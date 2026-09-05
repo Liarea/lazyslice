@@ -1,5 +1,5 @@
 export const meta = {
-  name: 'lazysnap-implement',
+  name: 'lazyslice-implement',
   description: 'One task: developer implements, three reviewers, up to two fix rounds, independent verify, commit',
   phases: [
     { title: 'Build', detail: 'developer implements the brief and runs the checks' },
@@ -16,14 +16,14 @@ export const meta = {
 //   paths  directories or files the developer may write, as an array of repo-relative paths
 //   stage  pipeline stage name or 'peripheral'
 
-const REPO = '/Users/gareth/personal_repos/lazysnap'
+const REPO = '/Users/gareth/personal_repos/lazyslice'
 const a = args || {}
 if (!a.brief || !a.id) throw new Error('implement.js needs args {id, title, brief, model, paths}')
 const model = a.model || 'opus'
 const effort = a.effort || 'high'
 const paths = (a.paths || []).join(', ')
 
-const PRE = `You are a developer on lazysnap. Repo: ${REPO}. Read ${REPO}/CLAUDE.md, ${REPO}/ARCHITECTURE.md, and the CLAUDE.md in every directory you touch, before writing code.
+const PRE = `You are a developer on lazyslice. Repo: ${REPO}. Read ${REPO}/CLAUDE.md, ${REPO}/ARCHITECTURE.md, and the CLAUDE.md in every directory you touch, before writing code.
 Rules: you may write only under these paths: ${paths}. You may not edit go.mod or go.sum; if you need a dependency that is missing, stop and report it in your return value. Do not fix nearby code, do not extend behaviour the task did not mention, do not add tests beyond the task. Prefer targeted edits over rewriting files. Run gofmt on files you touch. Before returning, run: make lint && make test (and make integration if your task says so), and paste the last 20 lines of output into your return value. "Should work" is not a status. Do not commit. Nobody is watching and nobody can answer questions: finish the whole task.`
 
 const DEV = { type: 'object', required: ['files', 'summary', 'checks_output', 'checks_passed', 'concerns', 'postmortem'], properties: {
@@ -47,7 +47,7 @@ let dev = await agent(`${PRE}\n\n<task id="${a.id}">\n${a.brief}\n</task>`, { la
 if (!dev) return { id: a.id, status: 'blocked', reason: 'developer agent died', findings: [] }
 
 const review = async (round) => {
-  const rs = await parallel(LENSES.map(l => () => agent(`You are a reviewer on lazysnap. Repo: ${REPO}. Read ${REPO}/CLAUDE.md and ${REPO}/ARCHITECTURE.md. The task under review is:\n<task id="${a.id}">\n${a.brief}\n</task>\nThe developer reports: ${dev.summary}. Files: ${dev.files.join(', ')}. Checks passed: ${dev.checks_passed}.\nYour lens: ${l.text}\nRun the checks yourself (make lint && make test) and do not trust the developer's report. Do not fix anything. Return findings with file and line; severity high means it must not merge.`,
+  const rs = await parallel(LENSES.map(l => () => agent(`You are a reviewer on lazyslice. Repo: ${REPO}. Read ${REPO}/CLAUDE.md and ${REPO}/ARCHITECTURE.md. The task under review is:\n<task id="${a.id}">\n${a.brief}\n</task>\nThe developer reports: ${dev.summary}. Files: ${dev.files.join(', ')}. Checks passed: ${dev.checks_passed}.\nYour lens: ${l.text}\nRun the checks yourself (make lint && make test) and do not trust the developer's report. Do not fix anything. Return findings with file and line; severity high means it must not merge.`,
     { label: `review:${l.key}:r${round}`, phase: 'Review', model: 'opus', schema: FINDINGS })))
   return rs.filter(Boolean).flatMap(r => r.findings)
 }
@@ -62,7 +62,7 @@ while (blocking.length && round < 2) {
     { label: `fix:${a.id}:r${round}`, phase: 'Fix', model, effort, schema: DEV })
   if (!fixed) break
   dev = fixed
-  const re = await agent(`You are the re-verifier on lazysnap. Repo: ${REPO}. These findings were reported on task ${a.id} and the developer says they are fixed:\n${JSON.stringify(blocking, null, 1)}\nDeveloper's concerns: ${JSON.stringify(dev.concerns)}. Check each finding against the current code (git diff, read the files). Run make lint && make test. Return only findings that are still open, keeping their severity, plus any new high-severity problem the fix introduced.`,
+  const re = await agent(`You are the re-verifier on lazyslice. Repo: ${REPO}. These findings were reported on task ${a.id} and the developer says they are fixed:\n${JSON.stringify(blocking, null, 1)}\nDeveloper's concerns: ${JSON.stringify(dev.concerns)}. Check each finding against the current code (git diff, read the files). Run make lint && make test. Return only findings that are still open, keeping their severity, plus any new high-severity problem the fix introduced.`,
     { label: `reverify:${a.id}:r${round}`, phase: 'Fix', model: 'opus', schema: FINDINGS })
   blocking = re ? re.findings.filter(f => f.severity !== 'low') : []
 }

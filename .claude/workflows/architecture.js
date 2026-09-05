@@ -1,5 +1,5 @@
 export const meta = {
-  name: 'lazysnap-architecture',
+  name: 'lazyslice-architecture',
   description: 'Phase 2: benchmark, three independent architecture proposals, judge panel, ADRs, threat model, adversarial review',
   phases: [
     { title: 'Propose', detail: 'three architects with different lenses, plus a language throughput benchmark' },
@@ -9,8 +9,8 @@ export const meta = {
   ],
 }
 
-const REPO = '/Users/gareth/personal_repos/lazysnap'
-const PRE = `You are on the lazysnap team. Repo: ${REPO}. Read ${REPO}/CONCEPT.md, ${REPO}/CLAUDE.md, ${REPO}/research/SYNTHESIS.md, and ${REPO}/research/HARD_PROBLEMS.md first; consult the other files in ${REPO}/research/ as needed.
+const REPO = '/Users/gareth/personal_repos/lazyslice'
+const PRE = `You are on the lazyslice team. Repo: ${REPO}. Read ${REPO}/CONCEPT.md, ${REPO}/CLAUDE.md, ${REPO}/research/SYNTHESIS.md, and ${REPO}/research/HARD_PROBLEMS.md first; consult the other files in ${REPO}/research/ as needed.
 Rules: write ONLY the file(s) your task names, using absolute paths. Do not edit any other file. Do not run git commit. Cite research documents by path and heading when you rely on them. Do not stop until the file is written and complete; nobody is watching and nobody can answer questions. Your final message is not for a human: return only the structured output.`
 
 const OUT = { type: 'object', required: ['files', 'summary', 'postmortem'], properties: {
@@ -28,7 +28,7 @@ log('Phase 2: benchmark plus three proposals in parallel')
 
 const [bench, proposals] = await parallel([
   () => agent(`${PRE}
-Settle the language throughput question with a measurement, not an opinion. Start a PostgreSQL 16 container with Docker (name lazysnap-bench, a random high port, remove it when done). Create a table with 5 million rows and ten mixed columns (ints, text, timestamps, a JSONB). Measure wall-clock and peak RSS for: (a) Go with pgx v5 using CopyTo into a streaming consumer that counts rows and writes them back with CopyFrom into a second table; (b) Python 3.13 with psycopg 3 doing the same with copy() in both directions; (c) the psql \\copy baseline. Run each three times. Put the code under /private/tmp/claude-501/lazysnap-scratch/bench/ (not in the repo). Write ${REPO}/research/BENCHMARK_LANGUAGE.md with the table of results, the exact commands, hardware, and a one-paragraph interpretation that says which language wins for streaming and by how much, and whether the gap matters at the scale in CONCEPT.md. Stop and remove the container at the end even if something fails.`,
+Settle the language throughput question with a measurement, not an opinion. Start a PostgreSQL 16 container with Docker (name lazyslice-bench, a random high port, remove it when done). Create a table with 5 million rows and ten mixed columns (ints, text, timestamps, a JSONB). Measure wall-clock and peak RSS for: (a) Go with pgx v5 using CopyTo into a streaming consumer that counts rows and writes them back with CopyFrom into a second table; (b) Python 3.13 with psycopg 3 doing the same with copy() in both directions; (c) the psql \\copy baseline. Run each three times. Put the code under /private/tmp/claude-501/lazyslice-scratch/bench/ (not in the repo). Write ${REPO}/research/BENCHMARK_LANGUAGE.md with the table of results, the exact commands, hardware, and a one-paragraph interpretation that says which language wins for streaming and by how much, and whether the gap matters at the scale in CONCEPT.md. Stop and remove the container at the end even if something fails.`,
     { label: 'benchmark', phase: 'Propose', model: 'opus', schema: OUT }),
   () => parallel(LENSES.map(l => () => agent(`${PRE}
 You are one of three architects writing independent proposals. Your lens: ${l.brief}
@@ -49,7 +49,7 @@ You are a judge. Read all three files in ${REPO}/research/proposals/ and ${REPO}
 
 const decide = await agent(`${PRE}
 You are the architect making the final call. Inputs: the three proposals in ${REPO}/research/proposals/, ${REPO}/research/BENCHMARK_LANGUAGE.md, and the judges' verdicts: ${JSON.stringify(judges.filter(Boolean))}.
-Write these files: ${REPO}/docs/adr/001-language.md, 002-tui.md, 003-database-order.md, 004-config-model.md, 005-pipeline.md, 006-extension-model.md, each in the format Context / Options considered / Decision / Consequences / Reversal condition, citing proposals and research by path. Then ${REPO}/ARCHITECTURE.md: the pipeline stages as Go interfaces with their input and output types written as real Go code, the subset planner algorithm as pseudocode, the deterministic masking scheme, the progress event model, the CLI flag surface for v1 (every flag, its default, and which stage it drives), how the emitted lazysnap.yml looks with a full example, the repository layout with one line per directory, the dependency list with versions and one reason each, and two Mermaid diagrams. Then ${REPO}/THREAT_MODEL.md: assets, threats (at minimum: classifier misses a PII column, target is production, secrets in config or logs, snapshot committed to git, malicious custom masker, half-loaded target, supply chain of releases), each with likelihood, impact, the concrete control, and whether it blocks v1. Finally ${REPO}/docs/adr/README.md explaining the format and listing the ADRs. Graft the judges' best ideas where they fit. Where the judges disagree, decide and say why.`,
+Write these files: ${REPO}/docs/adr/001-language.md, 002-tui.md, 003-database-order.md, 004-config-model.md, 005-pipeline.md, 006-extension-model.md, each in the format Context / Options considered / Decision / Consequences / Reversal condition, citing proposals and research by path. Then ${REPO}/ARCHITECTURE.md: the pipeline stages as Go interfaces with their input and output types written as real Go code, the subset planner algorithm as pseudocode, the deterministic masking scheme, the progress event model, the CLI flag surface for v1 (every flag, its default, and which stage it drives), how the emitted lazyslice.yml looks with a full example, the repository layout with one line per directory, the dependency list with versions and one reason each, and two Mermaid diagrams. Then ${REPO}/THREAT_MODEL.md: assets, threats (at minimum: classifier misses a PII column, target is production, secrets in config or logs, snapshot committed to git, malicious custom masker, half-loaded target, supply chain of releases), each with likelihood, impact, the concrete control, and whether it blocks v1. Finally ${REPO}/docs/adr/README.md explaining the format and listing the ADRs. Graft the judges' best ideas where they fit. Where the judges disagree, decide and say why.`,
   { label: 'decide', phase: 'Decide', model: 'fable', effort: 'high', schema: OUT })
 
 const REV = { type: 'object', required: ['verdict', 'issues'], properties: { verdict: { type: 'string', enum: ['accept', 'revise'] },

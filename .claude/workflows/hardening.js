@@ -1,12 +1,12 @@
 export const meta = {
-  name: 'lazysnap-hardening',
+  name: 'lazyslice-hardening',
   description: 'Phase 5: torture schemas, failure UX, performance, then a three-attacker red team with one fix round and re-attack',
   phases: [
     { title: 'Harden', detail: 'torture, failure UX, performance, each through implement.js in sequence' },
     { title: 'Red team', detail: 'three attackers try to make the tool leak; fix; re-attack' },
   ],
 }
-const REPO = '/Users/gareth/personal_repos/lazysnap'
+const REPO = '/Users/gareth/personal_repos/lazyslice'
 const IMPL = `${REPO}/.claude/workflows/implement.js`
 
 const TASKS = [
@@ -31,9 +31,9 @@ const ATTACK = { type: 'object', required: ['attempts'], properties: { attempts:
 const attackers = [
   'PII that dodges the classifier: column names in other languages or abbreviations, values that miss every regex (obfuscated emails, phone numbers with spaces and words, names in a column called label), personal data inside arrays and JSON three levels deep, and inside a column the classifier marked as safe. Build a schema for each, run the tool, and check the target.',
   'Wrong target: make the tool write to production by aliasing the host, using a different port on the same database, a read replica, a connection string with the same database name on a different host, or a target URL taken from a compose file that points at prod. Also try to get it to hold write privileges on the source.',
-  'Secrets and residue: get a password, secret, or unmasked row into lazysnap.yml, logs at any verbosity, the emitted error messages, a crash dump, a temp file, or a snapshot written into a git-tracked or cloud-synced folder. Also try a custom masker that throws halfway and one that returns its input.',
+  'Secrets and residue: get a password, secret, or unmasked row into lazyslice.yml, logs at any verbosity, the emitted error messages, a crash dump, a temp file, or a snapshot written into a git-tracked or cloud-synced folder. Also try a custom masker that throws halfway and one that returns its input.',
 ]
-const attack = (round) => parallel(attackers.map((a, i) => () => agent(`You are a red-team engineer trying to make lazysnap leak production data. Repo: ${REPO}. Read THREAT_MODEL.md, ARCHITECTURE.md, and the code. Build the binary. Use the testutil containers. Your attack surface: ${a} For each attempt give the exact reproduction commands, whether anything leaked or the tool misbehaved, and the fix. Do not change any repo file; put scratch schemas under /private/tmp/claude-501/lazysnap-scratch/redteam-${i}/. Report every attempt, including the ones that failed to leak.`,
+const attack = (round) => parallel(attackers.map((a, i) => () => agent(`You are a red-team engineer trying to make lazyslice leak production data. Repo: ${REPO}. Read THREAT_MODEL.md, ARCHITECTURE.md, and the code. Build the binary. Use the testutil containers. Your attack surface: ${a} For each attempt give the exact reproduction commands, whether anything leaked or the tool misbehaved, and the fix. Do not change any repo file; put scratch schemas under /private/tmp/claude-501/lazyslice-scratch/redteam-${i}/. Report every attempt, including the ones that failed to leak.`,
   { label: `attack:${i + 1}:r${round}`, phase: 'Red team', model: 'opus', schema: ATTACK })))
 
 const first = (await attack(1)).filter(Boolean).flatMap(r => r.attempts)
@@ -42,7 +42,7 @@ log(`Red team round 1: ${first.length} attempts, ${leaks.length} leaked`)
 let fix = null, second = []
 if (leaks.length) {
   fix = await workflow({ scriptPath: IMPL }, { id: 'T-REDFIX', title: 'Red team fixes', model: 'opus', effort: 'high', stage: 'hardening', paths: ['internal/', 'cmd/', 'THREAT_MODEL.md', 'testdata/regressions/'], integration: true,
-    brief: `The red team made lazysnap leak or misbehave in these ways:\n${JSON.stringify(leaks, null, 1)}\nFor each: add a regression test under testdata/regressions/ or the relevant package that reproduces it, then fix it with targeted edits, then update THREAT_MODEL.md with the new threat and control. Never fix by weakening a test.` })
+    brief: `The red team made lazyslice leak or misbehave in these ways:\n${JSON.stringify(leaks, null, 1)}\nFor each: add a regression test under testdata/regressions/ or the relevant package that reproduces it, then fix it with targeted edits, then update THREAT_MODEL.md with the new threat and control. Never fix by weakening a test.` })
   second = (await attack(2)).filter(Boolean).flatMap(r => r.attempts).filter(x => x.leaked)
   log(`Red team round 2: ${second.length} still leaking`)
 }

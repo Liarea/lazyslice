@@ -1,65 +1,66 @@
-# Prompting: general cheat sheet
+# Prompting cheat sheet
 
-Everything below traces to [Prompting best practices](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices).
+Every line traces to [Prompting best practices](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices), read 2026-09-05. Quotes verbatim.
 
 ## What is different about this model
 
-Covers Fable/Mythos 5.1 and 5, Opus 5 and 4.6–4.8, Sonnet 5 and 4.6, Haiku 4.5; [read the per-model page first](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices#model-specific-guidance).
+It covers Fable 5.1/5, Mythos 5.1/5, Opus 5 and 4.6–4.8, Sonnet 5 and 4.6, and Haiku 4.5; read the [model-specific guidance](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices#model-specific-guidance) table first.
 
-- **Verbosity.** Latest models are "[More direct and grounded](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices#communication-style-and-verbosity)" and may skip summaries after tool calls. **Opus 5** is the exception: longer by default, and effort does not reliably change visible length — ask for conciseness. **Fable 5.1** writes *fewer* progress updates during agentic work — ask for them, and drop any "keep it brief" instruction.
-- **Thinking defaults.** Off when `thinking` is omitted on Opus 4.6–4.8 and Sonnet 4.6; on by default on Opus 5 and Sonnet 5; always on and adaptive-only on Fable/Mythos 5 and 5.1. `budget_tokens` [400s on Claude 4.7 and later](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices#leverage-thinking--interleaved-thinking-capabilities).
-- **Prefill is gone.** Last-turn assistant prefills [400 on Claude 4.6 and later](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices#migrating-away-from-prefilled-responses); use structured outputs, tool enums or XML tags.
-- **Self-verification.** "Verify your answer against [test criteria]" works reliably — **except on Opus 5**, which verifies well unaided; remove such instructions when migrating to it.
-
-**Haiku 4.5 in an automated coding workflow:** the page says almost nothing — no per-model guide row, no coding guidance. It appears twice: in the covered-models list, and among the models with [context awareness](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices#context-awareness-and-multiwindow-workflows), tracking their remaining token budget, which means it may wrap up early (pair with the "do not stop early" prompt below). Anything more is **unverified**.
+- Current models are "more direct and grounded" and "less verbose", and may skip summaries after tool calls.
+- **Opus 5 inverts this**: responses run longer and `effort` "does not reliably change visible response length". Ask for concision explicitly. It self-verifies well unprompted, so "remove these instructions rather than rewriting them" when migrating.
+- **Fable 5.1** writes *fewer* progress updates in agent loops; ask for them and drop any "keep it brief" line. It formats less already, so anti-markdown blocks suppress needed structure.
+- Instruction following is literal: "can you suggest some changes" gets suggestions, not edits.
+- Opus 4.5/4.6 respond more to system prompts, so old anti-laziness prompting now **over**triggers. Opus 4.6 over-explores and has "a strong predilection for subagents"; so does Opus 5.
+- Thinking is adaptive: on by default for Opus 5 / Sonnet 5, always on for Fable/Mythos 5.x, off unless asked for on Opus 4.6–4.8 and Sonnet 4.6. `budget_tokens` is deprecated and 400s on Claude 4.7+.
+- Prefilled last assistant turns 400 from Claude 4.6 on. Keep history append-only and return thinking blocks unchanged; editing earlier turns invalidates later ones.
 
 ## Prompt skeleton
 
-[XML tags](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices#structure-prompts-with-xml-tags) throughout; long inputs at the top, query at the end ("[up to 30 percent](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices#long-context-prompting)" better).
+XML tags with "consistent, descriptive tag names"; long inputs first, since queries at the end "can improve response quality by up to 30 percent".
 
 ```xml
-<!-- system: You are a [role]. One sentence is enough. -->
-<documents><document index="1"><source>…</source><document_content>…</document_content></document></documents>
-<context>Why this matters — Claude generalizes from the explanation.</context>
-<task>1. … 2. … 3. …</task>   <!-- numbered when order or completeness matters -->
-<constraints>What to do, not what not to do.</constraints>
-<definition_of_done>Verify your answer against […] before finishing.</definition_of_done>
-<return_format>Put X in <x> tags.</return_format>
-<examples><example>…</example></examples>  <!-- 3–5, relevant and diverse -->
+You are a helpful coding assistant specializing in Python.
+
+<context>Why this matters, who reads it.</context>
+<documents><document index="1"><source>schema.sql</source><document_content>…</document_content></document></documents>
+<instructions>Numbered steps when order matters. What to do, not what not to do.</instructions>
+<constraints>Scope, tools, safety rules.</constraints>
+<examples><example>3–5 relevant, diverse examples.</example></examples>
+<definition_of_done>Before you finish, verify your answer against [test criteria].</definition_of_done>
+<output_format>Write the prose sections in <smoothly_flowing_prose_paragraphs> tags.</output_format>
 ```
 
-## Phrases that work (verbatim from the page)
+Golden rule: "Show your prompt to a colleague with minimal context… If they'd be confused, Claude will be too."
+
+## Phrases that work
 
 - "Include as many relevant features and interactions as possible. Go beyond the basics to create a fully-featured implementation."
-- Not "Can you suggest some changes…" but "Change this function to improve its performance." or "Make these edits to the authentication flow."
-- "Your response should be composed of smoothly flowing prose paragraphs." (not "Do not use markdown")
-- "After receiving tool results, carefully reflect on their quality and determine optimal next steps."
-- "choose an approach and commit to it… If you're weighing two approaches, pick one and see it through."
-- "Never speculate about code you have not opened… you MUST read the file before answering."
-- "If you create any temporary new files, scripts, or helper files for iteration, clean up these files… at the end of the task."
+- "Change this function to improve its performance." / "Make these edits to the authentication flow."
+- "By default, implement changes rather than only suggesting them." (Inverse: "Do not jump into implementation or change files unless clearly instructed.")
+- "If you intend to call multiple tools and there are no dependencies between the tool calls, make all of the independent tool calls in parallel… Never use placeholders."
+- "Never speculate about code you have not opened… read the file before answering."
+- "It is unacceptable to remove or edit tests because this could lead to missing or buggy functionality."
 
 ## Anti-patterns
 
-- Vague asks ("Create an analytics dashboard"). [Golden rule](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices#be-clear-and-direct): if a colleague with minimal context would be confused, so will Claude.
-- Bare prohibitions with no reason ("NEVER use ellipses") instead of the motivation.
-- "CRITICAL: You MUST use this tool when…" — Opus 4.5/4.6 are more system-prompt-responsive; say "Use this tool when…". Likewise "If in doubt, use [tool]" now [overtriggers](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices#overthinking-and-excessive-thoroughness).
-- A heavy anti-markdown block on Fable 5.1, which already formats sparsely.
-- Prescriptive reasoning plans: "[Prefer general instructions over prescriptive steps](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices#leverage-thinking--interleaved-thinking-capabilities)."
-- Removing tests, hardcoding to test inputs, guessed tool parameters.
-- "think" when thinking is disabled on Opus 4.5 — use "consider" or "evaluate".
+- Vague asks; negative-only format rules; rules with no reason given.
+- Shouty over-prompting ("CRITICAL: You MUST…"), "Default to using [tool]", "If in doubt, use [tool]". Prefer "Use [tool] when it would enhance your understanding."
+- Prefill; `budget_tokens`; hand-written reasoning plans ("think thoroughly" beats a prescribed sequence); anti-markdown blocks on Fable 5.1.
 
-## Effort and length guidance
+## Effort and length
 
-Control depth with `effort` plus `max_tokens` under `thinking: {type: "adaptive"}`, not `budget_tokens`; lower effort when the model over-explores. Length is a separate lever — ask for conciseness in words. To suppress needless thinking: "Thinking adds latency and should only be used when it will meaningfully improve answer quality… When in doubt, respond directly."
+`effort` plus query complexity sets thinking depth; lower it when a model over-explores, and use `max_tokens` as the ceiling. It does not control Opus 5's visible length. To cut latency: "Thinking adds latency and should only be used when it will meaningfully improve answer quality… When in doubt, respond directly."
 
 ## For coding agents
 
-- **Finishing.** "do not stop tasks early due to token budget concerns… Never artificially stop any task early", and "It's encouraged to spend your entire output context working on the task - just make sure you don't run out of context with significant uncommitted work."
-- **Scope.** Against [overeagerness](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices#overeagerness): "Only make changes that are directly requested or clearly necessary… A bug fix doesn't need surrounding code cleaned up." No docstrings on untouched code, no guards for impossible states.
-- **Tests.** Write them first, track in `tests.json`, and say "It is unacceptable to remove or edit tests". "Tests are there to verify correctness, not to define the solution"; report infeasible tasks or wrong tests "rather than working around them".
-- **Edits.** Say "change"/"make these edits", not "suggest". Set the default with `<default_to_action>` or `<do_not_act_before_instructions>`.
-- **Subagents.** Claude delegates natively; Opus 4.6 and 5 overuse it. Damp: "Use subagents when tasks can run in parallel, require isolated context, or involve independent workstreams… For simple tasks… work directly rather than delegating."
-- **Batching.** "make all of the independent tool calls in parallel… Never use placeholders or guess missing parameters." On Fable 5.1, resend this as a turn-scoped system message after each round of tool results.
-- **State across windows.** Git as the log, JSON for structured state, freeform progress notes; prefer a fresh window over compaction, and be prescriptive on restart ("Review progress.txt, tests.json, and the git logs").
-- **Risky actions.** "for actions that are hard to reverse, affect shared systems, or could be destructive, ask the user before proceeding… don't bypass safety checks (e.g. --no-verify)".
+- **Finishing:** "do not stop tasks early due to token budget concerns… Never artificially stop any task early"; use the whole output context, but "don't run out of context with significant uncommitted work."
+- **Scope:** nothing beyond what was asked; no docstrings on code you didn't change; no handling for impossible cases ("Only validate at system boundaries"); no abstractions for one-off operations.
+- **Tests:** write them first into a structured `tests.json`, never delete them. "Tests are there to verify correctness, not to define the solution. Do not hard-code values or create solutions that only work for specific test inputs." If one is wrong, "inform me rather than working around them".
+- **Edits:** read before claiming; standard tools over helper scripts; clean up temp files. Confirm before destructive or shared-system actions (`rm -rf`, `git push --force`, PR comments); "don't bypass safety checks (e.g. --no-verify)".
+- **Subagents:** native, no prompting needed; damp overuse — "For simple tasks, sequential operations, single-file edits… work directly rather than delegating."
+- **Batching:** independent calls already run in parallel; the phrase above pushes it to ~100%. On Fable 5.1, resend it as a turn-scoped system message after each round of tool results.
+- **State:** a distinct first-window prompt (write tests, `init.sh`), then git logs, `progress.txt`, `tests.json`; prefer a fresh window over compaction, restarting prescriptively ("Call pwd; you can only read and write files in this directory.").
 
+## Haiku 4.5 in an automated coding workflow
+
+One thing is specific to it: Haiku 4.5, with Sonnet 5/4.6/4.5, has [context awareness](https://platform.claude.com/docs/en/build-with-claude/context-windows#context-awareness) — it tracks its remaining token budget, which "enables Claude to execute tasks and manage context more effectively". So it "may sometimes naturally try to wrap up work as it approaches the context limit": if the harness compacts or saves state to files, say so, with the never-stop-early phrasing above. It has no row in the model-specific table and no prompting page of its own, so everything else here is the all-models advice; its thinking and `effort` defaults are not stated — **unverified**.

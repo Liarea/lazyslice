@@ -1,87 +1,87 @@
 # Prompting Claude Opus 5
 
-For prompting Opus 5 in an automated coding workflow. Claims trace to the [guide] or [effort doc]; verified 2026-09-05.
+For prompting Opus 5 in an automated coding workflow. Every claim traces to the [guide][g] or [Effort][e]; verified 2026-09-05.
 
 ## What is different about this model
 
-- "Performs well out of the box on existing Claude Opus 4.8 prompts": tune, don't rewrite. [guide]
-- **Finishes tasks:** "completes full tasks rather than leaving stubs or placeholders, and it performs best when given the complete task specification up front and left to run". [guide]
-- **Verifies itself:** verification instructions "cause over-verification"; removing them "reduces wasted tokens with no loss in quality". [guide]
-- **Talks more:** responses, narration, and written files run longer than prior Opus. [guide]
-- **Expands scope:** "adding steps that weren't requested". [guide]
-- **Delegates readily;** it "multiplies cost and time when applied to small tasks". [guide]
-- 1M context, default and maximum; behaviour "consistent throughout the window". [guide]
+- Built for agentic coding, strongest on long-horizon tasks. Opus 4.8 prompts work as-is; below is what needs tuning.[ref][g]
+- **It finishes.** On multi-file features and refactors it "completes full tasks rather than leaving stubs or placeholders, and it performs best when given the complete task specification up front and left to run."[ref][cap]
+- **It verifies and self-corrects unprompted.**[ref][scope]
+- **It talks more**: responses, narration, corrections, written files.[ref][len]
+- **It expands scope** and **delegates to subagents more readily**.[ref][sub]
+- Review has high precision *and* recall, even at lower effort.[ref][cap]
+- 1M context, default and maximum; instruction following, tool calling and reasoning hold across it.[ref][cap]
+- Thinking is on by default, disableable only at `high` effort or below.[ref][think]
 
 ## Prompt skeleton
 
-Constraints and return-format wording verbatim from the [guide].
+The guide gives no template; this orders its snippets. Give the whole spec up front, then leave it to run.[ref][cap]
 
 ```text
-ROLE     You are working in <repo>, on <component>.
-CONTEXT  <Files, decisions, commands. Front-load everything.>
-TASK     <The complete spec, once, in full. Not a first step.>
-CONSTRAINTS
-  Deliver what was asked, at the scope intended. Make routine judgment calls
-  yourself, and check in only when different readings of the request would lead
-  to materially different work. If the request seems mistaken or a better
-  approach exists, say so in a sentence and continue with the task as asked
-  rather than quietly narrowing, widening, or transforming it. Finish the whole
-  task, and stop short of actions that are clearly beyond what was asked.
-  Write only the files named above.
-  Delegate to a subagent only for large tasks that are genuinely independent and
-  parallelizable. Do not delegate work you can finish yourself in a handful of
-  tool calls, and do not use subagents to verify or double-check your own work.
-DEFINITION OF DONE
-  <Named checks that must pass, output pasted.> No stubs or TODOs.
-RETURN FORMAT
-  Lead with the outcome: your first sentence should answer "what happened" or
-  "what did you find," with supporting detail after it.
-  Match the length of written documents to what the task needs: cover the
-  substance, but do not pad with filler sections, redundant summaries, or
-  boilerplate.
+ROLE      Working in <repo>; what it may touch.
+CONTEXT   <Files, decisions, links. Long context is fine.>
+TASK      <The whole task. No staged reveals.>
+CONSTRAINTS  <Scope paragraph.> <Subagent paragraph.> <Repo rules.>
+DONE WHEN <Checks that must pass; files that must exist.>
+RETURN    <Document-length line.> Lead with the outcome.
+<tone_preference>Keep outputs reasonably concise.</tone_preference>
 ```
 
 ## Phrases that work
 
-From the [guide], verbatim.
+Paste, do not paraphrase.
 
-- Concision: "Keep responses focused, brief, and concise. Keep disclaimers and caveats short, and spend most of the response on the main answer."
-- Tail reminder in a long system prompt: `<tone_preference>Keep outputs reasonably concise.</tone_preference>`
-- Narration: "Before your first tool call, say in one sentence what you're about to do. While working, give a brief update only when you find something important or change direction."
-- Corrections: "Only correct an earlier statement when the error would change the user's code, conclusions, or decisions."
-- Thinking disabled, against leaked tool calls and XML tags: "When you use a tool, you may say a brief sentence first. If no tool can express what the user asked for, say so instead of guessing. Do not include internal or system XML tags in your response."
+**Scope**[ref][scope]:
+> Deliver what was asked, at the scope intended. Make routine judgment calls yourself, and check in only when different readings of the request would lead to materially different work. If the request seems mistaken or a better approach exists, say so in a sentence and continue with the task as asked rather than quietly narrowing, widening, or transforming it. Finish the whole task, and stop short of actions that are clearly beyond what was asked.
+
+**Subagents**[ref][sub]:
+> Delegate to a subagent only for large tasks that are genuinely independent and parallelizable, such as a wide multi-file investigation. Do not delegate work you can finish yourself in a handful of tool calls, and do not use subagents to verify or double-check your own work. If one subagent can complete the task, use one rather than several, and keep spawn counts low.
+
+**Deliverable length**[ref][doclen]:
+> Match the length of written documents to what the task needs: cover the substance, but do not pad with filler sections, redundant summaries, or boilerplate.
+
+**Narration cadence**[ref][narr]:
+> Before your first tool call, say in one sentence what you're about to do. While working, give a brief update only when you find something important or change direction. When you finish, lead with the outcome: your first sentence should answer "what happened" or "what did you find," with supporting detail after it for readers who want it.
+
+**Correction noise**[ref][self]:
+> Only correct an earlier statement when the error would change the user's code, conclusions, or decisions. State corrections plainly and briefly, then continue the task. For slips that change nothing for the user, make the fix and move on without noting it.
+
+Near the end of a long system prompt: `<tone_preference>Keep outputs reasonably concise.</tone_preference>`[ref][len]
 
 ## Anti-patterns
 
-All from the [guide].
-
-- "include a final verification step…" / "use a subagent to verify" — remove, with scaffolding that does the same.
-- "double-check your answer" / "re-verify before responding" — these "add cost without improving results".
-- In review prompts, "only report high-severity issues" or "be conservative" — it "may follow that instruction literally and report less".
-- Lowering effort to shorten output: it "controls how much the model thinks rather than how much it says".
-- Telling it not to think or reason — that "increases tag leakage"; naming `<thinking>` tags is "less effective than the general form".
-- Only stating what not to do: "Positive examples… tend to be more effective"; reusing a prior model's effort defaults or vision workarounds unvalidated.
+- "Include a final verification step", "use a subagent to verify" — remove; these and legacy verification scaffolding over-verify.[ref][scope]
+- "Double-check your answer", "re-verify before responding" — compounds with existing behaviour.[ref][self]
+- In reviews, "only report high-severity issues" or "be conservative" — taken literally, it reports less. Ask for everything; filter separately.[ref][cap]
+- Any rule telling it not to think or reason — increases XML tag leakage. Naming `<thinking>` tags is less effective than a general no-internal-tags rule.[ref][think]
+- Style rules phrased as prohibitions; positive examples work better.[ref][narr]
+- Reusing an earlier model's effort defaults or vision workarounds unswept.[ref][cap]
 
 ## Effort and length guidance
 
-- Levels `low`/`medium`/`high`/`xhigh`/`max`; API default `high`. [effort doc]
-- Start at `high`; `xhigh` for demanding coding and agentic work, `max` for unconstrained spend; "use `low` and `medium` liberally as your primary control for token cost and response time wherever your evals show quality holds". Sweep afresh. [effort doc]
-- At `xhigh`/`max` set a large `max_tokens`; 64k is a fair default. [effort doc]
-- Thinking is on by default and cannot be disabled at `xhigh`/`max` (400 error). Prefer low effort with thinking on: it "performs better than thinking disabled at similar cost". [guide] [effort doc]
-- Length is a prompt problem: ask explicitly, plus a reminder near the end of a long prompt. [guide]
+- Effort controls thinking volume, not visible length; lowering it does not reliably shorten responses.[ref][len]
+- Start at the default `high`. Use `low`/`medium` liberally as the primary cost and latency control wherever evals show quality holds; `xhigh` for demanding agentic work, `max` when the task justifies unconstrained spend.[ref][e5]
+- At `xhigh`/`max` set a large `max_tokens` (64k is a reasonable start); thinking cannot be disabled there — those requests 400.[ref][e5]
+- Thinking on at `low` beats thinking off at similar cost, for most tasks.[ref][think]
+- Per-message effort changes preserve the prompt cache; top-level ones do not.[ref][e5]
 
 ## For coding agents
 
-From the [guide] unless noted.
+- **Finishing:** complete spec up front, then let it run.[ref][cap] On narrow tasks, paste the scope paragraph verbatim.[ref][scope]
+- **Reviews:** fast pass now, thorough pass later — accuracy holds at low effort.[ref][cap]
+- **Subagents:** good writer-verifier coordination, few overwrite collisions, but delegation multiplies cost on small work. Cap it: `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`, `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`, SDK `max_budget_usd` (Claude Code 2.1.217+). Claude Code adds a delegation instruction only under its `claude_code` preset; otherwise add one yourself.[ref][sub]
+- **Written output:** files it writes run long; add the length line to every file-producing task.[ref][doclen]
+- **Vision work:** give it tools to analyze, crop and visually verify; cheaper than thinking alone.[ref][cap]
+- **Thinking off:** expect occasional tool calls emitted as text (worst on search-heavy loops; leaked text persists in history, tainting later turns) and internal XML tags. One mitigation: "When you use a tool, you may say a brief sentence first. If no tool can express what the user asked for, say so instead of guessing. Do not include internal or system XML tags in your response."[ref][think]
 
-- **Finishing:** hand over the whole spec and let it run; strongest on "multi-file features, larger refactors, and end-to-end feature work".
-- **Scope:** paste the constraints paragraph above — the guide's remedy.
-- **Tests:** keep real gates (lint/test) as definition-of-done; drop "verify your work".
-- **Review:** accuracy "holds at lower effort settings" — fast pass now, thorough later.
-- **Subagents:** cap them — `CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`, `CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`, `max_budget_usd`, needing Claude Code 2.1.217+. Claude Code adds a delegation instruction only under its `claude_code` system prompt preset; otherwise add one yourself.
-- **Multi-agent:** writer-verifier patterns work well.
-- **Vision and UI:** give it tools to "iteratively analyze, crop, and visually verify" — cheaper than thinking alone.
-- **Batching:** the guide gives none; lower effort does "combine multiple operations into fewer tool calls" [effort doc]. More: unverified.
-
-[guide]: https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5
-[effort doc]: https://platform.claude.com/docs/en/build-with-claude/effort
+[g]: https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5
+[cap]: https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5#capability-improvements
+[len]: https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5#response-length-and-verbosity
+[narr]: https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5#user-facing-progress-updates
+[doclen]: https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5#written-deliverable-length
+[scope]: https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5#task-scope-and-over-verification
+[sub]: https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5#controlling-subagent-spawning
+[self]: https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5#self-correction
+[think]: https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5#running-with-thinking-disabled
+[e]: https://platform.claude.com/docs/en/build-with-claude/effort
+[e5]: https://platform.claude.com/docs/en/build-with-claude/effort#recommended-effort-levels-for-claude-opus-5
