@@ -4,13 +4,18 @@
 |---|---|---|---|---|---|---|
 | E0 Frame | 0 | 0 | 0 | 3 | 0 | 0 |
 | E1 Research | 1 | 0 | 0 | 10 | 0 | 0 |
-| E2 Architecture | 2 | 0 | 0 | 0 | 0 | 0 |
+| E2 Architecture | 2 | 0 | 5 | 0 | 0 | 0 |
 | E3 Foundations | 3 | 0 | 0 | 0 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 0 | 0 | 0 |
 | E5 Hardening | 5 | 0 | 0 | 0 | 0 | 0 |
 
 ## Open and in progress
 
+- T-0014 [in_progress] E2 · Language throughput benchmark, Go vs Python (opus)
+- T-0015 [in_progress] E2 · Three architecture proposals: mvp-first, risk-first, user-first (opus)
+- T-0016 [in_progress] E2 · Judge panel scoring (opus)
+- T-0017 [in_progress] E2 · ADRs 001-006, ARCHITECTURE.md, THREAT_MODEL.md (fable)
+- T-0018 [in_progress] E2 · Adversarial review of the decision set and one revision (opus)
 
 ## Recently closed
 
