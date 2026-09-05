@@ -26,7 +26,6 @@ import (
 	"fmt"
 
 	"github.com/Liarea/lazyslice/internal/pipeline"
-	"github.com/Liarea/lazyslice/mask"
 )
 
 type classifier struct{}
@@ -38,18 +37,4 @@ var _ pipeline.Classifier = classifier{}
 
 func (classifier) Classify(_ *pipeline.Schema, _ pipeline.Sampler, _ *pipeline.Config) (*pipeline.Classification, error) {
 	return nil, fmt.Errorf("classify: %w", pipeline.ErrNotImplemented)
-}
-
-// Validator answers "do these sampled values look like this category?". Each
-// one is a pure function over a single value so that the second net in verify
-// can run the same rules over the full contents of the target.
-//
-// Scaffold status: only the phone validator exists, and it delegates to the
-// mask module so that canonicalisation and validation are one decision.
-type Validator func(v string) bool
-
-// ValidPhone reports whether v is a valid number under the region hint. It is
-// the classifier's value validator for pipeline.CatPhone.
-func ValidPhone(region string) Validator {
-	return func(v string) bool { return mask.ValidPhone(v, region) }
 }

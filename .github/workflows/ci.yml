@@ -46,6 +46,15 @@ jobs:
           (cd mask && go mod tidy)
           git diff --exit-code -- go.mod go.sum mask/go.mod mask/go.sum
 
+  # CLAUDE.md's hardest rule, enforced over the whole tree rather than over the
+  # registered flags of one command tree, which is all a Go test can see.
+  forbidden:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: no flag, field, key or variable turns masking off
+        run: make forbidden
+
   test:
     strategy:
       fail-fast: false

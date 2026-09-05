@@ -85,19 +85,24 @@ func Postgres(ctx context.Context, t *testing.T, image string) string {
 				WithStartupTimeout(startupTimeout),
 		),
 	)
-	if err != nil {
-		t.Fatalf("testutil: starting %s: %v", image, err)
-	}
-
+	// Registered before the error is checked, and nil-safe, because
+	// testcontainers.Run returns a container alongside its error precisely so
+	// that a container which started but failed its wait strategy can still be
+	// terminated. That is the likely failure here, given the startup timeout
+	// this file exists to bound, and Ryuk does not reap it wherever
+	// TESTCONTAINERS_RYUK_DISABLED is set.
 	t.Cleanup(func() {
 		// A separate context: ctx may already be cancelled by the time the test
 		// finishes, and a leaked container outlives the run.
 		stop, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
-		if termErr := ctr.Terminate(stop); termErr != nil {
+		if termErr := testcontainers.TerminateContainer(ctr, testcontainers.StopContext(stop)); termErr != nil {
 			t.Logf("testutil: terminating %s: %v", image, termErr)
 		}
 	})
+	if err != nil {
+		t.Fatalf("testutil: starting %s: %v", image, err)
+	}
 
 	endpoint, err := ctr.PortEndpoint(ctx, "5432/tcp", "")
 	if err != nil {

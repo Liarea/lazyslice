@@ -36,7 +36,7 @@ LDFLAGS := -s -w \
 	-X main.commit=$(COMMIT) \
 	-X main.date=$(DATE)
 
-.PHONY: all build test lint integration fmt check tools clean help
+.PHONY: all build test lint integration forbidden fmt check tools clean help
 
 ## build: compile the binary into bin/
 build:
@@ -57,6 +57,28 @@ test:
 integration:
 	go test -tags integration -count=1 -timeout 30m ./...
 
+## forbidden: fail on any name that would turn masking off
+##
+## CLAUDE.md's hardest rule is that no flag disables masking wholesale, and
+## ARCHITECTURE.md section 8 lists the spellings. TestForbiddenFlagsDoNotExist
+## is the second layer and it is strictly narrower: it walks the registered
+## cobra flags of one command tree, so it cannot see an environment variable, a
+## lazyslice.yml key, a struct field or a flag registered somewhere else. This
+## grep reads every non-test Go file in both modules instead. The remaining
+## forbidden names in section 8 (--replace, --rules) are ordinary words in
+## prose, so they stay with the exact-match test rather than becoming a grep
+## that cries wolf.
+FORBIDDEN := no-?_?mask|nomask|disable[-_]?mask|skip[-_]?mask|unsafe|allow-nonempty-target|allow-ctid
+
+forbidden:
+	@if grep -rnEi --include='*.go' --exclude='*_test.go' '$(FORBIDDEN)' cmd internal mask tools; then \
+		echo; \
+		echo "forbidden: the lines above match /$(FORBIDDEN)/i."; \
+		echo "Masking is not configurable away (CLAUDE.md, ARCHITECTURE.md section 8)."; \
+		exit 1; \
+	fi
+	@echo "==> forbidden: no name that turns masking off"
+
 ## lint: golangci-lint over both modules
 lint:
 	@if [ -z "$(GOLANGCI_LINT)" ]; then \
@@ -72,20 +94,24 @@ fmt:
 	gofmt -w -s $$(git ls-files '*.go')
 	@set -e; for m in $(MODULES); do ( cd $$m && go mod tidy ); done
 
-## check: lint then test. This is what CI runs and what you paste.
-check: lint test
+## check: lint, the forbidden-name grep, then test. This is what CI runs.
+check: lint forbidden test
 
 ## tools: install the pinned build tools into bin/tools
 tools:
 	GOBIN=$(TOOLDIR) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 	GOBIN=$(TOOLDIR) go install github.com/goreleaser/goreleaser/v2@$(GORELEASER_VERSION)
 
-## snapshot: build the release artifacts locally without publishing
+## snapshot: build the release artifacts locally without publishing or signing
+##
+## --skip=sign because the cosign signature is keyless and its identity is the
+## release workflow's OIDC token (THREAT_MODEL.md T10): there is nothing for a
+## laptop to sign with, and a local build should not need cosign installed.
 snapshot:
 	@if [ -z "$(GORELEASER)" ]; then \
 		echo "goreleaser not found; run: make tools"; exit 1; \
 	fi
-	$(GORELEASER) release --snapshot --clean
+	$(GORELEASER) release --snapshot --clean --skip=sign
 
 ## clean: remove build output
 clean:

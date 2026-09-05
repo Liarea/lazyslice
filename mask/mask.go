@@ -16,28 +16,12 @@
 // Encode is length-prefixed so that ("email", "a@b.com") and ("emai",
 // "la@b.com") hash differently.
 //
-// Scaffold status: the key schedule, the encoding and the registry are real;
-// no generator is registered yet, so Lookup finds nothing and Registered
-// returns an empty slice. Generators arrive with the masking task.
+// Scaffold status: declarations only. This file is the type surface
+// internal/pipeline compiles against; the key schedule above, the
+// canonicalisation, the registry and every generator arrive with the masking
+// task, each with the section 5 test vectors that make them a contract rather
+// than a guess.
 package mask
-
-import (
-	"crypto/hkdf"
-	"crypto/hmac"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/binary"
-	"encoding/hex"
-	"errors"
-	"fmt"
-	"math"
-	"sort"
-	"sync"
-)
-
-// ErrNotImplemented is returned by every placeholder in the scaffold. No
-// caller should ever see it once the masking task has landed.
-var ErrNotImplemented = errors.New("mask: not implemented")
 
 // ID names a masker in the registry, as it is written in lazyslice.yml:
 // "email", "phone", "person_name", "null", "fixed:$lazyslice$invalid".
@@ -49,79 +33,8 @@ const KeyLen = 32
 // Key is the run key K. It is read from ./lazyslice.secret or
 // $LAZYSLICE_SECRET, or generated per run and discarded. It never leaves the
 // process and it is never written to lazyslice.yml, an event or the marker
-// table; only Fingerprint is.
+// table; only its fingerprint is.
 type Key [KeyLen]byte
-
-// NewKey returns a random run key.
-func NewKey() (*Key, error) {
-	var k Key
-	if _, err := rand.Read(k[:]); err != nil {
-		return nil, fmt.Errorf("mask: generating run key: %w", err)
-	}
-	return &k, nil
-}
-
-// Fingerprint is sha256(K)[:8] in hex, the value lazyslice.yml records as
-// secret_fingerprint and lazyslice_meta as secret_fingerprint. It identifies a
-// key without revealing it.
-func (k *Key) Fingerprint() string {
-	sum := sha256.Sum256(k[:])
-	return hex.EncodeToString(sum[:4])
-}
-
-// Derive returns K_cat for a classification category: HKDF-SHA256 over the run
-// key with info "lazyslice/v1/<category>". Deriving per category is what makes
-// a column's mapping change when its category changes, which
-// ARCHITECTURE.md section 5 "Determinism scope" requires the tool to announce.
-func (k *Key) Derive(category string) ([KeyLen]byte, error) {
-	var out [KeyLen]byte
-	b, err := hkdf.Key(sha256.New, k[:], nil, "lazyslice/v1/"+category, KeyLen)
-	if err != nil {
-		return out, fmt.Errorf("mask: deriving category key: %w", err)
-	}
-	copy(out[:], b)
-	return out, nil
-}
-
-// Sum is h: HMAC-SHA256 of the length-prefixed fields under a derived category
-// key. Every generator choice is a function of h and nothing else, so there is
-// no global seed to reset between runs.
-func Sum(catKey [KeyLen]byte, fields ...[]byte) [32]byte {
-	m := hmac.New(sha256.New, catKey[:])
-	m.Write(Encode(fields...))
-	var out [32]byte
-	copy(out[:], m.Sum(nil))
-	return out
-}
-
-// Encode is the length-prefixed encoding used everywhere a tuple is hashed,
-// here and in the residual filter:
-//
-//	Encode(f1, ..., fn) = u32be(len(f1)) || f1 || ... || u32be(len(fn)) || fn
-//
-// It is unambiguous, so no two distinct tuples share an encoding and a column
-// "b.c" in schema "a" never aliases column "c" in schema "a.b".
-func Encode(fields ...[]byte) []byte {
-	n := 0
-	for _, f := range fields {
-		n += 4 + len(f)
-	}
-	buf := make([]byte, 0, n)
-	var l [4]byte
-	for _, f := range fields {
-		// A field longer than the u32 prefix can hold cannot be encoded
-		// unambiguously, and truncating the prefix would let two distinct tuples
-		// share an encoding. Postgres caps a field at 1 GB, so this is
-		// unreachable; it fails loudly rather than quietly.
-		if uint64(len(f)) > math.MaxUint32 {
-			panic("mask: field too long to length-prefix")
-		}
-		binary.BigEndian.PutUint32(l[:], uint32(len(f))) //nolint:gosec // G115: bounded on the line above
-		buf = append(buf, l[:]...)
-		buf = append(buf, f...)
-	}
-	return buf
-}
 
 // Value is one column value on its way through a masker. Exactly one of Null,
 // Text and Bytes carries the value: Null for SQL NULL, Bytes for bytea, Text
@@ -172,43 +85,4 @@ type Masker interface {
 	// The planner compares it against the column's own admissible domain and
 	// refuses a unique column that cannot carry the row count.
 	Domain(c Constraints) int64
-}
-
-var registry sync.Map // ID -> Masker
-
-// Register adds a masker to the build-time registry. Nothing is loaded at
-// runtime (ADR-006): registration happens in an init function of this module or
-// of a program that imports it. Registering an ID twice panics, because a
-// silently replaced masker changes the mapping.
-func Register(id ID, m Masker) {
-	if m == nil {
-		panic("mask: Register called with a nil masker for " + string(id))
-	}
-	if _, loaded := registry.LoadOrStore(id, m); loaded {
-		panic("mask: masker registered twice: " + string(id))
-	}
-}
-
-// Lookup returns the registered masker for id.
-func Lookup(id ID) (Masker, bool) {
-	v, ok := registry.Load(id)
-	if !ok {
-		return nil, false
-	}
-	m, ok := v.(Masker)
-	return m, ok
-}
-
-// Registered lists every registered ID in sorted order. The classifier rule
-// pack is checked against this list, so a category with no masker cannot exist.
-func Registered() []ID {
-	var ids []ID
-	registry.Range(func(k, _ any) bool {
-		if id, ok := k.(ID); ok {
-			ids = append(ids, id)
-		}
-		return true
-	})
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
-	return ids
 }

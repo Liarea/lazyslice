@@ -11,7 +11,8 @@
 // candidate list, the decision header, lazyslice.yml and lazyslice_meta carry.
 // Ref.String never prints a password because Ref never holds one.
 //
-// Scaffold status: the types and the fingerprint are real; Parse is a no-op.
+// Scaffold status: the types and the fingerprint are real; Parse, Redact and
+// SameEndpoint are no-ops that return ErrNotImplemented.
 package dsn
 
 import (
@@ -66,17 +67,18 @@ func (r Ref) Fingerprint() string {
 
 // SameEndpoint reports whether two references name the same normalised
 // host:port/database. The target gate refuses when the target and the source
-// answer true (ARCHITECTURE.md section 9 rule 2).
-func (r Ref) SameEndpoint(o Ref) bool {
-	return Loopback(r.Host) == Loopback(o.Host) && r.Port == o.Port && r.Database == o.Database
-}
-
-// Loopback normalises the several spellings of the local machine to one, so
-// that "localhost" and "127.0.0.1" are recognised as the same endpoint by the
-// gate and as local by the locality rule.
+// answer true (ARCHITECTURE.md section 9 rule 2), so this is the rule that
+// stops a run writing to its own source.
 //
-// Scaffold status: no-op, returns h unchanged.
-func Loopback(h string) string { return h }
+// Normalising the host is the hard half of it: "localhost", "127.0.0.1" and
+// "::1" are one endpoint, and comparing the spellings would call them three.
+//
+// Scaffold status: no-op, returns ErrNotImplemented. It returns an error rather
+// than a comparison because a wrong false here is a write to production: the
+// gate must fail on the error and may never read the false as "not the source".
+func (r Ref) SameEndpoint(_ Ref) (bool, error) {
+	return false, ErrNotImplemented
+}
 
 // Parse splits a connection string into the DSN handed to the driver and the
 // redacted Ref everything else uses.

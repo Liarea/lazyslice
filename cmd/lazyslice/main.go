@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"runtime"
@@ -27,11 +28,13 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
 	"github.com/Liarea/lazyslice/internal/core"
 	"github.com/Liarea/lazyslice/internal/event"
+	"github.com/Liarea/lazyslice/internal/pg"
 	"github.com/Liarea/lazyslice/internal/pipeline"
 	"github.com/Liarea/lazyslice/internal/render"
 )
@@ -82,15 +85,19 @@ func main1() int {
 	return run(ctx, os.Args[1:], os.Stdout, os.Stderr)
 }
 
-func run(ctx context.Context, args []string, stdout, stderr *os.File) int {
-	root := newCommandTree(ctx, stdout)
+func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	req := core.NewRequest()
+	root := newCommandTree(ctx, &req, stdout)
 
 	root.SetArgs(args)
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 
 	if err := root.ExecuteContext(ctx); err != nil {
-		return report(stderr, err)
+		// The request is read, not the flag variable, because
+		// --show-row-values-in-errors is the one thing report needs to know and
+		// the request is where every flag lands.
+		return report(stderr, err, req.ShowRowValuesInErrors)
 	}
 	return ExitOK
 }
@@ -99,18 +106,26 @@ func run(ctx context.Context, args []string, stdout, stderr *os.File) int {
 // subcommands, version, and the flag groups. It is one function so that the
 // test that locks the flag surface against ARCHITECTURE.md section 8 sees
 // exactly what a user sees.
-func newCommandTree(ctx context.Context, stdout *os.File) *cobra.Command {
-	req := core.NewRequest()
+func newCommandTree(ctx context.Context, req *core.Request, stdout io.Writer) *cobra.Command {
 	flags := newFlagGroups()
 	raw := newRawFlags()
 
-	bindFlags(flags, &req, raw)
+	bindFlags(flags, req, raw)
 
-	root := newRootCmd(ctx, &req, raw, stdout)
+	root := newRootCmd(ctx, req, raw, stdout)
 	for _, g := range flags {
 		root.PersistentFlags().AddFlagSet(g.set)
 	}
 	root.SetUsageFunc(groupedUsage(flags))
+	// Cobra reports a mistyped flag, an unparseable value and too many
+	// positional arguments as plain errors, which report would map to
+	// ExitInternal. They are the operator's most common mistake and they are
+	// usage errors, so they are wrapped here into errUsage and exit 2 like
+	// every hand-written one (ADR-005). FlagErrorFunc walks to the parent, so
+	// setting it on the root covers the subcommands too.
+	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
+		return fmt.Errorf("%w: %w", errUsage, err)
+	})
 	// The subcommand list is exactly the one in ARCHITECTURE.md section 8;
 	// cobra's generated completion command is not on it.
 	root.CompletionOptions.DisableDefaultCmd = true
@@ -118,11 +133,11 @@ func newCommandTree(ctx context.Context, stdout *os.File) *cobra.Command {
 	root.SilenceErrors = true
 
 	root.AddCommand(
-		subcommand(ctx, "introspect", "Read the source catalog and print it", &req, raw, stdout),
-		subcommand(ctx, "classify", "Classify every column and print the reasons", &req, raw, stdout),
-		subcommand(ctx, "plan", "Print the subset plan and stop", &req, raw, stdout),
-		subcommand(ctx, "verify", "Re-run the checks against an existing target", &req, raw, stdout),
-		subcommand(ctx, "doctor", "Print what lazyslice can see and what it cannot prove", &req, raw, stdout),
+		subcommand(ctx, "introspect", "Read the source catalog and print it", req, raw, stdout),
+		subcommand(ctx, "classify", "Classify every column and print the reasons", req, raw, stdout),
+		subcommand(ctx, "plan", "Print the subset plan and stop", req, raw, stdout),
+		subcommand(ctx, "verify", "Re-run the checks against an existing target", req, raw, stdout),
+		subcommand(ctx, "doctor", "Print what lazyslice can see and what it cannot prove", req, raw, stdout),
 		newVersionCmd(stdout),
 	)
 
@@ -133,22 +148,48 @@ func newCommandTree(ctx context.Context, stdout *os.File) *cobra.Command {
 // is an ADR-005 code; anything unmapped is ExitInternal, because a code that
 // means "something went wrong" must not be confused with one a CI job branches
 // on.
-func report(stderr *os.File, err error) int {
+func report(stderr io.Writer, err error, showValues bool) int {
 	switch {
 	case errors.Is(err, context.Canceled):
 		fmt.Fprintln(stderr, "lazyslice: interrupted")
 		return ExitInterrupted
 	case errors.Is(err, pipeline.ErrNotImplemented):
-		fmt.Fprintf(stderr, "lazyslice: %v\n", err)
+		fmt.Fprintf(stderr, "lazyslice: %s\n", renderSafe(err, showValues))
 		fmt.Fprintln(stderr, "  this build is the phase 3 scaffold: the flag surface is real, the stages are not")
 		return ExitInternal
 	case errors.Is(err, errUsage):
-		fmt.Fprintf(stderr, "lazyslice: %v\n", err)
+		fmt.Fprintf(stderr, "lazyslice: %s\n", renderSafe(err, showValues))
 		return ExitUsage
 	default:
-		fmt.Fprintf(stderr, "lazyslice: %v\n", err)
+		fmt.Fprintf(stderr, "lazyslice: %s\n", renderSafe(err, showValues))
 		return ExitInternal
 	}
+}
+
+// renderSafe is the only thing report is allowed to print, so that the single
+// error egress of the binary has one redaction pass rather than none.
+//
+// A *pgconn.PgError quotes the conflicting row in Detail and Where, so it is
+// rendered by internal/pg, which drops those fields unless
+// --show-row-values-in-errors (THREAT_MODEL.md T4). An error carrying a
+// connection string must be redacted where it is created, by the package that
+// holds the dsn.DSN: report never sees the credential and so cannot know what
+// to remove.
+func renderSafe(err error, showValues bool) string {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pg.RenderError(pgErr, showValues)
+	}
+	return err.Error()
+}
+
+// oneDSN is cobra.MaximumNArgs(1) with its error wrapped, so that "too many
+// arguments" is exit 2 like every other usage error rather than exit 1.
+func oneDSN(cmd *cobra.Command, args []string) error {
+	if err := cobra.MaximumNArgs(1)(cmd, args); err != nil {
+		return fmt.Errorf("%w: %w", errUsage, err)
+	}
+	return nil
 }
 
 // errUsage marks a flag the user must fix. It is wrapped, never returned bare,
@@ -157,7 +198,7 @@ var errUsage = errors.New("usage")
 
 // ---------- commands ----------
 
-func newRootCmd(ctx context.Context, req *core.Request, raw *rawFlags, stdout *os.File) *cobra.Command {
+func newRootCmd(ctx context.Context, req *core.Request, raw *rawFlags, stdout io.Writer) *cobra.Command {
 	var showVersion bool
 
 	cmd := &cobra.Command{
@@ -167,7 +208,7 @@ func newRootCmd(ctx context.Context, req *core.Request, raw *rawFlags, stdout *o
 			"foreign keys, masks personal data, and loads the result into a local\n" +
 			"database. It never writes to the source, and it refuses to write to a\n" +
 			"target that is not empty or was not written by lazyslice.",
-		Args:         cobra.MaximumNArgs(1),
+		Args:         oneDSN,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if showVersion {
@@ -198,12 +239,12 @@ func subcommand(
 	name, short string,
 	req *core.Request,
 	raw *rawFlags,
-	stdout *os.File,
+	stdout io.Writer,
 ) *cobra.Command {
 	return &cobra.Command{
 		Use:          name + " [DSN] [flags]",
 		Short:        short,
-		Args:         cobra.MaximumNArgs(1),
+		Args:         oneDSN,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 1 {
@@ -221,7 +262,7 @@ func subcommand(
 	}
 }
 
-func newVersionCmd(stdout *os.File) *cobra.Command {
+func newVersionCmd(stdout io.Writer) *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
 		Short: "Print the version, commit, Go version and supported Postgres majors",
@@ -250,7 +291,7 @@ func versionText() string {
 	)
 }
 
-func sinkFor(req core.Request, stdout *os.File) event.Sink {
+func sinkFor(req core.Request, stdout io.Writer) event.Sink {
 	if req.JSON {
 		return render.NewNDJSON(stdout)
 	}
@@ -414,6 +455,20 @@ func finish(_ *cobra.Command, req *core.Request, raw *rawFlags) error {
 			// The bare form is refused on purpose: an opt-out with no reason is
 			// an opt-out nobody can review later (ARCHITECTURE.md section 8).
 			return fmt.Errorf("%w: --unmask wants TABLE.COL=REASON, got %q", errUsage, u)
+		}
+		// An unqualified name can never match a column reference, so it would
+		// be an opt-out that silently never applied: indistinguishable, in the
+		// output, from one that did. Masking is the one rail the operator can
+		// pull, so the shape is checked here rather than shrugged at.
+		if table, column, qualified := strings.Cut(col, "."); !qualified || table == "" || column == "" {
+			return fmt.Errorf(
+				"%w: --unmask wants TABLE.COL=REASON, and the column must be qualified, got %q",
+				errUsage, u)
+		}
+		if previous, duplicate := req.Unmask[col]; duplicate {
+			return fmt.Errorf(
+				"%w: --unmask %s given twice, with reasons %q and %q; one column has one reason",
+				errUsage, col, previous, reason)
 		}
 		req.Unmask[col] = reason
 	}

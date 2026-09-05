@@ -1,13 +1,17 @@
 package main
 
 import (
+	"bytes"
 	"context"
-	"os"
+	"io"
 	"regexp"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/spf13/pflag"
+
+	"github.com/Liarea/lazyslice/internal/core"
 )
 
 // The flag surface is a promise, not an implementation detail: docs/FLAGS.md is
@@ -33,7 +37,8 @@ var wantFlags = []string{
 }
 
 func TestV1FlagSurfaceIsRegistered(t *testing.T) {
-	root := newCommandTree(context.Background(), os.Stdout)
+	req := core.NewRequest()
+	root := newCommandTree(context.Background(), &req, io.Discard)
 
 	for _, name := range wantFlags {
 		if root.PersistentFlags().Lookup(name) == nil {
@@ -82,7 +87,8 @@ var forbidden = []*regexp.Regexp{
 }
 
 func TestForbiddenFlagsDoNotExist(t *testing.T) {
-	root := newCommandTree(context.Background(), os.Stdout)
+	req := core.NewRequest()
+	root := newCommandTree(context.Background(), &req, io.Discard)
 
 	check := func(name string) {
 		for _, re := range forbidden {
@@ -96,5 +102,97 @@ func TestForbiddenFlagsDoNotExist(t *testing.T) {
 	root.Flags().VisitAll(func(f *pflag.Flag) { check(f.Name) })
 	for _, c := range root.Commands() {
 		c.Flags().VisitAll(func(f *pflag.Flag) { check(f.Name) })
+	}
+}
+
+// Exit codes are part of the interface (ADR-005): a wrapper or a CI job branches
+// on them, so "the operator mistyped a flag" (2) may never arrive as "lazyslice
+// crashed" (1). Cobra raises its own parse errors, which is why this drives the
+// whole command tree rather than report alone.
+func TestExitCodes(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want int
+	}{
+		{"unknown flag", []string{"--nope"}, ExitUsage},
+		{"unparseable int", []string{"--take", "abc"}, ExitUsage},
+		{"unparseable depth", []string{"--depth", "notanint"}, ExitUsage},
+		{"too many arguments", []string{"a", "b", "c"}, ExitUsage},
+		{"unknown flag on a subcommand", []string{"introspect", "--nope"}, ExitUsage},
+		{"unqualified unmask", []string{"--unmask", "notatable=because"}, ExitUsage},
+		{"unmask with no reason", []string{"--unmask", "public.users.email"}, ExitUsage},
+		{"version", []string{"version"}, ExitOK},
+		{"--version", []string{"--version"}, ExitOK},
+		{"help", []string{"--help"}, ExitOK},
+		// The scaffold itself: every stage is a no-op, so a run that parses
+		// cleanly still fails, and it fails as an internal error rather than a
+		// usage one.
+		{"a clean run in the scaffold", []string{"--unmask", "public.users.email=ticket 42"}, ExitInternal},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			if got := run(t.Context(), c.args, &stdout, &stderr); got != c.want {
+				t.Errorf("run(%q) = %d, want %d\nstderr: %s", c.args, got, c.want, stderr.String())
+			}
+		})
+	}
+}
+
+// --unmask is the one safety rail the operator can pull, so a spelling that
+// could never match a column must be refused rather than stored: an opt-out
+// that silently never applied looks exactly like one that did.
+func TestUnmaskShapes(t *testing.T) {
+	cases := []struct {
+		name    string
+		args    []string
+		wantErr bool
+		want    map[string]string
+	}{
+		{
+			name: "qualified",
+			args: []string{"public.users.email=ticket 42"},
+			want: map[string]string{"public.users.email": "ticket 42"},
+		},
+		{
+			name: "two columns",
+			args: []string{"users.email=a", "users.phone=b"},
+			want: map[string]string{"users.email": "a", "users.phone": "b"},
+		},
+		{name: "unqualified", args: []string{"notatable=because"}, wantErr: true},
+		{name: "no reason", args: []string{"users.email"}, wantErr: true},
+		{name: "empty reason", args: []string{"users.email="}, wantErr: true},
+		{name: "trailing dot", args: []string{"users.=because"}, wantErr: true},
+		{name: "leading dot", args: []string{".email=because"}, wantErr: true},
+		{name: "the same column twice", args: []string{"users.email=a", "users.email=b"}, wantErr: true},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			req := core.NewRequest()
+			err := finish(nil, &req, &rawFlags{unmask: c.args})
+			if c.wantErr {
+				if err == nil {
+					t.Fatalf("finish(--unmask %q) = nil, want a usage error", c.args)
+				}
+				if !strings.Contains(err.Error(), "usage") {
+					t.Errorf("finish(--unmask %q) = %v, want it to wrap errUsage", c.args, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("finish(--unmask %q) = %v, want nil", c.args, err)
+			}
+			if len(req.Unmask) != len(c.want) {
+				t.Fatalf("Unmask = %v, want %v", req.Unmask, c.want)
+			}
+			for k, v := range c.want {
+				if req.Unmask[k] != v {
+					t.Errorf("Unmask[%q] = %q, want %q", k, req.Unmask[k], v)
+				}
+			}
+		})
 	}
 }

@@ -30,7 +30,12 @@ var _ pipeline.Residual = (*bloom)(nil)
 
 func (*bloom) Add(_ pipeline.ColumnRef, _ string, _ []byte) {}
 
-func (*bloom) MayContain(_ pipeline.ColumnRef, _ string, _ []byte) bool { return false }
+// MayContain fails closed while the filter is a no-op: it answers "this value
+// may be a residual" for everything, so a verify written against this filter
+// reports every masked cell as an unconfirmable hit and exits 9, rather than
+// printing a green tick over a target full of cleartext. internal/pg.Gate
+// refuses the same way with NotProbed.
+func (*bloom) MayContain(_ pipeline.ColumnRef, _ string, _ []byte) bool { return true }
 
 func (*bloom) Cells() int64 { return 0 }
 

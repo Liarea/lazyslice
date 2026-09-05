@@ -74,18 +74,42 @@ homebrew_casks:
       owner: Liarea
       name: homebrew-tap
       branch: main
+      # Minted per run by the release workflow from a GitHub App installed on
+      # the tap, so there is no long-lived token in repository secrets
+      # (THREAT_MODEL.md T10). This field is not rendered by the usual template
+      # engine: the publish pipe hands the raw string to goreleaser's
+      # ApplySingleEnvOnly, which accepts the exact form `{{ .Env.NAME }}` and
+      # nothing else, so envOrDefault here fails the release. `make snapshot`
+      # never reaches the publish pipe, so the variable's absence locally does
+      # not matter; on CI the workflow always sets it, empty when the App is
+      # unconfigured, and skip_upload below stops publishing before the token
+      # is read.
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     directory: Casks
     homepage: https://github.com/Liarea/lazyslice
     description: Snapshot a production SQL database into a safe local copy
-    # A pre-release tag does not become the formula everyone gets by default.
-    skip_upload: auto
-    hooks:
-      post:
-        install: |
-          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/lazyslice"]
-          end
+    # "auto" keeps a pre-release tag out of the tap everyone installs from.
+    # With no tap credential the cask is skipped outright: attempting the push
+    # with an empty token fails the job after the GitHub release has already
+    # been created, and a half-published tag is the worst of the three
+    # outcomes.
+    skip_upload: '{{ if eq (envOrDefault "HOMEBREW_TAP_TOKEN" "") "" }}true{{ else }}auto{{ end }}'
+
+# Keyless cosign signature over the checksum file, which names every artifact
+# in the release, so one signature covers them all (THREAT_MODEL.md T10). The
+# identity is the release workflow's OIDC token: there is no signing key to
+# store, and nothing to rotate. Signing is skipped by `make snapshot`.
+signs:
+  - cmd: cosign
+    artifacts: checksum
+    certificate: "${artifact}.pem"
+    output: true
+    args:
+      - sign-blob
+      - "--output-certificate=${certificate}"
+      - "--output-signature=${signature}"
+      - "${artifact}"
+      - "--yes"
 
 release:
   draft: false
