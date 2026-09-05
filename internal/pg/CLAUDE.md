@@ -7,8 +7,14 @@ package opens a `pgxpool.Pool`.
 
 **Contract.** ARCHITECTURE.md §2 "source and target handles" in full —
 `Source.Snapshot`/`.Reader`/`.Short`/`.Release`/`.Trace`,
-`Target.Gate`/`.Writer` — and §9 for the gate's exact order (reachable+CREATE
-→ identity → locality → marker → emptiness).
+`Target.Gate`/`.Writer` — and §9 for the gate's exact order: reachability as
+a precondition, not a rule (unreachable ⇒ exit 4, `target.refused.unreachable`,
+`Eligibility.Verdict` stays `NotProbed`), then 1 identity → 2 locality →
+3 `has_schema_privilege(...,'CREATE')` → 4 marker → 5 emptiness (ADR-008 §5).
+`CREATE` sits after locality, not folded into the reachability precondition —
+a remote target whose role lacks `CREATE` is refused as remote, naming the
+host and `--allow-remote-target` (THREAT_MODEL.md T2's locality control), not
+for the privilege.
 
 **Rules.**
 - Every source transaction is `REPEATABLE READ READ ONLY`. All five pgx
