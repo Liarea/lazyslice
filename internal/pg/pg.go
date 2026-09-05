@@ -14,7 +14,8 @@
 // inside the 1 s dial. Verdict is tri-state so that "not probed" can never be
 // read as eligible: any error, timeout or unprobed table is Refused.
 //
-// Scaffold status: no-op. Every method returns pipeline.ErrNotImplemented.
+// Scaffold status: no-op apart from RenderError. Every method returns
+// pipeline.ErrNotImplemented.
 package pg
 
 import (
@@ -37,13 +38,35 @@ func Connect(_ context.Context, _ dsn.DSN) (*pgxpool.Pool, error) {
 	return nil, fmt.Errorf("pg: connect: %w", pipeline.ErrNotImplemented)
 }
 
-// RenderError turns a Postgres error into something safe to print: Code,
-// Message and SQLSTATE. Detail, Where and Hint are dropped unless
+// RenderError turns a Postgres error into something safe to print: Message and
+// SQLSTATE. Detail, Where and Hint are dropped unless
 // --show-row-values-in-errors, because a unique-violation Detail quotes the
 // conflicting row (THREAT_MODEL.md T4).
 //
-// Scaffold status: no-op.
-func RenderError(_ *pgconn.PgError, _ bool) string { return "" }
+// It is real rather than a no-op because cmd/lazyslice routes every error it
+// prints through it: a placeholder here would be a silent hole in the one
+// redaction pass the binary has.
+func RenderError(e *pgconn.PgError, showValues bool) string {
+	if e == nil {
+		return ""
+	}
+	s := fmt.Sprintf("%s (SQLSTATE %s)", e.Message, e.Code)
+	if !showValues {
+		return s
+	}
+	// The operator asked for the fields that quote the row, by a flag whose
+	// name says so.
+	for _, f := range []struct{ label, value string }{
+		{"detail", e.Detail},
+		{"where", e.Where},
+		{"hint", e.Hint},
+	} {
+		if f.value != "" {
+			s += "\n  " + f.label + ": " + f.value
+		}
+	}
+	return s
+}
 
 // NewSource returns the read side.
 func NewSource(p *pgxpool.Pool) pipeline.Source { return &source{pool: p} }

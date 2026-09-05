@@ -1212,7 +1212,7 @@ tracker/                epics, tasks, BOARD.md; written only by tools/tracker.py
 
 ## 13. Dependencies
 
-Every version below was checked against proxy.golang.org (and go.dev/dl for the toolchain) on 2026-09-05. Pinned exactly in `go.mod`; a bump is a pull request that says why.
+Every version below was checked against proxy.golang.org (and go.dev/dl for the toolchain) on 2026-09-05. Pinned exactly in `go.mod`; a bump is a pull request that says why. The three Charm modules are imported as `charm.land/...`: `github.com/charmbracelet/bubbletea/v2@v2.0.9` and its siblings declare the `charm.land` module path, so the `github.com` spelling does not compile.
 
 | Module | Version | Reason |
 |---|---|---|
@@ -1221,16 +1221,17 @@ Every version below was checked against proxy.golang.org (and go.dev/dl for the 
 | `github.com/moby/moby/client` | v0.6.0 | Docker Engine API client for container discovery; `docker/docker` stopped at v28.5.2+incompatible (2025-11-05) |
 | `github.com/spf13/cobra` | v1.10.2 | Subcommands and the generated flag reference |
 | `github.com/goccy/go-yaml` | v1.19.2 | Reads and writes `lazyslice.yml` with comments preserved for the emitted header |
-| `github.com/charmbracelet/bubbletea/v2` | v2.0.9 | The two paged TUI screens (ADR-002) |
-| `github.com/charmbracelet/lipgloss/v2` | v2.0.6 | Styling for those screens and the line printer's colour |
-| `github.com/charmbracelet/bubbles/v2` | v2.2.1 | Table and viewport components |
+| `charm.land/bubbletea/v2` | v2.0.9 | The two paged TUI screens (ADR-002) |
+| `charm.land/lipgloss/v2` | v2.0.6 | Styling for those screens and the line printer's colour |
+| `charm.land/bubbles/v2` | v2.2.1 | Table and viewport components |
+| `github.com/spf13/pflag` | v1.0.9 | Imported directly by `cmd/lazyslice` for the per-stage `--help` groups |
 | `golang.org/x/text` | v0.41.0 | NFKC normalisation and case folding before hashing (`mask` module) |
 | `github.com/nyaruka/phonenumbers` | v1.8.1 | E.164 canonicalisation and validity for phones (`mask` module and classifier validator) |
 | `github.com/testcontainers/testcontainers-go` | v0.44.0 | Test only: Postgres 14 and 18 containers for integration and invariants |
 
 Not dependencies, and why: `brianvoe/gofakeit` (word-list drift changes the mapping; lists are ours); `zalando/go-keyring` (ADR-004: no keyring in v1); `RoaringBitmap/roaring` (sorted slices suffice under the row budget; phase 5 may add it); `docker/docker` (frozen); any Bloom filter library (about 100 lines, in `internal/transform/bloom.go`, stdlib only); anything with cgo.
 
-Build tools pinned in the Makefile at scaffold time, not here: golangci-lint, goreleaser, cosign (keyless signing per THREAT_MODEL.md T10).
+Build tools, not dependencies: golangci-lint and goreleaser are pinned in the Makefile (`make tools`); cosign is installed by the release workflow alone, because the signature is keyless and its identity is that workflow's OIDC token, so a laptop has nothing to sign with (THREAT_MODEL.md T10). `make snapshot` passes `--skip=sign` for the same reason.
 
 ## 14. The v1 cut line
 

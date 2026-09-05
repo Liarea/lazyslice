@@ -7,7 +7,7 @@ Where the two disagree, CLAUDE.md wins and this file is wrong.
 ## Before you claim anything works
 
 ```sh
-make check        # lint and unit tests, both modules
+make check        # lint, the forbidden-name grep, and unit tests, both modules
 make integration  # container-backed tests; needs a Docker endpoint
 ```
 
@@ -44,10 +44,16 @@ ADR disagree, the ADR wins and ARCHITECTURE.md is corrected.
 These come from CONCEPT.md and THREAT_MODEL.md, and a pull request that breaks
 one of them will be closed rather than reviewed.
 
-- **Never add a flag that disables masking wholesale.** The CI grep rejects
-  anything matching `no-mask|disable-mask|skip-mask|unsafe`, and
-  `TestForbiddenFlagsDoNotExist` rejects it again. A per-column `--unmask
-  TABLE.COL=REASON` with a mandatory reason is the only opt-out, by design.
+- **Never add a flag that disables masking wholesale.** `make forbidden`, which
+  CI runs as its own job, greps every non-test Go file in both modules for
+  `no-mask|nomask|disable-mask|skip-mask|unsafe|allow-nonempty-target|allow-ctid`
+  and their `_` spellings, so an environment variable, a `lazyslice.yml` key or
+  a struct field named that way is caught as well as a flag.
+  `TestForbiddenFlagsDoNotExist` is the second, narrower layer: it walks the
+  registered flags of the command tree, and it is what rejects `--replace` and
+  `--rules`, which are ordinary words a grep cannot look for. A per-column
+  `--unmask TABLE.COL=REASON` with a mandatory reason is the only opt-out, by
+  design.
 - **When in doubt, mask it.** The classifier is biased to recall. The failure
   mode is mask more, never less.
 - **A safety rail is not configurable away** without a flag whose name says what
