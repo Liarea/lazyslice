@@ -1,0 +1,89 @@
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GOLANGCI_LINT_VERSION: v2.13.2
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # The masker is a nested module (ADR-006) with its own go.mod, so it is
+      # linted separately against the same configuration.
+      - name: lint (root module)
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          args: --config ${{ github.workspace }}/.golangci.yml
+
+      - name: lint (mask module)
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+          working-directory: mask
+          args: --config ${{ github.workspace }}/.golangci.yml
+
+      - name: go.mod is tidy
+        run: |
+          go mod tidy
+          (cd mask && go mod tidy)
+          git diff --exit-code -- go.mod go.sum mask/go.mod mask/go.sum
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: build
+        run: go build ./...
+      - name: test (root module)
+        run: go test -race -count=1 ./...
+      - name: test (mask module)
+        working-directory: mask
+        run: go test -race -count=1 ./...
+
+  # The tests that matter are statements about a real Postgres, so they run
+  # against containers on a runner with a Docker daemon, on the oldest and the
+  # newest supported majors (ADR-003, ARCHITECTURE.md section 14).
+  integration:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: ["14", "18"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: docker is available
+        run: docker version
+      - name: integration
+        env:
+          LAZYSLICE_TEST_POSTGRES_IMAGE: postgres:${{ matrix.postgres }}
+        run: make integration
