@@ -21,9 +21,12 @@ defined by how `implement.js` consumes it, not restated per workflow.
   touch; do not widen it to make a task "easier."
 - `implement.js` is shared infrastructure: a change to it affects every
   workflow's tasks, so treat it like a library API, not one phase's script.
-- Workflow scripts commit on the orchestrator's behalf only where the brief
-  explicitly says so (e.g. the scaffold task) — root CLAUDE.md's
-  no-agent-commits rule is the default everywhere else.
+- `implement.js` itself commits each task after independent verification
+  succeeds (`git add -A && git commit`) — that is the orchestrator committing,
+  per root CLAUDE.md, not an exception to it. A developer agent never commits
+  itself; its brief says "Do not commit." The scaffold brief is the one place
+  a developer agent is told to run git commands directly, and it says so
+  explicitly.
 
 **Test.** No automated test suite; verify a workflow change by resuming a
 step in a scratch run and checking the tracker (`tools/tracker.py list`)
@@ -31,5 +34,5 @@ reflects what actually happened.
 
 **Never:** let a task's `paths` exceed what its brief and root CLAUDE.md
 authorize; hardcode a phase's steps in a way that can't resume after an
-interruption; have a workflow script commit without an explicit exception
-stated in its own brief.
+interruption; let a developer agent commit itself instead of leaving that to
+`implement.js`'s own verify-phase commit step.
