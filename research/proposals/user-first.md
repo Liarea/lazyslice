@@ -1,126 +1,127 @@
 # Proposal: user-first
 
-Architecture proposal for phase 2, written under one lens: **the first run in `research/SQLIT_STUDY.md` §5.5 Scenario A is the product**. Every choice is defended by a user quote in `research/COMPLAINTS.md` or a named mechanism in sqlit or lazygit.
-
----
+**Lens: Scenario A of `research/SQLIT_STUDY.md` §5.5 is the product.** Each decision cites `research/COMPLAINTS.md` or a sqlit / lazygit mechanism.
 
 ## 1. Language: Go 1.27.1, `CGO_ENABLED=0`
 
-`research/BENCHMARK_LANGUAGE.md` does not exist as of 2026-09-05. The available evidence is one-sided. Installation is the top-voted feature request in this category (`COMPETITORS.md` §4): pg_sample's most-upvoted issue is "How do I install this?", Snaplet Snapshot's top two are npm failures on Apple Silicon, Replibyte cannot be built. `POSTMORTEMS.md` §8 records Snapshot being cut off while still growing by a `better-sqlite3` pin. `SQLIT_STUDY.md` §2.6c spends a page on sqlit's machinery for printing the right `pip`/`pipx`/`uv` command and concludes a static Go binary "sidesteps the entire driver problem — which is a real argument for the language choice". Go also has the two libraries the pipeline is made of: `pgx` v5.10.0 (`CopyFrom` at 357,100 rows/s, `HARD_PROBLEMS.md` §4.1) and the Docker SDK.
+The top-voted request in this category is *installation*: pg_sample's most-upvoted issue is "How do I install this?", open since 2020 (`COMPETITORS.md` §4). One static binary is a first-run feature, not an ops preference. Go also gives stdlib `crypto/hkdf`, `pgx` v5.10.0, and the Docker SDK.
 
-Dependency set, verified against proxy.golang.org on 2026-09-05: `jackc/pgx/v5` v5.10.0, `docker/docker` v28.5.2+incompatible, `spf13/cobra` v1.10.2, `nyaruka/phonenumbers` v1.8.1, `golang.org/x/text` v0.41.0, `zalando/go-keyring` v0.2.8, `brianvoe/gofakeit/v7` v7.16.0 (word lists vendored, not called — §8), `testcontainers-go` v0.44.0 (test only), released by `goreleaser` v2.18.0. All MIT/Apache-2.0/BSD per `LICENSE_DECISION.md` L82.
+We budget for the one price now. `client.FromEnv` does not resolve Docker contexts, "the highest-risk single defect in the first-run path" (`SQLIT_STUDY.md` §5.1), so `internal/discover/dockerctx` is ours — `--host` → `DOCKER_HOST` → `DOCKER_CONTEXT` → `currentContext` in `~/.docker/config.json` and `contexts/*/meta.json` → default sockets including Colima's and OrbStack's — and it is the first integration test. FPE is struck: no maintained Go library exists (`HARD_PROBLEMS.md` §2.2).
 
-**We write Docker context resolution ourselves**, ~150 lines in `internal/dockerctx`: `--host` → `DOCKER_HOST` → `DOCKER_CONTEXT` → `currentContext` in `~/.docker/config.json` → `~/.docker/contexts/*/meta.json` → default socket, with the resolved context printed by name. `SQLIT_STUDY.md` §5.1 calls `client.FromEnv`'s blindness to contexts "the highest-risk single defect in the first-run path". **FPE is struck for v1** (`HARD_PROBLEMS.md` §2.2: standard in flux, no maintained Go library).
+**Reversal condition.** `research/BENCHMARK_LANGUAGE.md` does not exist yet (T-0014/T-0019). Reverse only if it puts Go within 20% of an asyncpg baseline **and** a single-file Python build passes `lazyslice --version` everywhere. After phase 3 this is a rewrite, not a reversal.
 
-*Reversal condition:* the benchmark shows masking below 50k rows/s on a 20-column table, or a Postgres feature we need has no pure-Go client path.
+## 2. TUI: Bubble Tea v2.0.9, Lip Gloss v2.0.6, Bubbles v2.2.1 — not entered by default
 
-## 2. TUI: Bubble Tea v2.0.9 + Lip Gloss v2.0.6 — entered on demand, never by default
+The framework is the lazygit lineage (`BUILD_PLAN.md` L115). The user-first decision is *when*: **the happy path is a line printer, not an alternate screen.** CONCEPT.md's transcript is scrollback — it survives the run and pastes into a compliance ticket; an alternate-screen app erases itself on exit.
 
-The framework is settled (lazygit lineage, `BUILD_PLAN.md` L115). The user-first decision is *when it runs*. **The happy path is a line-printing renderer, not an alternate-screen app.** CONCEPT.md's transcript is scrollback: it survives the run, and TR-10's data custodian ("Sounds fantastic") is shown a transcript, not a screenshot. An alternate screen erases the evidence the user came for. The full-screen Bubble Tea view is entered on exactly three triggers — `?` at any prompt or mid-run, `lazyslice explain`, `lazyslice plan --interactive` — and renders the same `event.Event` stream.
+`lazyslice` prints lines; `--tui`, or `?` at a prompt, enters Bubble Tea for the two screens that need paging: the classifier's reasons and the plan table. Three sqlit mechanisms carry over.
 
-Two mechanisms are adopted verbatim. **The footer is computed from current state, not the current screen** (`SQLIT_STUDY.md` §2.4 layer 2): `? why masked` appears only after classify; `s skip table` only while a table extracts. **Every rendering of a binding comes from one table and CI fails on drift** — lazygit's "This file is auto-generated… run `go generate ./...`" — because four of eleven rows in sqlit's own README keybinding table are wrong nine months after that was its top launch complaint. Cancel (`q`, `Ctrl+C`) is not rebindable.
+- **Discovery never blocks the first line** — sqlit's "single most important structural decision" (§2.0). Candidates print as each verification resolves.
+- **The footer is computed from state, not screen** (§2.4); unavailable bindings render struck-through rather than vanishing.
+- **`docs/KEYBINDINGS.md` and the flag reference are generated**, with a CI drift check — lazygit's `go generate`; sqlit's hand-kept table has four wrong rows in eleven.
 
-*Reversal condition:* if the plan preview cannot be read as scrollback on a 40-table schema without paging, plan becomes full-screen by default and the line renderer becomes `--plain`.
+**Reversal condition.** If the plan table and reasons list both fit in 40 printed lines on every fixture, drop Bubble Tea for the line printer plus `$PAGER`. If users cannot find `?`, make `--tui` the TTY default — never move a capability into it.
 
-## 3. Database order: PostgreSQL only, and "done" is a test list
+## 3. Database order, and what "done" means
 
-Postgres 13–18. No second engine. "Done" for an adapter is not a feature list; it is: **the invariant suite passes on all eight fixture schemas, the engine has its own CI job, and zero subsetting issues are open against Postgres** (`SYNTHESIS.md` §3, `POSTMORTEMS.md` §10 item 4: "Both companies wrote that sentence and then did not obey it"). The eight fixtures, committed before the planner exists (`SYNTHESIS.md` §5 item 23), built from real `information_schema` output: no cycles; one self-cycle; a two-table cycle; an SCC with two overlapping cycles; a keyless junction table; a polymorphic `_type`/`_id` pair; a 300-column table; a partitioned table with a masked partition key. The first exists because Greenmask panics on schemas with *no* cycles (`COMPLAINTS.md` FK-8).
+PostgreSQL 13–18 only. Breadth is not the hard part: "and then noticed it didn't support MSSQL" (DB-1) heads 16 entries about *discovering unsupportedness after installing*. So a support table above the fold, and `lazyslice --source mysql://…` exits 2 naming it.
 
-*Reversal condition:* all eight pass, no open Postgres subsetting issue for one release cycle, and MySQL is asked for by more people than the tracker's open Postgres bugs.
+An adapter is **done** when: (a) I1–I6 are green on every torture fixture — no-cycle, self-cycle, two-table cycle, overlapping SCC, keyless junction, polymorphic pair, 300-column table (`SYNTHESIS.md` risk 3); (b) it has a CI job per major version; (c) seven capability rows are filled and printed by `lazyslice doctor` — snapshot, bulk load, FK/unique introspection, sequence reset, cycle handling, read-only check, residual scan — with no silent "n/a"; (d) `docs/ADDING_A_DATABASE.md` is corrected by the port.
 
-## 4. Configuration: emitted after, and an unseen column is never passed through
+**Reversal condition.** A second engine starts when Postgres has no open subsetting or masking issue and downloads — not stars (dbslice: 143 stars, 33/month) — name it.
 
-`lazyslice.yml` is written **on success only**, as a record. "Say I have nearly a hundred tables..." (CB-1) and "I suspect it's likely to take a couple of hours to set up this tool too!" (CB-2) are the bar; two 2026 entrants already clear it (`COMPETITORS.md` "Time from install").
+## 4. Configuration: emitted, never required
 
-The rot is the real problem: "the committed file *is* the stale config" (`SYNTHESIS.md` fact 3). So the file is **not** an allowlist. Every run re-introspects and re-classifies from scratch; the yml supplies *decisions*, not *coverage*. A column the file has never seen is classified fresh, and if the classifier says personal data — or says "cannot classify" — it is **masked and reported as new**. That is CB-5 and CB-6 asking for deny-by-default three years apart. `--strict` promotes any new-column report to exit 9, which is CI-1's `gcc -Werror`. Opt-outs (`--unmask table.column`) are per column with a reason; there is no wholesale switch, and no `unsafe` mode for one to live in.
+"Say I have nearly a hundred tables..." (CB-1) is the argument, and two 2026 entrants already reach a masked subset with no authored config. `lazyslice.yml` is written on success and by `--plan`: source/target *references* (`{from: env, var: DATABASE_URL}`), root, `--take`, per-column category + reason + masker + opt-outs, caps, schema fingerprint, secret **fingerprint**, tool version. Never a secret.
 
-`lazyslice verify --target …` re-runs the whole verification set against an existing target and exits non-zero. Nobody in the field ships this (`COMPETITORS.md` §6).
+Reading it back can only tighten. A column in the source and absent from the yml is masked with its category default and printed `new column`; under `--strict-schema` (default with no TTY, CI-1's `gcc -Werror` request) that is exit 9 — CB-5's deny-by-default request and CB-13's drift bug, answered structurally.
+
+**Reversal condition.** If the yml is hand-edited more often than regenerated, add `lazyslice explain --write` — never a precondition.
 
 ## 5. The pipeline
 
-Eight stages, each a pure function over immutable value types, in `internal/`. The core is a library; both front ends are renderers over one event channel.
-
-```mermaid
-flowchart LR
-  subgraph core["slice.Run(ctx, Options) (<-chan event.Event, error)"]
-    D[discover] -->|"[]discover.Candidate"| I[introspect]
-    I -->|"*introspect.Schema"| C[classify]
-    C -->|"classify.Verdicts"| P[plan]
-    P -->|"*plan.Plan"| E[extract]
-    E -->|"chan extract.RowBatch"| M[mask]
-    M -->|"chan extract.RowBatch"| L[load]
-    L -->|"load.Report"| V[verify]
-    V -->|"verify.Result"| Y["emit lazyslice.yml"]
-  end
-  core -.->|"event.Event"| CLI["cmd/lazyslice line renderer<br/>(default, CI-safe, --json)"]
-  core -.->|"event.Event"| TUI["internal/tui Bubble Tea<br/>(? / explain / plan -i)"]
-```
-
-`event.Event` is one struct: `{Stage Stage; Kind Kind; Table string; Rows, Total int64; Reason string; Err error}`. Every error carries its `Stage`, because "a 20-minute run that fails needs to say where" (`SQLIT_STUDY.md` §5.7), and no raw driver error reaches the user without a lazyslice sentence above it — the gap §2.6d finds in sqlit. Exit codes are §5.7's table plus 9 for `--strict`. `slice.Options` is populated only from cobra flags, so "every TUI action is reachable by a CLI flag" is a compile-time fact, not a review rule.
-
-## 6. Extensions: rule packs yes, masker plugins no
-
-**The classifier is pluggable, by data, not code.** `--rules pack.yml` (and `~/.config/lazyslice/rules/*.yml`) adds name patterns, validators by name, and dictionaries. A pack can only **add a category or raise a confidence** — never lower one, never mark a column non-personal; that is `--unmask`, per column, recorded. This is the extension people actually need: CB-7's team writes a comment on every column plus a diff job because their tool will not classify. It cannot make the tool less safe.
-
-**Maskers are not runtime-pluggable in v1.** The masker ships as a separately importable, dependency-free module, `github.com/Liarea/lazyslice/mask`, with its own tests and release cadence, because copycat outlived Snaplet by two years and 121k weekly downloads (ADR-007). Extending means importing it and registering a `mask.Masker` (`Category() string; Mask(h [32]byte, in mask.Value) (mask.Value, error)`) — compile-time, deterministic, auditable. No Go plugins (cgo), no WASM, no scripting: a plugin API is how a tool becomes a platform, and CI-5's user could not get data into CI because the tool needed a Temporal cluster.
-
-*Reversal condition:* three tracker entries asking for a masker we will not ship in-tree; then an out-of-process `--masker-command` protocol, never in-process code.
-
-## 7. The subset planner
-
-Client-side monotone worklist (`HARD_PROBLEMS.md` §1.1), not SQL pushdown: we must print why a row is present and must not write to the source.
-
-- **Root:** `--root`, else score `= inbound FK count − outbound FK count`, discard lookup-shaped tables, prefer `{customers, users, accounts, organizations, tenants, …}`, then row count (`SQLIT_STUDY.md` §5.4). `?` shows the ranked top five with components. This is the one blocking question on the happy path; it tab-completes against the already-introspected schema and re-prompts on an unrecognised name rather than silently defaulting.
-- **N:** `--take` / `-n`, default 500 (decided, `OPEN_QUESTIONS.md`).
-- **Parents:** mandatory, uncapped, any depth, tagged `PARENT_ONLY`. Composite keys as tuples; under `MATCH SIMPLE` a partially-NULL FK references nothing, so skip it.
-- **Children:** only from `CHILD_OK` rows, capped per parent key in one query with `row_number() OVER (PARTITION BY fk_col ORDER BY pk) <= cap`, depth-limited (`--depth`, default 4).
-- **Mode is decided once.** A row first reached as a parent is never re-expanded as a child. This is the size control and it is what stops Jailer #126, where customer 1's slice contained customers 2–10's orders.
-- **Cycles** need no special case for selection (sets only grow), and no special case for loading either, because FKs are created post-data. The plan still *names* every SCC it found — nobody prints that (`COMPETITORS.md` item 7).
-- **Lookup tables** (no outgoing FKs, ≥1 incoming, <1,000 rows) are copied whole and listed as such.
-- **Unreachable tables** are schema-only, listed by name, never silently copied.
-- **Row identity:** PK → unique non-partial non-expression index → inferred pseudo-key probed on a sample → `ctid` under the held snapshot; printed per table, and refused above 1,000,000 rows because a `ctid`-keyed run is not reproducible.
-- **Budgets:** `--row-budget` (default 2,000,000) and `--memory-budget` (default 512 MB, estimated as keys × 8 × 2). Planning aborts with a message instead of "collecting data indefinitely". SP-3 is "my database weighs less than 200Mb, and still I get OOM killed with 3GB".
-- **The plan prints before extraction** — tables, rows, caps applied, SCCs, unindexed FK columns, estimated snapshot hold time. Nobody does this (`COMPETITORS.md` "Where we can beat everyone").
+Eight stages, not `BUILD_PLAN.md` L118's six: every error must name its stage (`SQLIT_STUDY.md` §5.7), and the two added carry the promises — it finds your database and proves it worked.
 
 ```mermaid
 flowchart TD
-  CU["customers<br/>CHILD_OK · 500 seed"]
-  AD["addresses<br/>PARENT_ONLY"]
-  OR["orders<br/>CHILD_OK"]
-  LI["line_items<br/>CHILD_OK · cap 50/parent"]
-  PR["products<br/>PARENT_ONLY"]
-  SU["suppliers<br/>PARENT_ONLY"]
-  CO["countries<br/>lookup · copied whole"]
-
-  CU -->|"1 parent: default_address_id"| AD
-  AD -.->|"cycle: addresses.customer_id → customers<br/>already selected, set only grows"| CU
-  CU -->|"2 child: orders.customer_id"| OR
-  CU -->|"child edge to addresses is skipped:<br/>mode already fixed PARENT_ONLY"| AD
-  OR -->|"3 child: line_items.order_id"| LI
-  LI -->|"4 parent: product_id"| PR
-  PR -->|"5 parent: supplier_id"| SU
-  SU -.->|"SU is PARENT_ONLY, so other suppliers'<br/>line_items are NOT pulled"| LI
-  AD --> CO
+  R["core.Request<br/>(flags or keys)"] --> D[discover]
+  D --> I[introspect] --> C[classify] --> P[plan]
+  P -->|"gate: budgets, one question"| E[extract]
+  E -->|"chan Batch, cap 64"| T[transform] -->|"chan Batch"| L[load]
+  L --> V[verify] --> Y["Report + lazyslice.yml"]
+  D & P & E & L & V -.->|"every stage emits"| B(("event bus<br/>cap 256"))
+  B --> LN["render.Lines (default)"]
+  B --> TU["render.TUI"]
+  B --> J["--json NDJSON"]
 ```
+
+```go
+type Schema struct { Tables []Table; FKs []FK; Uniques []UniqueIndex; Seqs []Sequence; Parts []Partition }
+type Classification struct { Col ColumnRef; Cat Category; Conf Confidence; Reason string; Masker MaskerID }
+type Step struct { Table TableRef; Mode Mode /* CHILD_OK | PARENT_ONLY */; Key KeyStrategy; Pred Predicate; Cap int }
+type Plan struct { Root TableRef; Take int; Steps []Step; SCCs []SCC; Unreachable []TableRef; EstRows, EstMem int64 }
+type Batch struct { Table TableRef; Cols []string; Rows [][]any }
+
+// ctx elided.
+type Discoverer   interface{ Discover() ([]Candidate, error) }
+type Introspector interface{ Introspect(ReadOnlyConn) (*Schema, error) }
+type Classifier   interface{ Classify(*Schema, Sampler) ([]Classification, error) }
+type Planner      interface{ Plan(*Schema, PlanRequest) (*Plan, error) }
+type Extractor    interface{ Extract(*Plan, chan<- Batch) error }
+type Transformer  interface{ Transform(*Batch) error }
+type Loader       interface{ Load(<-chan Batch, *Plan) error }
+type Verifier     interface{ Verify(*Plan, []Classification) (*Report, error) }
+```
+
+**One entry point:** `core.Run(ctx, core.Request, chan<- event.Event) (*Report, error)`. `cmd/lazyslice` builds `Request` from flags; `internal/tui` builds the identical `Request` from keystrokes and reads the same channel via `tea.Program.Send`. `TestEveryTUIActionHasFlag` fails on any binding whose action lacks a flag. `event.Event{Stage, Kind, Table, N, Total, Text, Err}` is sent non-blocking, drops counted; `--json` emits that stream as NDJSON, so the TUI provably adds nothing.
+
+## 6. Extension model: maskers plug in, the classifier does not
+
+A pluggable classifier is a supported way to see *less* PII — the mode CONCEPT.md refuses. Maskers must be pluggable because "client had no proper idea of what the field were" (CB-3): value shape is local knowledge.
+
+A masker is a compiled-in pure function `func(h [32]byte, in Value, c Constraints) (Value, error)` in a registry, in a **separate module** `github.com/Liarea/lazyslice-mask` — stdlib only, own release tags — because copycat outlived Snaplet at 121,478 weekly downloads and ADR-007 requires the same here. No `.so`, Lua or WASM: a runtime code loader is a pass-through mode with extra steps. Extension happens in `lazyslice.yml` — shipped maskers per column, plus `mapping_file:`, the 1:1 CSV `HARD_PROBLEMS.md` §2.2 rule 4 requires — and in `classify.extra_patterns`, which may add a category or raise confidence but never lower or remove one (`TestConfigCannotLowerConfidence`).
+
+**Reversal condition.** Three unrelated requests for a masker we will not ship buys a v2 WASM sandbox, same signature — still no classifier plugin.
+
+## 7. The subset planner
+
+A client-side monotone worklist (`HARD_PROBLEMS.md` §1.1), never SQL pushdown: the tool must say *why a row is present* and must not write temp tables on the source.
+
+1. **Seed.** `SELECT <key> FROM root ORDER BY <key> LIMIT N` (`--take`/`-n`, default 500; optional `--where`), tagged `CHILD_OK`.
+2. **Parents** run for *every* entry: uncapped, any depth, tagged `PARENT_ONLY`; rows with a NULL FK column are skipped under `MATCH SIMPLE`; composite keys travel as tuples via `unnest($1::int8[], $2::text[])`, chunked at 2,000 keys; unindexed FK edges warn per edge from `pg_index`.
+3. **Children** run **only** for `CHILD_OK` entries: per-parent-key cap 20 (`--cap table=n`), depth limit 3 from the root. A row first reached as a parent is never re-expanded (`SYNTHESIS.md` §5 Q3) — both the size and the privacy control: Jailer #126 put other customers' orders in customer 1's slice for eight months.
+4. **Cycles** never affect selection. Tarjan SCC → condensed DAG → topological load order; inside an SCC order is arbitrary because FKs are created post-data, so verification *is* `ADD FOREIGN KEY … NOT VALID` + `VALIDATE CONSTRAINT`; the plan names each cycle.
+5. **Unreachable lookup tables** are copied whole iff `n_live_tup ≤ 10,000` and nothing in them classifies above `low`; otherwise schema-only.
+6. **Row identity** falls back PK → unique non-partial non-expression index → inferred pseudo-key (FK columns plus NOT NULL discriminators, probed on a `TABLESAMPLE`) → `ctid`, printed per table. A `ctid`-only table over 1,000,000 rows is refused (exit 4): `ctid` breaks I3/I5 across a `VACUUM FULL`.
+7. **Budgets.** Key sets are roaring bitmaps for single int8 keys, sorted tuple slabs otherwise. The plan prints `23 tables · ~18k rows · ~120 MB · ~46 MB planner memory` **before** extraction and aborts on `--memory-budget` (512 MB) or `--row-budget` (`100 × N`), naming the table and the `--cap` that fixes it. "less than 200Mb, and still I get OOM killed with 3GB" (SP-3) is a planning failure.
+8. **Polymorphic** `_type`/`_id` pairs are inferred from distinct values, walked as `PARENT_ONLY` virtual FKs, always reported.
+
+```mermaid
+flowchart LR
+  C["customers root<br/>CHILD_OK 500"] -->|child, cap 20| O["orders<br/>CHILD_OK"]
+  O -->|child, cap 20| OI["order_items<br/>CHILD_OK · depth 3"]
+  OI -->|parent| P["products<br/>PARENT_ONLY"]
+  P -->|parent| S["suppliers<br/>PARENT_ONLY"]
+  O -->|parent| E["employees<br/>PARENT_ONLY"]
+  E -->|"parent, self-cycle"| E
+  O -->|"parent, cycle back"| C
+  P -.->|"child edge NOT followed"| X["other order_items<br/>excluded"]
+```
+
+Both cycles are selected with no special case and loaded with no ordering.
 
 ## 8. Deterministic masking
 
-`K` = 32 random bytes per project. `K_cat = HKDF(K, info="lazyslice/v1/"+category)` (`crypto/hkdf`, Go 1.24+). `h = HMAC-SHA256(K_cat, canonical(value))`. `fake = generator[category](h)` — `h` drives every choice; never a seeded global faker, so gofakeit's word lists are vendored under `mask/data` and versioned, not called.
+`K` = 32 random bytes, written on first run to `./lazyslice.secret` (0600, gitignored, printed once), overridden by `$LAZYSLICE_SECRET` or the OS keyring (`zalando/go-keyring` v0.2.8). `lazyslice.yml` stores `secret_fingerprint: sha256(K)[:8]`. Then `K_cat = HKDF-SHA256(K, info="lazyslice/v1/"+category)`, `h = HMAC-SHA256(K_cat, canonical(value))`, `fake = generator[category](h)`. Canonicalisation is per category (case-folded emails, E.164 phones via `nyaruka/phonenumbers` v2.0.11), and categories propagate along FK edges and identical column names *before* masking, or joins break. NULL stays NULL, empty stays empty, no prefix or length survives. A column under a unique index gets a ≥2⁶⁴ generator with a hash-derived suffix (`alice.k7v2x@example.com`), never a retry counter; one whose admissible domain `d < n²/2ε` at `ε = 10⁻⁶` is refused by name. Fakes land in RFC 2606 domains and the 555-0100–0199 range; free text and JSON are replaced whole (`{}` for varying-key documents).
 
-Canonicalise per category before hashing (case-fold emails, E.164 phones, NFKC names, type tag prefix) or the same person masks differently in two tables. Propagate the category along FK edges and identical column names; a PK/unique column's decision overrides the FK columns pointing at it. Fakes land in RFC 2606 domains and the 555-0100..0199 range. NULL stays NULL, empty stays empty; `varchar(n)`, `CHECK` and enum labels are respected.
-
-**Uniqueness:** any column under a unique index (including expression and partial indexes) gets a generator with domain ≥ 2⁶⁴ and a hash-derived suffix. **No retry-with-counter** — it makes the mapping order-dependent. If the column's admissible domain `d` (from type, `atttypmod`, parseable `CHECK`, enum labels) is below `d_required ≈ n²/2ε` at ε = 10⁻⁶, refuse *that column by name* at plan time with both numbers.
-
-**Key lifecycle** (`OPEN_QUESTIONS.md` item 4): `./lazyslice.secret` (mode 0600, added to `.gitignore` on creation), else `LAZYSLICE_SECRET`, else the OS keyring under service `lazyslice`. The yml records only `secret_fingerprint`, the first 8 hex of SHA-256(K). A keyless CI run generates an ephemeral key, is internally consistent, and prints that its fakes will not match the laptop's; under `--strict` a keyless run is exit 5. Rotation is a new fingerprint: verify reports the mismatch, and the marked target is truncated and reloaded.
+**Lifecycle.** Rotation is a new fingerprint: `lazyslice_meta` holds the previous one, so a re-run prints `secret changed — masked values will differ` and truncates. A keyless CI run generates an ephemeral key, says so, and gets consistent joins with different fakes — never a hard failure, since failing CI on a missing secret is how secrets get committed.
 
 ## 9. v1 safety controls
 
-1. **Target eligibility is a hard gate**, re-checked every run even from the yml: reachable, `CREATE` on the schema, and *either* zero rows in every user table per `pg_stat_user_tables` *or* our `lazyslice_meta` marker. Migrated-but-empty passes — that is the compose test database (`OPEN_QUESTIONS.md` item 2). Only an explicit `--target` plus `--allow-nonempty-target` overrides. A `lazyslice_meta` with a newer `schema_version` fails closed.
-2. **Source is opened read-only and the role is printed**: `default_transaction_read_only = on` (our own guard, not access control) plus `has_table_privilege` checks, printed as the loudest header line when the role can write. `--require-read-only-role` makes it exit 6.
-3. **No unsafe mode exists.** A CI grep for `--no-mask|--disable-mask|--skip-mask|unsafe` fails the build (`SYNTHESIS.md` §5 item 19).
-4. **Verification set, all failures non-zero:** every post-data FK created `NOT VALID` then `VALIDATE CONSTRAINT`, per-constraint; the residual-PII scan; sequences set with `setval(seq, coalesce(max(id),1), max(id) IS NOT NULL)` after commit and re-read; every planned table non-empty; unmasked columns byte-identical to source.
-5. **The residual-PII scan, and what it cannot catch.** During extract we keep, per masked column, an HMAC set (run-local key) of up to 100,000 distinct canonical source values; after load we stream the target column and fail on any hash hit. Then we re-run the classifier's *validators* over target values in columns marked non-personal and report hits. It cannot catch: values beyond the 100,000 cap; personal data inside a column the classifier never flagged; personal data in free text inside a column classified non-personal; opted-out columns; binary blobs; quasi-identifier combinations; and frequency and ordering leakage, which deterministic masking preserves by construction. The README says exactly this, and says "pseudonymised", never "anonymised".
-6. **Pooled source endpoints** (`OPEN_QUESTIONS.md` item 1): we attempt `pg_export_snapshot()` under `REPEATABLE READ`; if a second connection's `SET TRANSACTION SNAPSHOT` fails (PgBouncer transaction mode), we degrade to a **single-connection extract inside that one transaction**, print "pooled endpoint detected — single-connection extract, slower, still consistent", and continue. `--require-snapshot-sharing` turns the degrade into exit 7. Standby cancellation past `max_standby_streaming_delay` is an expected, named failure with a retry message, not a generic error.
-7. **Interrupt rolls the target back and says what it rolled back.** Per-table transactions; `q`/`Ctrl+C` is not rebindable.
-
-*The claim this proposal is most likely to be wrong about:* that the root-table heuristic proposes the expected table on eight of ten real schemas (`SQLIT_STUDY.md` §7). It is untested. If it is wrong, Q2's default is wrong on the happy path, and the one question stops being answerable with Enter.
+1. **No unsafe mode exists.** A CI grep fails the build on any flag matching `no-mask|disable-mask|skip-mask|unsafe`.
+2. **Target eligibility gate:** reachable, `has_schema_privilege(…,'CREATE')`, and *either* zero rows in every user table (`pg_stat_user_tables`) *or* `lazyslice_meta` with `schema_version ≤ ours` (newer fails closed). A migrated-but-empty compose database passes; a partially seeded one is reported ineligible with row counts. Nothing else is written to without `--target` plus `--allow-nonempty-target`.
+3. **Source read-only:** `default_transaction_read_only = on` plus a printed `has_table_privilege` report; `--require-read-only-role` makes a writable role exit 6. The source pool's type is `ReadOnlyConn`, which has no `Exec` method — I4 is enforced by the compiler, not by discipline.
+4. **Residual-PII scan** in `verify`: per masked column, assert no target value's HMAC matches its source value's HMAC (digests, not values), then re-run the classifier over target samples. **Stated false negatives**, printed in the README: values already fake in the source; PII in a column the classifier never flagged; PII inside `bytea`; a masked value coinciding with another row's real value; PII in rows the `TABLESAMPLE` missed.
+5. **Exit codes:** 0 ok, 2 bad invocation, 3 no source, 4 target refused, 5 credential missing, 6 source not read-only, 7 extract/load failure, 8 FK verification failed, 9 schema drift under `--strict-schema`, 130 interrupted with target rolled back.
+6. **Poolers** (`OPEN_QUESTIONS.md` 1): attempt `pg_export_snapshot()` under `REPEATABLE READ` and a second connection's `SET TRANSACTION SNAPSHOT`; on failure, extract on one connection and say so. Never refuse: the pooler DSN is often the only one the developer has.
+7. **Secrets cannot be logged:** `event.Event` has no field able to hold a DSN, `dsn.Ref.String()` redacts, and a test asserts its transitive field types exclude `dsn.DSN`.

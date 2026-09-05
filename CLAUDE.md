@@ -4,7 +4,7 @@ Snapshot a production SQL database into a safe local copy: subset by a root tabl
 
 ## Current phase
 
-Phase 2, Architecture. Gate: ADRs 001 to 006 with reversal conditions, ARCHITECTURE.md, THREAT_MODEL.md with v1-blocking controls. Inputs: research/SYNTHESIS.md section 5 and research/OPEN_QUESTIONS.md. See docs/BUILD_PLAN.md.
+Phase 3, Foundations. Gate: CI green on an empty implementation, integration tests fail for the right reason, both fixtures load with every trap documented, per-directory CLAUDE.md files, ROADMAP.md, ADR-008 first run. ARCHITECTURE.md section 14 is the v1 cut line; section 12 is the layout. See docs/BUILD_PLAN.md.
 
 ## Rules
 
@@ -12,7 +12,7 @@ Work only on the current phase. Anything else goes to the tracker as an open tas
 
 Before saying something works: run the checks (lint, test, integration once they exist) and paste the result. "Should work" is not a status.
 
-Decisions live in docs/adr/. To change a decision, add a new ADR that supersedes the old one. Never edit an accepted ADR.
+Decisions live in docs/adr/. An ADR is proposed until its phase gate closes, then accepted and frozen. To change an accepted decision, add a new ADR that supersedes it. Never edit an accepted ADR.
 
 Write only the files your task names. Do not fix nearby code, extend behaviour the task did not mention, or add tests beyond the task. If you see something else wrong, report it in your return value.
 

@@ -3,12 +3,12 @@ id: T-0016
 title: "Judge panel scoring"
 epic: E2
 phase: 2
-status: in_progress
+status: done
 owner: opus
 created: 2026-09-05
 started: 2026-09-05
-closed: ""
-outcome: ""
+closed: 2026-09-05
+outcome: "done: judges split (user-first 33, risk-first 36, three-way tie 31/30/30); fatal flaws found in every proposal"
 ---
 
 # T-0016 · Judge panel scoring
@@ -27,6 +27,8 @@ outcome: ""
 
 - 2026-09-05 started
 
+- 2026-09-05 closed: done: judges split (user-first 33, risk-first 36, three-way tie 31/30/30); fatal flaws found in every proposal
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+Went well: distinct criteria produced distinct winners and a real disagreement for the decider. Went badly: nothing. Change: none.
