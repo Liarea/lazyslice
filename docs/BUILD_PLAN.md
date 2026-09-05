@@ -1,12 +1,12 @@
 # Lazysnap Build Plan
 
-Zero to one hundred · working name: lazysnap
+Zero to one hundred · working name: lazyslice
 
 One command that points at a production database, pulls out a small coherent slice, masks the personal data, and loads it into a local database you can safely develop against. This plan runs from a blank folder to a paid, hosted product, with the Claude Code prompts for each step.
 
 ```
 # the whole pitch, in one line
-$ lazysnap --from prod --root users --take 500
+$ lazyslice --from prod --root users --take 500
   detected 3 docker databases · 41 tables · 17 columns look like PII · ready in 38s
 ```
 
@@ -36,7 +36,7 @@ Write down what the thing is before researching what exists. Research done first
 #### PROMPT 0.1 · concept
 
 ```PROMPT 0.1 · concept
-Create CONCEPT.md for a new open-source CLI called lazysnap. It snapshots a production SQL database into a local dev database: subset by a root table and row count, follow foreign keys in both directions so the slice is referentially complete, detect and mask personal data, load into a target. Model it on how sqlit and lazygit win: zero config, zero docs needed, magic first run.
+Create CONCEPT.md for a new open-source CLI called lazyslice. It snapshots a production SQL database into a local dev database: subset by a root table and row count, follow foreign keys in both directions so the slice is referentially complete, detect and mask personal data, load into a target. Model it on how sqlit and lazygit win: zero config, zero docs needed, magic first run.
 
 Sections: one-line pitch; the user (a backend dev on a 3 to 30 person team); the moment they reach for it; the three principles (zero config, safe by default, terminal first) with one sentence each on what we refuse to ship because of it; explicit non-goals for v1 (synthetic data generation, scheduling, web UI, NoSQL, schema migration); and a "what a delighted first run looks like" transcript. Keep it under 700 words. Do not list features. Do not mention competitors.
 ```
@@ -44,7 +44,7 @@ Sections: one-line pitch; the user (a backend dev on a 3 to 30 person team); the
 #### PROMPT 0.2 · name
 
 ```PROMPT 0.2 · name
-Working name is lazysnap. Check it: search GitHub, PyPI, npm, crates.io, Homebrew, and the USPTO trademark database for lazysnap and close variants. Report collisions with links. Then propose five alternative names that keep the "lazy" family association, are pronounceable, and have a free .dev or .sh domain (check with whois or a DNS lookup). Write findings to NAME.md with a recommendation and its reasoning.
+Working name is lazyslice. Check it: search GitHub, PyPI, npm, crates.io, Homebrew, and the USPTO trademark database for lazyslice and close variants. Report collisions with links. Then propose five alternative names that keep the "lazy" family association, are pronounceable, and have a free .dev or .sh domain (check with whois or a DNS lookup). Write findings to NAME.md with a recommendation and its reasoning.
 ```
 
 ### Gate 0
@@ -114,7 +114,7 @@ Six decisions, each recorded as an Architecture Decision Record so future-you an
 - **Language: Go.** Single static binary, first-class Docker SDK, the COPY protocol via pgx, and it is what lazygit, lazydocker, and Greenmask use. Python with Textual gets you thirty databases faster via SQLAlchemy, but distribution and streaming performance are worse. Breadth is a phase 7 problem, not a phase 4 one.
 - **TUI: Bubble Tea and Lip Gloss.** The lazygit lineage. The TUI is one thin layer over a library that works headless.
 - **Database order: PostgreSQL, then MySQL, SQLite, SQL Server.** Postgres is where the dead competitors' users are.
-- **Config: emitted, not required.** First run writes `lazysnap.yml` describing exactly what it did. Committing that file makes CI reproducible.
+- **Config: emitted, not required.** First run writes `lazyslice.yml` describing exactly what it did. Committing that file makes CI reproducible.
 - **Pipeline: introspect → classify → plan → extract → transform → load.** Each stage has one interface and can be run alone with a flag, which is what makes it testable.
 - **Masking is pluggable, classification is not.** Users add maskers. The classifier is ours and conservative.
 
@@ -123,13 +123,13 @@ Six decisions, each recorded as an Architecture Decision Record so future-you an
 #### PROMPT 2.1 · language ADR
 
 ```PROMPT 2.1 · language ADR
-Write docs/adr/001-language.md deciding between Go and Python for lazysnap. Argue both sides honestly using research/HARD_PROBLEMS.md and COMPETITORS.md. Criteria in priority order: install experience (curl, brew, single binary), streaming throughput on a 50M row table, quality of Postgres, MySQL, SQLite and SQL Server drivers, TUI library maturity, ease of contribution, and how sqlit got to 30 databases in Python. Give a benchmark plan we could run in a day to settle the throughput question. End with a decision and the condition under which we would reverse it. Format: Context, Options, Decision, Consequences.
+Write docs/adr/001-language.md deciding between Go and Python for lazyslice. Argue both sides honestly using research/HARD_PROBLEMS.md and COMPETITORS.md. Criteria in priority order: install experience (curl, brew, single binary), streaming throughput on a 50M row table, quality of Postgres, MySQL, SQLite and SQL Server drivers, TUI library maturity, ease of contribution, and how sqlit got to 30 databases in Python. Give a benchmark plan we could run in a day to settle the throughput question. End with a decision and the condition under which we would reverse it. Format: Context, Options, Decision, Consequences.
 ```
 
 #### PROMPT 2.2 · pipeline
 
 ```PROMPT 2.2 · pipeline
-Write ARCHITECTURE.md. Define the pipeline introspect → classify → plan → extract → transform → load as six Go interfaces with their inputs and outputs as types. Show how one run flows through them, how the TUI and the headless CLI share the same core, and how a run emits lazysnap.yml that reproduces it. Specify the subset planner: given a root table and N, produce an ordered list of (table, predicate) steps that pulls parents first, children after, handles cycles by deferring constraints, and caps runaway fan-out with a per-table limit. Include a Mermaid diagram of the pipeline and a second one of the FK walk on a schema with a cycle. Note which stage each hard problem from research/HARD_PROBLEMS.md lives in.
+Write ARCHITECTURE.md. Define the pipeline introspect → classify → plan → extract → transform → load as six Go interfaces with their inputs and outputs as types. Show how one run flows through them, how the TUI and the headless CLI share the same core, and how a run emits lazyslice.yml that reproduces it. Specify the subset planner: given a root table and N, produce an ordered list of (table, predicate) steps that pulls parents first, children after, handles cycles by deferring constraints, and caps runaway fan-out with a per-table limit. Include a Mermaid diagram of the pipeline and a second one of the FK walk on a schema with a cycle. Note which stage each hard problem from research/HARD_PROBLEMS.md lives in.
 ```
 
 #### PROMPT 2.3 · classifier design
@@ -147,13 +147,13 @@ Write docs/adr/004-masking.md. Specify the masker interface, the built-in masker
 #### PROMPT 2.5 · threat model
 
 ```PROMPT 2.5 · threat model
-Write THREAT_MODEL.md for lazysnap. Assets: production data, credentials, the snapshot on disk. Threats: masking misses a PII column, a user points the target at production, credentials leak into lazysnap.yml or logs, a snapshot file lands in git, a malicious custom masker, and supply chain risk in our release pipeline. For each threat: likelihood, impact, and the concrete control we build (for example: refuse to load into any database whose name or host matches the source, or which has more than 10k rows in any table, unless --i-know-this-is-not-prod is passed; never write secrets to the emitted config; add snapshots/ to .gitignore on first run). Mark which controls are v1 blockers.
+Write THREAT_MODEL.md for lazyslice. Assets: production data, credentials, the snapshot on disk. Threats: masking misses a PII column, a user points the target at production, credentials leak into lazyslice.yml or logs, a snapshot file lands in git, a malicious custom masker, and supply chain risk in our release pipeline. For each threat: likelihood, impact, and the concrete control we build (for example: refuse to load into any database whose name or host matches the source, or which has more than 10k rows in any table, unless --i-know-this-is-not-prod is passed; never write secrets to the emitted config; add snapshots/ to .gitignore on first run). Mark which controls are v1 blockers.
 ```
 
 #### PROMPT 2.6 · sqlit study
 
 ```PROMPT 2.6 · sqlit study
-Clone github.com/Maxteabag/sqlit and read it. Write docs/adr/006-first-run-experience.md describing exactly how sqlit achieves zero-config first run: the Docker container detection, connection saving, keyring use, and the keybinding discoverability. Then specify our equivalent for lazysnap step by step: what happens when a user types `lazysnap` with no arguments in a project folder that has a docker-compose.yml, a DATABASE_URL in .env, or nothing at all. Define every question the tool may ask and its default. Cap it at one question on the happy path.
+Clone github.com/Maxteabag/sqlit and read it. Write docs/adr/006-first-run-experience.md describing exactly how sqlit achieves zero-config first run: the Docker container detection, connection saving, keyring use, and the keybinding discoverability. Then specify our equivalent for lazyslice step by step: what happens when a user types `lazyslice` with no arguments in a project folder that has a docker-compose.yml, a DATABASE_URL in .env, or nothing at all. Define every question the tool may ask and its default. Cap it at one question on the happy path.
 ```
 
 ### Gate 2
@@ -173,7 +173,7 @@ Everything that keeps the project honest gets built before the product does. The
 #### PROMPT 3.1 · scaffold
 
 ```PROMPT 3.1 · scaffold
-Scaffold the Go repo per ARCHITECTURE.md: cmd/lazysnap, internal/{introspect,classify,plan,extract,transform,load,tui}, one interface file per stage with a doc comment and a no-op implementation, a Makefile with build, test, lint (golangci-lint), and integration targets, GitHub Actions running unit tests on push and integration tests with Postgres via testcontainers-go, goreleaser config producing darwin/linux/windows binaries plus a Homebrew tap, SECURITY.md, CONTRIBUTING.md, a docs/adr/README that explains the ADR format, and .gitignore containing snapshots/ and lazysnap.secret. Everything must pass green on an empty implementation before you stop.
+Scaffold the Go repo per ARCHITECTURE.md: cmd/lazyslice, internal/{introspect,classify,plan,extract,transform,load,tui}, one interface file per stage with a doc comment and a no-op implementation, a Makefile with build, test, lint (golangci-lint), and integration targets, GitHub Actions running unit tests on push and integration tests with Postgres via testcontainers-go, goreleaser config producing darwin/linux/windows binaries plus a Homebrew tap, SECURITY.md, CONTRIBUTING.md, a docs/adr/README that explains the ADR format, and .gitignore containing snapshots/ and lazyslice.secret. Everything must pass green on an empty implementation before you stop.
 ```
 
 #### PROMPT 3.2 · CLAUDE.md
@@ -191,7 +191,7 @@ Build testdata/ with two Postgres fixtures loaded by the integration suite. Firs
 #### PROMPT 3.4 · invariant tests
 
 ```PROMPT 3.4 · invariant tests
-Write the invariant test suite in internal/invariants_test.go that runs against any snapshot the tool produces, using both fixtures. Invariants: (1) every foreign key in the target resolves; (2) no value in the target matches the classifier's own PII detectors for any column the classifier flagged; (3) running twice with the same secret produces byte-identical targets; (4) the source database's row counts and a checksum are unchanged after a run; (5) the emitted lazysnap.yml, fed back in, reproduces the snapshot; (6) the target row count for the root table equals --take. These tests are the definition of correct. Make them fail now, since nothing is implemented, and wire them into make integration.
+Write the invariant test suite in internal/invariants_test.go that runs against any snapshot the tool produces, using both fixtures. Invariants: (1) every foreign key in the target resolves; (2) no value in the target matches the classifier's own PII detectors for any column the classifier flagged; (3) running twice with the same secret produces byte-identical targets; (4) the source database's row counts and a checksum are unchanged after a run; (5) the emitted lazyslice.yml, fed back in, reproduces the snapshot; (6) the target row count for the root table equals --take. These tests are the definition of correct. Make them fail now, since nothing is implemented, and wire them into make integration.
 ```
 
 #### PROMPT 3.5 · roadmap
@@ -217,19 +217,19 @@ Build the pipeline one stage at a time, in order, each behind a flag that runs i
 #### PROMPT 4.1 · introspect
 
 ```PROMPT 4.1 · introspect
-Implement internal/introspect for Postgres: tables, columns with types, primary keys, foreign keys including composite and self-referencing, unique constraints, sequences and identity columns, partitions, enums, approximate row counts from pg_class, and a 200-row sample per table taken with TABLESAMPLE where available. Output the Schema type from ARCHITECTURE.md. Add `lazysnap introspect --from URL --json` that prints it. Write tests against both fixtures that assert every trap in testdata/README.md is represented in the output. Do not touch any other stage.
+Implement internal/introspect for Postgres: tables, columns with types, primary keys, foreign keys including composite and self-referencing, unique constraints, sequences and identity columns, partitions, enums, approximate row counts from pg_class, and a 200-row sample per table taken with TABLESAMPLE where available. Output the Schema type from ARCHITECTURE.md. Add `lazyslice introspect --from URL --json` that prints it. Write tests against both fixtures that assert every trap in testdata/README.md is represented in the output. Do not touch any other stage.
 ```
 
 #### PROMPT 4.2 · classify
 
 ```PROMPT 4.2 · classify
-Implement internal/classify per docs/adr/003. Input: Schema with samples. Output: per column, a category, a confidence, and a human-readable reason. Add `lazysnap classify --from URL` that prints a table sorted by confidence. Tests: on nasty.sql, email_verified must not be flagged, ref must be flagged, the JSONB and notes columns must be flagged as free text, and precision and recall on Pagila must be reported as numbers in the test output. Add a fixture of 50 real-world column names from open-source schemas (Discourse, GitLab, Mastodon) with expected categories, and make the test print the confusion matrix.
+Implement internal/classify per docs/adr/003. Input: Schema with samples. Output: per column, a category, a confidence, and a human-readable reason. Add `lazyslice classify --from URL` that prints a table sorted by confidence. Tests: on nasty.sql, email_verified must not be flagged, ref must be flagged, the JSONB and notes columns must be flagged as free text, and precision and recall on Pagila must be reported as numbers in the test output. Add a fixture of 50 real-world column names from open-source schemas (Discourse, GitLab, Mastodon) with expected categories, and make the test print the confusion matrix.
 ```
 
 #### PROMPT 4.3 · plan
 
 ```PROMPT 4.3 · plan
-Implement internal/plan per ARCHITECTURE.md. Given Schema, root table, and N, produce an ordered Plan of steps. Walk parents to completeness, then children with a per-table cap defaulting to 10x N. Handle cycles by marking constraints for deferral. Tables unreachable from the root are excluded unless they are small lookup tables (under 1000 rows, no FKs out), which are copied whole. Add `lazysnap plan --from URL --root T --take N` that prints the plan with estimated row counts. Tests on nasty.sql must show the cycle handled and the polymorphic association reported as "not followed: no constraint" with a hint.
+Implement internal/plan per ARCHITECTURE.md. Given Schema, root table, and N, produce an ordered Plan of steps. Walk parents to completeness, then children with a per-table cap defaulting to 10x N. Handle cycles by marking constraints for deferral. Tables unreachable from the root are excluded unless they are small lookup tables (under 1000 rows, no FKs out), which are copied whole. Add `lazyslice plan --from URL --root T --take N` that prints the plan with estimated row counts. Tests on nasty.sql must show the cycle handled and the polymorphic association reported as "not followed: no constraint" with a hint.
 ```
 
 #### PROMPT 4.4 · extract and transform
@@ -241,7 +241,7 @@ Implement internal/extract and internal/transform. Extract streams each plan ste
 #### PROMPT 4.5 · load and safety rails
 
 ```PROMPT 4.5 · load and safety rails
-Implement internal/load for Postgres: create schema in the target if missing, load with COPY FROM in plan order with constraints deferred, reset sequences to max+1, and verify FK integrity at the end. Then implement every v1-blocking control from THREAT_MODEL.md, at minimum: refuse a target that resembles the source, refuse a target with existing data unless --replace, never log or emit secrets, write snapshots/ to .gitignore. Now `lazysnap --from URL --to URL --root T --take N` must run end to end and pass all six invariants on both fixtures. Emit lazysnap.yml at the end of the run.
+Implement internal/load for Postgres: create schema in the target if missing, load with COPY FROM in plan order with constraints deferred, reset sequences to max+1, and verify FK integrity at the end. Then implement every v1-blocking control from THREAT_MODEL.md, at minimum: refuse a target that resembles the source, refuse a target with existing data unless --replace, never log or emit secrets, write snapshots/ to .gitignore. Now `lazyslice --from URL --to URL --root T --take N` must run end to end and pass all six invariants on both fixtures. Emit lazyslice.yml at the end of the run.
 ```
 
 #### PROMPT 4.6 · first run and docker
@@ -253,7 +253,7 @@ Implement docs/adr/006: with no arguments, detect Postgres containers via the Do
 #### PROMPT 4.7 · dogfood
 
 ```PROMPT 4.7 · dogfood
-I am going to run lazysnap for the first time on a real project, pretending I have never seen it. Before I do, write docs/DOGFOOD_LOG.md with a template: what I typed, what I expected, what happened, how long it took, what I had to look up. After each session I will paste my notes. Your job then is to turn every "had to look up" into either a default, a better prompt in the tool, or a Later item, and to never suggest documentation as the fix.
+I am going to run lazyslice for the first time on a real project, pretending I have never seen it. Before I do, write docs/DOGFOOD_LOG.md with a template: what I typed, what I expected, what happened, how long it took, what I had to look up. After each session I will paste my notes. Your job then is to turn every "had to look up" into either a default, a better prompt in the tool, or a Later item, and to never suggest documentation as the fix.
 ```
 
 ### Gate 4 · the demo gate
@@ -292,7 +292,7 @@ Profile a snapshot of 5,000 root rows from a source with a 20M row child table. 
 #### PROMPT 5.4 · red team
 
 ```PROMPT 5.4 · red team
-Act as a security reviewer who wants to find a way for lazysnap to leak production data. Try: PII in column names we do not check, values that dodge every regex, PII inside array and JSON columns three levels deep, a masker that throws halfway, a target URL that is prod with a different hostname alias, secrets in the emitted YAML, snapshots written to a synced folder, and verbose logging. For each attempt, show the reproduction, whether it succeeded, and the fix. Update THREAT_MODEL.md with anything new. Do not fix anything until the whole list is written.
+Act as a security reviewer who wants to find a way for lazyslice to leak production data. Try: PII in column names we do not check, values that dodge every regex, PII inside array and JSON columns three levels deep, a masker that throws halfway, a target URL that is prod with a different hostname alias, secrets in the emitted YAML, snapshots written to a synced folder, and verbose logging. For each attempt, show the reproduction, whether it succeeded, and the fix. Update THREAT_MODEL.md with anything new. Do not fix anything until the whole list is written.
 ```
 
 ### Gate 5
@@ -324,7 +324,7 @@ Write a VHS tape file (charmbracelet/vhs) that records the first-run flow on the
 #### PROMPT 6.3 · launch posts
 
 ```PROMPT 6.3 · launch posts
-Draft launch posts in docs/launch/: a Show HN title and first comment under 200 words that leads with the problem and the Snaplet and Neosync shutdowns; a r/PostgreSQL post; a r/devops post; a r/webdev post; and a short blog post "What I learned reading Snaplet's and Neosync's issue trackers" drawing on research/POSTMORTEMS.md. Each post must be honest about v1 limits (Postgres only) and end with one specific question to readers. Also list ten awesome-lists and comparison pages where a PR adding lazysnap would be welcome, with links.
+Draft launch posts in docs/launch/: a Show HN title and first comment under 200 words that leads with the problem and the Snaplet and Neosync shutdowns; a r/PostgreSQL post; a r/devops post; a r/webdev post; and a short blog post "What I learned reading Snaplet's and Neosync's issue trackers" drawing on research/POSTMORTEMS.md. Each post must be honest about v1 limits (Postgres only) and end with one specific question to readers. Also list ten awesome-lists and comparison pages where a PR adding lazyslice would be welcome, with links.
 ```
 
 #### PROMPT 6.4 · release
@@ -356,7 +356,7 @@ Write docs/ADDING_A_DATABASE.md from the Postgres implementation: which of the s
 #### PROMPT 7.2 · CI mode
 
 ```PROMPT 7.2 · CI mode
-Build a GitHub Action, lazysnap-action, that runs a committed lazysnap.yml against a source in secrets and produces a target service container for the job's tests. Include caching of the snapshot keyed on the config hash and the source schema hash so unchanged schemas reuse the last snapshot. Write the example workflow into the docs and dogfood it on our own repo against a Pagila source.
+Build a GitHub Action, lazyslice-action, that runs a committed lazyslice.yml against a source in secrets and produces a target service container for the job's tests. Include caching of the snapshot keyed on the config hash and the source schema hash so unchanged schemas reuse the last snapshot. Write the example workflow into the docs and dogfood it on our own repo against a Pagila source.
 ```
 
 #### PROMPT 7.3 · weekly triage
@@ -373,6 +373,8 @@ Run the weekly triage. Read all issues and PRs opened or updated in the last sev
 
 ## Phase 8: Client-facing product
 
+> Deferred indefinitely by docs/adr/007-tool-not-company.md. Kept for the record. Only the design-partner interviews may run, as user research.
+
 **Months 6 to 12** | Output: five design partners, a hosted tier, first invoice
 
 The hosted product sells what a CLI cannot: shared team snapshots, schedules, access control, and a compliance record that proves what was masked. Do not build any of it until five real teams have told you which of those they would pay for.
@@ -382,7 +384,7 @@ The hosted product sells what a CLI cannot: shared team snapshots, schedules, ac
 #### PROMPT 8.1 · design partners
 
 ```PROMPT 8.1 · design partners
-Write docs/business/DESIGN_PARTNERS.md: a 30-minute interview script for engineering leads at 5 to 50 person companies using lazysnap. Questions must uncover: how they get dev data today, who is responsible when PII leaks, whether they need snapshots shared across a team, how often schemas change, what they pay for adjacent tools, and what would make them pay for a hosted version. Include a scoring rubric and a target of five interviews. Then draft the outreach message for the GitHub users who opened the most detailed issues.
+Write docs/business/DESIGN_PARTNERS.md: a 30-minute interview script for engineering leads at 5 to 50 person companies using lazyslice. Questions must uncover: how they get dev data today, who is responsible when PII leaks, whether they need snapshots shared across a team, how often schemas change, what they pay for adjacent tools, and what would make them pay for a hosted version. Include a scoring rubric and a target of five interviews. Then draft the outreach message for the GitHub users who opened the most detailed issues.
 ```
 
 #### PROMPT 8.2 · open-core boundary
@@ -394,7 +396,7 @@ Write docs/adr/010-open-core-boundary.md. List every capability we have or plan,
 #### PROMPT 8.3 · hosted architecture
 
 ```PROMPT 8.3 · hosted architecture
-Design the hosted service in docs/business/HOSTED_ARCHITECTURE.md for the first 50 paying teams, optimising for one person operating it. Components: auth via GitHub and Google, a runner that executes lazysnap.yml against customer sources on a schedule from a fixed egress IP they can allow-list, encrypted snapshot storage in S3-compatible object storage with per-team keys, a small web app for browsing snapshots and masking reports, and Stripe billing with flat per-team pricing. State the data we hold, the data we never hold, and the deletion guarantee. Choose boring technology and justify each choice in one line.
+Design the hosted service in docs/business/HOSTED_ARCHITECTURE.md for the first 50 paying teams, optimising for one person operating it. Components: auth via GitHub and Google, a runner that executes lazyslice.yml against customer sources on a schedule from a fixed egress IP they can allow-list, encrypted snapshot storage in S3-compatible object storage with per-team keys, a small web app for browsing snapshots and masking reports, and Stripe billing with flat per-team pricing. State the data we hold, the data we never hold, and the deletion guarantee. Choose boring technology and justify each choice in one line.
 ```
 
 #### PROMPT 8.4 · pricing and paperwork
@@ -431,7 +433,7 @@ These are the definition of correct. A pull request that breaks one is wrong, wh
 The core of CLAUDE.md. Prompt 3.2 expands it.
 
 ```CLAUDE.md · core block
-# lazysnap rules
+# lazyslice rules
 
 Read ROADMAP.md first. Work only on the current phase. Anything else goes to Later with one line of reasoning; do not build it.
 

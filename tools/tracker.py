@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""lazysnap tracker: epics, tasks, post-mortems as markdown with YAML-ish frontmatter.
+"""lazyslice tracker: epics, tasks, post-mortems as markdown with YAML-ish frontmatter.
 
 Usage:
   tools/tracker.py epic new  --id E1 --title "..." [--phase N]

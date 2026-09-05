@@ -6,8 +6,10 @@
 that matter more than domains. A Go TUI called `lazysnap` — same language, same family,
 explicitly "inspired by lazygit and lazydocker" — was published to the Go module proxy ten
 weeks ago and owns the `go install` path. The word "snap" already means *packaging* and
-*backup* to the exact user CONCEPT.md describes. And "snapshot" means the whole database at
-a point in time, which is the opposite of this product's central claim. `lazysubset` has
+*backup* to the exact user CONCEPT.md describes. And in the one category that matters most —
+database subsetting — "snapshot" is already DBSnapper's and (formerly) Snaplet's word for
+precisely this kind of small, referentially-complete copy, so shipping under it means competing
+for someone else's vocabulary rather than describing something impossible. `lazysubset` has
 zero collisions in any namespace checked, is the category's own search term, and has
 `.dev`, `.sh`, `.io` **and** `.com` free.
 
@@ -86,27 +88,38 @@ It has 0 stars, so nothing is famous here; the problem is not fame, it is that a
 announcement of "lazysnap, a lazy-family TUI in Go" now needs a disambiguating sentence,
 forever. That is a tax on every README, every HN post, every conference slide.
 
-The other thirteen repos are less serious but shape the search results:
+All 14 matches from `gh api "/search/repositories?q=lazysnap+in:name"` (checked 2026-09-05):
 
-- [`AlthafPattan/lazysnap`](https://github.com/AlthafPattan/lazysnap) (TypeScript, pushed
+- [`jpdarago/lazysnap`](https://github.com/jpdarago/lazysnap) (Go, 0★) — the collision above.
+- [`AlthafPattan/lazysnap`](https://github.com/AlthafPattan/lazysnap) (TypeScript, 0★, pushed
   2026-04-09) — the npm package above.
-- [`jwdev42/lazysnapshotter`](https://github.com/jwdev42/lazysnapshotter) — a btrfs backup
-  frontend.
-- [`hugolevacher/lazySnapchat`](https://github.com/hugolevacher/lazySnapchat) — unrelated.
-- **Eight implementations of the "Lazy Snapping" computer-vision algorithm**:
-  [`zjxeditor/LazySnapping`](https://github.com/zjxeditor/LazySnapping) (10★),
-  [`wuyongxiang/LazySnapping-Android`](https://github.com/wuyongxiang/LazySnapping-Android) (5★),
-  [`vyerneni/LazySnapping`](https://github.com/vyerneni/LazySnapping) (3★),
-  `liaoxl/LazySnappingWithGMM`, `matinJ/lazysnapping`, `namthse03439/LazySnapping`,
-  `MaxtirError/LazySnaping`, `StefanoFochesatto/LazySnappingGraphFlow`.
+- [`jwdev42/lazysnapshotter`](https://github.com/jwdev42/lazysnapshotter) (Python, 1★) — a
+  btrfs backup frontend.
+- [`hugolevacher/lazySnapchat`](https://github.com/hugolevacher/lazySnapchat) (Kotlin, 0★) —
+  unrelated.
+- **Ten implementations of, or student exercises around, the "Lazy Snapping" computer-vision
+  algorithm**:
+  [`zjxeditor/LazySnapping`](https://github.com/zjxeditor/LazySnapping) (C++, 10★),
+  [`wuyongxiang/LazySnapping-Android`](https://github.com/wuyongxiang/LazySnapping-Android)
+  (C++, 5★),
+  [`vyerneni/LazySnapping`](https://github.com/vyerneni/LazySnapping) (Makefile, 3★),
+  [`liaoxl/LazySnappingWithGMM`](https://github.com/liaoxl/LazySnappingWithGMM) (C++, 2★),
+  [`matinJ/lazysnapping`](https://github.com/matinJ/lazysnapping) (C++, 1★),
+  [`namthse03439/LazySnapping`](https://github.com/namthse03439/LazySnapping) (0★),
+  [`MaxtirError/LazySnaping`](https://github.com/MaxtirError/LazySnaping) (C++, 0★),
+  [`StefanoFochesatto/LazySnappingGraphFlow`](https://github.com/StefanoFochesatto/LazySnappingGraphFlow)
+  (Python, 0★),
+  [`namthse03439/LazySnappingExperiment`](https://github.com/namthse03439/LazySnappingExperiment)
+  (0★),
+  [`vyerneni/LazySnapping-Zip-file`](https://github.com/vyerneni/LazySnapping-Zip-file) (0★).
 
 That last group exists because **Lazy Snapping is a well-known SIGGRAPH 2004 paper** — an
 interactive image cutout method by Li, Sun, Tang and Shum
 ([ACM DL](https://dl.acm.org/doi/10.1145/1015706.1015719),
-[paper PDF](https://home.cse.ust.hk/~cktang/sample_pub/lazy_snapping.pdf),
-[Microsoft Research](https://www.microsoft.com/en-us/research/publication/lazy-snapping/)).
-Roughly half the name's existing search surface is image segmentation and will stay that way;
-a twenty-two-year-old citation graph is not something a new project out-ranks.
+[paper PDF](https://home.cse.ust.hk/~cktang/sample_pub/lazy_snapping.pdf); see §6 for why the
+Microsoft Research citation was dropped). Ten of the fourteen matches — most of the name's
+existing search surface — are image segmentation and will stay that way; a twenty-two-year-old
+citation graph is not something a new project out-ranks.
 
 ---
 
@@ -116,7 +129,7 @@ The collisions alone would be survivable. The semantics are the real objection, 
 
 ### "snap" already means package manager to a terminal user
 
-Canonical's [snapd/snap](https://github.com/canonical/snapd) (2,046★) is the Linux packaging
+Canonical's [snapd/snap](https://github.com/canonical/snapd) (~2.0k★) is the Linux packaging
 format whose primary verb is literally `snap install`; [Snapcraft](https://snapcraft.io/) is
 its store. Homebrew itself ships formulae named [`snap`](https://formulae.brew.sh/formula/snap)
 and [`snapcraft`](https://formulae.brew.sh/formula/snapcraft). A tool distributed as
@@ -143,21 +156,39 @@ Homebrew also carries [`tarsnap`](https://formulae.brew.sh/formula/tarsnap),
   one reading: that we are DBSnapper's unofficial TUI. (Their own GitHub repo,
   [`dbsnapper/dbsnapper`](https://github.com/dbsnapper/dbsnapper), is only 9★ and is the docs
   site; the product, not the repo, is the brand we would be shadowing.)
-- **Snaplet** ran "Snapshot" — "captures, transforms, and restores database snapshots with
-  advanced subsetting" — then shut down in August 2024; Supabase took over the code on
-  2024-08-14 under MIT ([Supabase: Snaplet is now open source](https://supabase.com/blog/snaplet-is-now-open-source),
+- **Snaplet** ran "Snapshot" — described on its own site as "for capturing, transforming, and
+  restoring snapshots of your database. It's like an advanced version of pg_dump/pg_restore" —
+  with a subsetting feature described separately: "To maintain referential integrity,
+  subsetting traverses tables, selecting all the rows that are connected to the target table
+  through foreign key relationships." ([Supabase: Snaplet is now open
+  source](https://supabase.com/blog/snaplet-is-now-open-source), quoted verbatim; Snaplet shut
+  down and Supabase took over the code on 2024-08-14 under MIT,
   [supabase-community/seed](https://github.com/supabase-community/seed), 790★). HN carries the
   whole arc, from ["Show HN: Snaplet Seed"](https://hn.algolia.com/?query=snaplet) to "Snaplet
   Is Shutting Down". "Snap" in database anonymisation now trails a dead product behind it.
 
-### And "snap" describes the wrong thing
+### "snap" is not semantically wrong — it is already someone else's vocabulary for this exact thing
 
-CONCEPT.md promises "a **small**, referentially complete, anonymised copy", and its non-goals
-rule out whole-database work. A snapshot is, by definition, *the whole thing at a point in
-time*. The product's entire differentiator is that it is not the whole thing. The name argues
-against the pitch on first contact — precisely the failure CLAUDE.md's rule
-"documentation is never the fix for a confusing first run" tells us to fix at the source
-rather than explain away.
+An earlier draft of this argument claimed "a snapshot is, by definition, the whole thing at a
+point in time" and that `lazysnap` therefore contradicts its own pitch. That claim does not
+survive its own citations. DBSnapper's v2 post, quoted two paragraphs up, says teams "work with
+smaller, relationally complete, snapshots of their production databases" — a snapshot that is
+explicitly *not* the whole database. Snaplet's Snapshot did the same: subsetting by
+foreign-key traversal, under the name "Snapshot". And this repository's own `CLAUDE.md` opens
+with "**Snapshot** a production SQL database into a safe local copy: subset by a root table,
+follow foreign keys, mask personal data, load" — using "snapshot" for exactly the small,
+referentially-complete copy CONCEPT.md describes, with "subset" naming the mechanism inside it.
+Three independent sources, including our own project description, use "snapshot" this way. The
+word is not semantically incoherent for this product.
+
+The real objection is narrower and survives: **two live competitors already own "snapshot" as
+their word for this operation.** DBSnapper's headline feature *is* "Database Subsetting"
+delivered as a "snapshot"; Snaplet's product *was* literally named "Snapshot". Naming this tool
+`lazysnap` does not commit a category error — it walks into a vocabulary two other companies
+got to first, in a market small enough that there is no room to be the third "snap"-branded
+subsetting tool. That is a positioning problem, not a definitional one, and it is a reason to
+prefer a name that does not compete for the same word — see §4 reason 4 for whether the
+replacement actually escapes it.
 
 ### To be clear: the "lazy" prefix is fine — keep it
 
@@ -189,7 +220,7 @@ relevant recognition here. Keep the prefix. Change the stem.
 Constraints applied: keeps the "lazy" family, pronounceable, short to type, and at least one
 of `.dev` / `.sh` / `.io` free. All five clear the domain bar with all three free.
 
-| Name | Chars | npm | PyPI | crates | brew | GH acct | GH repos | Go proxy | .dev | .sh | .io | .com |
+| Name | Chars | npm | PyPI | crates | brew (formula+cask) | GH acct | GH repos | Go proxy | .dev | .sh | .io | .com |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | **lazysubset** | 10 | free | free | free | free | free | **0** | free | free | free | free | **free** |
 | **lazyslice** | 9 | free | **taken** | free | free | **taken** | 2 | free | free | free | free | taken |
@@ -197,6 +228,9 @@ of `.dev` / `.sh` / `.io` free. All five clear the domain bar with all three fre
 | **lazyfixture** | 11 | free | free | free | free | free | **0** | free | free | free | free | **free** |
 | **lazyscoop** | 9 | free | free | free | free | free | **0** | free | free | free | free | **free** |
 | *lazysnap (for comparison)* | 8 | **taken** | free | free | free | **taken** | **14** | **taken** | free | free | free | **taken** |
+
+Homebrew cask (`formulae.brew.sh/api/cask/<name>.json`) was checked for all six names, not
+formula only: all six return 404 (free) in the cask namespace, confirmed 2026-09-05.
 
 ### lazysubset — *the recommendation*
 
@@ -224,16 +258,35 @@ calls the operation subsetting:
 - [Neosync](https://github.com/nucleuscloud/neosync) (4,141★) — anonymise and sync production
   data across environments.
 
-Hacker News carries **21 stories** matching "database subsetting", led by
-["Jailer: A tool for database subsetting"](https://hn.algolia.com/?query=database%20subsetting&type=story)
-at 128 points and ["Show HN: Condenser – A database subsetting project"](https://github.com/TonicAI/condenser)
-at 26. For a project with no marketing budget, whose acquisition channel is somebody typing
-the problem into a search box, matching the term of art is worth more than being evocative.
+Hacker News carries **18 stories** matching the exact phrase "database subsetting"
+([reproducible via the Algolia API](https://hn.algolia.com/api/v1/search?query=%22database%20subsetting%22&tags=story)),
+led by ["Jailer: A tool for database subsetting, schema and data
+browsing"](https://news.ycombinator.com/item?id=29939890) at 128 points and
+["Show HN: Condenser – A database subsetting project"](https://news.ycombinator.com/item?id=17727413)
+at 26 (repo: [TonicAI/condenser](https://github.com/TonicAI/condenser)). The non-phrase
+`tags=story` search behind the clickable
+[hn.algolia.com link](https://hn.algolia.com/?query=database%20subsetting&type=story) reports a
+raw `nbHits` of 44 — the gap is typo-tolerant and word-split matches, per §0's method note, so
+18 is the trustworthy figure. For a project with no marketing budget, whose acquisition channel
+is somebody typing the problem into a search box, matching the term of art is worth more than
+being evocative.
+
+Phrase-level check, applied the same way as §2 applies it to `lazyslice` and `lazyscoop`:
+`gh api "/search/repositories?q=%22lazy+subset%22"` returns 3 unrelated, low-traffic repos (a
+JavaScript-subset teaching project, an R function, an automata-theory exercise — listed in full
+in §6) — none is a live tool and none has meaningful stars or recent activity, so "lazy subset"
+carries no competing meaning in the way "lazy slice" and "Scoop" do. `lazycarve` was checked the
+same way (`"lazy carve"` and `"lazy-carve"`): zero repos, zero meaning collision, at the cost of
+the discoverability problem noted in its own entry below.
 
 Costs, honestly: ten characters, and "subset" reads a little drier than the family's playful
-register. Ten characters is not disqualifying — `lazydocker` is also ten and is the second
-most-starred tool in the family. The dryness is real but it buys literal accuracy: the tool
-subsets, and says so.
+register. The brief asked for "short to type" without a numeric bar, so the standard applied
+here is relative to the family it joins: `lazygit` (7) and `lazysql` (7) are shorter,
+`lazydocker` (10) and `lazyjournal` (11) are not, and no candidate in this document was rejected
+for length alone — `lazyfixture` (11, below) is kept in the shortlist despite being the longest.
+`lazysubset` sits exactly at `lazydocker`'s length, two characters longer than the `lazysnap`
+incumbent, and is not shorter than it — a real cost the analogy to `lazydocker` softens but does
+not erase. The dryness is real but it buys literal accuracy: the tool subsets, and says so.
 
 One further caveat: a descriptive name is a weak trademark. If a hosted service is ever
 planned, `lazysubset` would be hard to register. CONCEPT.md lists "a web UI or a hosted
@@ -255,24 +308,25 @@ listing.
 Its collisions are all genuinely low-cost, and worth stating precisely so the trade is visible:
 
 - [PyPI `lazyslice` 0.3.0](https://pypi.org/project/lazyslice/) — "Lazy slicing and transpose
-  operations for h5py and zarr". Irrelevant channel: CONCEPT.md ships "one static binary,
-  one-line install", so we never ask anyone to `pip install`.
+  operations for h5py and zarr". Its own PyPI metadata names
+  [catalystneuro/lazyslice](https://github.com/catalystneuro/lazyslice) (3★) as its homepage
+  and repository — **this is the same project counted once, not two independent collisions.**
+  Irrelevant channel regardless: CONCEPT.md ships "one static binary, one-line install", so we
+  never ask anyone to `pip install`.
 - [github.com/lazyslice](https://github.com/lazyslice) — Organization, created 2020-08-12,
-  one Haskell repo last pushed 2020-08-31. It holds the org name but publishes no Go module
-  (`proxy.golang.org/github.com/lazyslice/lazyslice/@v/list` returns 200 with an **empty**
-  body — repo present, zero versions), so `go install` is unaffected. Not owning the org costs
-  little: `lazygit` lives at `jesseduffield/lazygit` and `lazysql` at `jorgerojas26/lazysql`.
-  The family has never required a matching org.
-- [catalystneuro/lazyslice](https://github.com/catalystneuro/lazyslice) — 3★, the same
-  h5py/zarr project. Negligible.
+  one Haskell repo last pushed 2020-08-31 (unrelated to the PyPI package above). It holds the
+  org name but publishes no Go module (`proxy.golang.org/github.com/lazyslice/lazyslice/@v/list`
+  returns 200 with an **empty** body — repo present, zero versions), so `go install` is
+  unaffected. Not owning the org costs little: `lazygit` lives at `jesseduffield/lazygit` and
+  `lazysql` at `jorgerojas26/lazysql`. The family has never required a matching org.
 - `lazyslice.com` registered; `.dev`, `.sh`, `.io` free.
 
 The objection that decides it against `lazysubset`: **"lazy" + "slice" already means lazy
-evaluation of a sequence**, and that is not hypothetical — the dormant `lazyslice/lazyslice`
-org repo is *Haskell*, and both PyPI packages are lazy-evaluation libraries. If this tool ships
-as a Go binary (the family convention, and what "one static binary" implies), `lazyslice` reads
-to a Go developer as a lazy-slice library before it reads as a database tool. That is a
-quieter version of the same mistake `lazysnap` makes.
+evaluation of a sequence**, and that is not hypothetical — the dormant `lazyslice` org repo is
+*Haskell* lazy-evaluation code, and the PyPI package (same project as `catalystneuro/lazyslice`)
+is Python lazy-slicing code. If this tool ships as a Go binary (the family convention, and what
+"one static binary" implies), `lazyslice` reads to a Go developer as a lazy-slice library before
+it reads as a database tool. That is a quieter version of the same mistake `lazysnap` makes.
 
 ### lazycarve
 
@@ -295,10 +349,26 @@ $ lazyfixture
 Clean everywhere including `.com`, and it names the **user's outcome** in the user's own
 vocabulary — a backend developer calls the data in their local database "fixtures".
 
-Two costs. Eleven characters is the longest of the five. And in most frameworks a "fixture"
+Three costs. Eleven characters is the longest of the five. In most frameworks a "fixture"
 means hand-authored static data — which is precisely the thing CONCEPT.md says these
 developers are stuck maintaining ("hand-written seed data that drifted from reality months
 ago"). The name risks describing the problem rather than the fix.
+
+And the exact-string registry check the table above runs is not sufficient here — applying the
+same phrase-level test §2 applies to `lazyslice` (lazy evaluation) and `lazyscoop` (Scoop the
+installer): **"lazy fixture" is established pytest vocabulary.** Both
+[`pytest-lazy-fixture`](https://pypi.org/project/pytest-lazy-fixture/) (0.6.3) and its
+maintained successor [`pytest-lazy-fixtures`](https://pypi.org/project/pytest-lazy-fixtures/)
+(1.4.1) are real, and `gh api "/search/repositories?q=lazy-fixture+in:name"` returns 13
+repositories built around the term. `lazyfixture` is clean in every registry checked, but to a
+Python developer — a large fraction of the audience CONCEPT.md targets — "lazy fixture" already
+means "a pytest fixture evaluated on first use," not "a small copy of a database." That
+collision does not show up in any of the exact-string checks in the table above, and it is the
+same category of problem as `lazyslice` and `lazyscoop`, just in a phrase this document had not
+previously flagged. It does not change lazyfixture's standing relative to the other four
+rejected alternatives — it was already a distant fourth on the "fixture = hand-authored data"
+objection alone — but it removes any temptation to read its clean registry row as a clean bill
+of health.
 
 ### lazyscoop
 
@@ -310,7 +380,7 @@ Clean everywhere including `.com`, nine characters, and it carries the family's 
 register — scoop a cupful out of prod.
 
 But it repeats `lazysnap`'s structural error. [Scoop](https://github.com/ScoopInstaller/Scoop)
-(24,628★, [scoop.sh](https://scoop.sh)) is "a command-line installer for Windows" — a package
+(~24.6k★, [scoop.sh](https://scoop.sh)) is "a command-line installer for Windows" — a package
 manager. A CLI tool named `lazyscoop`, distributed through package managers, reads as a TUI
 for Scoop exactly as `lazysnap` reads as a TUI for snap. "Scoop" also says nothing about
 referential completeness or masking; it describes a careless gesture, and this tool's whole
@@ -320,7 +390,7 @@ claim is care.
 
 | Name | Why not |
 |---|---|
-| `lazyclone` | npm and PyPI both taken, GitHub account taken, **134** repo matches; and "clone" means a full copy |
+| `lazyclone` | npm and PyPI both taken, GitHub account taken, **137** repo matches; and "clone" means a full copy |
 | `lazyprune` | [crates.io `lazyprune`](https://crates.io/api/v1/crates/lazyprune) exists with 12 published versions (updated 2026-05-15) |
 | `lazyseed` | [github.com/lazyseed](https://github.com/lazyseed) org taken; worse, "seed" now means *generated* data here — [supabase-community/seed](https://github.com/supabase-community/seed) is a schema-driven generator, and "synthetic data generation from a schema alone" is an explicit CONCEPT.md non-goal |
 | `lazysample` | "sampling" implies taking rows independently, which breaks referential integrity — the one thing this tool guarantees |
@@ -336,26 +406,66 @@ claim is care.
 **Rename to `lazysubset`. Take `lazysubset.dev` as the canonical home; `.sh`, `.io` and `.com`
 are also free if a hedge is wanted. Nothing has been bought.**
 
-The reasoning, in the order it matters:
+The reasoning, in the order it matters — re-ranked so it rests on the arguments that survive
+scrutiny (see the retraction in §2 of the earlier "snap is semantically wrong" claim):
 
-1. **It fixes the semantic error.** `snap` promises a copy of the whole database; the product
-   delivers a small part of one. A name that contradicts the pitch costs an explanation in
-   every README, every talk, and every first run — and CLAUDE.md says to fix that at the
-   source, not in documentation.
-2. **It is the only genuinely empty namespace.** `lazysnap` collides with a live Go TUI in
-   the same family that owns the `go install` path, a published npm package, a taken GitHub
-   account, a registered `.com`, and eight repos named after a 2004 SIGGRAPH algorithm.
-   `lazysubset` collides with nothing, anywhere, in any of the eleven channels checked.
-   Renaming to something *partly* occupied would repeat a softer version of the mistake we
-   are correcting.
-3. **It matches how people search for this problem.** "Database subsetting" is what Jailer,
-   Condenser, Tonic and DBSnapper all call it, with 21 HN stories behind the phrase. A
-   zero-budget CLI tool is found by keyword or not at all.
-4. **It avoids a live competitor's brand.** [DBSnapper](https://dbsnapper.com/) sells
-   snapshot + subset + de-identify for Postgres today, at $300–500/month, describing its
-   output in almost exactly CONCEPT.md's words. `lazysnap` reads as its TUI wrapper.
+1. **The Go TUI collision is real and immediate.** `jpdarago/lazysnap` is live in the Go
+   module proxy at v0.2.0, published ten weeks before this document, in the same language and
+   the same "inspired by lazygit and lazydocker" lineage. It owns `go install
+   github.com/jpdarago/lazysnap@latest` today. This is not a semantic argument; it is a name
+   already taken by a sibling project, with no ambiguity about who published first.
+2. **It is the only genuinely empty namespace.** `lazysnap` also collides with a published npm
+   package, a taken GitHub account, a registered `.com`, and fourteen GitHub repos, ten of them
+   image-segmentation implementations of a 2004 algorithm (§1). `lazysubset` collides with
+   nothing, anywhere, in any of the eleven channels checked, including the phrase-level check
+   in §3 (`"lazy subset" in:name` finds three unrelated, low-traffic repos — none claiming the
+   phrase). Renaming to something *partly* occupied would repeat a softer version of the
+   mistake we are correcting.
+3. **It escapes the DBSnapper/Snaplet brand adjacency, not a definitional error.** As §2's
+   revised argument concludes: "snapshot" is not semantically wrong for this product — DBSnapper,
+   Snaplet, and this repo's own `CLAUDE.md` all use it for a small, referentially-complete copy.
+   The problem is narrower: DBSnapper is a live, priced competitor whose headline feature is
+   "Database Subsetting" delivered as a "snapshot", and its site carries a footer link literally
+   labelled "Advanced Subsetting" — so `lazysnap` reads as its unofficial TUI wrapper on contact.
+   Whether `lazysubset` actually escapes that adjacency, rather than walking closer to it, is
+   addressed honestly below rather than assumed.
+4. **It matches how people search for this problem.** "Database subsetting" is the phrase
+   Jailer, Condenser, Tonic and DBSnapper all use. Measured 2026-09-05 via the Algolia API,
+   the exact phrase `"database subsetting"` matches **18** HN stories
+   ([reproducible query](https://hn.algolia.com/api/v1/search?query=%22database%20subsetting%22&tags=story)),
+   led by ["Jailer: A tool for database subsetting, schema and data
+   browsing"](https://news.ycombinator.com/item?id=29939890) at 128 points. The raw, non-phrase
+   `tags=story` query behind the clickable
+   [hn.algolia.com link](https://hn.algolia.com/?query=database%20subsetting&type=story) reports
+   44 — inflated by typo-tolerant and word-split matches the same way the `lazysnap` 459-vs-0
+   gap was in §0, so 18 is the number to trust. For a zero-budget CLI tool, matching the term of
+   art is worth more than being evocative.
 5. **It types acceptably.** Ten characters, three syllables, no ambiguous letters, and the
-   same length as `lazydocker`.
+   same length as `lazydocker` — see the honest accounting of the length trade-off below.
+
+### Does `lazysubset` actually escape the DBSnapper adjacency?
+
+Not cleanly, and this is the strongest objection to the recommendation, not a footnote.
+DBSnapper's own site carries a footer navigation link labelled **"Advanced Subsetting"** and its
+[v2 release post](https://dbsnapper.com/blog/introducing-dbsnapper-v2) is headlined "Database
+Subsetting" — the identical two words this document proposes putting in the new name. Where
+`lazysnap` shares one word ("snap") with a DBSnapper feature, `lazysubset` shares the entire
+core noun phrase with DBSnapper's flagship capability and its own marketing headline. By the
+document's own adjacency logic, `lazysubset` is arguably a *closer* echo of DBSnapper's
+positioning than `lazysnap` ever was.
+
+Two things keep the recommendation standing anyway, not disprove the objection. First, "database
+subsetting" is not DBSnapper's coinage — Jailer used it in a 2012-era HN post
+([item 16086381](https://news.ycombinator.com/item?id=16086381)) years before DBSnapper existed,
+and Tonic and Condenser use it independently; it is category vocabulary, not one company's
+brand, in the way "snap" plausibly reads as DBSnapper's own verb ("snapshot ... boost developer
+productivity"). Second, a generic term-of-art is legally and reputationally safer to share than
+a company's product name is: no one owns "database subsetting" the way DBSnapper effectively
+owns "database snapshotting + de-identification" as a phrase on its own homepage. But this is a
+judgment call, not a clean win, and a reader who weighs brand distance over search visibility
+should treat this as the deciding argument against `lazysubset` — pointing instead toward
+`lazycarve`, the one candidate that names the mechanism without borrowing the category's own
+search phrase.
 
 **If brandability is weighted above discoverability and namespace cleanliness, take
 `lazyslice` instead.** It is the more memorable name, one character shorter, already the
@@ -412,14 +522,54 @@ Someone with interactive browser access should search the shortlist at
 [tmsearch.uspto.gov](https://tmsearch.uspto.gov/) in classes **9** (software) and **42**
 (SaaS / software services) before the name is final.
 
-Three secondary gaps:
+**Concrete next action, with an owner:** the `tsdrapi.uspto.gov` failure above returned a
+notice that a free ODP (Open Data Portal) API key would be required from October 2 — and
+[account.uspto.gov/api-manager](https://account.uspto.gov/api-manager/) (200, reachable from
+this environment) is the documented self-service route to register one. Whoever owns this
+decision should register a key there and re-run the trademark search against `api.uspto.gov`
+before the name is finalized; that is a same-day task, not a blocker requiring new tooling.
+**Until that search runs, the recommendation in this document is provisional on trademark
+clearance** — `lazysubset` is the best-supported name among the six checked on every axis this
+document *can* check, but "best-supported pending clearance" is not the same claim as
+"cleared," and the two should not be conflated when this document is acted on.
+
+Also unverified: the two primary citations for the Lazy Snapping paper (§1) that were dropped
+from the source list. `https://www.microsoft.com/en-us/research/publication/lazy-snapping/`
+returns HTTP 200 but serves a 4.4 KB generic Microsoft Research shell page marked
+`noindex,nofollow` — not the publication record — so it was removed rather than cited as if it
+supported the claim. `https://dl.acm.org/doi/10.1145/1015706.1015719` returns 403 to any
+non-browser client and could not be fetched here either; it is left in as the canonical DOI but
+should be treated as paywalled/bot-blocked, not confirmed. The claim itself is not in doubt:
+[the HKUST-hosted PDF](https://home.cse.ust.hk/~cktang/sample_pub/lazy_snapping.pdf) is a
+genuine 6-page paper carrying the ACM copyright notice, and it is the source actually verified.
+
+Five secondary gaps:
 
 - **Non-US and common-law marks** (EUIPO/TMview, UKIPO, CIPO) were not checked; TMview was
   unreachable.
 - **Company and business-name registers** were not checked for any candidate.
 - **Domain availability is not the same as purchasability.** A `.dev`/`.io`/`.sh` name absent
-  from RDAP and WHOIS can still be premium-priced or on a registry reserved list. That was not
-  checked, and no domain was bought.
+  from RDAP and WHOIS can still be premium-priced or on a registry reserved list. `lazysubset.dev`
+  itself was checked no further than RDAP (404 = unregistered, confirmed 2026-09-05) — no
+  registrar quote was pulled from this environment, so its actual list price and whether it sits
+  on a premium/reserved tier are still open. No domain was bought.
+- **"Go module proxies" was checked in the singular.** Only `proxy.golang.org` (the default
+  `GOPROXY`) was queried for each candidate. Alternative proxies and mirrors (e.g. a private
+  Athens instance, `goproxy.io`, `goproxy.cn`) were not, though none of them would show a module
+  `proxy.golang.org` does not also know about for a public GitHub-hosted module.
+- **The Homebrew cask namespace was checked for `lazysnap` but not, in the original pass, for
+  the five alternatives.** That gap has since been closed: `formulae.brew.sh/api/cask/<name>.json`
+  returns 404 (free) for all six of `lazysnap`, `lazysubset`, `lazyslice`, `lazycarve`,
+  `lazyfixture` and `lazyscoop`, checked 2026-09-05. The §3 table's "brew" column now reflects
+  formula **and** cask.
+- **The "lazy subset" phrase was checked for meaning collisions, not just the exact string
+  `lazysubset`.** `gh api "/search/repositories?q=%22lazy+subset%22"` returns 3 repos —
+  [`joshmoody24/skoobert`](https://github.com/joshmoody24/skoobert) ("a lazy subset of
+  JavaScript"), [`creggian/lazy.subset`](https://github.com/creggian/lazy.subset) (an R
+  function), and an NFA-to-DFA exercise using "lazy subset construction" as a term of art in
+  automata theory. None is a live tool, none is database-adjacent, and none has meaningful
+  traffic — so the phrase carries no pre-existing meaning that would confuse this project's
+  audience, unlike `lazyslice` (lazy evaluation) or `lazyscoop` (Scoop the installer).
 
 Finally, `.io` and `.sh` have no entry in the [IANA RDAP bootstrap](https://data.iana.org/rdap/dns.json),
 so those results rest on WHOIS alone. WHOIS controls passed (`fly.io`, `esm.sh` both return
@@ -433,70 +583,19 @@ full records), so the channel is sound, but it is a single source rather than tw
 curl -s https://registry.npmjs.org/<name>                       # 404 = free
 curl -s https://pypi.org/pypi/<name>/json                       # 404 = free
 curl -s -H "User-Agent: <contact>" https://crates.io/api/v1/crates/<name>
-curl -s https://formulae.brew.sh/api/formula/<name>.json        # and /cask/
+curl -s https://formulae.brew.sh/api/formula/<name>.json        # formula: 404 = free
+curl -s https://formulae.brew.sh/api/cask/<name>.json           # cask: 404 = free
 gh api /users/<name>                                            # 404 = free
 gh api "/search/repositories?q=<name>+in:name" --jq '.total_count'
+gh api "/search/repositories?q=%22<phrase>%22" --jq '.total_count'  # phrase-level meaning check
 curl -s https://proxy.golang.org/<module>/@v/list               # 404 = no module
 curl -s https://pubapi.registry.google/rdap/domain/<name>.dev   # 404 = free (NOT rdap.org)
 whois -h whois.nic.io <name>.io                                 # "Domain not found." = free
 whois -h whois.nic.sh <name>.sh
 curl -sL https://rdap.org/domain/<name>.com                     # 404 = free
+curl -s "https://hn.algolia.com/api/v1/search?query=%22<phrase>%22&tags=story"  # exact-phrase story count
 ```
 
-Cited sources:
-[registry.npmjs.org/lazysnap](https://registry.npmjs.org/lazysnap) ·
-[jpdarago/lazysnap](https://github.com/jpdarago/lazysnap) ·
-[its Go proxy versions](https://proxy.golang.org/github.com/jpdarago/lazysnap/@v/list) ·
-[its README](https://raw.githubusercontent.com/jpdarago/lazysnap/main/README.md) ·
-[AlthafPattan/lazysnap](https://github.com/AlthafPattan/lazysnap) ·
-[github.com/LazySnap](https://github.com/LazySnap) ·
-[RDAP lazysnap.com](https://rdap.org/domain/lazysnap.com) ·
-[jwdev42/lazysnapshotter](https://github.com/jwdev42/lazysnapshotter) ·
-[Lazy snapping (ACM DL)](https://dl.acm.org/doi/10.1145/1015706.1015719) ·
-[Lazy Snapping PDF](https://home.cse.ust.hk/~cktang/sample_pub/lazy_snapping.pdf) ·
-[Lazy Snapping (Microsoft Research)](https://www.microsoft.com/en-us/research/publication/lazy-snapping/) ·
-[zjxeditor/LazySnapping](https://github.com/zjxeditor/LazySnapping) ·
-[vyerneni/LazySnapping](https://github.com/vyerneni/LazySnapping) ·
-[canonical/snapd](https://github.com/canonical/snapd) ·
-[Snapcraft](https://snapcraft.io/) ·
-[brew: snap](https://formulae.brew.sh/formula/snap) ·
-[brew: snapcraft](https://formulae.brew.sh/formula/snapcraft) ·
-[brew: tarsnap](https://formulae.brew.sh/formula/tarsnap) ·
-[brew: rsnapshot](https://formulae.brew.sh/formula/rsnapshot) ·
-[brew: snapraid](https://formulae.brew.sh/formula/snapraid) ·
-[tarsnap.com](https://www.tarsnap.com/) ·
-[DBSnapper](https://dbsnapper.com/) ·
-[DBSnapper v2 subsetting](https://dbsnapper.com/blog/introducing-dbsnapper-v2) ·
-[dbsnapper/dbsnapper](https://github.com/dbsnapper/dbsnapper) ·
-[Snaplet is now open source (Supabase)](https://supabase.com/blog/snaplet-is-now-open-source) ·
-[supabase-community/seed](https://github.com/supabase-community/seed) ·
-[lazygit](https://github.com/jesseduffield/lazygit) ·
-[lazydocker](https://github.com/jesseduffield/lazydocker) ·
-[lazynpm](https://github.com/jesseduffield/lazynpm) ·
-[Lazygit Turns 5](https://jesseduffield.com/Lazygit-5-Years-On/) ·
-[jorgerojas26/lazysql](https://github.com/jorgerojas26/lazysql) ·
-[brew: lazysql](https://formulae.brew.sh/formula/lazysql) ·
-[brew: lazycut](https://formulae.brew.sh/formula/lazycut) ·
-[brew: lazyrsync](https://formulae.brew.sh/formula/lazyrsync) ·
-[brew: lazycontainer](https://formulae.brew.sh/formula/lazycontainer) ·
-[Wisser/Jailer](https://github.com/Wisser/Jailer) ·
-[Jailer site](https://wisser.github.io/Jailer/) ·
-[TonicAI/condenser](https://github.com/TonicAI/condenser) ·
-[Tonic Subset](https://tonic.ai/products/tonic-subset) ·
-[nucleuscloud/neosync](https://github.com/nucleuscloud/neosync) ·
-[PyPI lazyslice](https://pypi.org/project/lazyslice/) ·
-[github.com/lazyslice](https://github.com/lazyslice) ·
-[catalystneuro/lazyslice](https://github.com/catalystneuro/lazyslice) ·
-[github.com/lazyseed](https://github.com/lazyseed) ·
-[github.com/lazysnip](https://github.com/lazysnip) ·
-[crates.io lazyprune](https://crates.io/api/v1/crates/lazyprune) ·
-[spectral-cube LazyMask](https://spectral-cube.readthedocs.io/en/latest/api/spectral_cube.masks.LazyMask.html) ·
-[ScoopInstaller/Scoop](https://github.com/ScoopInstaller/Scoop) ·
-[scoop.sh](https://scoop.sh) ·
-[USPTO trademark search](https://www.uspto.gov/trademarks/search) ·
-[tmsearch.uspto.gov](https://tmsearch.uspto.gov/) ·
-[IANA RDAP bootstrap](https://data.iana.org/rdap/dns.json) ·
-[HN: lazysnap](https://hn.algolia.com/?query=lazysnap) ·
-[HN: database subsetting](https://hn.algolia.com/?query=database%20subsetting&type=story) ·
-[HN: snaplet](https://hn.algolia.com/?query=snaplet) ·
-[HN: dbsnapper](https://hn.algolia.com/?query=dbsnapper)
+All source links relevant to a claim are inline in §§1–6 at the point that claim is made; this
+document does not keep a separate index, since one would only duplicate those links without
+adding annotation.

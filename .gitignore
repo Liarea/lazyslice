@@ -1,6 +1,6 @@
-# lazysnap
+# lazyslice
 snapshots/
-lazysnap.secret
+lazyslice.secret
 *.snapshot
 .env
 .env.*

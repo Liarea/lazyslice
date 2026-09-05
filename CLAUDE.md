@@ -1,10 +1,10 @@
-# lazysnap
+# lazyslice
 
 Snapshot a production SQL database into a safe local copy: subset by a root table, follow foreign keys, mask personal data, load. Read CONCEPT.md for what we are building and docs/OPERATING_MODEL.md for how.
 
 ## Current phase
 
-Phase 1, Research. Gate: six research documents with sources, CONCEPT.md revised against research/SYNTHESIS.md. See docs/BUILD_PLAN.md.
+Phase 2, Architecture. Gate: ADRs 001 to 006 with reversal conditions, ARCHITECTURE.md, THREAT_MODEL.md with v1-blocking controls. Inputs: research/SYNTHESIS.md section 5 and research/OPEN_QUESTIONS.md. See docs/BUILD_PLAN.md.
 
 ## Rules
 

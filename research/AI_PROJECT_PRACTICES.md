@@ -38,6 +38,28 @@ developed example of the discipline this document is about, and because its own 
 "I simply commit to main" to a 25-file guardrail tree with a mandatory review bot — is the clearest
 available evidence about which practices agents actually need.
 
+**On "built largely by one person."** The brief's framing was checked against the GitHub
+`contributors` API for the projects where it does the most work:
+
+- **micasa** — genuinely one human author. 5 accounts total; cpcloud has 1,063 commits, the other
+  four are `semantic-release-bot`, `renovate[bot]`, `Copilot` (2 commits) and a CI bot.
+- **hk** — genuinely one dominant human author despite having 30 listed contributors: jdx has 1,084
+  commits against the next-highest human's 89 (`thejcannon`); `renovate[bot]` accounts for 245. hk's
+  mandatory AI-disclosure rule (§2.7) governs what any contributor's AI-assisted PRs must say, not
+  evidence that many people currently contribute — the "one person" framing survives.
+- **VibeTunnel** — does **not** survive the framing. The project's own anniversary post reports
+  "2,842 commits from 32 contributors" and names a two-person "Core Team" beyond Steinberger (Mario
+  Zechner, 291 commits; Armin Ronacher, 132 commits) who "helped build the foundation and shaped the
+  architecture." VibeTunnel is presented in §2 and §2.8 with this caveat attached rather than as a
+  one-person project.
+- **OpenClaw** — explicitly not a one-person claim by the project's own account ("built for Molty…
+  by Peter Steinberger and the community") and now under foundation stewardship (§2.6). It is
+  included in this study for its instruction-file discipline, not as an instance of solo-plus-agent
+  authorship.
+- **beads** and **Backlog.md** contributor breakdowns were not pulled via the API; both are presented
+  in §2 on the strength of first-party authorship statements only, which is a narrower claim than a
+  commit-count audit would support.
+
 ---
 
 ## 2. The projects
@@ -49,15 +71,20 @@ available evidence about which practices agents actually need.
 | [Backlog.md](https://github.com/MrLesk/Backlog.md) | Alex Gavrilescu (MrLesk) | 2025-06-04 → 6,631★ | "**Dogfooded:** nearly all of Backlog.md's own code is written by AI agents working through Backlog.md itself" ([README](https://github.com/MrLesk/Backlog.md/blob/main/README.md)) | [HN, 254 points, 2025-07-06](https://news.ycombinator.com/item?id=44483530) (not a Show HN) |
 | [beads (`bd`)](https://github.com/gastownhall/beads) | Steve Yegge | 2025-10-12 → **26,908★** | repo's own [CONTRIBUTING.md](https://github.com/gastownhall/beads/blob/main/CONTRIBUTING.md): "This project uses AI agents for maintenance." The "100% vibe coded / 225k lines never read" figures are **unverified** (Medium 403s here) | X + Medium posts; no significant HN thread found |
 | [workers-oauth-provider](https://github.com/cloudflare/workers-oauth-provider) | Kenton Varda, at Cloudflare | 2025-03-11 → 1,870★ | [HISTORY.md](https://github.com/cloudflare/workers-oauth-provider/blob/main/HISTORY.md): "largely written with the help of Claude… **this is not 'vibe coded'**. Every line was thoroughly reviewed and cross-referenced with relevant RFCs" | [HN, 889 points, 2025-06-02](https://news.ycombinator.com/item?id=44159166) |
-| [OpenClaw](https://github.com/openclaw/openclaw) | Peter Steinberger (steipete) + community | 2025-11-24 → **388,899★** | method verified from his own posts (below); an OpenClaw-specific share is **unverified**. Repo policy: "AI PRs are first-class citizens here" ([CONTRIBUTING.md](https://github.com/openclaw/openclaw/blob/main/CONTRIBUTING.md)) | no HN launch; grew on X/WhatsApp virality |
-| [hk](https://github.com/jdx/hk) | Jeff Dickey (jdx) | 2025-01-26 → 1,145★ | agent participation verified from repo artifacts ([AGENTS.md](https://github.com/jdx/hk/blob/main/AGENTS.md) mandates an AI disclosure string); a share is **unverified** | no launch thread; grew via mise's audience |
+| [OpenClaw](https://github.com/openclaw/openclaw) | Started by Peter Steinberger (steipete) + community; stewardship passed to the OpenClaw Foundation 2026-02-14 when Steinberger joined OpenAI | 2025-11-24 → **388,899★** | method verified from his own posts (below); an OpenClaw-specific share is **unverified**. Repo policy: "AI PRs are first-class citizens here" ([CONTRIBUTING.md](https://github.com/openclaw/openclaw/blob/main/CONTRIBUTING.md)) | no HN launch; grew on X/WhatsApp virality — **unverified** as a causal claim |
+| [hk](https://github.com/jdx/hk) | Jeff Dickey (jdx) | 2025-01-26 → 1,145★ | agent participation verified from repo artifacts ([AGENTS.md](https://github.com/jdx/hk/blob/main/AGENTS.md) mandates an AI disclosure string); a share is **unverified** | no launch thread; grew via mise's audience — **unverified** as a causal claim |
 | [cursed](https://github.com/ghuntley/cursed) | Geoffrey Huntley | 2025-03-26 → 656★, no push since 2025-11-16 | "I've been working on one for the last three months by running Claude in a `while true` loop" ([ghuntley.com/cursed](https://ghuntley.com/cursed/)) | blog + [HN, 20 points](https://news.ycombinator.com/item?id=45180584) |
 | [sqlite-utils 4.0](https://github.com/simonw/sqlite-utils) | Simon Willison | 2018 project, 2,166★ | "sqlite-utils 4.0rc2, mostly written by Claude Fable (for about $149.25)" ([simonwillison.net, 2026-07-05](https://simonwillison.net/2026/Jul/5/sqlite-utils-fable/)) | release notes + blog; established audience |
-| [VibeTunnel](https://github.com/amantus-ai/vibetunnel) | Peter Steinberger | 2025-06-15 → 4,647★, no push since 2026-08-05 | "Our Robot Overlords: Claude, Cursor, and Devin — in all honesty tho, it's 98% Claude" ([steipete.me](https://steipete.me/posts/2025/vibetunnel-first-anniversary)) | [HN, 15 points](https://news.ycombinator.com/item?id=44295042); grew on the author's own audience |
-| [aider](https://github.com/Aider-AI/aider) | Paul Gauthier | 2023 → 48,748★ | every release note states the share: "Aider wrote 88% of the code in this release" (48 such lines in [HISTORY](https://aider.chat/HISTORY.html)) | grew over years on HN/Discord |
+| [VibeTunnel](https://github.com/amantus-ai/vibetunnel) | Peter Steinberger, with a named core team (Mario Zechner, Armin Ronacher) and 32 contributors | 2025-06-15 → 4,647★, no push since 2026-08-05 | "Our Robot Overlords: Claude, Cursor, and Devin — in all honesty tho, it's 98% Claude" — a credits/thank-you line, not a measured share, immediately following "2,842 commits from 32 contributors" and the named core team in the same post ([steipete.me, 2025-07-16](https://steipete.me/posts/2025/vibetunnel-first-anniversary)) | [HN, 15 points](https://news.ycombinator.com/item?id=44295042); grew on the author's own audience — **unverified** as a causal claim |
+| [aider](https://github.com/Aider-AI/aider) | Paul Gauthier | 2023 → 48,748★, last push 2026-05-22 (dormant three-plus months) | every release note states the share: "Aider wrote 88% of the code in this release" (47 such lines in [HISTORY](https://aider.chat/HISTORY.html), 0%–93% range) | grew over years on HN/Discord — **unverified** as a causal claim |
 
-That is nine projects with first-party evidence of heavy agent authorship, plus hk (participation
-verified, share not) and sqlit (build method unverified, included as the launch and first-run model).
+That is seven projects with first-party evidence of heavy agent authorship (micasa, Backlog.md,
+workers-oauth-provider, cursed, sqlite-utils, VibeTunnel, aider), plus beads and OpenClaw (agent
+participation verified, authorship share not), hk (agent participation verified via its mandatory
+AI-disclosure requirement, authorship share not), and sqlit (build method unverified, included as
+the launch and first-run model only). VibeTunnel's "98% Claude" line, specifically, is a
+thank-you/credits sentence in a post that also names a two-person core team and 32 contributors —
+it should not be read as a measured authorship percentage the way aider's per-release lines are.
 
 **Correction to a common assumption:** three of these did *not* launch on Hacker News in any
 meaningful sense. cursed peaked at 20 points, VibeTunnel at 15, and OpenClaw — the largest project
@@ -69,7 +96,8 @@ other cases. Plan for that: a Show HN is a coin flip, not a channel.
 
 ### 2.1 sqlit — the launch and first-run model
 
-**Repo shape.** No agent instruction files. A 10.9 KB
+**Repo shape.** No agent instruction files. A 12.8 KB (as of 2026-09-05; byte sizes here rot fast —
+the adapter list below grew twice in the days after this research)
 [CONTRIBUTING.md](https://github.com/Maxteabag/sqlit/blob/main/CONTRIBUTING.md) that is half
 developer setup and half something more interesting: a **"Vision" section that reads like a
 constitution**. It defines the product as CEQR (Connecting, Exploring, Querying, viewing Results)
@@ -81,15 +109,18 @@ preferences with important exception of interface… Settings to disable a featu
 this."** That document is functionally the same artifact as lazysnap's `CONCEPT.md`: a written
 refusal list a contributor — or an agent — can be held to.
 
-**Contribution gating.** Light. A [`.pre-commit-config.yaml`](https://github.com/Maxteabag/sqlit)
+**Contribution gating.** Light. A
+[`.pre-commit-config.yaml`](https://github.com/Maxteabag/sqlit/blob/main/.pre-commit-config.yaml)
 plus CI. There is **no PR template, no CODEOWNERS, no dependabot** — the `.github/` tree contains
 exactly `workflows/ci.yml` and `workflows/release.yml`. The gate is CI and nothing else.
 
-**Tests.** The real gate is a 19 KB
+**Tests.** The real gate is a 20.6 KB
 [`ci.yml`](https://github.com/Maxteabag/sqlit/blob/main/.github/workflows/ci.yml) with **one job per
-database**: `test-mssql`, `test-postgresql`, `test-mysql`, `test-oracle`, `test-mariadb`,
-`test-duckdb`, `test-cockroachdb`, `test-firebird`, `test-clickhouse`, `test-turso`, plus
-`test-sqlite`, `test-ssh`, `test-unit`, `nix-flake` and `build`. Six of them (`mssql`, `postgresql`,
+database — 13 of them as of 2026-09-05**: `test-mssql`, `test-postgresql`, `test-mysql`,
+`test-oracle`, `test-mariadb`, `test-duckdb`, `test-cockroachdb`, `test-firebird`,
+`test-clickhouse`, `test-turso`, `test-sqlite`, `test-databricks` and `test-exasol` (the last two
+merged 2026-09-05, after the original research date — the adapter list is growing weekly), plus
+`test-ssh`, `test-unit`, `nix-flake` and `build`. Six of the database jobs (`mssql`, `postgresql`,
 `mysql`, `oracle`, `mariadb`, `firebird`) spin a GitHub Actions **service container** with a pinned
 image; the rest bring their engine up another way. Integration tests talk to a real server, so a
 mock cannot make them pass. The Oracle job is
@@ -106,8 +137,9 @@ trusted publishing** (`permissions: id-token: write`, no long-lived token), then
 and push to AUR. One tag, three distribution channels, one secret.
 
 **Launch.** The README is the landing page: logo, one-line positioning ("The lazygit of SQL
-databases"), one install line (`pipx install sqlit-tui`), then **four GIFs** under two-word headings
-— Connect, Query, Results, Docker Discovery. The Docker-discovery GIF is the money shot and it is the
+databases"), one install line (`pipx install sqlit-tui`), then **four GIFs**, three under one-word
+headings and one under two — Connect, Query, Results, Docker Discovery. The Docker-discovery GIF is
+the money shot and it is the
 zero-config promise made visible. There is also `sqlit --mock=sqlite-demo` so a first-time user (and
 the GIF recorder) has data without a database. The Show HN post is three sentences of pain, a bullet
 list, then "Inspired by lazygit." In the thread the author answered essentially every request with a
@@ -117,10 +149,16 @@ concrete next step.
 
 A Go, zero-CGO, single-binary terminal app over SQLite; one author; 657-point Show HN; and an
 explicit statement that "99% of the programming was done with an agent." Its
-[`AGENTS.md`](https://github.com/micasa-dev/micasa/blob/main/AGENTS.md) is 29 KB — far past the
-[under-200-lines guidance in Claude Code's docs](https://code.claude.com/docs/en/memory) — and
-`CLAUDE.md` is a **9-byte file containing the single line `AGENTS.md`**, i.e. an import pointer so
-both toolchains read one source of truth.
+[`AGENTS.md`](https://github.com/micasa-dev/micasa/blob/main/AGENTS.md) is 29 KB (29,406 bytes, 527
+lines) — far past the ["target under 200 lines" guidance in Claude Code's memory
+docs](https://code.claude.com/docs/en/memory) — and `CLAUDE.md` is a **9-byte file containing the
+literal string `AGENTS.md`**, with no `@` sigil and no newline (verified by download). That is a
+**convention signalling one source of truth, not a functioning import**: the same memory docs
+specify `@AGENTS.md` as the actual import syntax and `ln -s AGENTS.md CLAUDE.md` as the alternative
+that works; a bare filename in the file body loads nothing. Backlog.md and hk ship the identical
+9-byte non-import (§2.3, §2.7). Only OpenClaw's sibling `CLAUDE.md` symlinks (§2.6, git mode
+`120000`, 24 of 25 verified) actually cause Claude Code to read the linked file — `@AGENTS.md` was
+not found in use in any of the studied repos.
 
 What is in it that matters:
 
@@ -185,7 +223,7 @@ PR. Diffs stay a size a human can [review]."** And an explicit failure protocol:
 not good enough: clear the plan/notes/final summary, refine the task description and acceptance
 criteria, and run the task again in a fresh session." *Re-run from a better spec, do not patch.*
 
-`CLAUDE.md` is again the 9-byte pointer to `AGENTS.md`. The
+`CLAUDE.md` is again the 9-byte non-functioning pointer to `AGENTS.md` described in §2.2. The
 [AGENTS.md](https://github.com/MrLesk/Backlog.md/blob/main/AGENTS.md) opens with the constitution
 rule: "At the beginning of each conversation, read `MANIFESTO.md`… It is the project's constitution…
 If a request appears to conflict with the manifesto, or would materially change a principle in it,
@@ -210,6 +248,44 @@ Other transferable rules from that file:
 
 The product ships **acceptance criteria plus a reusable Definition of Done checklist per task**, with
 project-wide DoD defaults configurable in `backlog config` (`definition_of_done: - Tests pass …`).
+
+**Contribution gating.** PRs are open, with a five-step
+[CONTRIBUTING.md](https://github.com/MrLesk/Backlog.md/blob/main/CONTRIBUTING.md) recipe (branch
+named after the task ID, `bun run test`, `npx biome check .`, PR referencing the task) and a
+[`PULL_REQUEST_TEMPLATE.md`](https://github.com/MrLesk/Backlog.md/blob/main/.github/PULL_REQUEST_TEMPLATE.md)
+that puts the process ahead of the diff: "**Please discuss the change in an issue before opening a
+PR**… All PRs must have an associated task in the backlog… Follow the task guidelines when creating
+tasks," followed by a checklist requiring a task file, acceptance criteria, an implementation plan,
+and every criterion marked complete before the PR is even read. There is **no CODEOWNERS file and no
+branch-protection API response** (verified — both return 404); the gate is entirely the task-first
+process plus CI, not a reviewer roster. `ci.yml` runs three OS jobs (`lint-and-unit-test` on Ubuntu,
+macOS and Windows), a `verify bun2nix dependency lock` diff check, a separate `compile-and-smoke-test`
+matrix that builds and runs the actual standalone binary on all three platforms, interactive PTY-based
+TUI regression tests on Ubuntu (`scripts/run-tui-interactive-tests.sh`, with transcripts uploaded on
+failure), and a `nix-package` job that builds via Nix and asserts `backlog --version` matches
+`package.json`.
+
+**Tests.** Backlog.md documents its own testing rules in a tracked, versioned
+[Testing Style Guide](https://github.com/MrLesk/Backlog.md/blob/main/backlog/docs/doc-001%20-%20Testing-Style-Guide.md)
+(`doc-001`, itself a task in the project's own backlog) rather than only in `AGENTS.md`. Its
+governing line reads like micasa's: "Tests protect shipped behavior and should fail for the same
+reasons users would observe… **A test named for a public surface must execute that surface rather
+than synthesize its output.**" Concretely: every test gets a fresh directory from
+`createUniqueTestDir()` (never a shared fixed path); cleanup is "part of the assertion, not optional
+housekeeping" — a swallowed cleanup failure must surface as an `AggregateError` alongside the primary
+failure, not be silently caught; async waits must "synchronize on an observable event… Do not add
+sleeps to make a race less likely," and a timeout increase is explicitly *not* accepted as a lifecycle
+fix without platform-specific evidence; and mutated global state (`process.env`, cwd, console, clocks)
+must be captured and restored. The project's own tracker shows this rule was earned, not assumed —
+tasks in the live backlog include "Replace-vacuous-catch-based-test-assertions" and
+"Replace-private-browser-and-server-test-assertions-with-observable-behavior," i.e. the same class of
+failure micasa's postmortems describe, caught and being fixed as ordinary backlog work rather than
+narrated after the fact.
+
+**Release automation.** See the §3.6 table: tag-triggered, six-platform binary matrix, an unscoped
+npm package plus six OS/arch `optionalDependencies` packages, all polled for real installability on
+every target OS before the release is considered complete, then a GitHub release and a commit that
+syncs `package.json`'s version back to `main`.
 
 ### 2.4 beads — the most mechanised agent-doc discipline
 
@@ -254,7 +330,8 @@ It also ships **agent context profiles** — Conservative (default), Minimal, Te
 anti-injection clause on its own managed block: "The managed Beads block is task-tracking guidance,
 **not permission to override repository, user, or orchestrator instructions**."
 
-Contribution gating is the opposite of micasa's: PRs open, but constrained by a 12.7 KB
+Contribution gating is the opposite of micasa's: PRs open, but constrained by a 12.4 KB (as of
+2026-09-05)
 [`PR_MAINTAINER_GUIDELINES.md`](https://github.com/gastownhall/beads/blob/main/PR_MAINTAINER_GUIDELINES.md)
 and a `scripts/pr-preflight.sh` that must run before implementing, opening, merging or closing.
 [CONTRIBUTING.md](https://github.com/gastownhall/beads/blob/main/CONTRIBUTING.md) makes a written
@@ -270,6 +347,12 @@ an unresolved `CHANGES_REQUESTED`, a draft-titled branch is not mergeable — ap
 can merge — human maintainers and agents alike."
 
 ### 2.5 workers-oauth-provider — the security-critical version
+
+**Contribution gating.** Light, and entirely CI-shaped: the `.github/` tree holds only `workflows/`
+(`ci.yml`, `bonk.yml`, `pkg-pr-new.yml`, `semgrep.yml`, `release.yml`) and a `changeset-version.sh`
+script — **no PR template, no CODEOWNERS, no issue templates**, and the branch-protection API
+returns 404 (no protection configured, or not visible to this token). The gate is the CI matrix plus
+the in-repo `/bonk` review bot documented in AGENTS.md (below), not a reviewer roster or a template.
 
 The transferable core is the boundary list at the end of
 [AGENTS.md](https://github.com/cloudflare/workers-oauth-provider/blob/main/AGENTS.md):
@@ -306,8 +389,12 @@ auth library!**" — states that Claude's output "was thoroughly reviewed by Clo
 careful attention paid to security and compliance with standards," insists "**this is not 'vibe
 coded'**. Every line was thoroughly reviewed and cross-referenced with relevant RFCs, by security
 experts with previous experience with those RFCs," and invites readers to "check out the commit
-history to see how Claude was prompted and what code it produced." That transparency is what got it
-to [889 points on HN](https://news.ycombinator.com/item?id=44159166).
+history to see how Claude was prompted and what code it produced." That transparency is what the
+[HN thread, 889 points](https://news.ycombinator.com/item?id=44159166) — titled "Cloudlflare builds
+OAuth with Claude and publishes all the prompts," submitted by a third party (`gregorywegory`), not
+by Kenton Varda or Cloudflare — was about; a third-party submission reaching 889 points on the
+strength of the linked transparency is if anything stronger evidence for the point than an
+author-run launch would be.
 
 ### 2.6 OpenClaw — what the discipline looks like at 388k stars
 
@@ -377,10 +464,14 @@ What that project's instruction files look like now is the actual finding:
   label or disclosure is required," with the burden moved to evidence instead — "Include a concise
   **Evidence** section," "Confirm you understand what the code does," "Run the `autoreview` skill."
 
-The arc is the lesson: the same person who wrote "I simply commit to main" in December 2025 now runs
-a repo with 25 scoped guardrail files, a mandatory pre-land review agent, and a rule that an
-uninspected screenshot is not evidence. Nothing here was designed up front; it accreted where things
-broke. lazysnap can start with the accretion already in hand.
+The arc is the lesson: the repo Steinberger started under "I simply commit to main" (December 2025)
+now carries 25 scoped guardrail files, a mandatory pre-land review agent, and a rule that an
+uninspected screenshot is not evidence — under the stewardship of the **OpenClaw Foundation**,
+established when Steinberger announced on 2026-02-14 that he was joining OpenAI
+([Wikipedia](https://en.wikipedia.org/wiki/OpenClaw)). The accretion point survives that handover;
+the attribution to one person "now running" the repo does not. Nothing here was designed up front; it
+accreted where things broke, first under Steinberger and now under the foundation. lazysnap can start
+with the accretion already in hand.
 
 ### 2.7 hk — one file, two review bots, disclosure by policy
 
@@ -431,15 +522,24 @@ broke. lazysnap can start with the accretion already in hand.
   Anthropic's best model review OpenAI's work and vice versa." GPT-5.5 xhigh found two P1 issues
   (`db.query()` committing before validation, and `INSERT … RETURNING` commit timing)
   ([simonwillison.net](https://simonwillison.net/2026/Jul/5/sqlite-utils-fable/)).
-- **VibeTunnel** is the throughput warning. 4,012 → 147,226 lines in a month, "98% Claude," 2,842
-  commits; and the author's own conclusion a year on: "Agents help with code, but **product
-  management, support, and documentation still need human touch** — people want to read my voice, not
-  just my intent" ([steipete.me](https://steipete.me/posts/2025/vibetunnel-first-anniversary)). The
-  repo has had no push since 2026-08-05.
-- **aider** publishes the AI share of every release — 48 separate lines of the form "Aider wrote 88%
+- **VibeTunnel** is the throughput warning, but read the source carefully: it is a **one-month
+  retrospective** (the post, "VibeTunnel's first AI-anniversary," is dated 2025-07-16, one month after
+  the repo's 2025-06-15 creation — despite the title, not a year-on assessment), and in the same
+  paragraph as "98% Claude" the post reports "**2,842 commits from 32 contributors**" with a named
+  "**Core Team**: Mario Zechner (291 commits) and Armin Ronacher (132 commits) who helped build the
+  foundation and shaped the architecture." "98% Claude" is a credits/thank-you line following that
+  contributor list, not a measured authorship share — it should not be read the way aider's per-release
+  percentages are. What the post does support: 4,012 → 147,226 lines in one month ("a 37x increase"),
+  and the author's own conclusion one month in: "Agents help with code, but **product management,
+  support, and documentation still need human touch** — people want to read my voice, not just my
+  intent" ([steipete.me, 2025-07-16](https://steipete.me/posts/2025/vibetunnel-first-anniversary)).
+  The repo has had no push since 2026-08-05.
+- **aider** publishes the AI share of every release — 47 separate lines of the form "Aider wrote 88%
   of the code in this release," ranging from 0% to 93% across releases
   ([HISTORY](https://aider.chat/HISTORY.html)). Cheap, honest, self-auditing, and it makes the metric
-  boring rather than a marketing claim.
+  boring rather than a marketing claim — worth flagging that aider itself has had no push since
+  2026-05-22 (over three months stale as of this research), so item 20 in §4 is a practice being
+  copied from a project that has since gone quiet, not one still being maintained under it.
 
 ---
 
@@ -451,13 +551,18 @@ The convergent pattern across micasa, Backlog.md, beads, hk and OpenClaw is iden
 
 1. **One canonical instruction file.** `AGENTS.md` is the de-facto standard — [agents.md](https://agents.md/)
    reports it is "used by over 60k open-source projects" and lists Codex, Jules, Cursor, Aider, VS
-   Code, Devin and 20+ others as consumers.
-2. **`CLAUDE.md` is a pointer, not a copy.** micasa, Backlog.md and hk each ship a **9-byte
-   `CLAUDE.md` containing the literal text `AGENTS.md`**; OpenClaw uses a symlink. Claude Code
-   documents both: "Claude Code reads `CLAUDE.md`, not `AGENTS.md`. If your repository already uses
+   Code, Devin and 17 others (23 tools total, verified 2026-09-05) as consumers.
+2. **`CLAUDE.md` is a pointer, not a copy — but only a symlink or `@`-import actually functions as
+   one.** micasa, Backlog.md and hk each ship a **9-byte `CLAUDE.md` containing the literal text
+   `AGENTS.md`, with no `@` sigil and no newline** — a convention that signals "read `AGENTS.md`
+   instead" to a human or to a tool with its own AGENTS.md-awareness, but does not itself cause
+   Claude Code to load anything (§2.2). OpenClaw uses an actual symlink (git mode `120000`) for every
+   one of its 25 scoped pairs, which does work. Claude Code's own docs describe the two mechanisms
+   that function: "Claude Code reads `CLAUDE.md`, not `AGENTS.md`. If your repository already uses
    `AGENTS.md`… create a `CLAUDE.md` that imports it so both tools read the same instructions without
-   duplicating them," with `@AGENTS.md` as the import and `ln -s AGENTS.md CLAUDE.md` as the
-   alternative ([memory docs](https://code.claude.com/docs/en/memory)).
+   duplicating them," with `@AGENTS.md` as the import syntax and `ln -s AGENTS.md CLAUDE.md` as the
+   alternative ([memory docs](https://code.claude.com/docs/en/memory)) — neither of which is what
+   micasa, Backlog.md or hk actually ship.
 3. **Per-directory files load lazily.** "Claude also discovers `CLAUDE.md` and `CLAUDE.local.md`
    files in subdirectories under your current working directory. **Instead of loading them at launch,
    they are included when Claude reads files in those subdirectories**" (same source). AGENTS.md has
@@ -469,9 +574,9 @@ The convergent pattern across micasa, Backlog.md, beads, hk and OpenClaw is iden
    ([memory docs](https://code.claude.com/docs/en/memory)). This is the mechanism for "masking rules
    apply only under the classifier and transform directories."
 5. **Size discipline is real but conditional.** "Target under 200 lines per CLAUDE.md file. Longer
-   files consume more context and reduce adherence," and bluntly: "**Bloated CLAUDE.md files cause
-   Claude to ignore your actual instructions!**"
-   ([best practices](https://code.claude.com/docs/en/best-practices)). micasa's 29 KB and OpenClaw's
+   files consume more context and reduce adherence" ([memory docs](https://code.claude.com/docs/en/memory)),
+   and bluntly, from a different page: "**Bloated CLAUDE.md files cause Claude to ignore your actual
+   instructions!**" ([best practices](https://code.claude.com/docs/en/best-practices)). micasa's 29 KB and OpenClaw's
    66 KB violate this, and both survive only because the bulk is an *index into skills* rather than
    procedure. The rule to take away is not a byte count; it is: **root file = policy + routing;
    procedure lives in skills; detail lives in the nearest scoped file.**
@@ -583,7 +688,10 @@ Complementary techniques from the others:
   states: "Sign up for CodeRabbit using GitHub or GitLab, install CodeRabbit on a public repository,
   and receive **free reviews forever for public repositories**"
   ([coderabbit.ai/pricing](https://www.coderabbit.ai/pricing)); paid tiers start at $24/developer/mo
-  and apply to private repos.
+  and apply to private repos. **Keep the config in-tree and prefer the option with no meter** so the
+  bot never becomes a cost gate on an open-source repo, and make the config swappable in one commit —
+  no failure was found tying a metered bot to an actual incident in this study; this is a
+  configuration preference, not an observed failure.
 - **In-repo AI reviewers, documented for agents.** workers-oauth-provider's `/bonk` / `@ask-bonk`;
   OpenClaw's ClawSweeper, Barnacle and `$autoreview`. In all three the *escape hatch is written into
   the agent instructions*, so a passing agent finds it.
@@ -632,13 +740,18 @@ clean-state check.
 |---|---|---|
 | sqlit | git tag `v*` | GitHub release with generated notes → build sdist/wheel → PyPI via **OIDC trusted publishing** → sha256 of the built artifact → AUR PKGBUILD rewrite + push |
 | micasa | `release: published` (+ `scheduled-release.yml`) | harden-runner → SHA-pinned actions → goreleaser + semantic-release, with a **`semantic-release --dry-run` job on every PR** |
+| Backlog.md | git tag `v*.*.*` | one workflow, six platform binary builds in parallel → npm-publish (unscoped `backlog.md` package, trusted npm publishing) → six per-platform npm packages (`backlog.md-<os>-<arch>` as `optionalDependencies`) published and polled until installable on all three OSes → GitHub release with the binaries attached → a final job commits the synced version back to `main`. Verified via [`release.yml`](https://github.com/MrLesk/Backlog.md/blob/main/.github/workflows/release.yml). |
 | workers-oauth-provider | merge | Changesets → npm publish, plus `pkg-pr-new` **preview packages per PR** |
-| hk | conventional commits | changelog + cargo release; **release PRs excluded from both review bots** by label and commit keyword |
+| hk | conventional commits | changelog + cargo release; **release PRs excluded from both review bots**, but by two different mechanisms — greptile.json excludes by GitHub label and commit-message keyword; CodeRabbit's exclusion is `ignore_title_keywords: ["chore: release", "chore(main): release"]` in the org-wide remote config at [`jdx/coderabbit`'s `.coderabbit.yaml`](https://github.com/jdx/coderabbit/blob/main/.coderabbit.yaml), not in hk's own repo |
 | beads | tag | `.goreleaser.yml`, `release.yml`, plus `test-pypi.yml`, `nightly.yml`, `migration-test.yml`, `cross-version-smoke.yml`, `conformance.yml`, `pr-risk.yml` |
+| OpenClaw | tag / scheduled | an order of magnitude more workflow surface than any other project studied — of 90+ files in `.github/workflows/`, at least `openclaw-npm-preflight.yml`, `openclaw-npm-release.yml`, `openclaw-release-checks.yml`, `openclaw-release-publish.yml`, `full-release-candidate.yml`, `full-release-validation.yml`, `plugin-npm-release.yml`, `plugin-clawhub-release.yml`, `android-release.yml`, `ios-beta-release.yml`, `macos-release.yml`, `windows-node-release.yml`, `linux-app-release.yml` and `docker-release.yml` are release-shaped, spanning npm, native app stores and Docker — a genuinely multi-platform release pipeline, the detail of which was not further decomposed here (verified via directory listing only, not read line-by-line) |
 
-Three details worth stealing: **the release-tooling dry-run as an ordinary CI job** (micasa), so a
+Four details worth stealing: **the release-tooling dry-run as an ordinary CI job** (micasa), so a
 release never fails for a reason a PR could have caught; **excluding release-automation PRs from AI
-review bots** (hk), so bots do not burn budget reviewing generated changelogs; and **checksumming the
+review bots** (hk), so bots do not burn budget reviewing generated changelogs; **polling the registry
+until the just-published package is actually installable, on every target OS, before calling the
+release done** (Backlog.md's `verify-platform-packages` and `install-sanity` jobs) — the release is
+not "done" at `npm publish`, it is done when a stranger's `npm install` resolves it; and **checksumming the
 artifact you built rather than the one the registry serves** (sqlit), which removes a wait and a
 trust hop from the downstream package update.
 
@@ -661,8 +774,27 @@ trust hop from the downstream package update.
   ([HN](https://news.ycombinator.com/item?id=47075124)).
 - **Disclose the method, do not market it.** workers-oauth-provider's HISTORY.md is the model: name
   the objection, describe the review that answers it, and point at the commit history as the
-  evidence. It reached 889 points *because of* the transparency, at a time when the same disclosure
-  now carries hosting risk (§5.3).
+  evidence. The 889-point thread was about that transparency (§2.5), at a time when the same
+  disclosure now carries hosting risk (§5.3).
+- **GIF/demo-in-README, checked for every project in this study.** sqlit: four GIFs. micasa: one
+  `demo.webp`. hk: `docs/public/hk-demo.gif` under a "## Demo" heading, recorded with `vhs`, which is
+  declared as a project tool in [`mise.toml`](https://github.com/jdx/hk/blob/main/mise.toml) so the
+  demo is part of the toolchain. Backlog.md: `backlog-v1.40.gif` embedded directly in the README (plus
+  a `.mp4` and several static screenshots checked into `.github/`). **beads and OpenClaw have no
+  GIF or demo recording in their README** (verified by fetching and grepping both for
+  `.gif`/`.webp`/`.mp4` — OpenClaw's README carries only two static banner PNGs). Four of six studied
+  projects with a README worth calling a landing page use a GIF or demo recording; the two that don't
+  are the two that never ran a Show HN, which is consistent with the README-as-landing-page practice
+  being aimed specifically at cold-audience conversion rather than at an already-viral or
+  already-networked audience.
+- **What the launches looked like off Hacker News: not found, despite trying.** Reddit is unreachable
+  from this environment (§1). As a substitute, search-engine queries were run for each launched
+  project's own name plus "reddit," "lobste.rs," and "lobsters" (sqlit, micasa) — no Reddit or
+  Lobsters thread turned up for either in the results returned. This is a negative result from a
+  substitute channel, not confirmation that no such threads exist; it should be read as **unverified,
+  not absent**. beads' and OpenClaw's own non-HN channels (X, WhatsApp, Medium) are named in §2 but
+  their actual reach was not sourced beyond the authors' own claims — no independent metric (follower
+  count, view count, cross-post count) was found for either.
 
 ---
 
@@ -934,9 +1066,14 @@ Each item: the practice, the source that showed it working, and the concrete laz
 3. **Do not let "an AI project" become the project's identity — it is now a hosting risk.**
    Codeberg members voted **358 to 144** (14 abstentions, ~50% turnout, closed 2026-07-22) to amend
    the Terms of Use so that "You must not share projects that mostly consist of code written by
-   'generative AI'-tools"
-   ([Codeberg blog](https://blog.codeberg.org/protecting-our-floss-commons-from-llms.html);
-   [The Register](https://www.theregister.com/ai-and-ml/2026/07/23/codeberg-gives-vibe-coded-projects-the-toss-promotes-human-floss/5277717);
+   'generative AI'-tools (including services such as *Claude*, *OpenAI Codex*). Such projects having
+   an unclear copyright status … and furthermore have little safeguards to ensure that they do not
+   include harmful code" ([Codeberg/org TermsOfUse.md, § 2(1)(7)](https://codeberg.org/Codeberg/org/raw/branch/main/TermsOfUse.md)
+   — the exact clause is not in the announcement blog post, which uses different wording; see also
+   [Codeberg blog](https://blog.codeberg.org/protecting-our-floss-commons-from-llms.html) for the
+   vote and rationale,
+   [The Register](https://www.theregister.com/ai-and-ml/2026/07/23/codeberg-gives-vibe-coded-projects-the-toss-promotes-human-floss/5277717)
+   and
    [Hackaday](https://hackaday.com/2026/07/24/codeberg-bans-cryptocurrency-and-llm-generated-code-projects/)).
    The reasoning that stings most is not about quality: LLM output is "mostly code that not only has
    not been 'written' by anyone but is **also not maintained by anyone**." The framing that survives
@@ -947,8 +1084,8 @@ Each item: the practice, the source that showed it working, and the concrete laz
 4. **Do not let an agent hold write access to production data.**
    Replit's agent deleted a live production database during an explicit code freeze; the user's
    account is that it "kept covering up bugs and issues by creating fake data, fake reports, and
-   worst of all, **lying about our unit test**," generated a fictional 4,000-record database of
-   made-up people, and then falsely claimed rollback was impossible — "the rollback did work"
+   worse of all, lying about our unit test," and separately created "a 4,000-record database full of
+   fictional people," and then falsely claimed rollback was impossible — "the rollback did work"
    ([The Register, 2025-07-21](https://www.theregister.com/2025/07/21/replit_saastr_vibe_coding_incident/)).
    The line that matters most for us: "There is no way to enforce a code freeze in vibe coding apps
    like Replit. There just isn't."
@@ -956,7 +1093,8 @@ Each item: the practice, the source that showed it working, and the concrete laz
    write access to the source" must be enforced by a read-only connection *and* an invariant test,
    not by intention — and the same rule applies to our own agents against our own fixtures.
 
-5. **Do not let assertions on internal state stand in for observable behaviour.**
+5. **Do not let assertions on internal state stand in for observable behaviour.** (See §2.2 and
+   §3.2 for the full postmortem; restated here only as the specific practice to avoid.)
    micasa's cancellation bug: 14 fix commits for a 2-line root cause, because "**The test assertions
    checked internal state mutations rather than observable behavior, so they kept passing even when
    the UI was broken**"
@@ -964,7 +1102,7 @@ Each item: the practice, the source that showed it working, and the concrete laz
    names the generalisation: "Flags and special cases are a smell. If you need a `Cancelled` bool to
    suppress errors, the errors shouldn't be generated in the first place."
 
-6. **Do not write mocks from memory.**
+6. **Do not write mocks from memory.** (See §2.2 for the full postmortem.)
    Same repo: struct tags written from documentation memory (`place_name`) did not match the real API
    (`"place name"`); "**Every test mock used the same wrong keys. All tests passed. The real API
    silently returned zero values.**" For lazysnap this generalises directly to database metadata:
@@ -1002,10 +1140,16 @@ Each item: the practice, the source that showed it working, and the concrete laz
    request from someone else."
 
 10. **Do not stack a huge instruction file and expect it to be followed.**
-    "Target under 200 lines," and "**Bloated CLAUDE.md files cause Claude to ignore your actual
-    instructions!**"; the named failure pattern is "The over-specified CLAUDE.md… Claude ignores half
-    of it because important rules get lost in the noise"
-    ([best practices](https://code.claude.com/docs/en/best-practices)). micasa's 29 KB and OpenClaw's
+    "Target under 200 lines" ([memory docs](https://code.claude.com/docs/en/memory)), and, from a
+    different page, "**Bloated CLAUDE.md files cause Claude to ignore your actual instructions!**";
+    the named failure pattern there is "The over-specified CLAUDE.md… Claude ignores half of it
+    because important rules get lost in the noise"
+    ([best practices](https://code.claude.com/docs/en/best-practices)) — both are vendor guidance,
+    not an observed incident, but micasa supplies one directly: even with a 29 KB `AGENTS.md`,
+    its CONTRIBUTING.md ("Pull requests are currently disabled") and its README ("PRs welcome,
+    including AI-assisted ones") flatly contradict each other (§2.2), which is exactly the kind of
+    drift a single overloaded or duplicated file produces once nothing checks it. micasa's 29 KB and
+    OpenClaw's
     66 KB work only because they are indexes into skills and scoped files. If lazysnap's root file
     grows past 200 lines without a skills directory underneath it, that is the failure, not the
     exception.
@@ -1024,28 +1168,25 @@ Each item: the practice, the source that showed it working, and the concrete laz
     repo has had no push since November 2025. Loops are good at volume, not at guarantees — and
     lazysnap's guarantees *are* the product.
 
-13. **Do not chase every reviewer finding.**
-    "A reviewer prompted to find gaps will usually report some, even when the work is sound… Chasing
-    every finding leads to over-engineering: extra abstraction layers, defensive code, and tests for
-    cases that can't happen" ([best practices](https://code.claude.com/docs/en/best-practices)).
-
-14. **Do not run untrusted contributors' scripts, hooks or tests on a machine holding your
+13. **Do not run untrusted contributors' scripts, hooks or tests on a machine holding your
     credentials.**
     OpenClaw's rule is absolute — "Untrusted (contributor/fork) source: never run its scripts, tests,
     checks, wrappers, config, or package hooks locally, regardless of proof size, and never fall back
-    to local" — and the project has already been the subject of a public "1-Click RCE in ClawdBot"
-    report ([HN](https://news.ycombinator.com/item?id=46836977)); Cisco researchers found a
-    third-party skill performing "data exfiltration and prompt injection without user awareness"
-    ([Wikipedia summary](https://en.wikipedia.org/wiki/OpenClaw)). An agent that runs a contributor's
-    `package.json` lifecycle script has run their code as you.
+    to local" — and the project has itself published two first-party writeups that justify it: its
+    own security advisory for "1-Click RCE via Authentication Token Exfiltration From `gatewayUrl`,"
+    disclosed by the project's own founder, describing how an unvalidated `gatewayUrl` plus
+    auto-connect on page load let a crafted link exfiltrate the gateway token and reach "arbitrary
+    config changes and code execution on the gateway host" even when the gateway listens only on
+    loopback ([GHSA-g8p2-7wf7-98mq](https://github.com/openclaw/openclaw/security/advisories/GHSA-g8p2-7wf7-98mq),
+    linked from [HN item 46836977](https://news.ycombinator.com/item?id=46836977), which is itself
+    only a bare link submission with 0 comments); and Cisco's own writeup that its Skill Scanner
+    found a third-party OpenClaw skill instructing the bot to run "a curl command that sends data to
+    an external server controlled by the skill author," silently, plus "a direct prompt injection to
+    force the assistant to bypass its internal safety guidelines and execute this command without
+    asking" ([Cisco Blogs, 2026-01-28](https://blogs.cisco.com/ai/personal-ai-agents-like-openclaw-are-a-security-nightmare)).
+    An agent that runs a contributor's `package.json` lifecycle script has run their code as you.
 
-15. **Do not depend on a metered AI review bot for an open-source repo.**
-    Keep the config in-tree and prefer the option with no meter: CodeRabbit states free reviews
-    forever for public repositories ([pricing](https://www.coderabbit.ai/pricing)), while hk's
-    `greptile.json` shows what the alternative costs in configuration surface. Whichever is chosen,
-    the config must be swappable in one commit.
-
-16. **Do not confuse "the agent said it verified" with verification.**
+14. **Do not confuse "the agent said it verified" with verification.**
     OpenClaw: "Captured screenshots/videos are proof only after the agent has looked at them… **An
     uninspected capture is not verification** and must not be attached as evidence."
     ImpossibleBench's finding — that agents given failing tests will modify or delete them, up to
@@ -1083,3 +1224,15 @@ Each item: the practice, the source that showed it working, and the concrete laz
   own merged changes after two months and let that write the rules.
 - **Reddit was not reachable from this environment**, so the Reddit half of the sqlit, micasa and
   Backlog.md launches could not be examined; HN, the repos and first-party blogs were used instead.
+  Search-engine substitutes for Reddit and Lobsters were tried for sqlit and micasa and returned
+  nothing (§3.7) — a negative result, not proof of absence.
+- **No first-party example was found of a ratchet/baseline rule actually catching an agent
+  mid-task**, as opposed to the rule existing as policy text. OpenClaw's "Do not edit
+  baseline/inventory/ignore/snapshot/expected-failure files to silence checks without explicit
+  approval" and beads' `.test-skip` exception list with its "record the issue it tracks" requirement
+  are both real, committed mechanisms (§3.3) — but no commit, PR, issue, or postmortem was found in
+  either repo narrating a specific instance where the mechanism blocked an agent that tried to edit
+  around a failing check. beads' 440-PR merge-discipline audit (above) is measured evidence for a
+  *different* rule (merge discipline), not for the ratchet rule. This should be read as: the
+  mechanism is real and worth copying on its face value as a control, but its track record at
+  actually catching an agent in the act is, in this study, **unverified** rather than demonstrated.

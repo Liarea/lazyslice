@@ -2,11 +2,13 @@
 
 Phase 1 research. Written 2026-09-05.
 
-**Method.** Cloned [`Maxteabag/sqlit`](https://github.com/Maxteabag/sqlit) into `/private/tmp/claude-501/lazysnap-scratch/sqlit` and read it at commit `2a09c28e5402da581da7cb38e581468bafdb9064` (2026-09-03). That commit is two commits past the `v1.6.3` tag, and `git diff --stat v1.6.3 HEAD` touches only four files — `sqlit/domains/connections/providers/mssql/adapter.py`, `sqlit/shared/ui/widgets_tables.py`, and two test files. Every file quoted below is byte-identical between `v1.6.3` and the commit I read, so **all permalinks in this document point at `v1.6.3`** and can be trusted to show what I saw.
+**Method.** Cloned [`Maxteabag/sqlit`](https://github.com/Maxteabag/sqlit) into `/private/tmp/claude-501/lazysnap-scratch/sqlit` and read it at commit `2a09c28e5402da581da7cb38e581468bafdb9064` (2026-09-03). That commit is two commits past the `v1.6.3` tag, and `git diff --stat v1.6.3 HEAD` touches only four files — `sqlit/domains/connections/providers/mssql/adapter.py`, `sqlit/shared/ui/widgets_tables.py`, and two test files. Every file quoted below is byte-identical between `v1.6.3` and the commit I read, so **all permalinks in this document point at `v1.6.3`** and can be trusted to show what I saw. Quoted code blocks are otherwise verbatim, with one exception applied uniformly and without an ellipsis marker: a multi-line docstring is shown collapsed to its first line, to keep the quotes focused on logic. The cited line range always covers the full function as it exists in the source, so a reader who opens a permalink will see more lines — the docstring's remainder — than the quoted block shows.
 
 I also read [lazygit's README](https://github.com/jesseduffield/lazygit/blob/master/README.md) and its [auto-generated keybindings reference](https://github.com/jesseduffield/lazygit/blob/master/docs/keybindings/Keybindings_en.md), and the [Show HN thread](https://news.ycombinator.com/item?id=46276002) that launched sqlit — which is the single best record of what real users hit on their own first run, because the author answered nearly every complaint in it.
 
 Reddit is unreachable from this environment. Community evidence comes from Hacker News (via the [Algolia API](https://hn.algolia.com/api)), the GitHub REST API, GitHub issues and PRs, and official vendor documentation.
+
+**A note on the name.** This document was researched and drafted while the project was still called lazysnap. Per [`docs/adr/000-name.md`](../docs/adr/000-name.md) (accepted 2026-09-05, following the collision audit in [`NAME.md`](../NAME.md)), the project is now named **lazyslice**. Every `lazysnap*` identifier proposed in §5 and §6 below maps one-to-one to its `lazyslice*` equivalent: `lazysnap.yml` → `lazyslice.yml`, `$LAZYSNAP_CONFIG_DIR` → `$LAZYSLICE_CONFIG_DIR`, keyring service `lazysnap` → `lazyslice`, the `lazysnap_meta` marker table → `lazyslice_meta`, and the `lazysnap` binary/command → `lazyslice`. The prose below keeps `lazysnap` throughout, unchanged, because that is the name under which the research was conducted and the name sqlit's Show HN thread and NAME.md's collision audit are talking about — renaming it after the fact would misattribute quotes and mislabel sources. Treat every `lazysnap` below as `lazyslice` when the design ships.
 
 **Contents**
 
@@ -126,7 +128,9 @@ Note the asymmetry: the TUI shows the *state*, the CLI shows the *state plus the
 
 **Steal 3: string-matching the exception is ugly and it works.** `"permission denied" in error_str` is not a stable API. But the alternative — enumerating docker-py's exception hierarchy — buys precision the user cannot perceive, and the fallback (`NOT_RUNNING`) is the most common true answer anyway. Do the same, and put the classifier behind one function so it is one place to fix.
 
-**Fix: Docker *contexts* are not covered.** `DOCKER_HOST` is only one of the ways a developer points at a daemon. Docker's own documentation says a context is used for "all `docker` commands... unless overridden with environment variables such as `DOCKER_HOST` and `DOCKER_CONTEXT`, or on the command-line with the `--context` and `--host` flags", with contexts stored in "a `meta.json` file below `~/.docker/contexts/`" ([Docker contexts docs](https://docs.docker.com/engine/manage-resources/contexts/)). Neither docker-py's documented set nor Go's `client.FromEnv` — which the Go SDK documents as "the equivalent of using the WithTLSClientConfigFromEnv, WithHostFromEnv, and WithVersionFromEnv options", reading `DOCKER_HOST`, `DOCKER_API_VERSION`, `DOCKER_CERT_PATH`, `DOCKER_TLS_VERIFY` ([pkg.go.dev docker/docker/client](https://pkg.go.dev/github.com/docker/docker/client)) — resolves a context. **This matters for lazysnap because Go is the chosen language** (docs/BUILD_PLAN.md) and because Colima and OrbStack users on macOS routinely have a non-default context and an empty `DOCKER_HOST`. A lazysnap that reports "Docker not running" to an OrbStack user has failed its first run. See §5.1.
+**docker-py already covers contexts; Go's client does not, and that gap is ours to fill.** `docker.from_env()` takes a `use_context` parameter, documented as: "If `True` (the default), fall back to the current Docker CLI context (`~/.docker/config.json` / `DOCKER_CONTEXT`) when `DOCKER_HOST` is not set. This allows the client to talk to Docker Desktop out of the box." ([docker-py client docs](https://docker-py.readthedocs.io/en/stable/client.html)). This landed in docker-py **7.2.0** (published 2026-07-09): "`docker.from_env()` now honors the active Docker CLI context when `DOCKER_HOST` is not set" ([release notes](https://github.com/docker/docker-py/releases/tag/7.2.0)). sqlit's `pyproject.toml` requires `docker>=7.0.0` ([L33](https://github.com/Maxteabag/sqlit/blob/v1.6.3/pyproject.toml#L33)), so any current pipx/uv/pip install of sqlit resolves contexts by default — `get_docker_status`'s `docker.from_env()` call at line 80 already inherits this. There is one real wrinkle: sqlit's own `uv.lock` pins `docker` to **7.1.0** (checked in the clone at `uv.lock` L961, no `use_context` support), while `pyproject.toml`'s `>=7.0.0` lets any newer resolver — pipx, a fresh `uv pip install`, plain `pip install sqlit-tui` — pull 7.2.0+ instead. So sqlit's own CI and dev environment, pinned to 7.1.0, resolve contexts differently than the packages most users actually install. This is a lockfile/specifier mismatch worth flagging upstream, not a defect in sqlit's shipped behaviour.
+>
+> Go's `client.FromEnv` gives us less than docker-py does, so we must do it ourselves. The Go SDK documents `FromEnv` as "the equivalent of using the WithTLSClientConfigFromEnv, WithHostFromEnv, and WithVersionFromEnv options", reading only `DOCKER_HOST`, `DOCKER_API_VERSION`, `DOCKER_CERT_PATH`, `DOCKER_TLS_VERIFY` ([pkg.go.dev docker/docker/client](https://pkg.go.dev/github.com/docker/docker/client)) — no context resolution at all. **This matters for lazysnap because Go is the chosen language** (docs/BUILD_PLAN.md) and because Colima and OrbStack users on macOS routinely have a non-default context and an empty `DOCKER_HOST`. Unlike sqlit, lazysnap gets no free ride from its dependency here: a lazysnap that reports "Docker not running" to an OrbStack user has failed its first run, and the fix has to be written by us, not inherited from a library default. See §5.1.
 
 #### Step 2 — which containers are databases?
 
@@ -240,6 +244,8 @@ Two more robustness details from the same file, both worth copying verbatim in s
 
 ### 2.2 Connection saving
 
+**Where a saved connection actually lives.** The half of "connection saving" that matters for what is committable versus machine-local: connection *records* (host, port, database, username, provider, the `source` provenance tag) are stored in `connections.json` inside the config directory — the README FAQ states it plainly: "Connection details are stored in `connections.json` inside the config directory" ([README FAQ](https://github.com/Maxteabag/sqlit/blob/v1.6.3/README.md)), defaulting to `$XDG_CONFIG_HOME/sqlit/` (`~/.config/sqlit/`), overridable via `$SQLIT_CONFIG_DIR`. That file is plain JSON and holds no secrets — passwords go through the separate `CredentialsService` machinery below (§2.3) — which is exactly the connections-record/secret split lazysnap needs, except lazysnap's analogue is committed (`lazysnap.yml` in the project directory) rather than machine-local, because the whole point of a committed connection definition is that a teammate or CI runs the identical command.
+
 Discovery does not persist anything. A detected container becomes a config only when the user acts, via `container_to_connection_config` ([lines 384-419](https://github.com/Maxteabag/sqlit/blob/v1.6.3/sqlit/domains/connections/discovery/docker_detector.py#L384-L419)), which stamps `source="docker"` on the resulting `ConnectionConfig` — so the provenance of every saved connection is recorded, not inferred later.
 
 Saving is deliberately forgiving ([`app/save_connection.py`](https://github.com/Maxteabag/sqlit/blob/v1.6.3/sqlit/domains/connections/app/save_connection.py)):
@@ -335,7 +341,7 @@ The author's reply: "Great UX feedback, that's going to be sorted out in the nex
 | `h` — Query history | `show_history` is `backspace`; in `query_normal`, `h` is `cursor_left` |
 | `n` — New query (clear all) | `new_query` is `N`; `n` is unbound in `query_normal` |
 | `d` — Clear query | `d` is `delete_leader_key` (the vim delete operator) |
-| `v` / `y` / `Y` / `a` — View cell / Copy cell / Copy row / Copy all | In `results`, `v` is `view_cell` and `y` is `results_yank_leader_key` — a *prefix* opening the `ry` menu (`c` cell, `y` row, `a` all, `e` export). `Y` and `a` are unbound in `results` |
+| `v` / `y` / `Y` / `a` — View cell / Copy cell / Copy row / Copy all | In `results`, `v` is `view_cell` and `y` is `results_yank_leader_key` — a *prefix* opening the `ry` menu (`c` cell, `y` row, `a` all, `e` export), defined in [`sqlit/core/keymap.py` L304-L310](https://github.com/Maxteabag/sqlit/blob/v1.6.3/sqlit/core/keymap.py#L304-L310) — the template file holds `action_keys`, but leader menus like `ry` are wired in code, not in `keymap.template.json`. `Y` and `a` are unbound in `results` |
 | `Ctrl+Q` — Quit | Works, but is not in the keymap at all; a code comment says quit "lives only as Textual's built-in App.BINDINGS (ctrl+q) and the `:q` command", deliberately un-rebindable "to avoid the footgun of a user accidentally locking themselves out of the exit key" ([`core/keymap.py` L377-380](https://github.com/Maxteabag/sqlit/blob/v1.6.3/sqlit/core/keymap.py#L377-L380)) |
 
 So four of the eleven rows on the front-page keybinding table of a 4,800-star project are wrong, nine months after the exact same class of bug was the top launch complaint. **Generating the in-app help was necessary and not sufficient.** lazygit solved the whole problem: its keybinding reference opens with "_This file is auto-generated. To update, make the changes in the pkg/i18n directory and then run `go generate ./...` from the project root._" ([Keybindings_en.md](https://github.com/jesseduffield/lazygit/blob/master/docs/keybindings/Keybindings_en.md)), organised by context and panel rather than by key. That is the standard to hit: **every rendering of a binding, in-app or in-docs, comes from one table, and CI fails on drift.**
@@ -349,11 +355,13 @@ sqlit's SQL completion engine is ~2,275 lines across [`sqlit/domains/query/compl
 Most of that is irrelevant to lazysnap, which has no SQL editor. Four things are not:
 
 1. **It triggers itself.** README: "Autocomplete triggers automatically in INSERT mode. Use `Tab` to accept." No key to remember, one key to accept.
-2. **The schema it completes against is loaded lazily, in threads, with a spinner.** [`autocomplete_schema.py`](https://github.com/Maxteabag/sqlit/blob/v1.6.3/sqlit/domains/query/ui/mixins/autocomplete_schema.py) runs a dozen distinct `run_worker(..., thread=True)` jobs — `get-databases`, `load-tables-*`, `load-views-*`, `load-procedures-*`, `load-columns-*` — batching processing at `SCHEMA_PROCESS_BATCH_SIZE = 200` and tracking `_schema_completed_jobs / _schema_total_jobs` for progress. Columns for a table are fetched only when that table is referenced.
-3. **Everything is cached in one place and shared.** `_db_object_cache` carries a comment saying it is "Shared cache for raw DB objects - used by both tree and autocomplete" — the explorer and the completer introspect once between them.
+2. **The schema it completes against is loaded lazily, in threads, with a spinner.** [`autocomplete_schema.py`](https://github.com/Maxteabag/sqlit/blob/v1.6.3/sqlit/domains/query/ui/mixins/autocomplete_schema.py) runs ten distinct `run_worker(..., thread=True)` jobs — `get-databases`, `load-tables-*`, `load-views-*`, `load-procedures-*`, `load-columns-*` — batching processing at `SCHEMA_PROCESS_BATCH_SIZE = 200` and tracking `_schema_completed_jobs / _schema_total_jobs` for progress. Columns for a table are fetched only when that table is referenced.
+3. **Everything is cached in one place and shared.** `_db_object_cache` carries a comment saying it is "Shared cache for raw DB objects - used by both tree and autocomplete" ([`sqlit/domains/query/ui/mixins/autocomplete.py` L29](https://github.com/Maxteabag/sqlit/blob/v1.6.3/sqlit/domains/query/ui/mixins/autocomplete.py#L29) — the cache itself lives in the sibling `autocomplete.py`, not in `autocomplete_schema.py`) — the explorer and the completer introspect once between them.
 4. **The completion result is dialect-formatted at the last moment**, via the provider's `format_autocomplete_identifier` ([`autocomplete_suggestions.py` L20-25](https://github.com/Maxteabag/sqlit/blob/v1.6.3/sqlit/domains/query/ui/mixins/autocomplete_suggestions.py#L20-L25)), so quoting rules live with the provider rather than in the completer.
 
 For lazysnap the transferable pattern is: **introspect once, in the background, into one cache that every consumer reads** — the classifier, the planner, the root-table completer, and the TUI all need the same schema, and introspecting it twice on a 400-table database is a visible stall.
+
+**Does lazysnap's one question offer completion?** This is where the brief's ask — study sqlit's autocomplete, then specify lazysnap's equivalent — was answered too thinly the first time: §5 named "the root-table completer" in passing and never specified it. CONCEPT.md's transcript shows `root table? [customers]` as free text with a bracketed default; nothing in the original §5 said whether Enter alone accepts the default, whether `Tab` completes a table name, whether matching is case-insensitive, whether a schema-qualified `public.customers` is accepted, or what happens on an unrecognised answer. It should: Q2 tab-completes against the already-introspected schema (the one cache point 3 above recommends sharing), matches case-insensitively against the ranked candidates from §5.4, accepts a schema-qualified name when the schema is ambiguous, and re-prompts rather than silently falling back to the default on an unrecognised table name — a silent fallback would let a typo pick the wrong root table with no error at all, which is worse than asking again once.
 
 ### 2.6 How it presents errors
 
@@ -445,7 +453,7 @@ So a release is: tag, push. Four releases shipped in the three weeks before `v1.
           python -c "from sqlit.cli import main; print('CLI import OK')"
 ```
 
-**A CI job that does nothing but prove the thing installs and starts.** For lazysnap that is: goreleaser builds every target, and the resulting binary answers `lazysnap --version`. Cheap, and it catches the class of failure that costs you a user on their first minute.
+**A CI job that does nothing but prove the thing installs and starts.** For lazysnap that is: [goreleaser](https://github.com/goreleaser/goreleaser) builds every target, and the resulting binary answers `lazysnap --version`. Checked as of September 2026: MIT-licensed, actively maintained — v2.18 shipped 2026-08-23, v2.17 on 2026-07-04, a release roughly monthly through the year ([goreleaser.com/blog](https://goreleaser.com/blog/)) — and it supports keyless OIDC-style signing via cosign/sigstore, documented as a `signs` block whose `cmd: cosign` and `--bundle` flag write a combined certificate-and-signature `.sigstore.json` ([goreleaser signing docs](https://goreleaser.com/customization/sign/)), which is the mechanism §5.9's "OIDC/keyless publishing" below refers to. Cheap, and it catches the class of failure that costs you a user on their first minute.
 
 ### 3.4 Contributor docs
 
@@ -474,12 +482,12 @@ The single worst first-run experience sqlit shipped was not a bug in its code. F
 
 The same trap was filed two months later as [issue #133, "Can't install with psycopg2-binary"](https://github.com/Maxteabag/sqlit/issues/133), where the reporter's `uvx --with psycopg2-binary sqlit-tui` failed with "An executable named `sqlit-tui` is not provided by package `sqlit-tui`", and their fallback `uvx ... sqlit` installed an unrelated, long-abandoned PyPI package called `sqlit` that is not even Python 3 source.
 
-Two independent defects, both now fixed, both instructive:
+Two independent defects, one fixed, one permanent:
 
-1. **The distribution name and the command name differed**, so `uvx <name>` — the most natural thing a uv user types — resolved to a squatted package. `pyproject.toml` now declares *both* `sqlit` and `sqlit-tui` as console scripts ([L172-174](https://github.com/Maxteabag/sqlit/blob/v1.6.3/pyproject.toml#L172-L174)), so `uvx sqlit-tui` works.
-2. **Someone else owned the obvious name.** Nothing in the code could have fixed that.
+1. **The distribution name and the command name differed**, so `uvx <name>` — the most natural thing a uv user types — resolved to a squatted package. This one is fixed: `pyproject.toml` now declares *both* `sqlit` and `sqlit-tui` as console scripts ([L172-174](https://github.com/Maxteabag/sqlit/blob/v1.6.3/pyproject.toml#L172-L174)), so `uvx sqlit-tui` works.
+2. **Someone else owned the obvious name.** Nothing in the code could have fixed that, and nothing has: PyPI still serves an unrelated `sqlit` 0.1.6, "Run quick queries over multiple sqlite dbs", Python 2 source, last touched years before sqlit-tui existed ([PyPI JSON API](https://pypi.org/pypi/sqlit/json), checked 2026-09-05). `uvx sqlit` still resolves to the wrong package today; only `uvx sqlit-tui` or `uvx --from sqlit-tui sqlit` work. This is what makes the lesson bite: the fixable half got fixed, and the unfixable half is still live, permanently, because a name once squatted stays squatted.
 
-For lazysnap: the binary name, the repo name, the install command and the package/tap/formula name must be one word, and that word must be checked for prior claims **before the name is committed to** — on Homebrew core and popular taps, on the AUR, on crates.io/npm/PyPI regardless of our language, and as a Go module path. See NAME.md.
+This is exactly the audit lazysnap ran before committing to a name, and it is why the audit happened: the binary name, the repo name, the install command and the package/tap/formula name had to be one word, checked for prior claims **before the name was committed to** — on Homebrew core and popular taps, on the AUR, on crates.io/npm/PyPI regardless of our language, and as a Go module path. That check found exactly this trap waiting: a Go TUI already published at `github.com/jpdarago/lazysnap` (same "lazy" family, same "inspired by lazygit" lineage), the npm scope taken, and a live commercial adjacency in DBSnapper's "snapshot, subset, sanitize" positioning. See [`NAME.md`](../NAME.md) for the audit and [`docs/adr/000-name.md`](../docs/adr/000-name.md) for the decision it produced — the project is now named lazyslice.
 
 ---
 
@@ -517,6 +525,8 @@ Rules 1 and 4 are in tension, and resolving that tension is the substance of thi
 
 `lazysnap` with no arguments runs the ladder below **in order, concurrently where possible, with a hard 2-second budget for the whole discovery phase**, and prints what it found. Each rung yields zero or more *candidates*, each carrying `(dsn, provenance, confidence)`.
 
+**What happens when the budget expires mid-verification.** The 2-second cap governs the *listing* rungs (0-5: reading files, env vars, and asking Docker for its container list) — those are always local and fast, and if a rung has not answered within budget it is skipped and reported as `timed out`, not blocked on. Verification (the per-candidate connect-and-probe step below) runs against a separate, per-candidate 1-second dial timeout and is not bounded by the 2-second discovery budget at all — a slow remote source that takes 1.5 seconds to answer `SELECT version()` does not abort the whole run, it just makes that one candidate's report line slower to fill in. lazysnap keeps a spinner up and prints candidates as their verification resolves, in the order they finish, rather than blocking the whole printed report on the slowest one. Only the discovery listing itself is a hard cutoff; verification is bounded per-candidate so one unreachable remote database cannot stall a decision that a local Docker container already answered in 40ms.
+
 | # | Probe | Yields | Notes |
 |---|---|---|---|
 | 0 | `./lazysnap.yml` | The whole previous run | If present, this is not a first run; see Scenario D in §5.5 |
@@ -526,7 +536,7 @@ Rules 1 and 4 are in tension, and resolving that tension is the substance of thi
 | 4 | Exited Postgres containers | Candidates marked `stopped` | Shown, not hidden; offered as "start it?" |
 | 5 | `docker-compose.yml` / `compose.yaml` in the working directory or a parent | Service names only | See below — this is a **naming** source, not a connection source |
 
-**Docker contexts must be resolved at rung 3.** Because Go's `client.FromEnv` does not read them ([pkg.go.dev](https://pkg.go.dev/github.com/docker/docker/client)) but Docker's CLI does ([contexts docs](https://docs.docker.com/engine/manage-resources/contexts/)), lazysnap resolves the daemon endpoint in this order, matching the CLI's documented precedence: `--host` flag → `DOCKER_HOST` → `DOCKER_CONTEXT` → the current context from `~/.docker/config.json` and `~/.docker/contexts/*/meta.json` → the default unix socket. Without this, every OrbStack and Colima user sees "Docker not running" on their first run. **This is the highest-risk single defect in the first-run path and it belongs in the first integration test.**
+**Docker contexts must be resolved at rung 3.** Because Go's `client.FromEnv` does not read them ([pkg.go.dev](https://pkg.go.dev/github.com/docker/docker/client)) but Docker's CLI does ([contexts docs](https://docs.docker.com/engine/manage-resources/contexts/)), lazysnap resolves the daemon endpoint in this order, matching docker-py's implementation of CLI behaviour rather than a page that states the order directly — the Docker contexts docs describe only that a context is used "unless overridden with environment variables such as `DOCKER_HOST` and `DOCKER_CONTEXT`, or on the command-line with the `--context` and `--host` flags" ([Docker contexts docs](https://docs.docker.com/engine/manage-resources/contexts/)), with no stated ordering. The ordering below is docker-py's, whose `from_context()` docstring is explicit: "resolves the current context the same way the Docker CLI does: `DOCKER_CONTEXT` env var, then the `currentContext` field in `~/.docker/config.json`, falling back to the built-in `default` context" ([`docker/client.py`, docker-py 7.2.0](https://github.com/docker/docker-py/blob/7.2.0/docker/client.py)), and 7.2.0's `use_context` establishes `DOCKER_HOST` winning over the context ([use_context docs](https://docker-py.readthedocs.io/en/stable/client.html)): `--host` flag → `DOCKER_HOST` → `DOCKER_CONTEXT` → the current context from `~/.docker/config.json` and `~/.docker/contexts/*/meta.json` → the default unix socket. Without this, every OrbStack and Colima user sees "Docker not running" on their first run. **This is the highest-risk single defect in the first-run path and it belongs in the first integration test.**
 
 **Why compose is rung 5 and not rung 1.** A `docker-compose.yml` describes intent, not reality. Ports can be `${DB_PORT:-5432}:5432`, and Compose resolves those from a `.env` in the project directory with a documented precedence order ([Compose env-var precedence](https://docs.docker.com/compose/how-tos/environment-variables/envvars-precedence/)); services can be behind profiles and not running; the file in the directory may not be the file the running containers were started from. Reading the YAML to *guess* a port is how you produce a connection string that does not connect — the §2.1 failure mode.
 
@@ -539,15 +549,22 @@ What the running containers *do* carry is authoritative provenance, because Comp
 
 And it takes the port from the live port bindings, with sqlit's three fallbacks and `_resolve_published_host`'s address-family fix (§2.1). `docker compose ps --format json` exposes the same data in a `Publishers` field with `PublishedPort` ([compose ps docs](https://docs.docker.com/reference/cli/docker/compose/ps/)) and is a reasonable cross-check, but shelling out to the CLI is a worse dependency than the SDK; use it only in a diagnostic subcommand.
 
-**Every candidate is then verified by connecting**, in parallel, with a 1-second dial timeout, and asking three questions: `SELECT version()`, the count of user tables in non-system schemas, and whether the current role can create a schema. A candidate that fails to connect is kept in the printed report with its error, and never silently dropped — the user needs to see that lazysnap found their database and could not log in to it.
+**Every candidate is then verified by connecting**, in parallel, with a 1-second dial timeout, and asking three questions: `SELECT version()`, the row count of every user table in non-system schemas (via `pg_stat_user_tables`, not a full scan), and `has_schema_privilege(current_user, 'public', 'CREATE')` — the same non-mutating check the §5.2 eligibility gate uses, so no probe writes anything to a database lazysnap has not yet decided to write to. A candidate that fails to connect is kept in the printed report with its error, and never silently dropped — the user needs to see that lazysnap found their database and could not log in to it.
+
+**De-duplication.** A container bound to `localhost:5432` and a `.env` `DATABASE_URL` pointing at `postgres://…@localhost:5432/shop` routinely name the same server — rung 1 and rung 3 both produce a candidate. Candidates are collapsed when they resolve to the same `(host, port, database)` after DNS/loopback normalisation (`localhost`, `127.0.0.1`, and the container's own published address family all treated as equal when the port matches). When two candidates collapse, the **lower-numbered rung wins as the printed provenance** — `.env` over a container, a container over compose naming — because it is the more specific source of truth, but the discarded candidate's provenance is still shown in parentheses so the user can see both were found: `source  shop-db  (env: DATABASE_URL, also docker: shop-db)   --source`. This keeps the decision header to the one provenance slot §5.2's format assumes while not hiding that two rungs agreed.
+
+**Why compose plus `.env` is the common case, not two disjoint ones — see Scenario B2 below.**
 
 ### 5.2 Choosing source and target without asking
 
 Verification gives, per candidate: reachable, table count, approximate row count, writability, and provenance. From those:
 
-**A candidate is eligible to be the target if and only if** it is reachable, the current role can create objects in it, and *either* it has zero user tables, *or* it contains the `lazysnap_meta` marker table written by a previous lazysnap run. Nothing else is ever written to, at any confidence, under any flag short of an explicit `--target`.
+**A candidate is eligible to be the target if and only if** it is reachable, the current role has `CREATE` on the schema being loaded into (`has_schema_privilege(current_user, 'public', 'CREATE')`, plus `has_database_privilege(current_user, current_database(), 'CREATE')` for a fresh database — the same wording used by the writability probe in §5.1, so the probe list and the gate never drift apart), and *either* every user table in it has zero rows, *or* it contains the `lazysnap_meta` marker table written by a previous lazysnap run. "Zero user tables" is the wrong test: a real project's compose test database routinely has migrations already applied — tables present, created by `db:migrate` or equivalent, but empty — and "zero user tables" would reject exactly the database Scenario A's happy path expects to write to. "Zero rows in every user table" is checked with `SELECT relname, n_live_tup FROM pg_stat_user_tables` (fast, approximate, no full scan) as long as there are fewer than, say, 500 user tables to check; past that cap, lazysnap samples and reports rather than stalling. A candidate with tables but rows only in some of them (partially seeded) fails the gate and is reported as such — reachable, writable, ineligible, row counts shown — rather than silently dropped. Nothing else is ever written to, at any confidence, under any flag short of an explicit `--target`.
 
-**The source is the candidate with the most tables that is not the chosen target.** Source connections are opened with `default_transaction_read_only = on` set on the session and every statement issued inside a read-only transaction, so rule 4 is enforced by the server rather than by our discipline.
+**The source is the most-reachable-local candidate with the most tables that is not the chosen target** — local (loopback, or a container whose Compose `working_dir` matches the current directory) beats remote regardless of table count, and only within the same locality tier does table count break ties; see Scenario B2 in §5.5 for why this matters more than it looks. Rule 4 ("never holds write access to the source") has two separable meanings, and lazysnap needs a mechanism for each:
+
+- **Not exercising write access.** Source connections are opened with `default_transaction_read_only = on` and every statement issued inside a read-only transaction, as a self-imposed guard against our own bugs — if lazysnap's own code tries to write, the transaction rejects it. Postgres documents the setting plainly: "This parameter controls the default read-only status of each new transaction. The default is `off` (read/write)" ([client connection defaults](https://www.postgresql.org/docs/current/runtime-config-client.html)). It is `USERSET` — any session, including our own, can turn it back off with `SET default_transaction_read_only = off`, and doing so grants nothing back because the role's privileges never changed. This is discipline wearing a server's uniform: real, worth keeping, but not access control.
+- **Not holding write access**, which is the rule CONCEPT.md actually states, requires the role itself to lack write privileges — a grant, not a session setting. lazysnap verifies this at connect time with `has_table_privilege` / `has_schema_privilege` checks for `INSERT`, `UPDATE`, `DELETE` on the schemas being read, prints the role and what it can do (`role app_ro can SELECT only on public, cannot INSERT/UPDATE/DELETE` or `role app can write — recommend a read-only role, see below`), and documents the supported setup: `CREATE ROLE lazysnap_ro LOGIN PASSWORD '…'; GRANT CONNECT ON DATABASE shop TO lazysnap_ro; GRANT USAGE ON SCHEMA public TO lazysnap_ro; GRANT SELECT ON ALL TABLES IN SCHEMA public TO lazysnap_ro;`. A source connecting as a writable role is not blocked — blocking a developer's own `postgres` superuser role would break the happy path — but it is named as a risk in the printed decision header, not silently accepted as equivalent to a read-only grant.
 
 **Both decisions are printed, always, with the flag that changes them**, honouring sqlit's own "conditional state problems, explicit user awareness" rule:
 
@@ -577,7 +594,7 @@ The decision ladder is: **source → target → root table → row count → mas
 - *Row count* defaults to 500 and is never asked.
 - *Masking* is never asked; it happens, and it is explained.
 
-In a non-interactive session (no TTY, or `--yes`), no question is ever asked: every default is taken, and any question whose default is "no" becomes a hard failure naming the flag that would have allowed it. That is how rule 5 (`same command works in CI`) and rule 1 (`one question`) coexist.
+In a non-interactive session (no TTY, or `--yes`), no question is ever asked: every default is taken where taking it has no side effect big enough to need a human's eyes on it (root table, row count, masking, truncating a stale marked target), and every question whose interactive default would *create or destroy* something — Q1 (start a container), Q3 (wipe a non-empty target), Q4 (need a secret with none available) — becomes a hard failure naming the flag that would have allowed it, regardless of what its interactive default is. That is how rule 5 (`same command works in CI`) and rule 1 (`one question`) coexist.
 
 ### 5.4 Root-table default, and why it can be defaulted at all
 
@@ -589,7 +606,7 @@ The top-scoring table is the default; `?` at the prompt shows the ranked top fiv
 
 `--root <table>` skips the question entirely, which is what CI uses and what `lazysnap.yml` records.
 
-### 5.5 The three scenarios
+### 5.5 The scenarios
 
 #### Scenario A — a folder with a `docker-compose.yml`
 
@@ -639,7 +656,22 @@ Details that matter:
 - **The password may be absent from the URL.** Resolve in order: the URL's own userinfo → `PGPASSWORD` → `PGPASSFILE`/`~/.pgpass` → the OS keyring under service `lazysnap` → prompt. The prompt is a secret prompt, not a configuration choice; it does not count against the one-question budget, it never appears when any earlier source succeeds, and it never appears in CI (a missing credential there is a hard failure naming `PGPASSWORD`/`--password-command`).
 - **Never persist a discovered secret without being asked.** After a prompted password, print a hint — `tip: lazysnap creds save stores this in your OS keyring` — rather than a question. This is sqlit's keyring design (§2.3) with the interaction budget removed.
 - **`lazysnap.yml` records the reference, never the value**: `source: {from: env, var: DATABASE_URL}`. sqlit's `password_command` (§2.3) is the precedent for a committed connection definition that contains no secret; lazysnap should support `password_command` for the same reason.
-- **A remote source deserves a louder read-only confirmation.** The header prints `read-only session` for every source, but for a source that is not on `localhost`/`127.0.0.1`/`::1`/a local container, it also prints the role and asserts `default_transaction_read_only` was accepted by the server. If the server refuses to set it, lazysnap stops. Rule 4 is not advisory.
+- **A remote source deserves a louder read-only confirmation.** The header prints `read-only session` for every source, but for a source that is not on `localhost`/`127.0.0.1`/`::1`/a local container, it also runs the §5.2 privilege check and prints what it found — `role app can write to shop — no read-only role configured, see lazysnap docs on GRANT SELECT` when the role holds write privileges, or `role app_ro: SELECT only` when it does not. A remote source held open by a writable role is not blocked (the run still proceeds; `default_transaction_read_only` still guards our own statements), but it is the loudest line in the header specifically because it is the one case where rule 4's actual guarantee — no write access held — is not met and the tool says so plainly instead of implying otherwise.
+
+#### Scenario B2 — compose and `.env` together, the actually common case
+
+The brief's three cases — compose, `.env`, nothing — are usually treated as disjoint, but a real Rails, Django, or Node repository routinely has both: a `docker-compose.yml` for local Postgres *and* a `.env` whose `DATABASE_URL` was copied from a teammate, a staging dump, or production, because that is how the app itself is configured. Rung 1 (`.env`) and rung 3 (compose-scoped containers) both yield a candidate, and they name different databases:
+
+```
+$ lazysnap
+  env · DATABASE_URL → postgres://app@prod-db.internal:5432/shop   (412 tables)
+  docker · compose project "shop" (working_dir matches .) → shop-db  (5432, 41 tables)
+  source  shop-db        (compose service "db", 41 tables, local)     --source
+  target  shop-db-test   (compose service "db-test", empty)           --target
+  root table? [customers]
+```
+
+**The tie-break: a local candidate is preferred as source over a non-local one, regardless of table count.** §5.2's plain rule — "most tables among non-target candidates" — would pick the 412-table `.env` candidate here, and if that DSN happens to point at staging or production, lazysnap would read from it, unattended, with no question asked, because source is never a question. That is worse than being wrong about a local scratch database: it is lazysnap connecting to production on a run nobody reviewed. The rule is therefore refined: **prefer a reachable local candidate (loopback address, or a container whose Compose `working_dir` label matches the current directory) as source whenever one exists**, table count only breaking ties among local candidates or among non-local ones. A non-local candidate becomes the source only when no local one is reachable — which is Scenario B proper — and the header always prints the environment variable's provenance even when it lost the tie, precisely because a developer staring at "why didn't it use my `DATABASE_URL`" deserves the same one-keypress answer §5.4 promises for the root table: `? DATABASE_URL pointed at prod-db.internal (412 tables, not local) — used shop-db instead`.
 
 #### Scenario C — a folder with nothing
 
@@ -669,18 +701,33 @@ Three properties of that output are deliberate. It shows **what was checked**, s
 
 Sub-cases:
 - **Docker not available at all.** The docker row reads one of four things — `not installed`, `not running`, `not accessible (permission denied — add your user to the docker group, or set DOCKER_HOST)`, or `context "x" unreachable` — mirroring sqlit's four-state enum (§2.1) but always with the remedy attached, because unlike sqlit's picker there is nothing else on the screen.
-- **A Postgres container is running but not from this project.** It *is* offered, marked with its provenance: `docker · postgres-16 (5432, 41 tables) — not from this compose project`. Being able to say "yes, that one" is worth more than directory purity; being told where it came from is what stops it being magic.
+- **A Postgres container is running but not from this project.** It is not asked about — source is never a question (§5.3) — it is simply included as a lower-confidence rung-3 candidate the moment the directory-scoped search comes up empty, and printed with its provenance exactly like any other source decision: `source  postgres-16   (5432, 41 tables) — not from this compose project    --source`. Once a source exists this way, the run is no longer Scenario C at all; it continues as Scenario B does — no eligible target, so Q1 fires. Being told where the container came from is what stops the pick being magic; not turning it into a question is what keeps rule 1 intact.
 
 #### Scenario D — the second run
 
-`./lazysnap.yml` exists. Zero questions. The file supplies source reference, target reference, root table, row count, per-column masking decisions and opt-outs. lazysnap re-verifies the target's eligibility gate (a file cannot authorise writing to a database that has since acquired data without the marker), prints the same decision header with `from lazysnap.yml` as the provenance, and runs. `--reconfigure` re-enters the first-run path. This is what CI runs, and it is the same binary and the same command.
+`./lazysnap.yml` exists. Zero questions. The file supplies source reference, target reference, root table, row count, per-column masking decisions and opt-outs. lazysnap re-verifies the target's eligibility gate (a file cannot authorise writing to a database that has since acquired data without the marker), prints the same decision header with `from lazysnap.yml` as the provenance, truncates any stale rows already in the marked target and prints that it did (§6, "not a question"), and runs. `--reconfigure` re-enters the first-run path. This is what CI runs, and it is the same binary and the same command.
 
 ### 5.6 Where state lives
 
 - **`./lazysnap.yml`** — emitted by a successful run, meant to be committed. References, never secrets. Records the decisions, the plan, the classification results with reasons, and the opt-outs.
 - **`~/.config/lazysnap/`**, overridable by `$LAZYSNAP_CONFIG_DIR`, respecting `$XDG_CONFIG_HOME` — machine-local, non-essential state only (last-used targets, a cached schema fingerprint). Directly modelled on sqlit's `_resolve_config_dir()` precedence: "`$SQLIT_CONFIG_DIR` if set (no migration); `$XDG_CONFIG_HOME/sqlit` (falling back to `~/.config/sqlit`)" ([`shared/core/store.py` L25-78](https://github.com/Maxteabag/sqlit/blob/v1.6.3/sqlit/shared/core/store.py#L25-L78)). Deleting this directory must never break a run.
 - **OS keyring, service name `lazysnap`, account `<host>:<port>/<database>`** — only ever written by an explicit `lazysnap creds save`. Backend via [`zalando/go-keyring`](https://github.com/zalando/go-keyring) (MIT, 1,324 stars, last pushed 2026-07-24 — [GitHub API](https://api.github.com/repos/zalando/go-keyring), checked 2026-09-05) or equivalent; probe it before trusting it, and fall back to *not storing* rather than to a plaintext file, which is the safe half of sqlit's fallback chain (§2.3).
-- **The target's `lazysnap_meta` table** — one row per run: run id, source fingerprint, root table, row count, masking secret id (not the secret), timestamp, tool version. This is what makes the target eligibility gate work across runs and across machines.
+- **The target's `lazysnap_meta` table** — one row per run: run id, source fingerprint, root table, row count, masking secret id (not the secret), timestamp, tool version. This is what makes the target eligibility gate work across runs and across machines. Specifically:
+
+  ```sql
+  CREATE TABLE lazysnap_meta (
+    run_id            uuid PRIMARY KEY,
+    tool_version      text NOT NULL,       -- semver of the lazysnap binary that wrote this row
+    schema_version    integer NOT NULL,    -- version of this table's own shape, for forward migration
+    created_at        timestamptz NOT NULL DEFAULT now(),
+    source_fingerprint text NOT NULL,      -- hash of (host, port, database) — never the DSN, never a secret
+    root_table        text NOT NULL,
+    row_count         integer NOT NULL,
+    masking_secret_id text NOT NULL        -- an id, resolvable via the keyring or --secret-file; never the secret itself
+  );
+  ```
+
+  Uniqueness and re-entry rules: the table itself, not a row, is the marker — its mere presence is what the §5.2 eligibility gate checks (`to_regclass('lazysnap_meta') is not null`), and every run appends a new row rather than overwriting, so the table is also a run history a human can `SELECT * FROM lazysnap_meta ORDER BY created_at DESC` to audit. **An incompatible version** is detected by `schema_version`: a `lazysnap_meta` present with a newer `schema_version` than the running binary understands is treated as untrusted — the gate fails closed (target ineligible, `--target` required) rather than guessing at a shape it cannot parse, and the error names the schema versions on both sides. **A target shared with another tool** — some other process writing to the same database — has no way to declare itself compatible, so lazysnap's marker only ever asserts "a compatible version of lazysnap has written here before," never "nothing else has"; a target eligibility check still requires zero rows in every *other* user table (§5.2), which is what actually protects a shared database, not the marker table itself.
 
 ### 5.7 Error presentation
 
@@ -694,12 +741,28 @@ Adopt sqlit's handler-registry pattern (§2.6b) wholesale: an ordered list of ha
 | `connection refused` on a container we detected | Note the published address family; if we chose `localhost`, retry once on the published address (the §2.1 / PR #279 failure) |
 | `database "x" does not exist` | List the databases the role can see |
 | `permission denied for table x` during extract | Name the table, the role, and the exact `GRANT SELECT` statement; offer to skip the table and record the skip in `lazysnap.yml` |
-| Source refuses `default_transaction_read_only` | Stop. This is a safety rail, not a warning |
+| Source role holds write privileges (`has_table_privilege` finds INSERT/UPDATE/DELETE on a schema being read) | Print the role and the missing `GRANT SELECT`-only setup; proceed — this is a warning about rule 4's guarantee, not a blocking failure, because rejecting a developer's own writable `postgres` role would break the happy path |
 | Target non-empty without the marker table | Refuse; print the table count and the `--target` flag; in interactive mode this is Q3 |
 | FK verification fails after load | Name the constraint, the child rows, and the parent that was capped; point at the fan-out cap that caused it |
 | Extract interrupted | Roll the target back; say what was rolled back |
 
 Two rules on top of the pattern. **Every error names the stage it happened in** — discover / classify / plan / extract / mask / load / verify — because a 20-minute run that fails needs to say where. And **no raw driver error reaches the user without a lazysnap sentence above it**, which is the gap in sqlit (§2.6d): the raw text stays, underneath, for the user who wants it.
+
+**Exit codes.** Every stage above maps to a distinct code, so CI can branch on *why* without parsing text:
+
+| Code | Meaning | Stage |
+|---|---|---|
+| 0 | Success | — |
+| 2 | Bad invocation — unknown flag, unparseable DSN, conflicting flags (`--source` and `--target` naming the same database) | before discover |
+| 3 | No source found and no safe default to ask about (Scenario C) | discover |
+| 4 | Target refused — non-empty and unmarked without `--allow-nonempty-target`, or the eligibility gate failed for every candidate | discover / plan |
+| 5 | Credential missing — no password from any of the five sources, non-interactive | discover |
+| 6 | Source is not adequately read-only — a remote source's role holds write privileges and `--require-read-only-role` was set (§5.2, §5.7) | discover |
+| 7 | Extraction or load failure — a table's `permission denied`, a connection dropped mid-copy, disk full on the target | extract / load |
+| 8 | FK verification failed after load | verify |
+| 130 | Interrupted (`SIGINT`/`Ctrl+C`) — target rolled back | any |
+
+This table does not exist anywhere else in this document; it is new, proposed alongside the error registry above, and untested like the rest of §5 (§7).
 
 ### 5.8 Discoverability of keys and flags
 
@@ -713,34 +776,46 @@ Two rules on top of the pattern. **Every error names the stage it happened in** 
 
 Not part of the first-run spec, but the other half of what this study is for:
 
-- One binary name, checked for prior claims on Homebrew, AUR, and the major package registries before the name is fixed (the `sqlit` / `sqlit-tui` trap, §3.5).
+- One binary name, checked for prior claims on Homebrew, AUR, and the major package registries before the name was fixed (the `sqlit` / `sqlit-tui` trap, §3.5) — done: see NAME.md and ADR-000, which renamed the project to lazyslice.
 - One-line install above the fold; a GIF per capability; a `--demo` path that needs no database, documented in the first screenful.
-- Tag-triggered release with generated notes and OIDC/keyless publishing — no long-lived tokens in repo secrets.
+- Tag-triggered release via [goreleaser](https://github.com/goreleaser/goreleaser) (§3.3) with generated notes and cosign/sigstore keyless signing — no long-lived tokens in repo secrets.
 - A CI job whose only purpose is to prove the artefact installs and starts (`lazysnap --version` on every built target).
 - Tiered tests: unit with no dependencies, integration behind a documented `docker compose` fixture with an env-var table of defaults, and container-creating tests behind an opt-in pytest/`go test` flag.
 - `CONTRIBUTING.md` carries the vision filter, not just the build commands. sqlit's CEQR/EAFF section is why 38 contributors did not turn it into DBeaver.
 - PR template that asks for test evidence and discloses AI assistance, as sqlit's PRs do.
 
+### 5.10 Divergences from docs/BUILD_PLAN.md
+
+§5 above was written from this sqlit study, and it disagrees with the brief docs/BUILD_PLAN.md already gave for this same research task in three places. Recorded here so ADR-006 inherits an explicit decision rather than a silent conflict:
+
+| Where | BUILD_PLAN says | §5 above proposes | Reason for the divergence |
+|---|---|---|---|
+| Root-table default | L250: "the table with the most incoming FKs" | §5.4: inbound minus outbound FK count, with lookup-table filtering and a name preference among the survivors | Raw inbound-FK count alone promotes lookup/reference tables (`countries`, `statuses`) that happen to be pointed at from everywhere; §7 already flags the resulting heuristic as untested, so this divergence is itself an open risk, not a settled improvement |
+| Reading `docker-compose.yml` | L250: "read `DATABASE_URL` from .env and docker-compose.yml" | §5.1 rung 5: compose YAML is a **naming** source only, never parsed for a DSN, because Compose variable substitution and profiles mean the file does not reliably describe what is actually running (§5.1's "why compose is rung 5, not rung 1") | The §2.1 failure mode this study documents — a guessed connection string that does not connect — is exactly what parsing the YAML for a DSN would risk |
+| Row-count flag name | L194, L232, invariant I6: `--take` | §6: `-n` / `--rows` | No positive reason found in this study; `--take` is BUILD_PLAN's existing choice and internal/invariants_test.go's invariant I6 is already written against it (L440: "Invariants I1 to I6 ... define correct. Never weaken a test to make it pass"), so this collision should resolve in `--take`'s favour rather than lazysnap's unless a later ADR argues otherwise |
+
+The third item is the one with a real cost: renaming the flag in §6 to match `--take` (or renaming the invariant if `--rows` genuinely reads better) needs to happen before implementation, not discovered when I6 fails to compile against a flag that does not exist.
+
 ---
 
 ## 6. The complete question catalogue
 
-Every question lazysnap may ask, with its default, when it fires, and what happens with no TTY. **Q2 is the only question on the happy path.** The ladder rule in §5.3 guarantees at most one of Q1/Q2/Q3 is asked in any run.
+Every question lazysnap may ask, with its default, when it fires, and what happens with no TTY. **Q2 is the only question on the happy path.** The ladder rule in §5.3, restated: lazysnap asks at most one *blocking* question — Q1, Q2, or Q3 — per run, because each is the first undetermined rung on the source→target→root-table ladder and every run stops climbing once it has asked one. Q4 sits outside that guarantee on purpose: it is a secret prompt, not a configuration decision, and CONCEPT.md's "at most one question" is about decisions the user must think about, not about typing a password the tool cannot safely default. A run can therefore ask one of {Q1, Q2, Q3} *and* Q4 in the same session without breaking the rule.
 
 | # | Question | Default | Fires when | Non-interactive behaviour | Flag that avoids it |
 |---|---|---|---|---|---|
-| **Q1** | `no local postgres found to load into. start one? postgres:16 as lazysnap-target-<project> on port <free> [Y/n]` | **Yes** | Source determined; no eligible target; Docker available | Takes the default (starts the container). `--no-create-target` turns it into a hard failure | `--target <dsn>` |
+| **Q1** | `no local postgres found to load into. start one? postgres:16 as lazysnap-target-<project> on port <free> [Y/n]` | **Yes**, interactively only | Source determined; no eligible target; Docker available | **Hard failure**, naming `--create-target` | `--create-target` |
 | **Q1′** | `target <name> is stopped — start it? [Y/n]` | **Yes** | An eligible target exists but its container is exited | Takes the default | `--target <dsn>` |
 | **Q2** | `root table? [customers]` | **The top-scoring table** per §5.4; `?` shows the ranked candidates and why | Source and target both determined (the happy path) | Takes the default | `--root <table>` |
 | **Q3** | `target <name> has 41 tables and no lazysnap marker. wipe and load? [y/N]` | **No** | An explicit `--target` points at a non-empty, unmarked database | **Hard failure**, naming `--allow-nonempty-target` | `--allow-nonempty-target` |
 | **Q4** | `password for <role>@<host>/<db>:` | none — a secret prompt, not a configuration choice | All five credential sources (URL, `PGPASSWORD`, `PGPASSFILE`/`~/.pgpass`, keyring, `password_command`) came up empty | **Hard failure**, naming `PGPASSWORD` and `--password-command` | `--password-command`, `lazysnap creds save` |
-| **Q5** | `<n> rows already in <table> in the target. keep them? [y/N]` | **No** (truncate) | Re-running into a marked target whose contents are stale | Takes the default | `--append` |
 
 Things that are deliberately **not** questions, with their fixed defaults:
 
 | Decision | Default | Why it is not a question | Flag |
 |---|---|---|---|
-| Which candidate is the source | Most tables among non-target candidates | Printed as a decision; wrong answers are cheap and reversible | `--source` |
+| `<n>` rows already in `<table>` in a marked target — keep or truncate | **Truncate** | Re-running into a marked target is exactly Scenario D, which is "zero questions" by design; a printed line (`target had 41 rows in customers — truncated`) satisfies rule 7 without spending the budget | `--append` |
+| Which candidate is the source | Most-reachable-local candidate, most tables among non-target candidates within that tier (§5.2, §5.5 Scenario B2) | Printed as a decision; wrong answers are cheap and reversible | `--source` |
 | Which candidate is the target | The one passing the eligibility gate, tie-broken by name then by marker | Printed; wrong answers are prevented by the gate, not by asking | `--target` |
 | Row count | **500** | CONCEPT.md's transcript; a number nobody has an opinion about until they do | `-n`, `--rows` |
 | Whether to mask a column classified as personal data | **Always mask** | Rule 3. No flag disables masking wholesale, ever | `--unmask <table.column>`, per column, recorded in `lazysnap.yml` |
@@ -749,7 +824,9 @@ Things that are deliberately **not** questions, with their fixed defaults:
 | Whether to write `lazysnap.yml` | **Always**, on success | It is the record of the run, not a preference | `--no-config` |
 | Whether the run is reproducible | Always records the masking secret *id*, never the secret | Secrets are never written to a committed file | `--secret-file` |
 
-**Interaction budget audit.** Scenario A: Q2 only. Scenario B with a remote source: Q1 only (root table defaults, printed). Scenario B with a local Postgres also present: Q2 only. Scenario C: no questions, a stop with a command. Scenario D: no questions. In CI: no questions, ever, in every scenario.
+**Interaction budget audit.** Scenario A: Q2 only. Scenario B with a remote source: Q1 only (root table defaults, printed). Scenario B with a local Postgres also present: Q2 only. Scenario B2 (compose and `.env` together): the local candidate wins the source tie-break, so this reduces to Scenario A's Q2 only. Scenario C: no questions, a stop with a command. Scenario D: no questions. In CI: no questions, ever, in every scenario.
+
+**Why Q1 defaults to Yes only with a human watching.** sqlit's CONTRIBUTING rule, quoted approvingly in §3.4 — "Universal state problems deem for magical fixes. Conditional state problems, explicit user awareness" — forbids exactly what an unattended `docker run` on Q1's old default would have been: a CI runner with no eligible target silently starting a `postgres:16` container nobody asked for. A human at a keyboard, mid-`lazysnap` run, pressing Enter on a line that names the image and the port is explicit awareness; a cron job or a CI pipeline hitting the same default with nobody reading the output is not. This is also why Scenario A's "compose file present, nothing running" variant refuses to start the project's own declared services and only prints `docker compose up -d db` — starting a container the developer already defined, with the images and volumes and networks *they* chose, is a bigger and more surprising side effect than starting a disposable, lazysnap-named, lazysnap-owned scratch container that exists only to be written into. Interactively, Q1 stays offered because that asymmetry holds; unattended, neither is safe enough to happen without a flag.
 
 ---
 
@@ -757,9 +834,9 @@ Things that are deliberately **not** questions, with their fixed defaults:
 
 - **Reddit is unreachable from this environment**, so community sentiment is sampled only from Hacker News and GitHub. The Show HN thread is nine months old; friction discovered since then may be recorded in places I could not read. A second, lower-traffic HN submission exists ([id=48271934](https://news.ycombinator.com/item?id=48271934), 2026-05-25, 20 points, 5 comments) and adds nothing.
 - **No public write-up by sqlit's author** on the Docker-detection design exists that I could find. §2.1 is reconstructed from source and from the bodies of PRs [#279](https://github.com/Maxteabag/sqlit/pull/279) and [#280](https://github.com/Maxteabag/sqlit/pull/280).
-- **docker-py's handling of `DOCKER_CONTEXT` is unverified.** The [documented set](https://docker-py.readthedocs.io/en/stable/client.html) for `from_env()` is `DOCKER_HOST`, `DOCKER_TLS_VERIFY`, `DOCKER_CERT_PATH`. I did not find a statement either way about contexts. For Go this is settled — [`client.FromEnv`](https://pkg.go.dev/github.com/docker/docker/client) reads four variables and contexts are not among them — which is why §5.1 specifies resolving them ourselves. **The precise file format of `~/.docker/contexts/*/meta.json` is not documented on the pages I read**; the implementation should read it from the Docker CLI's own source or use a maintained helper, and this is flagged as an implementation-phase task rather than a settled design.
-- **§5 is a proposal that nobody has run.** The specific claims most in need of testing, in order of risk: (a) that the target eligibility gate is *not* so strict that scenario A's happy path fails on real projects whose test database already has migrated-but-empty tables — a migrated schema has tables and no rows, so "zero user tables" may be the wrong test and "zero rows in every user table" may be right; (b) that the root-table scoring proposes the table a developer expects on at least, say, eight of ten real schemas; (c) that Q1's "start a container" default reads as helpful rather than alarming; (d) that a per-run password prompt with no persistence is not annoying enough to drive people to write DSNs into `lazysnap.yml` by hand.
-- **The discovery budget is unmeasured.** §5.1 asserts a 2-second cap covering a Docker list plus parallel verification connections. Verification requires a connection and three queries per candidate; against a slow remote source that may blow the budget on its own. What lazysnap should do when discovery times out mid-verification (proceed with partial results? show a spinner and keep going?) is unspecified.
-- **`lazysnap_meta` is named here but not specified** — schema, contents, what happens when the target is shared with another tool, and what happens when the marker exists but was written by an incompatible version.
+- **The precise file format of `~/.docker/contexts/*/meta.json` is not documented on the pages I read.** docker-py's `from_context()` states the resolution order in its docstring — "`DOCKER_CONTEXT` env var, then the `currentContext` field in `~/.docker/config.json`, falling back to the built-in `default` context" ([`docker/client.py`, docker-py 7.2.0](https://github.com/docker/docker-py/blob/7.2.0/docker/client.py)) — but not the schema of the per-context `meta.json` files themselves. The implementation should read it from the Docker CLI's own source or use a maintained helper, and this is flagged as an implementation-phase task rather than a settled design.
+- **§5 is a proposal that nobody has run.** The specific claims most in need of testing, in order of risk: (a) that "zero rows in every user table" (§5.2, revised from an earlier "zero user tables" draft that would have rejected a migrated-but-empty test database) is cheap enough to check on a real schema with hundreds of tables and does not itself blow the discovery budget; (b) that the root-table scoring proposes the table a developer expects on at least, say, eight of ten real schemas; (c) that Q1's "start a container" default reads as helpful rather than alarming; (d) that a per-run password prompt with no persistence is not annoying enough to drive people to write DSNs into `lazysnap.yml` by hand.
+- **The discovery budget is unmeasured, even though it is now specified.** §5.1 now separates the 2-second listing cap from a per-candidate 1-second verification timeout and says the latter is not bounded by the former (spinner, resolve-in-order). No implementation exists to measure whether 2 seconds is actually enough for the listing rungs on a machine with, say, 30 Docker containers running, or whether a 1-second dial timeout is too impatient for a remote source on a loaded network.
+- **`lazysnap_meta`'s schema (§5.6) is now specified but untested** — nobody has run a version-skew scenario against it, so the `schema_version` fail-closed behaviour and the "marker only asserts lazysnap wrote here, not that nothing else did" reasoning are design intent, not verified behaviour.
 - **The root-table heuristic has no evidence behind it.** In-degree minus out-degree is plausible and untested. Schemas with a single tenant table above the "customer" table (multi-tenant SaaS) will likely score the tenant table highest, which may or may not be the right answer.
 - **I did not review sqlit's TUI rendering, theming, results virtualisation, SSH tunnels, or cloud discovery** beyond noting that they exist. They are not on lazysnap's path to a first run.
