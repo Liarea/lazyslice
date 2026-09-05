@@ -22,15 +22,26 @@ import (
 // test: §10 records the source and target as references and never a password,
 // so a run driven by the yml alone would stop at Q4 for a credential. What the
 // second run does not get is a single plan or classify flag.
+//
+// Two guards stand in front of the comparison, for the reasons I3 gives at
+// length. An empty target dumps identically twice, so assertDumpHasData
+// insists the target holds rows; and the second run is compared against the
+// target the first run left behind, so "the config reproduced the snapshot"
+// would otherwise be indistinguishable from "the second invocation exited 0
+// and did nothing" — assertSecondRunHappened reads lazyslice_meta, which the
+// dumps deliberately exclude, and requires a run_id that was not there before.
 func TestI5EmittedConfigReproducesTheSnapshot(t *testing.T) {
 	ctx := context.Background()
 
 	for _, f := range fixtures {
 		t.Run(f.name, func(t *testing.T) {
 			db := start(ctx, t, f)
+			target := connect(ctx, t, db.target)
 
 			db.snapshot(ctx, t, f, f.root, f.take)
 			first := dumpData(ctx, t, db.target)
+			assertDumpHasData(t, "I5", "the "+f.name+" target after the first run", first)
+			runsBefore := markerRunIDs(ctx, t, target, "I5")
 
 			if _, err := os.Stat(db.configPath()); err != nil {
 				t.Fatalf("I5: the run wrote no %s, so there is nothing to feed back in: %v",
@@ -46,6 +57,7 @@ func TestI5EmittedConfigReproducesTheSnapshot(t *testing.T) {
 				"--config", db.configPath(),
 				"--yes",
 			)
+			assertSecondRunHappened(t, "I5", runsBefore, markerRunIDs(ctx, t, target, "I5"))
 			second := dumpData(ctx, t, db.target)
 
 			if diff := diffDumps(first, second); diff != "" {

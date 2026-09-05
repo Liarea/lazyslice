@@ -8,7 +8,7 @@
 | E3 Foundations | 3 | 2 | 1 | 6 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 0 | 0 | 0 |
 | E5 Hardening | 5 | 0 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 1 | 0 | 0 | 0 | 0 |
+| E9 Later | later | 2 | 0 | 0 | 0 | 0 |
 
 ## Open and in progress
 
@@ -16,6 +16,7 @@
 - T-0022 [in_progress] E3 · Invariant suite I1-I6, black box (opus)
 - T-0026 [open] E3 · Foundation review and fixes (opus)
 - T-0028 [open] E3 · Create GitHub repository Liarea/lazyslice and homebrew-tap, push main, add HOMEBREW_TAP_TOKEN secret (human)
+- T-0029 [open] E9 · Before going public: git-crypt the AI-specific paths and rewrite pre-encryption history (fable)
 
 ## Recently closed
 

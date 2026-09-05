@@ -5,6 +5,7 @@ package invariants
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -17,14 +18,21 @@ import (
 // Two halves, because either alone can be fooled.
 //
 //  1. The tool's own opinion: `lazyslice classify --json` is pointed at the
-//     target and must find nothing to mask. This is §6 item 4's second net run
-//     from outside the process, and it catches a masker that let a category
-//     through on a column the 200-row sample under-represented.
+//     target and must find nothing to mask in any column the run did not mask.
+//     This is §6 item 4's second net run from outside the process, and it
+//     catches a masker that let a category through on a column the 200-row
+//     sample under-represented.
 //  2. A grep the tool has no say in: every email address and every phone
 //     number that exists in the source is looked for in every cell of the
 //     target. A classifier that never flagged a column at all passes the first
 //     half and fails this one — which is the failure this suite exists to make
 //     impossible to miss.
+//
+// Both halves are about values in the target, so both are vacuous on a target
+// with no rows in it: findLeaks over zero cells returns nil and the classifier
+// has nothing to classify. assertTargetHoldsMaskedRows is the guard, and it
+// asks for more than "not empty" — it asks that a column the run recorded as
+// masked actually arrived with a value in it.
 func TestI2NothingFlaggedSurvives(t *testing.T) {
 	ctx := context.Background()
 
@@ -41,63 +49,166 @@ func TestI2NothingFlaggedSurvives(t *testing.T) {
 
 			db.snapshot(ctx, t, f, f.root, f.take)
 
-			t.Run("classifier", func(t *testing.T) { assertClassifierFindsNothing(ctx, t, db) })
+			masked := maskedColumns(t, db.configPath())
+			targetCells := scanCells(ctx, t, connect(ctx, t, db.target))
+			assertTargetHoldsMaskedRows(t, f.name, targetCells, masked)
+
+			t.Run("classifier", func(t *testing.T) { assertClassifierFindsNothing(ctx, t, db, masked) })
 			t.Run("grep", func(t *testing.T) {
-				assertNoSourceLiteralSurvives(ctx, t, db, sourceLiterals)
+				assertNoSourceLiteralSurvives(t, targetCells, sourceLiterals)
 			})
 		})
 	}
 }
 
+// assertTargetHoldsMaskedRows fails when the target holds nothing for the two
+// halves below to look at.
+//
+// "Nothing" has two shapes and both pass I2 silently: a target with no rows at
+// all, and a target that loaded rows but not into any column the run said it
+// masked. A pipeline that copied the root's --take rows and stopped satisfies
+// every other invariant in this package too, so this is the one place that
+// says so.
+func assertTargetHoldsMaskedRows(t *testing.T, fixture string, cells []cell, masked map[string]bool) {
+	t.Helper()
+
+	if len(cells) == 0 {
+		t.Fatalf("I2: the %s target holds no non-null value in any table, so both halves of this "+
+			"invariant pass whatever the masker did", fixture)
+	}
+	for _, c := range cells {
+		if masked[c.Table.String()+"."+c.Column] {
+			return
+		}
+	}
+	t.Fatalf("I2: the %s target holds %d non-null value(s) and not one of them is in any of the %d "+
+		"column(s) the emitted yml records as masked, so nothing the masker touched was loaded and "+
+		"both halves below are about columns nobody claimed to mask", fixture, len(cells), len(masked))
+}
+
 // assertClassifierFindsNothing runs `classify --json` against the target.
-func assertClassifierFindsNothing(ctx context.Context, t *testing.T, db *databases) {
+//
+// The assertion is scoped to §6 item 4: a column the run masked with a
+// category masker is *expected* to classify as its category — a masked email
+// is still an email — so only the columns the run left alone are held to
+// "nothing flagged". masked comes from the emitted yml, which is the run's own
+// statement of which those are.
+func assertClassifierFindsNothing(ctx context.Context, t *testing.T, db *databases, masked map[string]bool) {
+	t.Helper()
+
+	// The positive control, and the reason the code list below can be trusted.
+	//
+	// flaggedCodePrefixes is a claim about a catalogue that phase 4 writes. If
+	// the classify stage lands spelling its decisions any other way, every
+	// predicate here matches nothing, `hits` is empty for every possible
+	// target, and this half of I2 passes unconditionally on a classifier that
+	// is flagging every column it sees. So the same predicate is first run
+	// against the source, which the grep half has just proved is full of
+	// addresses and numbers: on that input it has to find something.
+	if flagged := flaggedColumns(t, classifyEvents(ctx, t, db, db.source, "the source")); len(flagged) == 0 {
+		t.Fatalf("I2: `classify --json` on the source flagged no column under any of the codes this "+
+			"test knows (%s), and the source is the fixture whose addresses and numbers the grep half "+
+			"proves are there. The classify stage has landed with codes flaggedCodePrefixes does not "+
+			"name, so the assertion on the target would pass on any output at all: put the codes the "+
+			"stage emits (internal/event/catalogue.yml) into that list.",
+			strings.Join(flaggedCodePrefixes, ", "))
+	}
+
+	var hits []string
+	for _, e := range flaggedColumns(t, classifyEvents(ctx, t, db, db.target, "the target")) {
+		column := e.Table + "." + e.Column
+		if masked[column] {
+			continue // §6 item 4: a column a category masker owns is out of scope
+		}
+		hits = append(hits, column+" ("+e.Code+")")
+	}
+	if len(hits) > 0 {
+		sort.Strings(hits)
+		t.Errorf("I2: the classifier flags %d column(s) of the target that the run did not mask:\n  %s",
+			len(hits), strings.Join(hits, "\n  "))
+	}
+}
+
+// classifyEvents runs `classify --json` against one database and parses the
+// stream.
+//
+// --config points into a directory that holds no yml, and that is the load
+// bearing half of the pair. --no-config suppresses only the *write* (§8: "Do
+// not write lazyslice.yml"); the read still defaults to ./lazyslice.yml, and
+// the working directory here is db.dir, which is exactly where the snapshot
+// under test just wrote its own. Fed that file, the classifier is not an
+// independent opinion of the target but an echo of the run's Columns map, its
+// extra_patterns and any opt-out it recorded — and an opt-out would blind the
+// one check meant to catch it.
+func classifyEvents(ctx context.Context, t *testing.T, db *databases, connURL, what string) []ndjsonEvent {
 	t.Helper()
 
 	res := runTool(ctx, t, db.dir,
-		"classify", "--source", db.target, "--json", "--no-config", "--yes",
+		"classify", "--source", connURL, "--json", "--yes",
+		"--no-config", "--config", filepath.Join(t.TempDir(), "lazyslice.yml"),
 		"--secret-file", db.secretPath(),
 	)
 	if res.exit != 0 {
-		t.Fatalf("I2: classifying the target:\n  %s", res)
+		t.Fatalf("I2: classifying %s:\n  %s", what, res)
 	}
+	return parseNDJSON(t, res.stdout)
+}
 
-	events := parseNDJSON(t, res.stdout)
+// flaggedColumns returns the events that report a column the classifier would
+// mask, and fails on anything it cannot read.
+//
+// Two failures rather than a quiet answer. A stream that names no column at
+// all means the contract this test reads has changed and it can no longer tell
+// a clean target from a silent one. A column-scoped code that is in neither
+// list means the catalogue has been renamed under it: the message names the
+// code, so the fix is a one-line edit rather than an archaeology exercise, and
+// the alternative — treating an unknown code as "not flagged" — is the exact
+// shape of a test that disarms itself.
+func flaggedColumns(t *testing.T, events []ndjsonEvent) []ndjsonEvent {
+	t.Helper()
+
 	named := 0
-	var hits []string
+	var flagged []ndjsonEvent
+	unknown := map[string]bool{}
 	for _, e := range events {
 		if e.Column == "" {
 			continue
 		}
 		named++
-		if !e.flagged() {
-			continue
+		switch {
+		case matchesAnyPrefix(e.Code, flaggedCodePrefixes):
+			flagged = append(flagged, e)
+		case matchesAnyPrefix(e.Code, copiedCodePrefixes):
+		default:
+			unknown[e.Code] = true
 		}
-		hits = append(hits, e.Table+"."+e.Column+" ("+e.Code+")")
 	}
 
-	// A predicate that matches nothing would make this half of I2 pass on any
-	// output at all, including none. If the classify stage never names a
-	// column, the contract this test reads has changed and the test is the
-	// thing to fix.
 	if named == 0 {
-		t.Fatalf("I2: `classify --json` on the target named no column in %d event(s); "+
-			"this test cannot tell a clean target from a silent one. "+
-			"ARCHITECTURE.md §4 says every decision has one line naming table and column",
-			len(events))
+		t.Fatalf("I2: `classify --json` named no column in %d event(s); this test cannot tell a clean "+
+			"target from a silent one. ARCHITECTURE.md §4 says every decision has one line naming "+
+			"table and column", len(events))
 	}
-	if len(hits) > 0 {
-		sort.Strings(hits)
-		t.Errorf("I2: the classifier flags %d column(s) of the target it just loaded:\n  %s",
-			len(hits), strings.Join(hits, "\n  "))
+	if len(unknown) > 0 {
+		codes := make([]string, 0, len(unknown))
+		for code := range unknown {
+			codes = append(codes, code)
+		}
+		sort.Strings(codes)
+		t.Fatalf("I2: `classify --json` named a column under %d code(s) this test does not recognise "+
+			"as either a masking decision or a copying one: %s. It cannot tell which of them mean "+
+			"personal data survived, so it would report clean by omission; add each to "+
+			"flaggedCodePrefixes or copiedCodePrefixes", len(codes), strings.Join(codes, ", "))
 	}
+	return flagged
 }
 
 // assertNoSourceLiteralSurvives greps the target for the source's addresses
 // and numbers.
-func assertNoSourceLiteralSurvives(ctx context.Context, t *testing.T, db *databases, source personalLiterals) {
+func assertNoSourceLiteralSurvives(t *testing.T, targetCells []cell, source personalLiterals) {
 	t.Helper()
 
-	leaks := findLeaks(scanCells(ctx, t, connect(ctx, t, db.target)), source)
+	leaks := findLeaks(targetCells, source)
 	if len(leaks) == 0 {
 		return
 	}
@@ -147,30 +258,46 @@ type ndjsonEvent struct {
 	Column string
 }
 
-// flaggedCodePrefixes are the codes this test reads as "the classifier would
-// mask this column".
+// flaggedCodePrefixes and copiedCodePrefixes are the two decisions §4 says a
+// classify run reaches for every column: mask it, or copy it.
 //
 // ARCHITECTURE.md §4's threshold is `possible` and above, and §6 item 4 makes
 // a column of the target reaching `possible` a failure with exit 9. Args
-// carries no category or confidence key (§7), so the Code is where that lands.
-// These are the prefixes the classify and verify catalogues are expected to
-// use; when the catalogue lands with other spellings, this list is what
-// changes, and the vacuity check above is what stops that being silent.
-var flaggedCodePrefixes = []string{
-	"classify.masked",
-	"classify.flagged",
-	"classify.personal",
-	"verify.residual",
-	"verify.second_net",
-}
-
-// flagged says whether this event reports a column the classifier would mask.
-func (e ndjsonEvent) flagged() bool {
-	if e.Kind == "warn" || e.Kind == "error" {
-		return true
+// carries no category or confidence key (§7), so the Code is where that lands,
+// and these are the prefixes the classify and verify catalogues are expected
+// to use.
+//
+// They are a claim about a file that does not exist yet: internal/event/
+// catalogue.yml carries only the three ADR-008 codes today. When the classify
+// stage lands, this list is what changes — and it cannot change silently,
+// because flaggedColumns fails on a column-scoped code in neither list and
+// assertClassifierFindsNothing requires this list to match something on a
+// source full of personal data before it will believe a clean target.
+var (
+	flaggedCodePrefixes = []string{
+		"classify.masked",
+		"classify.flagged",
+		"classify.personal",
+		"verify.residual",
+		"verify.second_net",
 	}
-	for _, prefix := range flaggedCodePrefixes {
-		if strings.HasPrefix(e.Code, prefix) {
+
+	copiedCodePrefixes = []string{
+		"classify.copied",
+		"classify.none",
+		"classify.unmasked",
+		"classify.skipped",
+		"classify.generated",
+		"classify.surrogate",
+	}
+)
+
+// matchesAnyPrefix is the code test. It is a prefix match because a code is
+// "<subject>.<verdict>.<detail>" (§7) and the detail is not this suite's
+// business.
+func matchesAnyPrefix(code string, prefixes []string) bool {
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(code, prefix) {
 			return true
 		}
 	}

@@ -21,15 +21,27 @@ import (
 // path §11.2 describes: the second run finds its own bound marker and
 // truncates. A determinism bug and a broken re-run therefore both fail here,
 // and the message says which line of which table moved.
+//
+// Two things are asserted before the comparison, because "the two dumps are
+// equal" is the easiest assertion in this package to satisfy by accident. A
+// data dump of a database with no rows is a few hundred bytes of SET
+// boilerplate and is byte-identical between runs, so assertDumpHasData
+// requires the target to hold data at all; and the second run is compared
+// against the state the first run left behind, so an invocation that exited 0
+// without truncating or reloading would pass perfectly, which
+// assertSecondRunHappened rules out through lazyslice_meta.
 func TestI3SameInputsSameTarget(t *testing.T) {
 	ctx := context.Background()
 
 	for _, f := range fixtures {
 		t.Run(f.name, func(t *testing.T) {
 			db := start(ctx, t, f)
+			target := connect(ctx, t, db.target)
 
 			db.snapshot(ctx, t, f, f.root, f.take)
 			first := dumpData(ctx, t, db.target)
+			assertDumpHasData(t, "I3", "the "+f.name+" target after the first run", first)
+			runsBefore := markerRunIDs(ctx, t, target, "I3")
 
 			// "Same secret" is only a claim if the key was persisted. When the
 			// key is ephemeral the two runs mask differently by design (§5), so
@@ -41,6 +53,7 @@ func TestI3SameInputsSameTarget(t *testing.T) {
 			}
 
 			db.snapshot(ctx, t, f, f.root, f.take)
+			assertSecondRunHappened(t, "I3", runsBefore, markerRunIDs(ctx, t, target, "I3"))
 			second := dumpData(ctx, t, db.target)
 
 			if diff := diffDumps(first, second); diff != "" {
