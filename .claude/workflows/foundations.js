@@ -52,9 +52,9 @@ const reviews = await parallel([
 const findings = reviews.filter(Boolean).flatMap(r => r.findings).filter(f => f.severity !== 'low')
 
 let fixes = null
-if (findings.length) {
-  log(`${findings.length} findings from foundation review; one fix task`)
-  fixes = await workflow({ scriptPath: IMPL }, { id: 'T-FOUNDFIX', title: 'Foundation review fixes', model: 'opus', stage: 'foundations', paths: ['testdata/', 'internal/', '.github/', 'Makefile', '.goreleaser.yaml'],
-    brief: `Address every finding below with targeted edits. Where a finding says a test could be faked, strengthen the test. Findings:\n${JSON.stringify(findings, null, 1)}` })
+if (true) {
+  log(`${findings.length} findings from foundation review plus carried-forward lows; one fix task`)
+  fixes = await workflow({ scriptPath: IMPL }, { id: 'T-FOUNDFIX', title: 'Foundation review fixes', model: 'opus', stage: 'foundations', paths: ['testdata/', 'internal/', 'cmd/CLAUDE.md', 'mask/CLAUDE.md', 'docs/CLAUDE.md', '.claude/CLAUDE.md', '.github/', 'Makefile', '.goreleaser.yaml'],
+    brief: `Address every finding below with targeted edits. Where a finding says a test could be faked, strengthen the test. Then apply the carried-forward low findings recorded in the Log sections of tracker/tasks/T-0021*.md and tracker/tasks/T-0023*.md (fixture loader COPY-in-conditional and case-insensitive header, LoadPagila superuser guard, the CLAUDE.md corrections, and a new mask/CLAUDE.md stating the masker contract from ARCHITECTURE.md §5 and ADR-006). Findings:\n${JSON.stringify(findings, null, 1)}` })
 }
 return { findings, fixes }
