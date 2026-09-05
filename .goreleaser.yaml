@@ -114,7 +114,7 @@ signs:
 release:
   draft: false
   # Until the tool does what CONCEPT.md promises, every tag is a pre-release.
-  prerelease: auto
+  prerelease: true
   footer: |
     lazyslice is pre-release. It masks personal data by default and refuses to
     write to a target it did not create, but the stated false negatives in

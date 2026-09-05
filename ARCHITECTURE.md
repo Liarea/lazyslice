@@ -1212,7 +1212,9 @@ tracker/                epics, tasks, BOARD.md; written only by tools/tracker.py
 
 ## 13. Dependencies
 
-Every version below was checked against proxy.golang.org (and go.dev/dl for the toolchain) on 2026-09-05. Pinned exactly in `go.mod`; a bump is a pull request that says why. The three Charm modules are imported as `charm.land/...`: `github.com/charmbracelet/bubbletea/v2@v2.0.9` and its siblings declare the `charm.land` module path, so the `github.com` spelling does not compile.
+> Charmbracelet publishes the v2 modules under the `charm.land/...` path; go.mod pins those paths (scaffold review, T-0020).
+
+Every version below was checked against proxy.golang.org (and go.dev/dl for the toolchain) on 2026-09-05. Pinned exactly in `go.mod`; a bump is a pull request that says why. The three Charm modules are imported as `charm.land/...`: `charm.land/bubbletea/v2@v2.0.9` and its siblings declare the `charm.land` module path, so the `github.com` spelling does not compile.
 
 | Module | Version | Reason |
 |---|---|---|

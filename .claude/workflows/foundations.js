@@ -9,7 +9,8 @@ export const meta = {
 }
 const REPO = '/Users/gareth/personal_repos/lazyslice'
 const IMPL = `${REPO}/.claude/workflows/implement.js`
-// args: { step: 'scaffold' | 'parallel' | 'review' }  one step per usage window
+// args: { step: 'scaffold' | 'fixtures' | 'invariants' | 'review' }  one step per usage window
+// fixtures: T-FIXTURES and T-ADR008 in parallel. invariants: T-INVARIANTS (needs fixtures), T-CLAUDEMD, T-ROADMAP in parallel.
 const step = (args && args.step) || 'scaffold'
 
 if (step === 'scaffold') {
@@ -19,7 +20,7 @@ const scaffold = await workflow({ scriptPath: IMPL }, { id: 'T-SCAFFOLD', title:
 return { scaffold }
 }
 
-if (step === 'parallel') {
+if (step === 'fixtures' || step === 'invariants') {
 phase('Parallel')
 const tasks = [
   { id: 'T-FIXTURES', title: 'Golden fixtures: Pagila and nasty.sql', model: 'opus', stage: 'foundations', paths: ['testdata/', 'internal/testutil/fixtures.go'],
@@ -33,7 +34,8 @@ const tasks = [
   { id: 'T-ROADMAP', title: 'ROADMAP.md with gates and Later', model: 'sonnet', reviewers: 1, stage: 'foundations', paths: ['ROADMAP.md'],
     brief: `Write ${REPO}/ROADMAP.md from phases 4 to 8 of ${REPO}/docs/BUILD_PLAN.md. For each phase: the goal in one sentence, the gate as a checkbox list, and a "Not in this phase" list. Top section "Current phase: 3, Foundations" with the phase 3 gate. Add the rule at the top: any feature request goes into the Later section at the bottom with a one-line reason, and nothing moves out of Later until the current gate is ticked. Seed Later with the v1 non-goals from CONCEPT.md.` },
 ]
-const results = await parallel(tasks.map(t => () => workflow({ scriptPath: IMPL }, t)))
+const pick = step === 'fixtures' ? ['T-FIXTURES', 'T-ADR008'] : ['T-INVARIANTS', 'T-CLAUDEMD', 'T-ROADMAP']
+const results = await parallel(tasks.filter(t => pick.includes(t.id)).map(t => () => workflow({ scriptPath: IMPL }, t)))
 return { results }
 }
 
