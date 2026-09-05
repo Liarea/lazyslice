@@ -5,7 +5,7 @@
 | E0 Frame | 0 | 0 | 0 | 3 | 0 | 0 |
 | E1 Research | 1 | 0 | 0 | 10 | 0 | 0 |
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
-| E3 Foundations | 3 | 6 | 0 | 1 | 0 | 0 |
+| E3 Foundations | 3 | 4 | 2 | 1 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 0 | 0 | 0 |
 | E5 Hardening | 5 | 0 | 0 | 0 | 0 | 0 |
 | E9 Later | later | 1 | 0 | 0 | 0 | 0 |
@@ -13,10 +13,10 @@
 ## Open and in progress
 
 - T-0019 [open] E9 · Go vs Python COPY throughput benchmark to validate ADR-001 (opus)
-- T-0021 [open] E3 · Golden fixtures: Pagila and nasty.sql (opus)
+- T-0021 [in_progress] E3 · Golden fixtures: Pagila and nasty.sql (opus)
 - T-0022 [open] E3 · Invariant suite I1-I6, black box (opus)
 - T-0023 [open] E3 · Per-directory CLAUDE.md files (sonnet)
-- T-0024 [open] E3 · ADR-008 first run from lazygit, lazydocker, k9s source (opus)
+- T-0024 [in_progress] E3 · ADR-008 first run from lazygit, lazydocker, k9s source (opus)
 - T-0025 [open] E3 · ROADMAP.md with gates and Later (sonnet)
 - T-0026 [open] E3 · Foundation review and fixes (opus)
 
