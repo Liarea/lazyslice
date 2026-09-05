@@ -2,12 +2,37 @@ export const meta = {
   name: 'lazyslice-hardening',
   description: 'Phase 5: torture schemas, failure UX, performance, then a three-attacker red team with one fix round and re-attack',
   phases: [
+    { title: 'Features', detail: 'section 14 phase-5 items: TUI screens, provisioning and rung 4, polymorphic inference, CI matrix and supply chain' },
     { title: 'Harden', detail: 'torture, failure UX, performance, each through implement.js in sequence' },
     { title: 'Red team', detail: 'three attackers try to make the tool leak; fix; re-attack' },
   ],
 }
 const REPO = '/Users/gareth/personal_repos/lazyslice'
 const IMPL = `${REPO}/.claude/workflows/implement.js`
+// args: { step: 'features' | 'harden' | 'redteam' }  one step per usage window
+const step = (args && args.step) || 'features'
+
+const FEATURES = [
+  { id: 'T-TUI', title: 'Bubble Tea reasons and plan screens', stage: 'tui', paths: ['internal/tui/', 'cmd/lazyslice/'], integration: false,
+    brief: `Implement internal/tui per docs/adr/002-tui.md and ARCHITECTURE.md §7 and §9: the reasons screen (classifier decisions with their reason strings, per-column opt-out that builds the same --unmask REASON flag) and the plan screen (tables, estimates, caps hit), both building a core.Request. The line printer stays the default; the TUI runs only on a TTY when the flag or the question ladder invokes it. Every action shows its keybinding; add the ADR-002 test that fails any keybinding lacking a CLI flag. Model tests with the framework's test utilities.` },
+  { id: 'T-PROVISION', title: 'Provisioning --create-target and rung 4', stage: 'discover', paths: ['internal/discover/', 'cmd/lazyslice/'], integration: true,
+    brief: `Implement discover/provision per ARCHITECTURE.md §9 "Provisioning": --create-target creates and starts a Postgres container matching the source major, and rung 4 offers stopped containers. The T2 gate runs on the provisioned target exactly as on any other. Integration test against Docker; skip cleanly when Docker is absent.` },
+  { id: 'T-POLY', title: 'Polymorphic association inference', stage: 'plan', paths: ['internal/plan/', 'internal/introspect/'], integration: false,
+    brief: `Implement ARCHITECTURE.md §3.2 polymorphic inference: detect _type/_id and content_type_id/object_id pairs, add parent-direction virtual edges, report them in the plan, and keep the caps bounding them. Until now the plan printed "polymorphic pair detected, not followed: no constraint"; keep that message for pairs that inference cannot resolve. Tests on nasty.sql's polymorphic pair.` },
+  { id: 'T-CI5', title: 'Five-major CI matrix, SBOM, govulncheck', stage: 'foundations', paths: ['.github/', 'Makefile', '.goreleaser.yaml'], integration: false,
+    brief: `Per ADR-003 and THREAT_MODEL T10: the integration job runs against Postgres 14, 15, 16, 17, and 18 via testcontainers; add govulncheck to CI; add SBOM generation and checksum signing to the goreleaser release; add the docs-drift job (generated FLAGS.md, KEYBINDINGS.md, ERRORS.md must match tools/docgen output) and the unsafe-flag grep job from CONCEPT.md's enforcement list.` },
+]
+
+if (step === 'features') {
+  phase('Features')
+  const results = []
+  for (const t of FEATURES) {
+    const r = await workflow({ scriptPath: IMPL }, { ...t, model: t.id === 'T-CI5' ? 'sonnet' : 'opus', effort: 'high' })
+    results.push(r)
+    if (!r || r.status !== 'merged') { log(`Stopped at ${t.id}`); return { results, stopped_at: t.id } }
+  }
+  return { results }
+}
 
 const TASKS = [
   { id: 'T-TORTURE', title: 'Schema torture suite', stage: 'hardening', paths: ['testdata/torture/', 'internal/', 'Makefile', 'docs/TORTURE.md'], integration: true,
@@ -18,12 +43,15 @@ const TASKS = [
     brief: `Profile a snapshot of 5,000 root rows from a source whose child table has 20,000,000 rows (extend the nasty.sql generator with a size parameter). Report where time goes per stage with pprof. Target: under 3 minutes on this machine against local containers. Optimise only the top two hotspots. Write the before and after numbers, the commands, and the flame summary into docs/PERF.md. Add a make bench target and a CI job that fails if extract throughput drops more than 20% from the recorded baseline stored in testdata/bench/baseline.json.` },
 ]
 
-phase('Harden')
-const results = []
-for (const t of TASKS) {
-  const r = await workflow({ scriptPath: IMPL }, { ...t, model: 'opus', effort: 'high' })
-  results.push(r)
-  if (!r || r.status !== 'merged') { log(`Stopped at ${t.id}`); return { results, stopped_at: t.id } }
+if (step === 'harden') {
+  phase('Harden')
+  const results = []
+  for (const t of TASKS) {
+    const r = await workflow({ scriptPath: IMPL }, { ...t, model: 'opus', effort: 'high' })
+    results.push(r)
+    if (!r || r.status !== 'merged') { log(`Stopped at ${t.id}`); return { results, stopped_at: t.id } }
+  }
+  return { results }
 }
 
 phase('Red team')
@@ -46,4 +74,4 @@ if (leaks.length) {
   second = (await attack(2)).filter(Boolean).flatMap(r => r.attempts).filter(x => x.leaked)
   log(`Red team round 2: ${second.length} still leaking`)
 }
-return { results, first_round: first, leaks, fix, still_leaking: second }
+return { first_round: first, leaks, fix, still_leaking: second }

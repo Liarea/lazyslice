@@ -18,9 +18,9 @@ cat tracker/BOARD.md                                    # the board
 | 0 Frame | written by hand | CONCEPT.md, OPERATING_MODEL.md, tracker | no |
 | 1 Research | `.claude/workflows/research.js` | 8 docs, critique, revise, 5 guides, synthesis | no |
 | 2 Architecture | `.claude/workflows/architecture.js` | benchmark, 3 proposals, 3 judges, ADRs, review | no |
-| 3 Foundations | `.claude/workflows/foundations.js` | scaffold, then fixtures + invariants + CLAUDE.md + roadmap, review | no |
-| 4 Vertical slice | `.claude/workflows/slice.js` | six stages through implement.js, stops at first block | no |
-| 5 Hardening | `.claude/workflows/hardening.js` | torture schemas, failure UX, perf, red team | no |
+| 3 Foundations | `.claude/workflows/foundations.js` with `{step}` | `scaffold`, then `parallel` (fixtures, invariants, CLAUDE.md files, ADR-008, roadmap), then `review`; one step per window | no |
+| 4 Vertical slice | `.claude/workflows/slice.js` | ten packages in dependency order through implement.js, stops at first block; resume by run id | no |
+| 5 Hardening | `.claude/workflows/hardening.js` with `{step}` | `features` (TUI, provisioning, polymorphic, CI matrix), `harden` (torture, failure UX, perf), `redteam` | no |
 | 6 Launch | drafts only | README, GIF, posts | yes: create GitHub repo, post |
 | 7 Breadth | implement.js per adapter, worktrees | MySQL, SQLite, SQL Server | no |
 | 8 Client-facing | research only | interviews, hosted design, pricing | yes: everything commercial |
