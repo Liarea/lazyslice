@@ -15,6 +15,8 @@ export const meta = {
 //   model  developer model: 'opus' | 'sonnet'
 //   paths  directories or files the developer may write, as an array of repo-relative paths
 //   stage  pipeline stage name or 'peripheral'
+//   reviewers  1 or 3 (default 3); peripheral docs tasks use 1
+//   integration  run make integration in verify
 
 const REPO = '/Users/gareth/personal_repos/lazyslice'
 const a = args || {}
@@ -22,9 +24,10 @@ if (!a.brief || !a.id) throw new Error('implement.js needs args {id, title, brie
 const model = a.model || 'opus'
 const effort = a.effort || 'high'
 const paths = (a.paths || []).join(', ')
+const nReviewers = a.reviewers === 1 ? 1 : 3
 
 const PRE = `You are a developer on lazyslice. Repo: ${REPO}. Read ${REPO}/CLAUDE.md, ${REPO}/ARCHITECTURE.md, and the CLAUDE.md in every directory you touch, before writing code.
-Rules: you may write only under these paths: ${paths}. You may not edit go.mod or go.sum; if you need a dependency that is missing, stop and report it in your return value. Do not fix nearby code, do not extend behaviour the task did not mention, do not add tests beyond the task. Prefer targeted edits over rewriting files. Run gofmt on files you touch. Before returning, run: make lint && make test (and make integration if your task says so), and paste the last 20 lines of output into your return value. "Should work" is not a status. Do not commit. Nobody is watching and nobody can answer questions: finish the whole task.`
+Rules: you may write only under these paths: ${paths}. You may not edit go.mod or go.sum; if you need a dependency that is missing, stop and report it in your return value. Do not fix nearby code, do not extend behaviour the task did not mention, do not add tests beyond the task. Prefer targeted edits over rewriting files. Run gofmt on files you touch. Before returning, run: make lint && make test (and make integration if your task says so), and paste the last 20 lines of output into your return value. "Should work" is not a status. Do not commit. Nobody is watching and nobody can answer questions: finish the whole task. A previous attempt at this task may have been interrupted: if files under your paths already exist, read them and continue from that state rather than starting over.`
 
 const DEV = { type: 'object', required: ['files', 'summary', 'checks_output', 'checks_passed', 'concerns', 'postmortem'], properties: {
   files: { type: 'array', items: { type: 'string' } }, summary: { type: 'string', description: 'at most 150 words' },
@@ -47,7 +50,7 @@ let dev = await agent(`${PRE}\n\n<task id="${a.id}">\n${a.brief}\n</task>`, { la
 if (!dev) return { id: a.id, status: 'blocked', reason: 'developer agent died', findings: [] }
 
 const review = async (round) => {
-  const rs = await parallel(LENSES.map(l => () => agent(`You are a reviewer on lazyslice. Repo: ${REPO}. Read ${REPO}/CLAUDE.md and ${REPO}/ARCHITECTURE.md. The task under review is:\n<task id="${a.id}">\n${a.brief}\n</task>\nThe developer reports: ${dev.summary}. Files: ${dev.files.join(', ')}. Checks passed: ${dev.checks_passed}.\nYour lens: ${l.text}\nRun the checks yourself (make lint && make test) and do not trust the developer's report. Do not fix anything. Return findings with file and line; severity high means it must not merge.`,
+  const rs = await parallel(LENSES.slice(0, nReviewers).map(l => () => agent(`You are a reviewer on lazyslice. Repo: ${REPO}. Read ${REPO}/CLAUDE.md and ${REPO}/ARCHITECTURE.md. The task under review is:\n<task id="${a.id}">\n${a.brief}\n</task>\nThe developer reports: ${dev.summary}. Files: ${dev.files.join(', ')}. Checks passed: ${dev.checks_passed}.\nYour lens: ${l.text}\nRun the checks yourself (make lint && make test) and do not trust the developer's report. Do not fix anything. Return findings with file and line; severity high means it must not merge.`,
     { label: `review:${l.key}:r${round}`, phase: 'Review', model: 'opus', schema: FINDINGS })))
   return rs.filter(Boolean).flatMap(r => r.findings)
 }
