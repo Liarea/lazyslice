@@ -3,12 +3,12 @@ id: T-0014
 title: "Language throughput benchmark, Go vs Python"
 epic: E2
 phase: 2
-status: in_progress
+status: cancelled
 owner: opus
 created: 2026-09-05
 started: 2026-09-05
-closed: ""
-outcome: ""
+closed: 2026-09-05
+outcome: cancelled
 ---
 
 # T-0014 · Language throughput benchmark, Go vs Python
@@ -27,6 +27,8 @@ outcome: ""
 
 - 2026-09-05 started
 
+- 2026-09-05 cancelled: Parked to E9 as T-0019; usage window could not fit it alongside the proposals and judges.
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+Cancelled. Reason: Parked to E9 as T-0019; usage window could not fit it alongside the proposals and judges.
