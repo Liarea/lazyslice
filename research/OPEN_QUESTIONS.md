@@ -15,3 +15,8 @@ Also from research/SYNTHESIS.md section 5, the twenty-three questions listed the
 
 - **Flag naming:** the root-count flag is `--take`, matching invariant I6 and the build plan. Short form `-n`.
 - **Hosted service:** struck, see docs/adr/007-tool-not-company.md.
+
+## Added from the mvp-first proposal, 2026-09-05
+
+9. **Child cap semantics.** BUILD_PLAN 4.3 says a per-table cap of 10x N; HARD_PROBLEMS argues per-parent-key caps. The two differ materially in slice size. The decide agent picks one, states the default, and names the flag.
+10. **Exit-code table.** SQLIT_STUDY section 5.7 has no code for a masking-verification failure or a budget abort. The decide agent publishes one exit-code table in ARCHITECTURE.md and every proposal's numbering yields to it.
