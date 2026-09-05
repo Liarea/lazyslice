@@ -42,3 +42,7 @@ make integration  # container-backed tests; needs a Docker endpoint
 
 The masker is a nested Go module, `github.com/Liarea/lazyslice/mask`, so it can
 be imported by a program that has never heard of lazyslice (ADR-006).
+
+## Licence
+
+Apache License 2.0. See [LICENSE](LICENSE). The name lazyslice is a trademark of the project; the licence does not grant permission to use it for a derived product (Apache-2.0 §6).

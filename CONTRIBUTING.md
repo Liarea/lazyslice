@@ -107,3 +107,7 @@ pluggable**, by design and not by omission.
 Do not open a public issue for a masking miss or any other vulnerability. See
 [SECURITY.md](SECURITY.md) for the private route, and read the rule about not
 sending us personal data before you write the report.
+
+## Licence and sign-off
+
+Contributions are accepted under the Apache License 2.0, the same licence as the project. There is no contributor licence agreement. Instead, every commit carries a Developer Certificate of Origin sign-off (`git commit -s`), which adds a `Signed-off-by:` line stating you have the right to submit the change under that licence. See https://developercertificate.org/. The project will not relicense contributions under a non-open-source licence.
