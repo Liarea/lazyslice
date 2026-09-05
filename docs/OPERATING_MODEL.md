@@ -28,7 +28,7 @@ Default is to inherit the session model when unsure. Never downgrade a reviewer 
 
 ## Budget reality
 
-The human's plan has session usage limits that reset at fixed times. A phase-1 research run of 29 agents cost about 3.5 million subagent tokens and was interrupted twice. Rules that follow from this: every workflow must be resumable by run id and commit partial output before resuming; a single run should aim for under 15 agents or under about 1.5 million tokens; reviewers stay on Opus, but revision and fix rounds that apply a concrete finding list run on Sonnet; research agents that spot-check links do so on at most five links, not every one.
+The human's plan has session usage limits that reset at fixed times. A phase-1 research run of 29 agents cost about 3.5 million subagent tokens and was interrupted twice. Rules that follow from this: every workflow must be resumable by run id and commit partial output before resuming; observed windows are five hours long and have held between 0.6 and 3.6 million subagent tokens depending on what ran earlier in the window, so a single run should aim for under 12 agents or about 2 million tokens, and the orchestrator does not start a second heavy run in the same window; reviewers stay on Opus, but revision and fix rounds that apply a concrete finding list run on Sonnet; research agents that spot-check links do so on at most five links, not every one.
 
 ## Review policy
 
