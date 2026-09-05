@@ -4,6 +4,7 @@ package invariants
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"testing"
 
@@ -27,6 +28,13 @@ import (
 // component references nothing at all (testdata/README.md trap 4), and a
 // MATCH FULL one is either wholly NULL or wholly present (trap 5), so the same
 // predicate is right for both.
+//
+// The anti-join alone is not the invariant, because a target that declares no
+// foreign key at all passes it, and so does one that recreated most of the
+// source's edges and quietly dropped the one that would have failed VALIDATE.
+// assertEveryForeignKeyRecreated is the other half: the source's edges are
+// read with the same query and every one whose two tables exist in the target
+// must be declared there too.
 func TestI1ForeignKeysResolve(t *testing.T) {
 	ctx := context.Background()
 
@@ -37,11 +45,7 @@ func TestI1ForeignKeysResolve(t *testing.T) {
 
 			conn := connect(ctx, t, db.target)
 			keys := foreignKeysOf(ctx, t, conn)
-			if len(keys) == 0 {
-				t.Fatalf("I1: the target declares no foreign keys at all, so this invariant would pass "+
-					"vacuously; %s has %d and §11.1 says they are recreated and validated",
-					f.name, len(foreignKeysOf(ctx, t, connect(ctx, t, db.source))))
-			}
+			assertEveryForeignKeyRecreated(ctx, t, f.name, connect(ctx, t, db.source), conn, keys)
 
 			for _, fk := range keys {
 				if n := danglingRows(ctx, t, conn, fk); n > 0 {
@@ -56,8 +60,51 @@ func TestI1ForeignKeysResolve(t *testing.T) {
 	}
 }
 
-// foreignKey is one declared edge of a database, as information_schema reports
-// it.
+// assertEveryForeignKeyRecreated fails when the target is missing an edge the
+// source declares between two tables the target has.
+//
+// The zero case is a special case of it: a target with no foreign keys at all
+// is missing all of them, and the message names each one rather than reporting
+// a count of nothing. Constraints are matched on the child table and the
+// constraint name together, because §11.1 recreates them from
+// pg_get_constraintdef and a name is unique per table, not per schema.
+//
+// Source edges whose child or parent table is absent from the target are
+// skipped: §11.1 recreates the tables the plan selected, and a --skip-table
+// (§3.6) or an unreachable table is not an FK the target ever promised.
+func assertEveryForeignKeyRecreated(
+	ctx context.Context, t *testing.T, fixture string, source, target *pgx.Conn, targetKeys []foreignKey,
+) {
+	t.Helper()
+
+	have := make(map[string]bool, len(targetKeys))
+	for _, fk := range targetKeys {
+		have[fk.Child.String()+" "+fk.Name] = true
+	}
+	tables := tableSet(ctx, t, target)
+
+	var missing []string
+	for _, fk := range foreignKeysOf(ctx, t, source) {
+		if !tables[fk.Child] || !tables[fk.Parent] {
+			continue
+		}
+		if have[fk.Child.String()+" "+fk.Name] {
+			continue
+		}
+		missing = append(missing, fk.Name+" on "+fk.Child.String()+"("+strings.Join(fk.ChildCols, ",")+
+			") → "+fk.Parent.String()+"("+strings.Join(fk.ParentCols, ",")+")")
+	}
+	if len(missing) == 0 {
+		return
+	}
+	sort.Strings(missing)
+	t.Fatalf("I1: the target declares %d foreign key(s) and the %s source declares %d more between "+
+		"tables the target has, so the anti-join below is silent about them; §11.1 says every foreign "+
+		"key is recreated NOT VALID and then validated:\n  %s",
+		len(targetKeys), fixture, len(missing), strings.Join(missing, "\n  "))
+}
+
+// foreignKey is one declared edge of a database.
 type foreignKey struct {
 	Name       string
 	Child      tableRef
@@ -66,161 +113,121 @@ type foreignKey struct {
 	ParentCols []string // aligned with ChildCols
 }
 
-// foreignKeysOf reads every foreign key of a database from information_schema.
+// foreignKeysOf reads every foreign key of a database from pg_constraint.
 //
-// information_schema rather than pg_constraint because I1 is a statement about
-// the database a user gets, expressed in the vocabulary that database exposes:
-// a run that produced a target whose constraints are only visible through
-// PostgreSQL's own catalog would still be reported here, and one that produced
-// no constraints at all is caught by the vacuity check in the test.
+// pg_constraint rather than information_schema, which an earlier draft used
+// and which cannot express two of the shapes testdata/ contains.
 //
-// The column alignment is the fiddly part. key_column_usage gives the
-// referencing columns in ordinal_position order, each carrying
-// position_in_unique_constraint: the 1-based position of the matching column
-// in the referenced unique or primary key constraint. That is what makes a
-// composite key (testdata/README.md trap 4) line up in the declared order
-// rather than alphabetically.
+//   - A constraint name is unique per table, not per schema. Joining
+//     referential_constraints to table_constraints on (schema, name) alone
+//     pairs a partitioned table's cloned constraint with the wrong header —
+//     public.events' FK is cloned to both its leaves under one name, so the
+//     join returns nine rows for one edge — and, for two genuinely different
+//     same-named constraints in one schema, merges their column lists and
+//     anti-joins the wrong columns.
+//   - referential_constraints.unique_constraint_name is NULL when the
+//     referenced uniqueness is a bare CREATE UNIQUE INDEX rather than a table
+//     constraint, so an inner join drops the edge entirely and I1 reports
+//     "every foreign key resolves" having never looked at it. nasty.sql's
+//     public.audit_log is index-only unique, so the shape is one fixture edit
+//     away from existing.
+//
+// conkey and confkey are attribute-number arrays in declared order, and
+// unnest WITH ORDINALITY keeps that order, which is what makes a composite key
+// (testdata/README.md trap 4) line up positionally rather than alphabetically.
+// conparentid = 0 keeps the constraint as it was declared and drops the copies
+// PostgreSQL clones onto each partition, so one declared edge is one row.
 func foreignKeysOf(ctx context.Context, t *testing.T, conn *pgx.Conn) []foreignKey {
 	t.Helper()
 
 	rows, err := conn.Query(ctx, `
-		SELECT rc.constraint_schema, rc.constraint_name,
-		       child.table_schema,  child.table_name,
-		       parent.table_schema, parent.table_name,
-		       rc.unique_constraint_schema, rc.unique_constraint_name
-		FROM information_schema.referential_constraints rc
-		JOIN information_schema.table_constraints child
-		  ON child.constraint_schema = rc.constraint_schema
-		 AND child.constraint_name   = rc.constraint_name
-		JOIN information_schema.table_constraints parent
-		  ON parent.constraint_schema = rc.unique_constraint_schema
-		 AND parent.constraint_name   = rc.unique_constraint_name
-		WHERE child.constraint_type = 'FOREIGN KEY'
-		  AND child.table_schema NOT IN ('pg_catalog', 'information_schema')
-		ORDER BY rc.constraint_schema, rc.constraint_name`)
+		SELECT con.conname,
+		       cn.nspname, cl.relname,
+		       pn.nspname, pr.relname,
+		       (SELECT array_agg(a.attname ORDER BY k.ord)
+		          FROM unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord)
+		          JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = k.attnum),
+		       (SELECT array_agg(a.attname ORDER BY k.ord)
+		          FROM unnest(con.confkey) WITH ORDINALITY AS k(attnum, ord)
+		          JOIN pg_attribute a ON a.attrelid = con.confrelid AND a.attnum = k.attnum)
+		FROM pg_constraint con
+		JOIN pg_class cl     ON cl.oid = con.conrelid
+		JOIN pg_namespace cn ON cn.oid = cl.relnamespace
+		JOIN pg_class pr     ON pr.oid = con.confrelid
+		JOIN pg_namespace pn ON pn.oid = pr.relnamespace
+		WHERE con.contype = 'f'
+		  AND con.conparentid = 0
+		  AND cn.nspname NOT IN ('pg_catalog', 'information_schema')
+		ORDER BY cn.nspname, cl.relname, con.conname`)
 	if err != nil {
 		t.Fatalf("invariants: listing foreign keys: %v", err)
 	}
+	defer rows.Close()
 
-	type header struct {
-		schema, name             string
-		child, parent            tableRef
-		uniqueSchema, uniqueName string
-	}
-	var headers []header
+	var out []foreignKey
 	for rows.Next() {
-		var h header
+		var fk foreignKey
 		if scanErr := rows.Scan(
-			&h.schema, &h.name,
-			&h.child.Schema, &h.child.Name,
-			&h.parent.Schema, &h.parent.Name,
-			&h.uniqueSchema, &h.uniqueName,
+			&fk.Name,
+			&fk.Child.Schema, &fk.Child.Name,
+			&fk.Parent.Schema, &fk.Parent.Name,
+			&fk.ChildCols, &fk.ParentCols,
 		); scanErr != nil {
-			rows.Close()
 			t.Fatalf("invariants: listing foreign keys: %v", scanErr)
 		}
-		headers = append(headers, h)
+		if len(fk.ChildCols) != len(fk.ParentCols) || len(fk.ChildCols) == 0 {
+			t.Fatalf("invariants: constraint %s on %s has %d referencing and %d referenced columns",
+				fk.Name, fk.Child, len(fk.ChildCols), len(fk.ParentCols))
+		}
+		out = append(out, fk)
 	}
 	if rows.Err() != nil {
-		rows.Close()
 		t.Fatalf("invariants: listing foreign keys: %v", rows.Err())
-	}
-	rows.Close()
-
-	out := make([]foreignKey, 0, len(headers))
-	for _, h := range headers {
-		childCols, positions := referencingColumns(ctx, t, conn, h.schema, h.name)
-		parentCols := referencedColumns(ctx, t, conn, h.uniqueSchema, h.uniqueName)
-
-		aligned := make([]string, 0, len(childCols))
-		for i, pos := range positions {
-			if pos < 1 || pos > len(parentCols) {
-				t.Fatalf("invariants: constraint %s on %s: column %s claims position %d in %s, which has %d columns",
-					h.name, h.child, childCols[i], pos, h.uniqueName, len(parentCols))
-			}
-			aligned = append(aligned, parentCols[pos-1])
-		}
-		out = append(out, foreignKey{
-			Name: h.name, Child: h.child, ChildCols: childCols,
-			Parent: h.parent, ParentCols: aligned,
-		})
 	}
 	return out
 }
 
-// referencingColumns returns the child columns of one foreign key in declared
-// order, with each column's position in the referenced constraint.
-func referencingColumns(ctx context.Context, t *testing.T, conn *pgx.Conn, schema, name string) ([]string, []int) {
+// tableSet is every relation a foreign key can be declared on or point at:
+// ordinary and partitioned tables outside the system schemas.
+//
+// Partitioned roots are included here and excluded from dataTables, because
+// the two questions are different: dataTables asks which relations hold rows
+// of their own, and this asks which names exist. A partitioned source table
+// becomes one plain table in the target (§11.1) under the same name.
+func tableSet(ctx context.Context, t *testing.T, conn *pgx.Conn) map[tableRef]bool {
 	t.Helper()
 
 	rows, err := conn.Query(ctx, `
-		SELECT column_name, position_in_unique_constraint
-		FROM information_schema.key_column_usage
-		WHERE constraint_schema = $1 AND constraint_name = $2
-		ORDER BY ordinal_position`, schema, name)
+		SELECT n.nspname, c.relname
+		FROM pg_class c
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE c.relkind IN ('r', 'p')
+		  AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+		  AND n.nspname NOT LIKE 'pg_toast%'
+		  AND n.nspname NOT LIKE 'pg_temp%'`)
 	if err != nil {
-		t.Fatalf("invariants: reading the columns of constraint %s: %v", name, err)
+		t.Fatalf("invariants: listing tables: %v", err)
 	}
 	defer rows.Close()
 
-	var cols []string
-	var positions []int
+	out := map[tableRef]bool{}
 	for rows.Next() {
-		var col string
-		var pos *int
-		if scanErr := rows.Scan(&col, &pos); scanErr != nil {
-			t.Fatalf("invariants: reading the columns of constraint %s: %v", name, scanErr)
+		var ref tableRef
+		if scanErr := rows.Scan(&ref.Schema, &ref.Name); scanErr != nil {
+			t.Fatalf("invariants: listing tables: %v", scanErr)
 		}
-		if pos == nil {
-			t.Fatalf("invariants: constraint %s: column %s has no position in the referenced constraint", name, col)
-		}
-		cols = append(cols, col)
-		positions = append(positions, *pos)
+		out[ref] = true
 	}
 	if rows.Err() != nil {
-		t.Fatalf("invariants: reading the columns of constraint %s: %v", name, rows.Err())
+		t.Fatalf("invariants: listing tables: %v", rows.Err())
 	}
-	return cols, positions
-}
-
-// referencedColumns returns the columns of the primary or unique constraint a
-// foreign key points at, in declared order.
-func referencedColumns(ctx context.Context, t *testing.T, conn *pgx.Conn, schema, name string) []string {
-	t.Helper()
-
-	rows, err := conn.Query(ctx, `
-		SELECT column_name
-		FROM information_schema.key_column_usage
-		WHERE constraint_schema = $1 AND constraint_name = $2
-		ORDER BY ordinal_position`, schema, name)
-	if err != nil {
-		t.Fatalf("invariants: reading the columns of constraint %s: %v", name, err)
-	}
-	defer rows.Close()
-
-	var cols []string
-	for rows.Next() {
-		var col string
-		if scanErr := rows.Scan(&col); scanErr != nil {
-			t.Fatalf("invariants: reading the columns of constraint %s: %v", name, scanErr)
-		}
-		cols = append(cols, col)
-	}
-	if rows.Err() != nil {
-		t.Fatalf("invariants: reading the columns of constraint %s: %v", name, rows.Err())
-	}
-	return cols
+	return out
 }
 
 // danglingRows counts the child rows of one foreign key whose parent is not in
 // the target.
 func danglingRows(ctx context.Context, t *testing.T, conn *pgx.Conn, fk foreignKey) int64 {
 	t.Helper()
-
-	if len(fk.ChildCols) != len(fk.ParentCols) || len(fk.ChildCols) == 0 {
-		t.Fatalf("invariants: constraint %s on %s has %d referencing and %d referenced columns",
-			fk.Name, fk.Child, len(fk.ChildCols), len(fk.ParentCols))
-	}
 
 	notNull := make([]string, 0, len(fk.ChildCols))
 	join := make([]string, 0, len(fk.ChildCols))

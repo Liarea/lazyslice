@@ -414,3 +414,81 @@ func countRows(ctx context.Context, t *testing.T, conn *pgx.Conn, ref tableRef) 
 	}
 	return n
 }
+
+// ---------- the marker table ----------
+
+// markerRunIDs reads the run_id of every row in the target's lazyslice_meta
+// (§11.2).
+//
+// It is how I3 and I5 tell a second run from a second invocation that did
+// nothing. Both compare the target against the state the first run left in it,
+// so an invocation that exited 0 without truncating or reloading produces an
+// identical dump — the strongest possible pass, for the weakest possible
+// pipeline. §11.2 says every run inserts its row with status = running before
+// its first drop, so a run that touched the target left a run_id behind.
+//
+// lazyslice_meta is deliberately excluded from the dumps (markerPattern):
+// comparing it would make I3 and I5 assert that two runs happened at the same
+// instant. This reads it directly instead, which is the opposite assertion.
+func markerRunIDs(ctx context.Context, t *testing.T, conn *pgx.Conn, invariant string) []string {
+	t.Helper()
+
+	var schema string
+	err := conn.QueryRow(ctx, `
+		SELECT n.nspname
+		FROM pg_class c
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE c.relname = 'lazyslice_meta'
+		  AND c.relkind = 'r'
+		  AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+		ORDER BY n.nspname
+		LIMIT 1`).Scan(&schema)
+	if err != nil {
+		t.Fatalf("%s: the target has no lazyslice_meta table, so this test cannot tell a second run from "+
+			"an invocation that exited 0 and did nothing; ARCHITECTURE.md §11.2 says every run inserts a "+
+			"row there before its first write: %v", invariant, err)
+	}
+
+	ref := tableRef{Schema: schema, Name: "lazyslice_meta"}
+	rows, err := conn.Query(ctx, `SELECT run_id::text FROM `+ref.quoted()+` ORDER BY run_id`)
+	if err != nil {
+		t.Fatalf("%s: reading %s: %v", invariant, ref, err)
+	}
+	defer rows.Close()
+
+	var out []string
+	for rows.Next() {
+		var id string
+		if scanErr := rows.Scan(&id); scanErr != nil {
+			t.Fatalf("%s: reading %s: %v", invariant, ref, scanErr)
+		}
+		out = append(out, id)
+	}
+	if rows.Err() != nil {
+		t.Fatalf("%s: reading %s: %v", invariant, ref, rows.Err())
+	}
+	return out
+}
+
+// assertSecondRunHappened fails unless lazyslice_meta gained a run_id that was
+// not there before the second invocation.
+//
+// A set difference rather than a count, because §11.2 does not say the table
+// keeps every row for ever: a run that replaced the marker row still writes a
+// new run_id, and one that wrote nothing cannot.
+func assertSecondRunHappened(t *testing.T, invariant string, before, after []string) {
+	t.Helper()
+
+	seen := make(map[string]bool, len(before))
+	for _, id := range before {
+		seen[id] = true
+	}
+	for _, id := range after {
+		if !seen[id] {
+			return
+		}
+	}
+	t.Fatalf("%s: lazyslice_meta records no run that was not there before the second invocation "+
+		"(%d row(s) before, %d after), so the second run wrote nothing to the target and comparing "+
+		"the target with itself proves nothing", invariant, len(before), len(after))
+}
