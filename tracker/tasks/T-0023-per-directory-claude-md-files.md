@@ -3,10 +3,10 @@ id: T-0023
 title: "Per-directory CLAUDE.md files"
 epic: E3
 phase: 3
-status: open
+status: in_progress
 owner: sonnet
 created: 2026-09-05
-started: ""
+started: 2026-09-05
 closed: ""
 outcome: ""
 ---
@@ -24,6 +24,8 @@ outcome: ""
 ## Log
 
 - 2026-09-05 created
+
+- 2026-09-05 started
 
 ## Post-mortem
 
