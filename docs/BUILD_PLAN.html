@@ -1,0 +1,549 @@
+<title>Lazysnap Build Plan</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --bg: #F7F6F1;
+    --bg-2: #EFEEE7;
+    --ink: #1B1F1D;
+    --ink-2: #4B524F;
+    --muted: #6E7572;
+    --rule: #D9DAD2;
+    --accent: #0E7C6B;
+    --accent-ink: #0A5C50;
+    --accent-soft: #DCEFEA;
+    --prompt-bg: #1E2321;
+    --prompt-ink: #E9E6DA;
+    --prompt-label: #F0B64A;
+    --prompt-rule: #343B38;
+    --gate-bg: #FBF3DF;
+    --gate-ink: #7A4B06;
+    --gate-rule: #E7CF97;
+    --code-bg: #ECEBE4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #141716;
+      --bg-2: #1B1F1D;
+      --ink: #E7E6DE;
+      --ink-2: #B4B8B2;
+      --muted: #8B918D;
+      --rule: #2C3230;
+      --accent: #3FB59F;
+      --accent-ink: #6FD1BE;
+      --accent-soft: #163A33;
+      --prompt-bg: #0E1110;
+      --prompt-ink: #E2DFD3;
+      --prompt-label: #F0B64A;
+      --prompt-rule: #262C2A;
+      --gate-bg: #2A2214;
+      --gate-ink: #F0C777;
+      --gate-rule: #4A3A1A;
+      --code-bg: #232826;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #141716;
+    --bg-2: #1B1F1D;
+    --ink: #E7E6DE;
+    --ink-2: #B4B8B2;
+    --muted: #8B918D;
+    --rule: #2C3230;
+    --accent: #3FB59F;
+    --accent-ink: #6FD1BE;
+    --accent-soft: #163A33;
+    --prompt-bg: #0E1110;
+    --prompt-ink: #E2DFD3;
+    --prompt-label: #F0B64A;
+    --prompt-rule: #262C2A;
+    --gate-bg: #2A2214;
+    --gate-ink: #F0C777;
+    --gate-rule: #4A3A1A;
+    --code-bg: #232826;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+  }
+  a { color: var(--accent-ink); }
+  h1, h2, h3, h4 {
+    font-family: "Bricolage Grotesque", "IBM Plex Sans", Arial, sans-serif;
+    text-wrap: balance;
+    line-height: 1.15;
+    margin: 0;
+  }
+  h1 { font-size: 2.6rem; font-weight: 700; letter-spacing: -0.02em; }
+  h2 { font-size: 1.7rem; font-weight: 700; letter-spacing: -0.01em; }
+  h3 { font-size: 1.15rem; font-weight: 700; }
+  p { margin: 0; }
+  code, pre, .mono { font-family: "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, monospace; }
+  code { background: var(--code-bg); padding: 0.05em 0.35em; border-radius: 3px; font-size: 0.92em; }
+
+  .page {
+    display: grid;
+    grid-template-columns: 200px minmax(0, 68ch);
+    gap: 3rem;
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 3rem 1.5rem 6rem;
+  }
+  @media (max-width: 860px) {
+    .page { grid-template-columns: minmax(0, 1fr); gap: 1.5rem; padding-top: 2rem; }
+    .rail { position: static !important; }
+  }
+
+  .rail {
+    position: sticky;
+    top: 1.5rem;
+    align-self: start;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    font-size: 0.85rem;
+  }
+  .rail .eyebrow { margin-bottom: 0.5rem; }
+  .rail a {
+    text-decoration: none;
+    color: var(--ink-2);
+    display: grid;
+    grid-template-columns: 1.6rem 1fr;
+    gap: 0.4rem;
+    padding: 0.25rem 0;
+    border-left: 2px solid var(--rule);
+    padding-left: 0.75rem;
+  }
+  .rail a:hover, .rail a:focus-visible { color: var(--accent-ink); border-left-color: var(--accent); outline: none; }
+  .rail a .n { font-family: "IBM Plex Mono", monospace; color: var(--muted); font-size: 0.78rem; padding-top: 0.15rem; }
+
+  .eyebrow {
+    font-size: 0.72rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 600;
+  }
+
+  main { display: flex; flex-direction: column; gap: 3.5rem; }
+  header.hero { display: flex; flex-direction: column; gap: 1rem; }
+  .lede { font-size: 1.15rem; color: var(--ink-2); max-width: 60ch; }
+
+  .principles {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    margin-top: 0.5rem;
+  }
+  .principles > div { background: var(--bg-2); padding: 0.9rem 1rem; display: flex; flex-direction: column; gap: 0.3rem; }
+  .principles h3 { font-size: 1rem; }
+  .principles p { font-size: 0.9rem; color: var(--ink-2); }
+  @media (max-width: 600px) { .principles { grid-template-columns: 1fr; } }
+
+  section.phase { display: flex; flex-direction: column; gap: 1.25rem; scroll-margin-top: 1.5rem; }
+  .phase-head { display: flex; flex-direction: column; gap: 0.35rem; padding-top: 1.5rem; border-top: 1px solid var(--rule); }
+  .phase-head .meta { display: flex; gap: 1.25rem; font-size: 0.82rem; color: var(--muted); }
+  .phase-head .meta b { color: var(--ink-2); font-weight: 500; }
+
+  ul, ol { margin: 0; padding-left: 1.25rem; display: flex; flex-direction: column; gap: 0.35rem; }
+  li::marker { color: var(--muted); }
+  .tight li { gap: 0.15rem; }
+
+  .decision {
+    border-left: 3px solid var(--accent);
+    background: var(--accent-soft);
+    padding: 0.9rem 1.1rem;
+    display: flex; flex-direction: column; gap: 0.5rem;
+    font-size: 0.95rem;
+  }
+  .decision .eyebrow { color: var(--accent-ink); }
+
+  .gate {
+    background: var(--gate-bg);
+    border: 1px solid var(--gate-rule);
+    color: var(--gate-ink);
+    padding: 0.85rem 1.1rem;
+    display: flex; flex-direction: column; gap: 0.4rem;
+    font-size: 0.93rem;
+  }
+  .gate .eyebrow { color: var(--gate-ink); }
+  .gate ul { padding-left: 1.1rem; }
+
+  .prompt {
+    background: var(--prompt-bg);
+    color: var(--prompt-ink);
+    border-radius: 4px;
+    overflow: hidden;
+    font-size: 0.86rem;
+    line-height: 1.55;
+  }
+  .prompt .bar {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 0.45rem 0.9rem;
+    border-bottom: 1px solid var(--prompt-rule);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.75rem;
+    color: var(--prompt-label);
+    letter-spacing: 0.04em;
+  }
+  .prompt button {
+    font: inherit; color: var(--prompt-ink); background: transparent;
+    border: 1px solid var(--prompt-rule); border-radius: 3px;
+    padding: 0.1rem 0.55rem; cursor: pointer; letter-spacing: 0;
+  }
+  .prompt button:hover, .prompt button:focus-visible { border-color: var(--prompt-label); outline: none; }
+  .prompt pre {
+    margin: 0; padding: 0.9rem 1rem;
+    white-space: pre-wrap; word-wrap: break-word;
+    font-family: "IBM Plex Mono", monospace;
+  }
+  .prompts { display: flex; flex-direction: column; gap: 0.9rem; }
+
+  table { border-collapse: collapse; width: 100%; font-size: 0.9rem; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  th { font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+  .table-wrap { overflow-x: auto; }
+
+  .invariants { display: flex; flex-direction: column; gap: 0; border: 1px solid var(--rule); }
+  .invariants > div { display: grid; grid-template-columns: 2.2rem 1fr; gap: 0.6rem; padding: 0.7rem 0.9rem; border-bottom: 1px solid var(--rule); font-size: 0.93rem; }
+  .invariants > div:last-child { border-bottom: 0; }
+  .invariants .k { font-family: "IBM Plex Mono", monospace; color: var(--accent-ink); font-size: 0.8rem; padding-top: 0.15rem; }
+
+  .cmd { background: var(--code-bg); padding: 0.8rem 1rem; border-radius: 4px; font-size: 0.9rem; overflow-x: auto; }
+  .cmd .c { color: var(--muted); }
+  .cmd .o { color: var(--accent-ink); }
+
+  @media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+</style>
+
+<div class="page">
+  <nav class="rail" aria-label="Phases">
+    <div class="eyebrow">Phases</div>
+    <a href="#p0"><span class="n">0</span><span>Frame</span></a>
+    <a href="#p1"><span class="n">1</span><span>Research</span></a>
+    <a href="#p2"><span class="n">2</span><span>Architecture</span></a>
+    <a href="#p3"><span class="n">3</span><span>Foundations</span></a>
+    <a href="#p4"><span class="n">4</span><span>Vertical slice</span></a>
+    <a href="#p5"><span class="n">5</span><span>Hardening</span></a>
+    <a href="#p6"><span class="n">6</span><span>Launch</span></a>
+    <a href="#p7"><span class="n">7</span><span>Breadth</span></a>
+    <a href="#p8"><span class="n">8</span><span>Client-facing</span></a>
+    <a href="#guard"><span class="n">∞</span><span>Guardrails</span></a>
+  </nav>
+
+  <main>
+    <header class="hero">
+      <div class="eyebrow">Zero to one hundred · working name: lazysnap</div>
+      <h1>Lazysnap Build Plan</h1>
+      <p class="lede">One command that points at a production database, pulls out a small coherent slice, masks the personal data, and loads it into a local database you can safely develop against. This plan runs from a blank folder to a paid, hosted product, with the Claude Code prompts for each step.</p>
+
+      <div class="cmd mono"><span class="c"># the whole pitch, in one line</span>
+$ lazysnap <span class="o">--from</span> prod <span class="o">--root</span> users <span class="o">--take</span> 500
+<span class="c">  detected 3 docker databases · 41 tables · 17 columns look like PII · ready in 38s</span></div>
+
+      <div class="principles">
+        <div><h3>Zero config</h3><p>First run asks at most one question. Config is emitted after a run, never required before it.</p></div>
+        <div><h3>Safe by default</h3><p>Anything that might be personal data is masked unless you say otherwise. The tool never writes to the source.</p></div>
+        <div><h3>Terminal first</h3><p>One binary, one-line install, works headless in CI with the same command a human typed.</p></div>
+      </div>
+    </header>
+
+    <section>
+      <h2>How to use this plan</h2>
+      <p style="margin-top:0.6rem">Each phase has a goal, a gate, and prompts. The gate is a list of things that must be true before the next phase starts. If you cannot tick it, you are not done, however good the code feels. The prompts are written for Claude Code with the repo open. Paste them as written, then argue with the output. Every prompt asks for a file, so decisions survive the session.</p>
+      <p style="margin-top:0.8rem">Timeline assumes one person at roughly fifteen hours a week. Halve the weeks if this is full time.</p>
+    </section>
+
+    <!-- PHASE 0 -->
+    <section class="phase" id="p0">
+      <div class="phase-head">
+        <div class="eyebrow">Phase 0</div>
+        <h2>Frame</h2>
+        <div class="meta"><span><b>Days 1 to 2</b></span><span>Output: CONCEPT.md, NAME.md</span></div>
+      </div>
+      <p>Write down what the thing is before researching what exists. Research done first turns into a feature list of everyone else's product.</p>
+      <div class="prompts">
+        <div class="prompt"><div class="bar"><span>PROMPT 0.1 · concept</span><button data-copy>copy</button></div><pre>Create CONCEPT.md for a new open-source CLI called lazysnap. It snapshots a production SQL database into a local dev database: subset by a root table and row count, follow foreign keys in both directions so the slice is referentially complete, detect and mask personal data, load into a target. Model it on how sqlit and lazygit win: zero config, zero docs needed, magic first run.
+
+Sections: one-line pitch; the user (a backend dev on a 3 to 30 person team); the moment they reach for it; the three principles (zero config, safe by default, terminal first) with one sentence each on what we refuse to ship because of it; explicit non-goals for v1 (synthetic data generation, scheduling, web UI, NoSQL, schema migration); and a "what a delighted first run looks like" transcript. Keep it under 700 words. Do not list features. Do not mention competitors.</pre></div>
+        <div class="prompt"><div class="bar"><span>PROMPT 0.2 · name</span><button data-copy>copy</button></div><pre>Working name is lazysnap. Check it: search GitHub, PyPI, npm, crates.io, Homebrew, and the USPTO trademark database for lazysnap and close variants. Report collisions with links. Then propose five alternative names that keep the "lazy" family association, are pronounceable, and have a free .dev or .sh domain (check with whois or a DNS lookup). Write findings to NAME.md with a recommendation and its reasoning.</pre></div>
+      </div>
+    </section>
+
+    <!-- PHASE 1 -->
+    <section class="phase" id="p1">
+      <div class="phase-head">
+        <div class="eyebrow">Phase 1</div>
+        <h2>Research</h2>
+        <div class="meta"><span><b>Week 1</b></span><span>Output: research/ folder, six documents</span></div>
+      </div>
+      <p>Four questions. What did the dead companies get wrong? What do the living tools make hard? What is technically difficult about subsetting and masking? What do users actually complain about, in their own words?</p>
+      <div class="prompts">
+        <div class="prompt"><div class="bar"><span>PROMPT 1.1 · competitor teardown</span><button data-copy>copy</button></div><pre>Research these tools and write research/COMPETITORS.md: Greenmask, Basecut, Neosync (archived after the Grow Therapy acquisition), Snaplet snapshot (open-sourced 2024, dormant), PostgreSQL Anonymizer, Jailer, condenser, replibyte, pgsubset, Tonic Structural, and Redgate Data Masker. For each: language, supported databases, how subsetting works (algorithm, direction of FK traversal, handling of cycles), how masking is configured, install path, licence, last commit date, star count, and the three most-upvoted open issues. Then a table: "time from install to first usable snapshot" estimated by reading their quickstarts. End with a section "what nobody does well" citing evidence. Include source links for every claim.</pre></div>
+        <div class="prompt"><div class="bar"><span>PROMPT 1.2 · post-mortems</span><button data-copy>copy</button></div><pre>Snaplet shut down in August 2024 and Neosync was acquired in August 2025. Read their archived docs, GitHub issues, changelogs, HN threads, founder posts, and any interviews. Write research/POSTMORTEMS.md answering: what did users love, what did users abandon them over, what did the product become that it did not start as, where did the complexity accumulate, and what pricing did they try. Finish with "five things we will not copy" and "three things we must copy". Quote users directly, with links.</pre></div>
+        <div class="prompt"><div class="bar"><span>PROMPT 1.3 · hard problems</span><button data-copy>copy</button></div><pre>Write research/HARD_PROBLEMS.md, a technical survey of the four hard problems in database subsetting and masking. (1) Subsetting: walking FK graphs with cycles, self-references, composite keys, polymorphic associations without constraints, and the choice between "children of root" versus "everything reachable". Cite Jailer's and Greenmask's approaches and academic work on referential subsetting. (2) Deterministic masking: keeping the same fake value for the same input across tables so joins on email still work, using keyed hashing; format-preserving options. (3) PII classification: column-name heuristics, regex on sampled values, entropy, and where ML is and is not worth it; list the categories a first release must catch (email, phone, name, address, DOB, IP, card, national ID, free text, JSON fields). (4) Streaming extraction and load at scale: COPY protocol, batching, ordering inserts to satisfy constraints, deferring constraints, sequences and identity columns. For each problem give the simplest approach that is correct, then the refinement.</pre></div>
+        <div class="prompt"><div class="bar"><span>PROMPT 1.4 · complaint mining</span><button data-copy>copy</button></div><pre>Mine real user complaints about getting realistic data into local and CI databases. Sources: Hacker News search, r/PostgreSQL, r/devops, r/webdev, r/ExperiencedDevs, dev.to, GitHub issues on Greenmask, Neosync, Snaplet, pg_anonymizer, and Stack Overflow questions tagged database-testing or anonymization. Write research/COMPLAINTS.md with at least 25 verbatim quotes, each with a link, tagged by theme (config burden, speed, broken FKs, leaked PII, wrong database, CI). Then rank the themes by frequency and add a short note on which theme our three principles address and which they do not.</pre></div>
+        <div class="prompt"><div class="bar"><span>PROMPT 1.5 · licence</span><button data-copy>copy</button></div><pre>Write research/LICENSE_DECISION.md comparing Apache-2.0, MIT, AGPL-3.0, and BSL 1.1 for an open-core CLI where the hosted service is the paid product. Cover: contributor comfort, corporate adoption friction, protection against a cloud vendor hosting our tool, what Greenmask and Neosync chose and why, and how the licence interacts with a future closed hosted layer in the same repo versus a separate repo. Recommend one licence and one repo structure. Keep it to one page.</pre></div>
+        <div class="prompt"><div class="bar"><span>PROMPT 1.6 · synthesis</span><button data-copy>copy</button></div><pre>Read everything in research/ and CONCEPT.md. Write research/SYNTHESIS.md: the ten facts that most change what we build, each with a link back to its source document; three risks that could kill the project with a mitigation for each; and a revised non-goals list. Then flag anything in CONCEPT.md that the research contradicts. Do not soften findings.</pre></div>
+      </div>
+      <div class="gate"><div class="eyebrow">Gate 1</div><ul>
+        <li>All six research documents exist and cite sources.</li>
+        <li>You can name, from memory, the top three user complaints and the top failure of each dead competitor.</li>
+        <li>CONCEPT.md has been revised against SYNTHESIS.md and non-goals grew, not shrank.</li>
+      </ul></div>
+    </section>
+
+    <!-- PHASE 2 -->
+    <section class="phase" id="p2">
+      <div class="phase-head">
+        <div class="eyebrow">Phase 2</div>
+        <h2>Architecture</h2>
+        <div class="meta"><span><b>Week 2</b></span><span>Output: docs/adr/001 to 006, ARCHITECTURE.md, THREAT_MODEL.md</span></div>
+      </div>
+      <p>Six decisions, each recorded as an Architecture Decision Record so future-you and contributors can see why. My recommendation on each is below. Let the prompts try to argue you out of it.</p>
+      <div class="decision">
+        <div class="eyebrow">Recommended decisions</div>
+        <ul class="tight">
+          <li><b>Language: Go.</b> Single static binary, first-class Docker SDK, the COPY protocol via pgx, and it is what lazygit, lazydocker, and Greenmask use. Python with Textual gets you thirty databases faster via SQLAlchemy, but distribution and streaming performance are worse. Breadth is a phase 7 problem, not a phase 4 one.</li>
+          <li><b>TUI: Bubble Tea and Lip Gloss.</b> The lazygit lineage. The TUI is one thin layer over a library that works headless.</li>
+          <li><b>Database order: PostgreSQL, then MySQL, SQLite, SQL Server.</b> Postgres is where the dead competitors' users are.</li>
+          <li><b>Config: emitted, not required.</b> First run writes <code>lazysnap.yml</code> describing exactly what it did. Committing that file makes CI reproducible.</li>
+          <li><b>Pipeline: introspect → classify → plan → extract → transform → load.</b> Each stage has one interface and can be run alone with a flag, which is what makes it testable.</li>
+          <li><b>Masking is pluggable, classification is not.</b> Users add maskers. The classifier is ours and conservative.</li>
+        </ul>
+      </div>
+      <div class="prompts">
+        <div class="prompt"><div class="bar"><span>PROMPT 2.1 · language ADR</span><button data-copy>copy</button></div><pre>Write docs/adr/001-language.md deciding between Go and Python for lazysnap. Argue both sides honestly using research/HARD_PROBLEMS.md and COMPETITORS.md. Criteria in priority order: install experience (curl, brew, single binary), streaming throughput on a 50M row table, quality of Postgres, MySQL, SQLite and SQL Server drivers, TUI library maturity, ease of contribution, and how sqlit got to 30 databases in Python. Give a benchmark plan we could run in a day to settle the throughput question. End with a decision and the condition under which we would reverse it. Format: Context, Options, Decision, Consequences.</pre></div>
+        <div class="prompt"><div class="bar"><span>PROMPT 2.2 · pipeline</span><button data-copy>copy</button></div><pre>Write ARCHITECTURE.md. Define the pipeline introspect → classify → plan → extract → transform → load as six Go interfaces with their inputs and outputs as types. Show how one run flows through them, how the TUI and the headless CLI share the same core, and how a run emits lazysnap.yml that reproduces it. Specify the subset planner: given a root table and N, produce an ordered list of (table, predicate) steps that pulls parents first, children after, handles cycles by deferring constraints, and caps runaway fan-out with a per-table limit. Include a Mermaid diagram of the pipeline and a second one of the FK walk on a schema with a cycle. Note which stage each hard problem from research/HARD_PROBLEMS.md lives in.</pre></div>
+        <div class="prompt"><div class="bar"><span>PROMPT 2.3 · classifier design</span><button data-copy>copy</button></div><pre>Write docs/adr/003-classifier.md. Design the PII classifier as three layers: column name heuristics (a curated list with weights, multilingual), value sampling with regexes and validators (Luhn for cards, RFC 5322 email, E.164 phone), and a "free text and JSON" catch-all that masks the entire field. Define confidence levels and the rule: anything at or above "possible" is masked unless the user opts out per column. Specify how the classifier explains itself in the TUI ("masked because column name contains 'email' and 97% of samples matched"). List the categories for v1 and the maskers each maps to. State what we will not try to detect in v1 and why.</pre></div>
+        <div class="prompt"><div class="bar"><span>PROMPT 2.4 · deterministic masking</span><button data-copy>copy</button></div><pre>Write docs/adr/004-masking.md. Specify the masker interface, the built-in maskers for each v1 PII category, and the determinism scheme: an HMAC of the original value with a per-run secret feeds a seeded generator so the same email maps to the same fake email everywhere in the snapshot, and a different run with a different secret cannot be correlated. Cover format preservation (keep the domain shape, keep phone country code), null and empty handling, unique constraints on masked columns, and how a user registers a custom masker without recompiling (decide: Go plugin, subprocess, or expression language; pick one).</pre></div>
+        <div class="prompt"><div class="bar"><span>PROMPT 2.5 · threat model</span><button data-copy>copy</button></div><pre>Write THREAT_MODEL.md for lazysnap. Assets: production data, credentials, the snapshot on disk. Threats: masking misses a PII column, a user points the target at production, credentials leak into lazysnap.yml or logs, a snapshot file lands in git, a malicious custom masker, and supply chain risk in our release pipeline. For each threat: likelihood, impact, and the concrete control we build (for example: refuse to load into any database whose name or host matches the source, or which has more than 10k rows in any table, unless --i-know-this-is-not-prod is passed; never write secrets to the emitted config; add snapshots/ to .gitignore on first run). Mark which controls are v1 blockers.</pre></div>
+        <div class="prompt"><div class="bar"><span>PROMPT 2.6 · sqlit study</span><button data-copy>copy</button></div><pre>Clone github.com/Maxteabag/sqlit and read it. Write docs/adr/006-first-run-experience.md describing exactly how sqlit achieves zero-config first run: the Docker container detection, connection saving, keyring use, and the keybinding discoverability. Then specify our equivalent for lazysnap step by step: what happens when a user types `lazysnap` with no arguments in a project folder that has a docker-compose.yml, a DATABASE_URL in .env, or nothing at all. Define every question the tool may ask and its default. Cap it at one question on the happy path.</pre></div>
+      </div>
+      <div class="gate"><div class="eyebrow">Gate 2</div><ul>
+        <li>Six ADRs, each with a stated reversal condition.</li>
+        <li>You could sketch the pipeline and the FK walk on a whiteboard without notes.</li>
+        <li>THREAT_MODEL.md lists at least three v1-blocking controls, and they appear in the phase 4 scope.</li>
+      </ul></div>
+    </section>
+
+    <!-- PHASE 3 -->
+    <section class="phase" id="p3">
+      <div class="phase-head">
+        <div class="eyebrow">Phase 3</div>
+        <h2>Foundations</h2>
+        <div class="meta"><span><b>Weeks 3 to 4</b></span><span>Output: a repo that builds, tests, and releases nothing useful yet</span></div>
+      </div>
+      <p>Everything that keeps the project honest gets built before the product does. The test fixtures are the most important artifact in the whole plan, because they define what "correct" means before you have an opinion.</p>
+      <div class="prompts">
+        <div class="prompt"><div class="bar"><span>PROMPT 3.1 · scaffold</span><button data-copy>copy</button></div><pre>Scaffold the Go repo per ARCHITECTURE.md: cmd/lazysnap, internal/{introspect,classify,plan,extract,transform,load,tui}, one interface file per stage with a doc comment and a no-op implementation, a Makefile with build, test, lint (golangci-lint), and integration targets, GitHub Actions running unit tests on push and integration tests with Postgres via testcontainers-go, goreleaser config producing darwin/linux/windows binaries plus a Homebrew tap, SECURITY.md, CONTRIBUTING.md, a docs/adr/README that explains the ADR format, and .gitignore containing snapshots/ and lazysnap.secret. Everything must pass green on an empty implementation before you stop.</pre></div>
+        <div class="prompt"><div class="bar"><span>PROMPT 3.2 · CLAUDE.md</span><button data-copy>copy</button></div><pre>Write CLAUDE.md for this repo using the "Standing rules for the agent" block from the build plan as the base. Add: the pipeline stage names and the rule that a change touches one stage unless an ADR says otherwise; the commands to run before claiming anything works (make lint test integration); the location of ADRs and the rule that any change to a decision requires a new ADR, never an edit; the invariants that tests enforce; and the current phase with a pointer to ROADMAP.md. Keep it under 80 lines. Nothing aspirational, only rules you will actually enforce.</pre></div>
+        <div class="prompt"><div class="bar"><span>PROMPT 3.3 · golden fixtures</span><button data-copy>copy</button></div><pre>Build testdata/ with two Postgres fixtures loaded by the integration suite. First, Pagila (the Postgres port of Sakila) as the friendly realistic schema. Second, a hostile schema you design, nasty.sql, that contains: a self-referencing table, a three-table FK cycle, a composite primary key, a polymorphic association with no FK constraint, a JSONB column containing emails and phone numbers, a free-text notes column with names in it, a column named "email_verified" that is a boolean (a false positive trap), a column named "ref" that holds emails (a false negative trap), a partitioned table, an enum, an array column, a generated column, a table with 2M rows for streaming tests generated on load, and identity columns with non-default sequences. Document every trap in testdata/README.md with the behaviour we expect from the tool.</pre></div>
+        <div class="prompt"><div class="bar"><span>PROMPT 3.4 · invariant tests</span><button data-copy>copy</button></div><pre>Write the invariant test suite in internal/invariants_test.go that runs against any snapshot the tool produces, using both fixtures. Invariants: (1) every foreign key in the target resolves; (2) no value in the target matches the classifier's own PII detectors for any column the classifier flagged; (3) running twice with the same secret produces byte-identical targets; (4) the source database's row counts and a checksum are unchanged after a run; (5) the emitted lazysnap.yml, fed back in, reproduces the snapshot; (6) the target row count for the root table equals --take. These tests are the definition of correct. Make them fail now, since nothing is implemented, and wire them into make integration.</pre></div>
+        <div class="prompt"><div class="bar"><span>PROMPT 3.5 · roadmap</span><button data-copy>copy</button></div><pre>Write ROADMAP.md from the build plan phases 4 to 8. For each phase: the goal in one sentence, the gate as a checklist, and a "not in this phase" list. Add a top section "Current phase" that I will update by hand. Add a rule at the top: any feature request goes into a "Later" section at the bottom with a one-line reason, and nothing moves out of Later without the current phase gate being ticked.</pre></div>
+      </div>
+      <div class="gate"><div class="eyebrow">Gate 3</div><ul>
+        <li>CI is green on an empty implementation, and integration tests fail for the right reason.</li>
+        <li><code>brew install</code> from your tap installs a binary that prints its version.</li>
+        <li>Both fixtures load, and testdata/README.md names every trap.</li>
+      </ul></div>
+    </section>
+
+    <!-- PHASE 4 -->
+    <section class="phase" id="p4">
+      <div class="phase-head">
+        <div class="eyebrow">Phase 4</div>
+        <h2>Vertical slice</h2>
+        <div class="meta"><span><b>Weeks 5 to 8</b></span><span>Output: the one command works, Postgres to Postgres</span></div>
+      </div>
+      <p>Build the pipeline one stage at a time, in order, each behind a flag that runs it alone. The TUI comes last and only wraps what already works headless. Resist adding a second database. Resist adding a web anything.</p>
+      <div class="prompts">
+        <div class="prompt"><div class="bar"><span>PROMPT 4.1 · introspect</span><button data-copy>copy</button></div><pre>Implement internal/introspect for Postgres: tables, columns with types, primary keys, foreign keys including composite and self-referencing, unique constraints, sequences and identity columns, partitions, enums, approximate row counts from pg_class, and a 200-row sample per table taken with TABLESAMPLE where available. Output the Schema type from ARCHITECTURE.md. Add `lazysnap introspect --from URL --json` that prints it. Write tests against both fixtures that assert every trap in testdata/README.md is represented in the output. Do not touch any other stage.</pre></div>
+        <div class="prompt"><div class="bar"><span>PROMPT 4.2 · classify</span><button data-copy>copy</button></div><pre>Implement internal/classify per docs/adr/003. Input: Schema with samples. Output: per column, a category, a confidence, and a human-readable reason. Add `lazysnap classify --from URL` that prints a table sorted by confidence. Tests: on nasty.sql, email_verified must not be flagged, ref must be flagged, the JSONB and notes columns must be flagged as free text, and precision and recall on Pagila must be reported as numbers in the test output. Add a fixture of 50 real-world column names from open-source schemas (Discourse, GitLab, Mastodon) with expected categories, and make the test print the confusion matrix.</pre></div>
+        <div class="prompt"><div class="bar"><span>PROMPT 4.3 · plan</span><button data-copy>copy</button></div><pre>Implement internal/plan per ARCHITECTURE.md. Given Schema, root table, and N, produce an ordered Plan of steps. Walk parents to completeness, then children with a per-table cap defaulting to 10x N. Handle cycles by marking constraints for deferral. Tables unreachable from the root are excluded unless they are small lookup tables (under 1000 rows, no FKs out), which are copied whole. Add `lazysnap plan --from URL --root T --take N` that prints the plan with estimated row counts. Tests on nasty.sql must show the cycle handled and the polymorphic association reported as "not followed: no constraint" with a hint.</pre></div>
+        <div class="prompt"><div class="bar"><span>PROMPT 4.4 · extract and transform</span><button data-copy>copy</button></div><pre>Implement internal/extract and internal/transform. Extract streams each plan step with a server-side cursor and COPY TO where possible, never materialising a full table in memory; prove it with a test on the 2M row table under a memory cap. Transform applies maskers per docs/adr/004 row by row with the HMAC determinism scheme, and guarantees unique constraints on masked columns survive. Wire the invariant tests for PII absence and determinism. Add a progress event stream the TUI will consume later.</pre></div>
+        <div class="prompt"><div class="bar"><span>PROMPT 4.5 · load and safety rails</span><button data-copy>copy</button></div><pre>Implement internal/load for Postgres: create schema in the target if missing, load with COPY FROM in plan order with constraints deferred, reset sequences to max+1, and verify FK integrity at the end. Then implement every v1-blocking control from THREAT_MODEL.md, at minimum: refuse a target that resembles the source, refuse a target with existing data unless --replace, never log or emit secrets, write snapshots/ to .gitignore. Now `lazysnap --from URL --to URL --root T --take N` must run end to end and pass all six invariants on both fixtures. Emit lazysnap.yml at the end of the run.</pre></div>
+        <div class="prompt"><div class="bar"><span>PROMPT 4.6 · first run and docker</span><button data-copy>copy</button></div><pre>Implement docs/adr/006: with no arguments, detect Postgres containers via the Docker socket, read DATABASE_URL from .env and docker-compose.yml, and offer them as source and target candidates. If exactly one plausible source and one plausible target exist, ask the single question (root table, default: the table with the most incoming FKs) and go. Implement the Bubble Tea TUI as a thin layer: a table picker showing the classifier's reasons, a plan preview, and a live progress view fed by the event stream. Every action must have a visible keybinding hint. No feature may exist in the TUI that is not reachable by a flag.</pre></div>
+        <div class="prompt"><div class="bar"><span>PROMPT 4.7 · dogfood</span><button data-copy>copy</button></div><pre>I am going to run lazysnap for the first time on a real project, pretending I have never seen it. Before I do, write docs/DOGFOOD_LOG.md with a template: what I typed, what I expected, what happened, how long it took, what I had to look up. After each session I will paste my notes. Your job then is to turn every "had to look up" into either a default, a better prompt in the tool, or a Later item, and to never suggest documentation as the fix.</pre></div>
+      </div>
+      <div class="gate"><div class="eyebrow">Gate 4 · the demo gate</div><ul>
+        <li>Pagila, 200 customers, from one Docker container to another, in under 60 seconds, with zero flags beyond the root table.</li>
+        <li>All six invariants pass on both fixtures in CI.</li>
+        <li>Two dogfood sessions logged, and the second needed nothing looked up.</li>
+        <li>A 20-second GIF exists that shows the whole thing. If it is not impressive, the product is not done.</li>
+      </ul></div>
+    </section>
+
+    <!-- PHASE 5 -->
+    <section class="phase" id="p5">
+      <div class="phase-head">
+        <div class="eyebrow">Phase 5</div>
+        <h2>Hardening</h2>
+        <div class="meta"><span><b>Weeks 9 to 10</b></span><span>Output: it survives strangers' schemas</span></div>
+      </div>
+      <p>The demo works on your fixtures. Now find the schemas that break it before users do, and make the failure modes gentle.</p>
+      <div class="prompts">
+        <div class="prompt"><div class="bar"><span>PROMPT 5.1 · schema torture</span><button data-copy>copy</button></div><pre>Collect ten real open-source Postgres schemas of different shapes (Discourse, GitLab, Mastodon, Odoo, Metabase, Supabase's auth schema, Cal.com, Plausible, a Django default, a Rails default with ActiveStorage). Add a make target that loads each with a small amount of generated data and runs a snapshot from its most-connected table. For every failure, write a minimal reproduction into testdata/regressions/ before fixing it. Report a table: schema, tables, run time, failures found, PII columns detected versus a hand-labelled truth set for three of them.</pre></div>
+        <div class="prompt"><div class="bar"><span>PROMPT 5.2 · failure UX</span><button data-copy>copy</button></div><pre>Audit every error path in the tool. For each, the message must say what went wrong, which table or column, and the exact flag or action that fixes it. No stack traces reach the user without --debug. Partial failures must leave the target either empty or complete, never half-loaded; implement that as a transaction or a drop-on-failure. Write the error catalogue to docs/ERRORS.md and add a test that every error type in the code appears in it.</pre></div>
+        <div class="prompt"><div class="bar"><span>PROMPT 5.3 · performance</span><button data-copy>copy</button></div><pre>Profile a snapshot of 5,000 root rows from a source with a 20M row child table. Report where time goes per stage. Target: under 3 minutes on a laptop over a local network. Optimise only the top two hotspots, write the before and after numbers into docs/PERF.md, and add a benchmark to CI that fails if extract throughput drops more than 20% from the recorded baseline.</pre></div>
+        <div class="prompt"><div class="bar"><span>PROMPT 5.4 · red team</span><button data-copy>copy</button></div><pre>Act as a security reviewer who wants to find a way for lazysnap to leak production data. Try: PII in column names we do not check, values that dodge every regex, PII inside array and JSON columns three levels deep, a masker that throws halfway, a target URL that is prod with a different hostname alias, secrets in the emitted YAML, snapshots written to a synced folder, and verbose logging. For each attempt, show the reproduction, whether it succeeded, and the fix. Update THREAT_MODEL.md with anything new. Do not fix anything until the whole list is written.</pre></div>
+      </div>
+      <div class="gate"><div class="eyebrow">Gate 5</div><ul>
+        <li>Nine of ten torture schemas snapshot cleanly, and the tenth fails with a message that says exactly why.</li>
+        <li>Red team found nothing that leaks unmasked flagged data.</li>
+        <li>Performance baseline is recorded and enforced in CI.</li>
+      </ul></div>
+    </section>
+
+    <!-- PHASE 6 -->
+    <section class="phase" id="p6">
+      <div class="phase-head">
+        <div class="eyebrow">Phase 6</div>
+        <h2>Launch</h2>
+        <div class="meta"><span><b>Weeks 11 to 12</b></span><span>Output: v0.1.0 in public, first thousand stars</span></div>
+      </div>
+      <p>sqlit launched with a README GIF and a Reddit post, not a website. The README is the landing page. Spend a full week on it.</p>
+      <div class="prompts">
+        <div class="prompt"><div class="bar"><span>PROMPT 6.1 · README</span><button data-copy>copy</button></div><pre>Rewrite README.md as the landing page. Structure, in order: the GIF; one sentence on what it does; the install line for brew, curl, and go install; the one-command example with real output; "why" in three short paragraphs matching the three principles; a comparison table against Greenmask, pg_anonymizer, and Tonic on the axes users care about (time to first snapshot, config required, databases, masking determinism, licence); how it decides what is PII and how to override it; the safety rails; a Roadmap link; and a "why I built this" paragraph I will write. Study the sqlit, lazygit, and Bruno READMEs first and note what they do in the first screen.</pre></div>
+        <div class="prompt"><div class="bar"><span>PROMPT 6.2 · GIF and docs</span><button data-copy>copy</button></div><pre>Write a VHS tape file (charmbracelet/vhs) that records the first-run flow on the Pagila fixture at 1200x700, under 25 seconds, with a pause on the classifier's reasons screen. Then generate a minimal docs site with mkdocs-material: install, first run, CI usage with a GitHub Actions example, masking overrides, custom maskers, every flag, and the error catalogue. Nothing on the site may contradict the tool's own --help output; add a test that checks that.</pre></div>
+        <div class="prompt"><div class="bar"><span>PROMPT 6.3 · launch posts</span><button data-copy>copy</button></div><pre>Draft launch posts in docs/launch/: a Show HN title and first comment under 200 words that leads with the problem and the Snaplet and Neosync shutdowns; a r/PostgreSQL post; a r/devops post; a r/webdev post; and a short blog post "What I learned reading Snaplet's and Neosync's issue trackers" drawing on research/POSTMORTEMS.md. Each post must be honest about v1 limits (Postgres only) and end with one specific question to readers. Also list ten awesome-lists and comparison pages where a PR adding lazysnap would be welcome, with links.</pre></div>
+        <div class="prompt"><div class="bar"><span>PROMPT 6.4 · release</span><button data-copy>copy</button></div><pre>Cut v0.1.0: run the full gate 5 checklist, tag, let goreleaser publish binaries and the Homebrew formula, verify a fresh machine installs and runs the Pagila demo from the README with copy-paste alone, and write CHANGELOG.md. Then set up issue templates (bug with schema attachment instructions, PII miss with a private reporting route via SECURITY.md, feature request that must name which principle it serves) and labels including good-first-issue.</pre></div>
+      </div>
+      <div class="gate"><div class="eyebrow">Gate 6</div><ul>
+        <li>Posted on HN and two subreddits. Every comment answered within a day for a week.</li>
+        <li>A stranger has opened an issue with a schema you have never seen.</li>
+        <li>The first ten issues are triaged into ROADMAP.md, and at least half went to Later.</li>
+      </ul></div>
+    </section>
+
+    <!-- PHASE 7 -->
+    <section class="phase" id="p7">
+      <div class="phase-head">
+        <div class="eyebrow">Phase 7</div>
+        <h2>Breadth and community</h2>
+        <div class="meta"><span><b>Months 4 to 6</b></span><span>Output: MySQL, SQLite, SQL Server, a GitHub Action, contributors</span></div>
+      </div>
+      <p>Now the sqlit trick: breadth is where AI-assisted building pays off. Each new database is the same six interfaces with a different driver, and the invariant suite already knows what correct means.</p>
+      <div class="prompts">
+        <div class="prompt"><div class="bar"><span>PROMPT 7.1 · adapter playbook</span><button data-copy>copy</button></div><pre>Write docs/ADDING_A_DATABASE.md from the Postgres implementation: which of the six stages need a driver-specific implementation, which are shared, the introspection queries needed, the bulk-load mechanism (LOAD DATA, BCP, bulk insert), how to port the fixtures, and the checklist for calling an adapter done (all six invariants, torture suite, docs page, README table row). Then implement MySQL following the playbook exactly, and improve the playbook wherever it was wrong.</pre></div>
+        <div class="prompt"><div class="bar"><span>PROMPT 7.2 · CI mode</span><button data-copy>copy</button></div><pre>Build a GitHub Action, lazysnap-action, that runs a committed lazysnap.yml against a source in secrets and produces a target service container for the job's tests. Include caching of the snapshot keyed on the config hash and the source schema hash so unchanged schemas reuse the last snapshot. Write the example workflow into the docs and dogfood it on our own repo against a Pagila source.</pre></div>
+        <div class="prompt"><div class="bar"><span>PROMPT 7.3 · weekly triage</span><button data-copy>copy</button></div><pre>Run the weekly triage. Read all issues and PRs opened or updated in the last seven days. For each: label it, decide phase or Later per ROADMAP.md, draft a reply, and flag any report of unmasked PII as urgent. List PRs that pass CI and follow CONTRIBUTING.md and are safe for me to merge after reading, versus those that change an ADR decision and need a conversation. Output as a checklist I work through, not as actions taken.</pre></div>
+      </div>
+      <div class="gate"><div class="eyebrow">Gate 7</div><ul>
+        <li>Four databases pass the invariant suite.</li>
+        <li>At least three merged PRs from people you have never met.</li>
+        <li>Someone you do not know has written about the tool without being asked.</li>
+      </ul></div>
+    </section>
+
+    <!-- PHASE 8 -->
+    <section class="phase" id="p8">
+      <div class="phase-head">
+        <div class="eyebrow">Phase 8</div>
+        <h2>Client-facing product</h2>
+        <div class="meta"><span><b>Months 6 to 12</b></span><span>Output: five design partners, a hosted tier, first invoice</span></div>
+      </div>
+      <p>The hosted product sells what a CLI cannot: shared team snapshots, schedules, access control, and a compliance record that proves what was masked. Do not build any of it until five real teams have told you which of those they would pay for.</p>
+      <div class="prompts">
+        <div class="prompt"><div class="bar"><span>PROMPT 8.1 · design partners</span><button data-copy>copy</button></div><pre>Write docs/business/DESIGN_PARTNERS.md: a 30-minute interview script for engineering leads at 5 to 50 person companies using lazysnap. Questions must uncover: how they get dev data today, who is responsible when PII leaks, whether they need snapshots shared across a team, how often schemas change, what they pay for adjacent tools, and what would make them pay for a hosted version. Include a scoring rubric and a target of five interviews. Then draft the outreach message for the GitHub users who opened the most detailed issues.</pre></div>
+        <div class="prompt"><div class="bar"><span>PROMPT 8.2 · open-core boundary</span><button data-copy>copy</button></div><pre>Write docs/adr/010-open-core-boundary.md. List every capability we have or plan, and sort each into "always free in the CLI" or "hosted only" using one test: does it require infrastructure we run, or a guarantee only we can make? Scheduling, storage, team sharing, audit and compliance reports, SSO, and support go one way; every masker, every database, and CI mode stay free. Specify how the repo is structured so the boundary is visible in the code, and how the CLI talks to the hosted service through a documented API that a self-hoster could reimplement.</pre></div>
+        <div class="prompt"><div class="bar"><span>PROMPT 8.3 · hosted architecture</span><button data-copy>copy</button></div><pre>Design the hosted service in docs/business/HOSTED_ARCHITECTURE.md for the first 50 paying teams, optimising for one person operating it. Components: auth via GitHub and Google, a runner that executes lazysnap.yml against customer sources on a schedule from a fixed egress IP they can allow-list, encrypted snapshot storage in S3-compatible object storage with per-team keys, a small web app for browsing snapshots and masking reports, and Stripe billing with flat per-team pricing. State the data we hold, the data we never hold, and the deletion guarantee. Choose boring technology and justify each choice in one line.</pre></div>
+        <div class="prompt"><div class="bar"><span>PROMPT 8.4 · pricing and paperwork</span><button data-copy>copy</button></div><pre>Write docs/business/PRICING.md and a checklist for going commercial. Pricing: propose three flat team tiers with the value metric being snapshot schedules and retained snapshots, never seats; justify against PagerDuty-style per-seat resentment and Tonic's enterprise price. Paperwork checklist: legal entity options for a solo founder, a terms of service and privacy policy tailored to a tool that touches customer PII, a data processing agreement template, what SOC 2 actually requires and when to start, and cyber insurance. Mark which items need a lawyer versus a template.</pre></div>
+      </div>
+      <div class="gate"><div class="eyebrow">Gate 8</div><ul>
+        <li>Five interviews scored, and at least three named the same hosted feature.</li>
+        <li>One design partner runs the hosted tier in anger for a month.</li>
+        <li>First invoice paid.</li>
+      </ul></div>
+    </section>
+
+    <!-- GUARDRAILS -->
+    <section class="phase" id="guard">
+      <div class="phase-head">
+        <div class="eyebrow">Always on</div>
+        <h2>Guardrails</h2>
+        <div class="meta"><span><b>Every session, every phase</b></span></div>
+      </div>
+
+      <h3>Invariants the tests enforce</h3>
+      <p>These are the definition of correct. A pull request that breaks one is wrong, whoever wrote it and however nice the feature.</p>
+      <div class="invariants">
+        <div><span class="k">I1</span><span>Every foreign key in the target resolves.</span></div>
+        <div><span class="k">I2</span><span>No flagged column in the target contains a value the classifier would flag.</span></div>
+        <div><span class="k">I3</span><span>Same source, same secret, same config produces a byte-identical target.</span></div>
+        <div><span class="k">I4</span><span>The source is unchanged after a run. The tool holds no write privilege on it.</span></div>
+        <div><span class="k">I5</span><span>The emitted config reproduces the run.</span></div>
+        <div><span class="k">I6</span><span>The root table in the target has exactly the requested number of rows.</span></div>
+      </div>
+
+      <h3 style="margin-top:1rem">Standing rules for the agent</h3>
+      <p>The core of CLAUDE.md. Prompt 3.2 expands it.</p>
+      <div class="prompt"><div class="bar"><span>CLAUDE.md · core block</span><button data-copy>copy</button></div><pre># lazysnap rules
+
+Read ROADMAP.md first. Work only on the current phase. Anything else goes to Later with one line of reasoning; do not build it.
+
+Before saying something works: make lint test integration. Paste the result. "Should work" is not a status.
+
+Invariants I1 to I6 in internal/invariants_test.go define correct. Never weaken a test to make it pass. If an invariant is wrong, write an ADR proposing the change and stop.
+
+One stage per change. A change touching more than one pipeline stage needs a sentence in the PR explaining why.
+
+Decisions live in docs/adr/. To change a decision, add a new ADR that supersedes the old one. Never edit an accepted ADR.
+
+Safety rails from THREAT_MODEL.md are not configurable away without a flag whose name says what it does. Never add a flag that disables masking wholesale.
+
+The TUI is a thin layer. Every TUI action must be reachable by a CLI flag first.
+
+Do not add a database, a config option, or a dependency to fix a bug. Fix the bug.
+
+Documentation is never the fix for a confusing first run. Change the default or the question.
+
+When in doubt, mask it.</pre></div>
+
+      <h3 style="margin-top:1rem">Session prompts</h3>
+      <div class="prompts">
+        <div class="prompt"><div class="bar"><span>Start of every session</span><button data-copy>copy</button></div><pre>Read CLAUDE.md, ROADMAP.md, and the last entry in docs/DOGFOOD_LOG.md. Tell me the current phase, what the gate still needs, and the single most valuable thing to do in the next two hours. Then wait for me to agree before writing code.</pre></div>
+        <div class="prompt"><div class="bar"><span>Scope check, when a feature feels tempting</span><button data-copy>copy</button></div><pre>I want to add: [describe it]. Before anything else: which phase in ROADMAP.md does this belong to, which principle does it serve, and what in the current gate does it unblock? If the answer to the last is "nothing", write it into Later with my reasoning and tell me no. Be blunt.</pre></div>
+        <div class="prompt"><div class="bar"><span>Before merging anything</span><button data-copy>copy</button></div><pre>Review this diff as a maintainer who will be paged if it leaks production data. Check: does it weaken any invariant, does it add a way to skip masking, does it log or persist a secret, does it write to the source, does it touch more than one stage, and does the error path leave a half-loaded target? Then check the boring things: tests for new behaviour, docs updated, --help still matches docs. List findings by severity. Do not fix anything yet.</pre></div>
+        <div class="prompt"><div class="bar"><span>Friday review</span><button data-copy>copy</button></div><pre>Compare this week's commits against ROADMAP.md's current phase. What moved the gate forward, what did not, and what got built that was not in the phase? Update the "Current phase" section with what is left. Then give me one honest sentence about whether I am on track for the phase's week range, and if not, what to cut rather than what to add.</pre></div>
+        <div class="prompt"><div class="bar"><span>When stuck for more than an hour</span><button data-copy>copy</button></div><pre>I have been stuck on [problem] for over an hour. Do not propose a fix. First write down the three simplest explanations, the one-line experiment that would rule out each, and which ADR or research doc is relevant. Then run the cheapest experiment.</pre></div>
+      </div>
+
+      <h3 style="margin-top:1rem">What "done" means at every level</h3>
+      <div class="table-wrap"><table>
+        <tr><th>Level</th><th>Done means</th></tr>
+        <tr><td>A change</td><td>Lint, tests, and integration green. Invariants untouched. One stage. Docs match --help.</td></tr>
+        <tr><td>A phase</td><td>Every gate item ticked by evidence, not by feel. ROADMAP.md updated.</td></tr>
+        <tr><td>A release</td><td>Fresh machine, README copy-paste, demo runs. CHANGELOG written. Tag pushed.</td></tr>
+        <tr><td>The product</td><td>A stranger's team pays for the hosted tier and renews.</td></tr>
+      </table></div>
+    </section>
+  </main>
+</div>
+
+<script>
+  document.querySelectorAll('[data-copy]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var pre = btn.closest('.prompt').querySelector('pre');
+      var text = pre.textContent;
+      var done = function () { btn.textContent = 'copied'; setTimeout(function () { btn.textContent = 'copy'; }, 1400); };
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(done, function () { fallback(text); done(); });
+        } else { fallback(text); done(); }
+      } catch (e) { fallback(text); done(); }
+    });
+  });
+  function fallback(text) {
+    var ta = document.createElement('textarea');
+    ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.left = '-9999px';
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); } catch (e) {}
+    document.body.removeChild(ta);
+  }
+</script>
