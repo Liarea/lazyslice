@@ -26,6 +26,10 @@ How this project is built by one orchestrator and a fleet of agents, with a huma
 
 Default is to inherit the session model when unsure. Never downgrade a reviewer to save tokens.
 
+## Budget reality
+
+The human's plan has session usage limits that reset at fixed times. A phase-1 research run of 29 agents cost about 3.5 million subagent tokens and was interrupted twice. Rules that follow from this: every workflow must be resumable by run id and commit partial output before resuming; a single run should aim for under 15 agents or under about 1.5 million tokens; reviewers stay on Opus, but revision and fix rounds that apply a concrete finding list run on Sonnet; research agents that spot-check links do so on at most five links, not every one.
+
 ## Review policy
 
 Every implementation task is followed, in the same workflow, by three parallel reviewers with distinct lenses, then at most two fix rounds by the original developer, then a final verify. A task that still fails after two rounds is returned to the orchestrator as blocked with the findings, not merged.
