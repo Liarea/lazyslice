@@ -2,7 +2,7 @@ export const meta = {
   name: 'lazyslice-architecture',
   description: 'Phase 2: benchmark, three independent architecture proposals, judge panel, ADRs, threat model, adversarial review',
   phases: [
-    { title: 'Propose', detail: 'three architects with different lenses, plus a language throughput benchmark' },
+    { title: 'Propose', detail: 'three architects with different lenses' },
     { title: 'Judge', detail: 'three judges score every proposal' },
     { title: 'Decide', detail: 'Fable writes ADRs 001-006, ARCHITECTURE.md, THREAT_MODEL.md' },
     { title: 'Review', detail: 'three adversarial lenses on the decision set, one revision' },
@@ -26,16 +26,12 @@ const DECISIONS = `The six decisions every proposal must take a position on, wit
 
 log('Phase 2: benchmark plus three proposals in parallel')
 
-const [bench, proposals] = await parallel([
-  () => agent(`${PRE}
-Settle the language throughput question with a measurement, not an opinion. Start a PostgreSQL 16 container with Docker (name lazyslice-bench, a random high port, remove it when done). Create a table with 5 million rows and ten mixed columns (ints, text, timestamps, a JSONB). Measure wall-clock and peak RSS for: (a) Go with pgx v5 using CopyTo into a streaming consumer that counts rows and writes them back with CopyFrom into a second table; (b) Python 3.13 with psycopg 3 doing the same with copy() in both directions; (c) the psql \\copy baseline. Run each three times. Put the code under /private/tmp/claude-501/lazyslice-scratch/bench/ (not in the repo). Write ${REPO}/research/BENCHMARK_LANGUAGE.md with the table of results, the exact commands, hardware, and a one-paragraph interpretation that says which language wins for streaming and by how much, and whether the gap matters at the scale in CONCEPT.md. Stop and remove the container at the end even if something fails.`,
-    { label: 'benchmark', phase: 'Propose', model: 'opus', schema: OUT }),
-  () => parallel(LENSES.map(l => () => agent(`${PRE}
+const bench = null // benchmark parked as a Later task (T-BENCH) to fit usage windows; ADR-001 carries it as a reversal test
+const proposals = await parallel(LENSES.map(l => () => agent(`${PRE}
 You are one of three architects writing independent proposals. Your lens: ${l.brief}
 Write ${REPO}/research/proposals/${l.key}.md (create the directory if needed). ${DECISIONS}
 Include a Mermaid diagram of the pipeline and one of the FK walk on a schema with a cycle. Be concrete: name libraries with versions, name types, name flags. Under 2000 words.`,
-    { label: `propose:${l.key}`, phase: 'Propose', model: l.key === 'risk-first' ? 'fable' : 'opus', schema: OUT }))),
-])
+    { label: `propose:${l.key}`, phase: 'Propose', model: l.key === 'risk-first' ? 'fable' : 'opus', schema: OUT })))
 
 const JUDGE = { type: 'object', required: ['scores', 'best_ideas', 'fatal_flaws'], properties: {
   scores: { type: 'array', items: { type: 'object', required: ['proposal', 'total', 'notes'], properties: { proposal: { type: 'string' }, total: { type: 'integer' }, notes: { type: 'string' } } } },
@@ -44,11 +40,11 @@ const JUDGE = { type: 'object', required: ['scores', 'best_ideas', 'fatal_flaws'
 
 log('Judging: three judges, each scores all three proposals')
 const judges = await parallel(['implementability by one developer in eight weeks', 'data-safety and failure modes', 'first-run experience and adoption'].map((crit, i) => () => agent(`${PRE}
-You are a judge. Read all three files in ${REPO}/research/proposals/ and ${REPO}/research/BENCHMARK_LANGUAGE.md. Your primary criterion is: ${crit}. Score each proposal 0-10 on your criterion and 0-10 on each of: internal consistency, fidelity to CONCEPT.md principles, and evidence cited from research/. Total out of 40. Name the best idea in each proposal that the others lack, and any fatal flaw. Be specific and quote the proposals.`,
+You are a judge. Read all three files in ${REPO}/research/proposals/. (No benchmark file exists; judge decision 1 on the research evidence.) Your primary criterion is: ${crit}. Score each proposal 0-10 on your criterion and 0-10 on each of: internal consistency, fidelity to CONCEPT.md principles, and evidence cited from research/. Total out of 40. Name the best idea in each proposal that the others lack, and any fatal flaw. Be specific and quote the proposals.`,
   { label: `judge:${i + 1}`, phase: 'Judge', model: 'opus', schema: JUDGE })))
 
 const decide = await agent(`${PRE}
-You are the architect making the final call. Inputs: the three proposals in ${REPO}/research/proposals/, ${REPO}/research/BENCHMARK_LANGUAGE.md, and the judges' verdicts: ${JSON.stringify(judges.filter(Boolean))}.
+You are the architect making the final call. Inputs: the three proposals in ${REPO}/research/proposals/ and the judges' verdicts: ${JSON.stringify(judges.filter(Boolean))}.
 Write these files: ${REPO}/docs/adr/001-language.md, 002-tui.md, 003-database-order.md, 004-config-model.md, 005-pipeline.md, 006-extension-model.md, each in the format Context / Options considered / Decision / Consequences / Reversal condition, citing proposals and research by path. Then ${REPO}/ARCHITECTURE.md: the pipeline stages as Go interfaces with their input and output types written as real Go code, the subset planner algorithm as pseudocode, the deterministic masking scheme, the progress event model, the CLI flag surface for v1 (every flag, its default, and which stage it drives), how the emitted lazyslice.yml looks with a full example, the repository layout with one line per directory, the dependency list with versions and one reason each, and two Mermaid diagrams. Then ${REPO}/THREAT_MODEL.md: assets, threats (at minimum: classifier misses a PII column, target is production, secrets in config or logs, snapshot committed to git, malicious custom masker, half-loaded target, supply chain of releases), each with likelihood, impact, the concrete control, and whether it blocks v1. Finally ${REPO}/docs/adr/README.md explaining the format and listing the ADRs. Graft the judges' best ideas where they fit. Where the judges disagree, decide and say why.`,
   { label: 'decide', phase: 'Decide', model: 'fable', effort: 'high', schema: OUT })
 
