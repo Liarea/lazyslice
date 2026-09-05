@@ -1,93 +1,98 @@
 # Prompting Claude Fable 5.1 — operational cheat sheet
 
-All claims trace to [Prompting Claude Fable 5.1][page] (retrieved 2026-09-04); it covers Fable 5.1 and Mythos 5.1.
+Everything traces to [Prompting Claude Fable 5.1][page] (fetched 2026-09-05); it also covers Claude Mythos 5.1. Quoted blocks are verbatim.
 
 ## What is different about this model
 
-Fable 5 prompts "should perform well on Claude Fable 5.1 without changes", but:
-
-- **Quieter during tool chains**, more so at higher effort. Updates come as progress-update `thinking` blocks, **empty** under default `thinking.display: "omitted"` ([updates]).
-- **One tool call per turn where the next are implied, not named** — coding, bash-and-editor and computer-use loops ([batching]).
-- **History must be append-only.** Thinking blocks are valid only in the conversation that produced them (accounts created on/after 2026-08-31); replaying one after a changed prefix returns 400 ([append-only]).
-- **Denser prose**, but *less* bold, headers and lists than earlier models, so old anti-formatting rules now hurt ([density], [formatting]).
-- **Whole-file rewrites** instead of targeted edits ([edits]), and **scope creep** — "and sometimes more": nearby fixes, unmentioned extensions, extra test files ([scope]).
-- **Less searching at `low` effort** ([search]).
-- **Safety classifiers** can return `stop_reason: "refusal"`, with fewer false positives than Fable 5 at launch; finding vulnerabilities in source code is permitted ([safeguards]).
+- Fable 5 prompts "should perform well on Claude Fable 5.1 without changes" — what follows is deltas, not a rewrite. [src][page]
+- Writes **fewer user-facing updates** in long tool-calling turns; worse at higher effort and in longer chains. [src][updates]
+- In coding/computer-use loops it may issue **one tool call per turn** when the next calls are implied, not named. [src][batch]
+- **Thinking blocks are conversation-bound** (accounts created on/after 2026-08-31): replaying one after the prefix changed returns a 400. [src][append]
+- Prose is **denser**; chat formatting is **sparser** (less bold, fewer headers/lists) — old anti-formatting rules now backfire. [src][density], [src][format]
+- More likely to reproduce source passages **unmarked as quotations**. [src][quote]
+- More likely to **rewrite whole files** instead of editing surgically. [src][edits]
+- Delivers what's asked "and sometimes more": nearby fixes, unrequested extensions, extra test files. [src][scope]
+- At `low` effort it searches less and answers from memory more. [src][search]
+- Runs safety classifiers and can return `stop_reason: "refusal"`, with fewer false positives than Fable 5 at launch; finding vulnerabilities in source code is permitted. [src][safeguard]
+- Better vision, best with a crop/zoom tool. [src][vision]
 
 ## Prompt skeleton
 
+Assembled from the page's blocks; each slot names its section.
+
 ```text
-ROLE: You are operating autonomously. The user is not watching in real time
-and cannot answer questions mid-task.
-
-CONTEXT: <repo, files, decisions; note if your UI hides tool output>
-TASK: <the deliverable, stated once and in full>
-
-CONSTRAINTS
-- The scope is the deliverable; don't narrow, widen or swap it.
-- Anything else you notice is a follow-up, not a change.
-- Surgically edit files rather than rewrite them.
-- Commit tests only where the task asks or the repo already keeps them.
-
-DEFINITION OF DONE
-Before ending your turn, check your last paragraph. If it is a plan, an
-analysis, a question, or a promise about work you have not done, do that
-work now.
-
-RETURN FORMAT: <exact shape, plus a recap that stands on its own>
+ROLE/AUTONOMY   "You are operating autonomously..."      → Finish the whole task
+CONTEXT         repo facts; say if your UI hides tool output → Progress updates
+TASK            the concrete ask
+CONSTRAINTS     "# Delivering work" block                → Finish the whole task
+                no-extras block                          → Keep changes and tests
+                surgical-edit line                       → Targeted edits
+                verify-names line                        → Search at low effort
+DONE            "Before ending your turn, check your last paragraph..." → Finish
+RETURN FORMAT   when lists/headers help                  → Formatting in chat
+TAIL NUDGE      batching sentence, re-sent each turn     → Batch tool calls
 ```
-
-Each line compresses a verbatim block ([finish], [scope], [edits]); paste the full ones when length allows.
 
 ## Phrases that work (verbatim)
 
-Batching ([batching]), appended to each request:
+Autonomy opener — "Keep it as written." [src][finish]
+
+> You are operating autonomously. The user is not watching in real time and cannot answer questions mid-task, so asking 'Want me to…?' or 'Shall I…?' will block the work.
+
+Definition of done [src][finish]:
+
+> Before ending your turn, check your last paragraph. If it is a plan, an analysis, a question, a list of next steps, or a promise about work you have not done ('I'll…', 'let me know when…'), do that work now with tool calls.
+
+Batching [src][batch]:
+
 > First privately list what you need next; then request every item that doesn't depend on another's result in this one response.
 
-Autonomy ([finish]) — "the opening sentence… carries much of the effect. Keep it as written":
-> You are operating autonomously. The user is not watching in real time and cannot answer questions mid-task, so asking 'Want me to…?' or 'Shall I…?' will block the work. For reversible actions that follow from the original request, proceed without asking.
+Targeted edits [src][edits]:
 
-Scope ([finish]):
-> The user's request — or the plan they approved — sets the scope, and the scope is the deliverable: don't quietly narrow, widen, or swap it.
-
-Targeted edits ([edits]):
 > The number of tokens used to edit files is best minimized, all else being equal. Therefore, when it will not affect the end result, try to surgically edit a file rather than rewrite the entire thing.
 
-Prose ([density]): "Please remove all mannered prose."
+Density [src][density]: "Please remove all mannered prose."
+
+Also lift whole: the `# Delivering work` block [src][finish], the no-extras/tests block [src][scope], the name-verification block [src][search], the client-compaction summary [src][compact], the quoting `<example>` [src][quote].
 
 ## Anti-patterns
 
-- Lines like "hold all findings for the final response" ([updates]).
-- Old anti-formatting rules; say when formatting *is* appropriate ([formatting]).
-- Injecting or removing per-turn reminders, summarising turns in place, changing the system prompt mid-session — use turn-scoped system messages instead (`clear_at: "next_user_message"`, beta `mid-conversation-system-clear-at-2026-08-21`) ([append-only]).
-- "Does this program compile without errors?" — ask "Are there any bugs in this program?". Base64 in tool output also trips classifiers ([safeguards]).
-- Forcing the lead agent to block on each subagent ([subagents]).
+- Lines like "hold all findings for the final response" — audit them out first. [src][updates]
+- Anti-formatting rules from older models: replace with a when-to-format rule. [src][format]
+- Editing earlier turns: injecting/removing per-turn reminders, summarising older turns in place, changing the system prompt mid-session. Use turn-scoped system messages, left byte-for-byte. [src][append]
+- "Does this program compile without errors?" — ask "Are there any bugs in this program?" instead. Avoid base64 in tool output. [src][safeguard]
+- Forcing the lead agent to block on each subagent. [src][subagents]
 
 ## Effort and length guidance
 
-Start at the default `high`, then sweep all levels against your evals — re-run even if you swept Fable 5, since "effort level names don't correspond to the same amount of thinking across models". `medium` roughly matches Fable 5 at lower cost; `low` is often competitive with Opus and Sonnet on cost per task while scoring higher ([effort]). Raise effort for turns where it skips searching ([search]).
+Start at the default `high`, then sweep `low`/`medium`/`xhigh`/`max` against your evals; re-run it even if you swept Fable 5, since level names don't map to the same amount of thinking across models. At `medium` results roughly match Fable 5 at lower cost; `low` is often competitive with Opus/Sonnet on cost per task while scoring higher. [src][effort]
 
-Prefer `high` for long deliverables; at `xhigh`/`max` the model may draft them in thinking, then write them again. Set `max_tokens` to cover thinking *and* reply, and append the budget note ("Everything produced in one reply, including any reasoning or drafting done before the reply, counts toward a single limit of about [max_tokens] tokens"), which "makes the thinking much shorter" ([long-outputs]).
+At `xhigh`/`max` it may draft a long deliverable in thinking and write it again. Run those at `high`; if not, set `max_tokens` to cover thinking *and* reply, and append the page's "counts toward a single limit of about [max_tokens] tokens" note to the user message. For `low`-effort search gaps, raising effort for those turns can beat prompting. [src][long], [src][search]
 
 ## For coding agents
 
-- **Finishing:** apply both task-completion blocks; under length pressure use only the first, which "keeps most of the effect". Exception: when the user is thinking out loud, the deliverable is your assessment — report and stop ([finish]).
-- **State changes** ([finish]): "Before running a command that changes system state (such as restarts, deletes, or config edits), check that the evidence actually supports that specific action."
-- **Scope and tests:** pre-existing bugs become follow-ups; ambiguity resolves to the most directly supported reading; scratch checks stay unversioned; committed tests are sized like neighbouring files, "roughly one focused test per stated behavior". Reported: unrequested additions and test code "drop substantially with no measurable change in task success" ([scope]).
-- **Batching:** send the nudge as a fresh turn-scoped system message after each `tool_result` turn; without the beta, in a text block after those blocks ([batching]).
-- **Subagents:** start-subagent tool returns immediately, results arrive in a later `user` message, lead gets a separate wait tool — lower average time to completion at similar quality and cost ([subagents]).
+- **Finishing:** apply both *Finish the whole task* blocks; the first alone keeps most of the effect. [src][finish]
+- **Scope and tests:** the no-extras block drops unrequested additions and committed test code "with no measurable change in task success" — commit tests only where the task asks or the repo already does, ~one focused test per stated behaviour. [src][scope]
+- **Edits:** surgical over rewrite. [src][edits]
+- **Batching:** append the nudge as a turn-scoped system message (`clear_at: "next_user_message"`, beta `mid-conversation-system-clear-at-2026-08-21`) after each tool-result turn; without the beta, a text block after the `tool_result` blocks. [src][batch]
+- **Subagents:** start-tool returns immediately, results arrive in a later `user` message, and the lead gets a separate wait tool. Lowers average time to completion at similar quality and cost. [src][subagents]
+- **Progress:** updates arrive as `thinking` blocks — empty under the default `thinking.display: "omitted"`; set `"updates"` (beta `thinking-display-updates-2026-08-18`) or `"summarized"`. [src][updates]
+- **Compaction:** client-side, replace the history with one summary plus the new user turn, replaying no thinking blocks; cheaper cache reads mean early compaction may no longer pay. [src][append]
 
 [page]: https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5-1
 [effort]: https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5-1#consider-all-effort-levels
 [updates]: https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5-1#ask-for-user-facing-progress-updates
-[batching]: https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5-1#batch-independent-tool-calls-in-agent-loops
-[append-only]: https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5-1#keep-the-conversation-history-append-only
+[batch]: https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5-1#batch-independent-tool-calls-in-agent-loops
+[append]: https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5-1#keep-the-conversation-history-append-only
 [density]: https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5-1#writing-density
-[formatting]: https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5-1#formatting-in-chat
+[format]: https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5-1#formatting-in-chat
+[quote]: https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5-1#quoting-retrieved-sources
 [finish]: https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5-1#finish-the-whole-task
+[compact]: https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5-1#tell-the-model-what-to-preserve-in-compaction-summaries
 [scope]: https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5-1#keep-changes-and-tests-to-what-the-task-asks-for
 [search]: https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5-1#search-triggering-at-low-effort
-[safeguards]: https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5-1#reduce-safeguard-false-positives
+[safeguard]: https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5-1#reduce-safeguard-false-positives
 [edits]: https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5-1#prefer-targeted-edits-over-whole-file-rewrites
-[long-outputs]: https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5-1#leave-room-for-long-outputs-at-xhigh-and-max-effort
+[long]: https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5-1#leave-room-for-long-outputs-at-xhigh-and-max-effort
 [subagents]: https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5-1#let-the-lead-agent-keep-working-while-subagents-run
+[vision]: https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5-1#give-vision-work-tools-to-crop-and-zoom

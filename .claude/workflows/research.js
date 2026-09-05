@@ -70,7 +70,7 @@ const revise = (d) => (x) => {
   if (x.critique.verdict === 'accept' && !x.critique.issues.some(i => i.severity === 'high')) return x.author
   return agent(`${PRE}
 You wrote ${REPO}/${d.file}. A reviewer found these issues: ${JSON.stringify(x.critique.issues)}. Missing: ${JSON.stringify(x.critique.missing)}. Fix every high and medium issue and answer every missing question, editing the file in place with targeted edits. Do not remove sourced content to make the file shorter. Return the updated structured output.`,
-    { label: `revise:${d.key}`, phase: 'Revise', model: d.model, schema: DOC })
+    { label: `revise:${d.key}`, phase: 'Revise', model: 'sonnet', effort: 'medium', schema: DOC })
 }
 
 log('Research: 8 documents, each critiqued and revised; 5 prompt guides digested in parallel')
