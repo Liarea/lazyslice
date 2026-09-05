@@ -4,7 +4,7 @@ Snapshot a production SQL database into a safe local copy: subset by a root tabl
 
 ## Current phase
 
-Phase 3, Foundations. Gate: CI green on an empty implementation, integration tests fail for the right reason, both fixtures load with every trap documented, per-directory CLAUDE.md files, ROADMAP.md, ADR-008 first run. ARCHITECTURE.md section 14 is the v1 cut line; section 12 is the layout. See docs/BUILD_PLAN.md.
+See ROADMAP.md, section "Current phase", for the phase and its gate. ARCHITECTURE.md section 14 is the v1 cut line; section 12 is the layout.
 
 ## Rules
 
