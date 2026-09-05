@@ -34,7 +34,7 @@ Tasks are capped at roughly 400 changed lines so review happens in real time. Bi
 
 ## Parallelism
 
-Work runs in parallel only when it touches disjoint directories. The six pipeline stages are built sequentially because each consumes the previous stage's types. Fixtures, CI, docs, and tests can run alongside any stage. Parallel file-mutating agents get their own git worktree; the orchestrator merges.
+Work runs in parallel only when it touches disjoint directories. The six pipeline stages are built sequentially because each consumes the previous stage's types. Fixtures, CI, docs, and tests can run alongside any stage. Parallel agents whose write paths are disjoint share the working tree and may not touch go.mod, go.sum, or each other's paths. Only when two parallel tasks must touch the same files, as with adapters in phase 7, does each get its own git worktree and branch, and the orchestrator merges.
 
 ## Tracking
 
