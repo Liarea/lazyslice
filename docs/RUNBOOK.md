@@ -37,6 +37,10 @@ Run a phase from the orchestrator session with the Workflow tool and `scriptPath
 4. Commit: `git add -A && git commit -m "phase N: ..."`.
 5. Read the gate in docs/BUILD_PLAN.md before starting the next phase. A gate item without evidence is not ticked.
 
+## When a run dies on a usage limit
+
+Agents fail with "You've hit your session limit" and the workflow returns with a failures list. Nothing is lost: files already written stay on disk and finished agents are cached. After the limit resets, relaunch with the same `scriptPath` and `resumeFromRunId`; only the failed agents run. Commit the partial output first so a later edit to the script cannot orphan it.
+
 ## When a task comes back blocked
 
 Read the findings. Decide one of: split the task and rerun; write an ADR if the block is a design flaw; or cancel with a reason in the tracker. Never weaken a test or an invariant to unblock.
