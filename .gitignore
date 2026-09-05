@@ -1,0 +1,19 @@
+# lazysnap
+snapshots/
+lazysnap.secret
+*.snapshot
+.env
+.env.*
+!.env.example
+
+# build
+/bin/
+/dist/
+coverage.out
+*.test
+
+# editors
+.DS_Store
+.idea/
+.vscode/
+*.swp
