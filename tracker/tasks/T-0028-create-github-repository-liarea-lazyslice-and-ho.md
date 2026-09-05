@@ -25,6 +25,8 @@ git remote origin set; CI runs on push; a throwaway pre-release tag produces bin
 
 - 2026-09-05 created
 
+- 2026-09-05 2026-09-05: repo created by Gareth, origin added (ssh), main pushed. Remaining: Liarea/homebrew-tap repo and HOMEBREW_TAP_TOKEN secret; repo is private, so a public brew install needs it public or the cask will point at inaccessible assets.
+
 ## Post-mortem
 
 _(filled on close: what went well, what went badly, what we change next time)_
