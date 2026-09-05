@@ -1,0 +1,96 @@
+# lazyslice
+#
+# Every claim about this repository is made by one of these targets. "Should
+# work" is not a status (CLAUDE.md): run `make check` and paste the output.
+#
+# The build tools are pinned here rather than in go.mod, because they are tools
+# and not dependencies (ARCHITECTURE.md section 13). `make tools` installs them
+# into $(TOOLDIR) at the pinned versions, and every target prefers a pinned
+# binary over whatever is on PATH.
+
+SHELL := /usr/bin/env bash
+.SHELLFLAGS := -eu -o pipefail -c
+.DEFAULT_GOAL := check
+
+MODULE  := github.com/Liarea/lazyslice
+BINARY  := lazyslice
+BINDIR  := bin
+TOOLDIR := $(CURDIR)/$(BINDIR)/tools
+
+# Pinned build tools. A bump is a pull request that says why.
+GOLANGCI_LINT_VERSION := v2.13.2
+GORELEASER_VERSION    := v2.18.0
+
+GOLANGCI_LINT := $(shell command -v $(TOOLDIR)/golangci-lint 2>/dev/null || command -v golangci-lint 2>/dev/null)
+GORELEASER    := $(shell command -v $(TOOLDIR)/goreleaser 2>/dev/null || command -v goreleaser 2>/dev/null)
+
+# The masker is a nested module (ADR-006) with its own go.mod, so every target
+# that walks the tree walks both.
+MODULES := . ./mask
+
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
+DATE    := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+LDFLAGS := -s -w \
+	-X main.version=$(VERSION) \
+	-X main.commit=$(COMMIT) \
+	-X main.date=$(DATE)
+
+.PHONY: all build test lint integration fmt check tools clean help
+
+## build: compile the binary into bin/
+build:
+	CGO_ENABLED=0 go build -trimpath -ldflags '$(LDFLAGS)' -o $(BINDIR)/$(BINARY) ./cmd/$(BINARY)
+
+## test: unit tests, both modules, with the race detector
+test:
+	@set -e; for m in $(MODULES); do \
+		echo "==> go test $$m"; \
+		( cd $$m && go test -race -count=1 ./... ); \
+	done
+
+## integration: tests behind the integration build tag; needs a Docker endpoint
+##
+## These are the tests that matter: the planner, the gate, the loader and the
+## residual scan are statements about a real Postgres. They start containers
+## through internal/testutil, so they are slow and they are not in `check`.
+integration:
+	go test -tags integration -count=1 -timeout 30m ./...
+
+## lint: golangci-lint over both modules
+lint:
+	@if [ -z "$(GOLANGCI_LINT)" ]; then \
+		echo "golangci-lint not found; run: make tools"; exit 1; \
+	fi
+	@set -e; for m in $(MODULES); do \
+		echo "==> lint $$m"; \
+		( cd $$m && $(GOLANGCI_LINT) run --config $(CURDIR)/.golangci.yml ); \
+	done
+
+## fmt: gofmt -w over both modules, and tidy go.mod
+fmt:
+	gofmt -w -s $$(git ls-files '*.go')
+	@set -e; for m in $(MODULES); do ( cd $$m && go mod tidy ); done
+
+## check: lint then test. This is what CI runs and what you paste.
+check: lint test
+
+## tools: install the pinned build tools into bin/tools
+tools:
+	GOBIN=$(TOOLDIR) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+	GOBIN=$(TOOLDIR) go install github.com/goreleaser/goreleaser/v2@$(GORELEASER_VERSION)
+
+## snapshot: build the release artifacts locally without publishing
+snapshot:
+	@if [ -z "$(GORELEASER)" ]; then \
+		echo "goreleaser not found; run: make tools"; exit 1; \
+	fi
+	$(GORELEASER) release --snapshot --clean
+
+## clean: remove build output
+clean:
+	rm -rf $(BINDIR) dist coverage.out
+
+## help: list the targets
+help:
+	@grep -E '^## ' $(MAKEFILE_LIST) | sed 's/^## //'

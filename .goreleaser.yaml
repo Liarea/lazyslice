@@ -1,0 +1,98 @@
+# goreleaser configuration for lazyslice.
+#
+# The binary is static and CGO-free (ADR-001), so one build stanza covers every
+# platform and the artifacts are directly comparable.
+#
+# `make snapshot` runs this locally without publishing anything.
+
+version: 2
+
+project_name: lazyslice
+
+before:
+  hooks:
+    - go mod download
+    - go mod verify
+
+builds:
+  - id: lazyslice
+    main: ./cmd/lazyslice
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .FullCommit }}
+      - -X main.date={{ .CommitDate }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: lazyslice
+    ids: [lazyslice]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - SECURITY.md
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+
+# The Homebrew tap lives at github.com/Liarea/homebrew-tap. goreleaser
+# deprecated formulae for binary releases in favour of casks, so this is a cask;
+# `brew install Liarea/tap/lazyslice` is the same command either way.
+homebrew_casks:
+  - name: lazyslice
+    ids: [lazyslice]
+    repository:
+      owner: Liarea
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Casks
+    homepage: https://github.com/Liarea/lazyslice
+    description: Snapshot a production SQL database into a safe local copy
+    # A pre-release tag does not become the formula everyone gets by default.
+    skip_upload: auto
+    hooks:
+      post:
+        install: |
+          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/lazyslice"]
+          end
+
+release:
+  draft: false
+  # Until the tool does what CONCEPT.md promises, every tag is a pre-release.
+  prerelease: auto
+  footer: |
+    lazyslice is pre-release. It masks personal data by default and refuses to
+    write to a target it did not create, but the stated false negatives in
+    SECURITY.md apply to every snapshot it produces. Read them before you treat
+    a snapshot as anonymous.

@@ -1,0 +1,132 @@
+# golangci-lint v2 configuration.
+#
+# The set is strict on the things that would let a personal value escape or a
+# safety check be skipped, and quiet about style opinions that would generate
+# noise a reviewer learns to ignore.
+#
+# In particular: errcheck is on with no exclusions worth mentioning, because an
+# unchecked error on a gate probe is a target that gets written to; errorlint is
+# on because the exit code is computed with errors.Is; and gosec is on because
+# this program holds two database credentials and a masking key.
+
+version: "2"
+
+run:
+  timeout: 5m
+  build-tags:
+    - integration
+
+linters:
+  default: none
+  enable:
+    # correctness
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - errorlint
+    - nilerr
+    - bodyclose
+    - rowserrcheck
+    - durationcheck
+    - copyloopvar
+    - predeclared
+    - makezero
+    - exhaustive
+    # security
+    - gosec
+    # clarity
+    - revive
+    - gocritic
+    - misspell
+    - unconvert
+    - wastedassign
+    - whitespace
+    - nolintlint
+
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+
+    exhaustive:
+      # A switch over a Category, a Mode or a Verdict that silently ignores a
+      # case is how a new classification category ends up unmasked.
+      default-signifies-exhaustive: true
+
+    govet:
+      enable-all: true
+      disable:
+        # fieldalignment reorders struct fields for padding, which would fight
+        # the field order ARCHITECTURE.md section 2 specifies.
+        - fieldalignment
+
+    gosec:
+      excludes:
+        # G104 duplicates errcheck.
+        - G104
+
+    revive:
+      rules:
+        - name: exported
+          arguments:
+            - disableStutteringCheck
+        - name: package-comments
+        - name: indent-error-flow
+        - name: errorf
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: increment-decrement
+        - name: var-declaration
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: unexported-return
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: dot-imports
+        - name: empty-block
+        - name: superfluous-else
+        - name: unreachable-code
+        - name: redefines-builtin-id
+
+    nolintlint:
+      # A nolint with no explanation is a silenced linter nobody can review.
+      require-explanation: true
+      require-specific: true
+      allow-unused: false
+
+    misspell:
+      # No locale: the prose is British and the SQL keywords (ANALYZE,
+      # SERIALIZABLE) are not, so only real misspellings are worth reporting.
+      ignore-rules:
+        - analyze
+
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      # Test helpers may shout, sleep and use weak randomness.
+      - path: _test\.go
+        linters:
+          - gosec
+          - errcheck
+      - path: internal/testutil/
+        linters:
+          - gosec
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/Liarea/lazyslice

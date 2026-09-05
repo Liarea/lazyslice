@@ -1,0 +1,43 @@
+name: release
+
+on:
+  push:
+    tags:
+      # The tool's own tags. The mask module releases on mask/v* and is not
+      # built into a binary, so it is not this workflow's business (ADR-006).
+      - "v*"
+
+permissions:
+  contents: write
+  # id-token is required for keyless signing (THREAT_MODEL.md T10), which the
+  # goreleaser configuration adds once cosign is wired in.
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: tests must pass before anything is published
+        run: |
+          go test -count=1 ./...
+          (cd mask && go test -count=1 ./...)
+
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: v2.18.0
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # A token with write access to github.com/Liarea/homebrew-tap. Without
+          # it the release still publishes; only the tap formula is skipped.
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
