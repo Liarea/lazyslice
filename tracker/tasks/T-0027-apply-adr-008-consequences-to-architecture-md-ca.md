@@ -1,6 +1,6 @@
 ---
-id: T-0025
-title: "ROADMAP.md with gates and Later"
+id: T-0027
+title: "Apply ADR-008 consequences to ARCHITECTURE.md, catalogue, ADR index"
 epic: E3
 phase: 3
 status: in_progress
@@ -11,7 +11,7 @@ closed: ""
 outcome: ""
 ---
 
-# T-0025 · ROADMAP.md with gates and Later
+# T-0027 · Apply ADR-008 consequences to ARCHITECTURE.md, catalogue, ADR index
 
 ## Goal
 

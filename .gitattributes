@@ -1,0 +1,2 @@
+testdata/** -text
+*.sql text eol=lf
