@@ -1,0 +1,49 @@
+# Code catalogue (ARCHITECTURE.md §7).
+#
+# Every event.Code emitted anywhere in the tree must have a row here; CI fails
+# on a code in the tree the catalogue does not carry (internal/event/event.go).
+# docs/ERRORS.md is generated from this file by tools/docgen.
+#
+# Row shape:
+#   code:    the event.Code string, dotted "<subject>.<verdict>.<detail>".
+#   kind:    one of the event.Kind names (ARCHITECTURE.md §7) — stage_start,
+#            stage_done, progress, decision, question, info, warn, error.
+#   stage:   the event.Stage name the code is emitted from.
+#   exit:    the process exit code (ADR-005), present only for kind: error.
+#   message: the rendered template. Placeholders are {argkey}, drawn only
+#            from event.ArgKey — a test asserts no template references a key
+#            outside that enum. Never a value from a row.
+#   args:    the ArgKey names the template uses, for that test to check
+#            against.
+#
+# Scaffold status: only the three codes ADR-008 adds are listed below. The
+# rest arrive with the tasks that emit them (internal/event/event.go).
+
+- code: target.refused.unreachable
+  kind: error
+  stage: discover
+  exit: 4
+  message: "target {host} did not respond: {reason}"
+  args: [host, reason]
+
+- code: target.refused.no_create
+  kind: error
+  stage: discover
+  exit: 4
+  message: "role {role} may not create objects in {database}: {statement}"
+  args: [role, database, statement]
+
+- code: target.refused.start_timeout
+  kind: error
+  stage: discover
+  exit: 4
+  # ADR-008 §6 step 3 requires this message to name the container and
+  # "docker logs <name>". Neither is expressible with today's ArgKey enum
+  # (internal/event/event.go): ArgStatement is documented there and in
+  # ARCHITECTURE.md §7 as SQL rendered from a catalogue template with
+  # identifiers substituted, never a docker CLI invocation, and there is no
+  # ArgKey for a container name. Owed to the phase 4 task that implements
+  # Q1' (ADR-008 §6): add an ArgKey (e.g. ArgContainer) and re-template this
+  # message before Q1' ships; do not reuse {statement} for a non-SQL command.
+  message: "target container did not become ready after {seconds}s"
+  args: [seconds]

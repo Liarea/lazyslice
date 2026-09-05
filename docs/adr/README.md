@@ -27,9 +27,7 @@ Phase gates check that every ADR has a stated reversal condition (docs/BUILD_PLA
 | [005](005-pipeline.md) | Nine stages, one core, one event channel, and the safety controls that live in them | accepted 2026-09-05 |
 | [006](006-extension-model.md) | Maskers are a library, rules are data, nothing is loaded at runtime | accepted 2026-09-05 |
 | [007](007-tool-not-company.md) | v1 is a tool, not a company | accepted 2026-09-05 |
-| 008 | First-run experience: the discovery ladder, the one-question rule and the question catalogue | owed this phase |
-
-ADR-008 is owed because research/OPEN_QUESTIONS.md item 5 requires reading lazygit's, lazydocker's and k9s's first-run and context-handling source before it is written. Until then ARCHITECTURE.md §9 carries the v1 behaviour, adopted from research/SQLIT_STUDY.md §5 and §6 with the two changes ADR-005 makes (no Q3, no `--allow-nonempty-target`); ADR-008 may refine it and may not loosen it.
+| [008](008-first-run.md) | First-run experience: the discovery ladder, the one-question rule and the question catalogue | proposed 2026-09-05 |
 
 ## Numbering note
 
