@@ -44,6 +44,10 @@ Work runs in parallel only when it touches disjoint directories. The six pipelin
 
 `tracker/` holds epics and tasks as markdown with frontmatter. `tools/tracker.py` is the only writer, and only the orchestrator runs it. Agents return structured results that include a one-line post-mortem; the orchestrator records it on close. `tracker/BOARD.md` is regenerated on every write. A task is never closed without a post-mortem; a cancelled task carries its reason.
 
+## Commit discipline
+
+While a workflow that commits is running, the orchestrator never runs `git add -A`. It stages the exact paths it changed (`git add tracker/ docs/RUNBOOK.md`) so an agent's half-written files are not swept into an unrelated commit. In parallel steps only the orchestrator commits, once, after the batch, so every task's commit is attributable. Observed failure, 2026-09-05: two tracker commits absorbed the invariants suite mid-task.
+
 ## Context discipline
 
 Agents write their work to files and return a summary under 200 words plus structured fields. The orchestrator reads summaries, not whole documents, and reads a file only when making a decision that depends on its contents. Decisions live in `docs/adr/` so they survive compaction. If the session is compacted, the summary must keep: current phase and gate status, open task ids, unresolved review findings, and any ADR under discussion.
