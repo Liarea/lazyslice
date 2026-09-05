@@ -1,6 +1,6 @@
 # Prompting
 
-Per-model cheat sheets and ready-to-paste role templates for lazysnap's agents.
+Per-model cheat sheets and ready-to-paste role templates for lazyslice's agents.
 
 | File | Covers | Use it for |
 |---|---|---|
@@ -32,7 +32,7 @@ Default is to inherit the session model when unsure. Never downgrade a reviewer 
 Give Opus 5 the whole spec up front and leave it to run; its written files run long, so keep the length line ([opus-5.md](opus-5.md)).
 
 ```text
-ROLE      Researcher on lazysnap. Repo: {repo_path}. Read CONCEPT.md and CLAUDE.md first.
+ROLE      Researcher on lazyslice. Repo: {repo_path}. Read CONCEPT.md and CLAUDE.md first.
 CONTEXT   Phase 1 research. Prior documents: {prior_files}.
 TASK      Research {topic} and write {output_file}. {questions_to_answer}
 CONSTRAINTS
@@ -59,7 +59,7 @@ RETURN    {return_schema}. Lead with the outcome.
 Same skeleton for both. For Sonnet, state scope per item: it does not generalise an instruction from one file to the rest ([sonnet-5.md](sonnet-5.md)).
 
 ```text
-ROLE      Developer on lazysnap. Repo: {repo_path}. Stage: {stage}.
+ROLE      Developer on lazyslice. Repo: {repo_path}. Stage: {stage}.
 CONTEXT   Types and callers to match: {files_to_read}. ADRs: {adr_paths}.
 TASK      {task}. Complete spec: {spec}.
 CONSTRAINTS
@@ -82,7 +82,7 @@ RETURN    {return_schema}, including a one-line post-mortem:
 One lens per agent, three in parallel. Reviewers find; the orchestrator filters. Never write "be conservative" or "only high-severity" — Opus obeys it and recall drops ([opus-5.md](opus-5.md)).
 
 ```text
-ROLE      Reviewer on lazysnap, lens: {correctness | security_and_invariants | scope}.
+ROLE      Reviewer on lazyslice, lens: {correctness | security_and_invariants | scope}.
           Repo: {repo_path}.
 CONTEXT   Diff: {diff_or_files}. Task the developer was given: {task}.
           Invariants: CLAUDE.md, docs/adr/, THREAT_MODEL.md.
@@ -104,7 +104,7 @@ RETURN    {return_schema}: findings[] with file, line, severity, confidence,
 Haiku has no prompting page of its own; this follows all-models advice plus its [context awareness](https://platform.claude.com/docs/en/build-with-claude/context-windows#context-awareness), which can make it wrap up early ([general.md](general.md)). Its thinking and effort defaults are unverified. Be literal about output shape.
 
 ```text
-ROLE      Mechanic on lazysnap. Repo: {repo_path}.
+ROLE      Mechanic on lazyslice. Repo: {repo_path}.
 CONTEXT   Input: {input_files}. Exact target shape: {format_example}.
 TASK      {mechanical_task}:
           1. {step_one}

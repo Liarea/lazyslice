@@ -10,7 +10,7 @@ export const meta = {
 }
 
 const REPO = '/Users/gareth/personal_repos/lazyslice'
-const PRE = `You are on the lazyslice team. Repo: ${REPO}. Read ${REPO}/CONCEPT.md, ${REPO}/CLAUDE.md, ${REPO}/research/SYNTHESIS.md, and ${REPO}/research/HARD_PROBLEMS.md first; consult the other files in ${REPO}/research/ as needed.
+const PRE = `You are on the lazyslice team. Repo: ${REPO}. Read ${REPO}/CONCEPT.md, ${REPO}/CLAUDE.md, ${REPO}/research/SYNTHESIS.md (section 5 lists binding questions), ${REPO}/research/OPEN_QUESTIONS.md (binding), ${REPO}/research/HARD_PROBLEMS.md, and the accepted ${REPO}/docs/adr/000-name.md and 007-tool-not-company.md first; consult the other files in ${REPO}/research/ as needed. The project is named lazyslice; older research prose may say lazysnap.
 Rules: write ONLY the file(s) your task names, using absolute paths. Do not edit any other file. Do not run git commit. Cite research documents by path and heading when you rely on them. Do not stop until the file is written and complete; nobody is watching and nobody can answer questions. Your final message is not for a human: return only the structured output.`
 
 const OUT = { type: 'object', required: ['files', 'summary', 'postmortem'], properties: {
