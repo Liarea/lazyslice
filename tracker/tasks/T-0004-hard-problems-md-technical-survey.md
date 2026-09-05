@@ -3,10 +3,10 @@ id: T-0004
 title: "HARD_PROBLEMS.md technical survey"
 epic: E1
 phase: 1
-status: open
+status: in_progress
 owner: fable
 created: 2026-09-04
-started: ""
+started: 2026-09-05
 closed: ""
 outcome: ""
 ---
@@ -24,6 +24,10 @@ outcome: ""
 ## Log
 
 - 2026-09-04 created
+
+- 2026-09-05 started
+
+- 2026-09-05 first draft written 2026-09-04; critique and revision pending (session limit interrupted run wf_ac7e4ed9-869)
 
 ## Post-mortem
 
