@@ -6,8 +6,8 @@
 | E1 Research | 1 | 0 | 0 | 10 | 0 | 0 |
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 1 | 0 | 9 | 0 | 0 |
-| E4 Vertical slice | 4 | 7 | 1 | 7 | 0 | 0 |
-| E5 Hardening | 5 | 1 | 0 | 0 | 0 | 0 |
+| E4 Vertical slice | 4 | 5 | 1 | 9 | 0 | 0 |
+| E5 Hardening | 5 | 2 | 0 | 0 | 0 | 0 |
 | E9 Later | later | 4 | 0 | 0 | 0 | 0 |
 
 ## Open and in progress
@@ -17,15 +17,14 @@
 - T-0029 [open] E9 · Before going public: git-crypt the AI-specific paths and rewrite pre-encryption history (fable)
 - T-0031 [open] E9 · Licence for the lazyslice.yml schema and docs; confirm copyright holder statement (fable)
 - T-0035 [open] E4 · Verify negative control: a source email planted in a masked target column makes lazyslice verify exit 9 naming table and column (opus)
-- T-0040 [in_progress] E4 · T-MASK: mask module (opus)
-- T-0041 [open] E4 · T-EXTRACT: extract and transform stages (opus)
+- T-0041 [in_progress] E4 · T-EXTRACT: extract and transform stages (opus)
 - T-0042 [open] E4 · T-LOAD: load stage (opus)
 - T-0043 [open] E4 · T-VERIFY: verify stage, includes T-0035 negative control (opus)
 - T-0044 [open] E4 · T-CORE: core run, emit, render, repo, CLI end to end; integration job blocking again (opus)
 - T-0045 [open] E4 · T-DISCOVER: discovery rungs 0-3 and the first-run ladder (opus)
 - T-0046 [open] E5 · Fixture: deferrable unique on a partitioned root, leaf-local key, and an edge referencing the leaf (sonnet)
-- T-0047 [open] E4 · T-PGSHAPES: statement-shape grammar placeholders for plan and extract; plan exports Shapes() (opus)
 - T-0048 [open] E9 · Explicit --key on an uncomparable column type surfaces a raw pgx error instead of a refusal (opus)
+- T-0049 [open] E5 · Mask module low findings from T-MASK review (see T-0040 log) and a registry test that every rules.yml masker id resolves (sonnet)
 
 ## Recently closed
 
@@ -33,6 +32,8 @@
 - T-0037 [done] E4 · T-INTROSPECT: introspect stage → done: 2dd2102 (stage) after fix2; PG18 contype filter, tolerant sampling, bounded TABLESAMPLE, FK end filters, extension walk narrowed, partition edges re-pointed only when the root can carry them
 - T-0038 [done] E4 · T-CLASSIFY: classify stage with rule pack → done: classify with embedded rule pack, validators, English dictionary, accepted-type gate, FK propagation to a fixpoint, yml raise gate; unit tests green
 - T-0039 [done] E4 · T-PLAN: subset planner → done: 86c5ee1; FIFO worklist with provenance, caps, budgets, identity ladder with §3.4 pseudo-keys, unreadable tables, SCC order, not-recreatable refusal; unit and integration tests green
+- T-0040 [done] E4 · T-MASK: mask module → done: 2d1de18; key, HKDF, HMAC, every category generator with Domain(), small-domain reporting, unique-domain refusal, format preservation
+- T-0047 [done] E4 · T-PGSHAPES: statement-shape grammar placeholders for plan and extract; plan exports Shapes() → done: grammar gains select-list item, variable-arity cast list, --where predicate with exclusions; plan exports Shapes() and its suite runs through pg.Source; extract shapes staged
 - T-0002 [done] E1 · COMPETITORS.md teardown → done: 636-line teardown of 23 tools, 156 sources, critiqued and revised
 - T-0003 [done] E1 · POSTMORTEMS.md Snaplet and Neosync → done: Snaplet and Neosync post-mortems with founder quotes, pricing history, five do-not-copy and three must-copy
 - T-0004 [done] E1 · HARD_PROBLEMS.md technical survey → done: four hard problems surveyed with simplest-correct, refinement, and trap for each
@@ -52,5 +53,3 @@
 - T-0020 [done] E3 · Repository scaffold per ARCHITECTURE.md sections 12 and 13 → done: 8254d0f; 20 packages, interfaces, Makefile, CI, goreleaser, SECURITY, CONTRIBUTING; make check green
 - T-0021 [done] E3 · Golden fixtures: Pagila and nasty.sql → done: 31aa82e; Pagila pinned v3.1.0 with checksums, nasty.sql 21 tables, 22 traps documented, 2M-row generator, testutil loaders
 - T-0022 [done] E3 · Invariant suite I1-I6, black box → done: 3b9c04f; I1-I6 as black-box tests against the binary and two containers, each failing for the right reason today
-- T-0023 [done] E3 · Per-directory CLAUDE.md files → done: 3b18a1e; 22 CLAUDE.md files across cmd, internal packages, testdata, docs, tracker, .claude
-- T-0024 [done] E3 · ADR-008 first run from lazygit, lazydocker, k9s source → done: research/FIRST_RUN_STUDY.md from lazygit, lazydocker, k9s source; docs/adr/008-first-run.md proposed with six-step Docker order, question ladder, locality predicate
