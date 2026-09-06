@@ -1,0 +1,416 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package pg
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Liarea/lazyslice/internal/dsn"
+	"github.com/Liarea/lazyslice/internal/event"
+	"github.com/Liarea/lazyslice/internal/pipeline"
+	"github.com/Liarea/lazyslice/internal/ref"
+)
+
+// The gate's refusal codes (ARCHITECTURE.md §9, THREAT_MODEL.md T2). Every one
+// of them is a row the renderer looks up, and therefore a row in
+// docs/ERRORS.md; internal/event/catalogue.yml carries three of them today and
+// owes the rest (see internal/pg/CLAUDE.md, "Decisions made during
+// implementation").
+const (
+	// CodeUnreachable is the precondition, not a rule: a candidate that does not
+	// answer cannot be judged, and Verdict stays NotProbed.
+	CodeUnreachable event.Code = "target.refused.unreachable"
+	// CodeSameDatabase is rule 1: the target is the source.
+	CodeSameDatabase event.Code = "target.refused.same_database"
+	// CodeRemote is rule 2: the target is not local and no flag names its host.
+	CodeRemote event.Code = "target.refused.remote"
+	// CodeNoCreate is rule 3.
+	CodeNoCreate event.Code = "target.refused.no_create"
+	// CodeTableCap is rule 5 above the cap.
+	CodeTableCap event.Code = "target.refused.table_cap"
+	// CodeNotEmpty is rule 5: a user table that is not empty, has row-level
+	// security, or could not be probed.
+	CodeNotEmpty event.Code = "target.refused.not_empty"
+	// CodeProbeFailed is a probe that did not run to completion. It is a
+	// refusal, never a skip (THREAT_MODEL.md T2).
+	CodeProbeFailed event.Code = "target.refused.probe_failed"
+)
+
+// TableCap is the number of user tables the gate will probe. Above it the
+// target is refused outright with the count printed; it is never sampled and
+// never passed, because Verdict has no state in which "not probed" reads as
+// eligible (ARCHITECTURE.md §9 rule 5).
+const TableCap = 2000
+
+// RowsNotCounted is the value Eligibility.RowCounts carries for a table the gate
+// found to be not empty. The gate proves emptiness with SELECT EXISTS and never
+// counts rows in a database it is refusing to touch, so the map is the set of
+// offending tables and the number is a marker, not a count.
+const RowsNotCounted int64 = -1
+
+// bookkeepingSchema is the one schema the exemption below applies in. It is the
+// schema to_regclass resolves the marker in on the default search_path, and the
+// schema a framework migrates.
+const bookkeepingSchema = "public"
+
+// bookkeeping are the migration-bookkeeping tables the emptiness rule exempts
+// (ADR-005 "Target"). A compose database that has had its migrations run is the
+// ordinary case, and rows in these tables are the migration state, not data;
+// lazyslice copies them whole from the source so that state matches the schema
+// it recreates (ARCHITECTURE.md §11.1 item 7).
+//
+// lazyslice_meta is exempt for the same reason: it is bookkeeping we wrote. An
+// unbound marker therefore falls through to the emptiness check and is judged on
+// the rest of the database, which is what ARCHITECTURE.md §9 rule 4 says
+// happens; without the exemption the fall-through could never reach a verdict
+// other than "not empty" and rule 4's last sentence would be dead text.
+//
+// The names are matched in bookkeepingSchema only. Emptiness is the one control
+// between the tool and the catastrophic write, and this exemption is the only
+// thing in it that widens what counts as empty; a reporting.schema_migrations or
+// an analytics.django_migrations is somebody's data wearing a familiar name, so
+// the exemption is spelled as narrowly as the case it exists for.
+var bookkeeping = map[string]bool{
+	"schema_migrations":          true,
+	"_prisma_migrations":         true,
+	"alembic_version":            true,
+	"__diesel_schema_migrations": true,
+	"flyway_schema_history":      true,
+	"goose_db_version":           true,
+	"atlas_schema_revisions":     true,
+	"knex_migrations":            true,
+	"knex_migrations_lock":       true,
+	"django_migrations":          true,
+	strings.ToLower(MarkerTable): true,
+}
+
+// CatalogFingerprinter recomputes Schema.Fingerprint (ARCHITECTURE.md §11.1)
+// over the catalog reachable through r. The gate needs it for rule 4: a marker
+// is bound only when the fingerprint it recorded still matches the target's
+// current catalog.
+//
+// It is injected rather than implemented here because the fingerprint is defined
+// over the object classes internal/introspect reads, and internal/pg does not
+// introspect. A Target with no fingerprinter can never find a marker bound,
+// which is the fail-closed direction: the gate falls through to the emptiness
+// check and a populated target is still refused.
+type CatalogFingerprinter func(ctx context.Context, r pipeline.Reader) (string, error)
+
+// TargetOption configures a Target.
+type TargetOption func(*Target)
+
+// WithCatalogFingerprint supplies the function that recomputes the target's
+// schema fingerprint for the marker binding (ARCHITECTURE.md §11.2).
+func WithCatalogFingerprint(f CatalogFingerprinter) TargetOption {
+	return func(t *Target) { t.fingerprint = f }
+}
+
+// WithLocal states that the candidate is local for a reason the connection
+// string does not show — a container whose compose working_dir is the cwd or an
+// ancestor (ARCHITECTURE.md §9 rule 2). Without it, locality is decided from the
+// endpoint alone: a Unix socket or a loopback address.
+func WithLocal(local bool) TargetOption {
+	return func(t *Target) { t.local = local }
+}
+
+// Target is the write side, and the gate in front of it.
+type Target struct {
+	pool        *pgxpool.Pool
+	ref         dsn.Ref
+	fingerprint CatalogFingerprinter
+	local       bool
+}
+
+var _ pipeline.Target = (*Target)(nil)
+
+// OpenTarget opens the write side. No tracer is registered on this pool: the
+// target is the side lazyslice writes to, and what defends it is the gate.
+func OpenTarget(ctx context.Context, d dsn.DSN, opts ...TargetOption) (*Target, error) {
+	_, r, err := dsn.Parse(string(d))
+	if err != nil {
+		return nil, err
+	}
+	pool, err := Connect(ctx, d, nil)
+	if err != nil {
+		return nil, err
+	}
+	t := &Target{pool: pool, ref: r, local: r.Loopback()}
+	for _, o := range opts {
+		o(t)
+	}
+	return t, nil
+}
+
+// Ref is the redacted identity of the target.
+func (t *Target) Ref() dsn.Ref { return t.ref }
+
+// Close releases the pool.
+func (t *Target) Close() { t.pool.Close() }
+
+const (
+	sqlPing      = `SELECT 1`
+	sqlIdentity  = `SELECT current_database()`
+	sqlCanCreate = `SELECT CASE WHEN EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'public')
+            THEN has_schema_privilege(current_user, 'public', 'CREATE') ELSE false END`
+	sqlUserTables = `SELECT n.nspname, c.relname, c.relrowsecurity OR c.relforcerowsecurity
+FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE c.relkind IN ('r', 'p') AND NOT c.relispartition
+  AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+  AND n.nspname NOT LIKE 'pg\_toast%' AND n.nspname NOT LIKE 'pg\_temp%'
+  AND NOT EXISTS (SELECT 1 FROM pg_depend d
+                  WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.deptype = 'e')
+ORDER BY n.nspname, c.relname`
+)
+
+// Gate implements ARCHITECTURE.md §9 "Target" in the order it states:
+// reachability as a precondition, then 1 identity, 2 locality, 3 CREATE,
+// 4 marker, 5 emptiness.
+//
+// It returns Verdict == Eligible only when every probe ran to completion. Any
+// error, timeout or unprobed table is Refused; the one thing that is never
+// Refused-by-rule is an unreachable candidate, which stays NotProbed because
+// nothing about it was judged at all. NotProbed is not Eligible either, so no
+// path through this function ends in a write that a rule did not authorise.
+func (t *Target) Gate(ctx context.Context, source dsn.Ref, sourceSystemID, allowRemoteHost string) (pipeline.Eligibility, error) {
+	e := pipeline.Eligibility{Verdict: pipeline.NotProbed, Local: t.local}
+
+	conn, err := t.pool.Acquire(ctx)
+	if err != nil {
+		e.Reason = CodeUnreachable
+		return e, fmt.Errorf("pg: gate: connecting to the target: %w", err)
+	}
+	defer conn.Release()
+
+	var one int
+	if pingErr := conn.QueryRow(ctx, sqlPing).Scan(&one); pingErr != nil {
+		e.Reason = CodeUnreachable
+		return e, fmt.Errorf("pg: gate: the target did not answer: %w", pingErr)
+	}
+
+	// From here every outcome is a judgement, so nothing may leave NotProbed.
+	e.Verdict = pipeline.Refused
+
+	// Rule 1: identity. A disjunction over sameness, not a conjunction over
+	// difference: refuse on any match.
+	var currentDB string
+	if dbErr := conn.QueryRow(ctx, sqlIdentity).Scan(&currentDB); dbErr != nil {
+		e.Reason = CodeProbeFailed
+		return e, fmt.Errorf("pg: gate: reading the target database name: %w", dbErr)
+	}
+	targetRef := t.ref
+	targetRef.Database = currentDB
+
+	systemID, err := systemIdentifier(ctx, conn)
+	if err != nil {
+		e.Reason = CodeProbeFailed
+		return e, err
+	}
+	if sourceSystemID != "" && systemID != "" {
+		e.SameCluster = systemID == sourceSystemID
+	} else if same, clusterErr := targetRef.SameCluster(source); clusterErr == nil {
+		e.SameCluster = same
+	}
+
+	sameEndpoint, err := targetRef.SameEndpoint(source)
+	if err != nil {
+		// A reference that cannot be compared is never "not the source".
+		e.Reason = CodeProbeFailed
+		return e, fmt.Errorf("pg: gate: comparing the target with the source: %w", err)
+	}
+	sameCatalog := sourceSystemID != "" && systemID != "" &&
+		systemID == sourceSystemID && currentDB == source.Database
+	if sameEndpoint || sameCatalog {
+		e.Reason = CodeSameDatabase
+		return e, nil
+	}
+
+	// Rule 2: locality. The flag decides whether the rule refuses; it does not
+	// make the target local. Eligibility.Local stays what it was set to from
+	// t.local above, because the decision header is the operator's only visible
+	// signal that the write is leaving this machine and a flag-admitted remote
+	// target must not print as local (THREAT_MODEL.md T2).
+	if !t.local && !hostNamed(allowRemoteHost, targetRef) {
+		e.Reason = CodeRemote
+		return e, nil
+	}
+
+	// Rule 3: CREATE on schema public.
+	var canCreate bool
+	if createErr := conn.QueryRow(ctx, sqlCanCreate).Scan(&canCreate); createErr != nil {
+		e.Reason = CodeProbeFailed
+		return e, fmt.Errorf("pg: gate: reading schema privileges on the target: %w", createErr)
+	}
+	if !canCreate {
+		e.Reason = CodeNoCreate
+		return e, nil
+	}
+
+	// Rule 4: the marker, bound to this source and this catalog.
+	marker, found, err := t.latestMarker(ctx, conn)
+	if err != nil {
+		e.Reason = CodeProbeFailed
+		return e, err
+	}
+	e.Marked = found
+	if found {
+		e.PrevKeyFP = marker.SecretFingerprint
+		e.PrevClassFP = marker.ClassificationFingerprint
+		bound, err := t.markerBound(ctx, conn, marker, source, sourceSystemID)
+		if err != nil {
+			e.Reason = CodeProbeFailed
+			return e, err
+		}
+		e.MarkerBound = bound
+		if bound {
+			e.Verdict = pipeline.Eligible
+			return e, nil
+		}
+	}
+
+	// Rule 5: emptiness.
+	return t.checkEmpty(ctx, conn, e)
+}
+
+// hostNamed reports whether --allow-remote-target named this target's host. The
+// flag names a host exactly; it is compared after normalisation so that the
+// spelling in the flag and the spelling in the connection string do not have to
+// match character for character, and it is never resolved.
+func hostNamed(allowRemoteHost string, target dsn.Ref) bool {
+	if allowRemoteHost == "" {
+		return false
+	}
+	allowed := dsn.Ref{Host: allowRemoteHost, Port: target.Port, Database: target.Database}
+	same, err := allowed.SameCluster(target)
+	return err == nil && same
+}
+
+func systemIdentifier(ctx context.Context, conn *pgxpool.Conn) (string, error) {
+	var id string
+	err := conn.QueryRow(ctx, sqlSystemID).Scan(&id)
+	if err == nil {
+		return id, nil
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return "", fmt.Errorf("pg: gate: reading the target system identifier: %w", err)
+	}
+	// Execution of pg_control_system is not granted to PUBLIC. An identifier we
+	// cannot read is not an identifier that differs: the endpoint comparison
+	// stands on its own and the run says so in the header.
+	return "", nil
+}
+
+func (t *Target) markerBound(ctx context.Context, conn *pgxpool.Conn, m MarkerRow, source dsn.Ref, sourceSystemID string) (bool, error) {
+	if m.SchemaVersion > MarkerSchemaVersion {
+		// A marker written by a newer lazyslice. It authorises nothing, and the
+		// gate falls through to emptiness (ARCHITECTURE.md §11.2).
+		return false, nil
+	}
+	if m.SourceFingerprint != source.Fingerprint() {
+		return false, nil
+	}
+	if m.SourceSystemID != "" && sourceSystemID != "" && m.SourceSystemID != sourceSystemID {
+		return false, nil
+	}
+	if t.fingerprint == nil {
+		// Nothing can recompute the catalog fingerprint, so the binding cannot
+		// be confirmed and the marker authorises nothing.
+		return false, nil
+	}
+	current, err := t.fingerprint(ctx, &reader{conn: conn, own: false})
+	if err != nil {
+		return false, fmt.Errorf("pg: gate: recomputing the target schema fingerprint: %w", err)
+	}
+	return current != "" && current == m.SchemaFingerprint, nil
+}
+
+// exemptFromEmptiness reports whether the emptiness rule skips this table. It
+// is a qualified match: the same name in another schema is data, not
+// bookkeeping (see bookkeeping).
+func exemptFromEmptiness(t ref.TableRef) bool {
+	return t.Schema == bookkeepingSchema && bookkeeping[strings.ToLower(t.Name)]
+}
+
+func (t *Target) checkEmpty(ctx context.Context, conn *pgxpool.Conn, e pipeline.Eligibility) (pipeline.Eligibility, error) {
+	type userTable struct {
+		ref ref.TableRef
+		rls bool
+	}
+
+	rows, err := conn.Query(ctx, sqlUserTables)
+	if err != nil {
+		e.Reason = CodeProbeFailed
+		return e, fmt.Errorf("pg: gate: listing the target's user tables: %w", err)
+	}
+	var tables []userTable
+	for rows.Next() {
+		var u userTable
+		if err := rows.Scan(&u.ref.Schema, &u.ref.Name, &u.rls); err != nil {
+			rows.Close()
+			e.Reason = CodeProbeFailed
+			return e, fmt.Errorf("pg: gate: listing the target's user tables: %w", err)
+		}
+		if exemptFromEmptiness(u.ref) {
+			continue
+		}
+		tables = append(tables, u)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		e.Reason = CodeProbeFailed
+		return e, fmt.Errorf("pg: gate: listing the target's user tables: %w", err)
+	}
+
+	e.TableCount = len(tables)
+	if len(tables) > TableCap {
+		e.Reason = CodeTableCap
+		return e, nil
+	}
+
+	e.RowCounts = map[ref.TableRef]int64{}
+	for _, u := range tables {
+		if u.rls {
+			// Under FORCE ROW LEVEL SECURITY with no matching policy, EXISTS
+			// returns false over millions of rows the session cannot see, while
+			// DROP TABLE still succeeds. Row-level security is therefore "not
+			// empty" by rule, never by probe.
+			e.RowCounts[u.ref] = RowsNotCounted
+			continue
+		}
+		var occupied bool
+		q := `SELECT EXISTS (SELECT 1 FROM ` + pgx.Identifier{u.ref.Schema, u.ref.Name}.Sanitize() + `)`
+		if err := conn.QueryRow(ctx, q).Scan(&occupied); err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				e.Reason = CodeProbeFailed
+				return e, fmt.Errorf("pg: gate: probing %s.%s: %w", u.ref.Schema, u.ref.Name, err)
+			}
+			// A probe that errors for any reason, 42501 included, counts as not
+			// empty. It is named in the refusal like any other.
+			e.RowCounts[u.ref] = RowsNotCounted
+			continue
+		}
+		if occupied {
+			e.RowCounts[u.ref] = RowsNotCounted
+		}
+	}
+
+	if len(e.RowCounts) > 0 {
+		e.Reason = CodeNotEmpty
+		return e, nil
+	}
+	e.RowCounts = nil
+	e.Verdict = pipeline.Eligible
+	return e, nil
+}
+
+// Writer opens the write side. Nothing calls it before Gate has returned
+// Eligible; that ordering is core.Run's, and this package does not second-guess
+// it, because a Writer that re-ran the gate would run it twice on every load.
+func (t *Target) Writer(_ context.Context) (pipeline.Writer, error) {
+	return &writer{pool: t.pool}, nil
+}
