@@ -146,7 +146,7 @@ Blocks v1: **yes** (READ ONLY transactions, tracer, privilege report, snapshot r
 Likelihood: low per release, certain over the project's life. A one-line unmerged fix ended Snapshot's afterlife (research/POSTMORTEMS.md §8); a compromised release is the category's trust-ending event. Impact: a binary that is not what CI built, or a dependency that phones home.
 
 Controls:
-- Tag-triggered goreleaser builds in GitHub Actions with cosign keyless signing and a published SBOM; no long-lived tokens in repository secrets (research/SQLIT_STUDY.md §5.9).
+- Tag-triggered goreleaser builds in GitHub Actions with cosign keyless signing and a published SBOM. Release credentials are short-lived wherever a short-lived one exists: `GITHUB_TOKEN` is minted per job and cosign signs keylessly with no stored key. The one exception is `HOMEBREW_TAP_TOKEN`, a scoped PAT with write access to `Liarea/homebrew-tap` held as a repository secret, because publishing the cask crosses a repository boundary and the GitHub App that would mint an installation token does not exist yet. This is the accepted position, not an oversight; reversal condition: the App exists on `Liarea/homebrew-tap` with both secrets set, at which point the tap-token step in .github/workflows/release.yml is restored and the PAT deleted (research/SQLIT_STUDY.md §5.9; amended 2026-09-06).
 - Every dependency pinned exactly; `go.sum` verified; `govulncheck` in CI; dependency bumps are their own pull requests with the reason.
 - A CI job installs the built artefact on every target and runs `lazyslice --version`; the Homebrew formula pins the checksum.
 - `CGO_ENABLED=0` and the no-outbound-call test (T4) mean a compromised dependency has no native code path and no network path to use.
