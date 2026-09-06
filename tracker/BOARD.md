@@ -6,7 +6,7 @@
 | E1 Research | 1 | 0 | 0 | 10 | 0 | 0 |
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 1 | 0 | 9 | 0 | 0 |
-| E4 Vertical slice | 4 | 2 | 1 | 15 | 0 | 0 |
+| E4 Vertical slice | 4 | 1 | 1 | 16 | 0 | 0 |
 | E5 Hardening | 5 | 7 | 0 | 0 | 0 | 0 |
 | E9 Later | later | 4 | 0 | 0 | 0 | 0 |
 
@@ -16,7 +16,7 @@
 - T-0028 [open] E3 · Create GitHub repository Liarea/lazyslice and homebrew-tap, push main, add HOMEBREW_TAP_TOKEN secret (human)
 - T-0029 [open] E9 · Before going public: git-crypt the AI-specific paths and rewrite pre-encryption history (fable)
 - T-0031 [open] E9 · Licence for the lazyslice.yml schema and docs; confirm copyright holder statement (fable)
-- T-0044 [open] E4 · T-CORE: core run, emit, render, repo, CLI end to end; integration job blocking again (opus)
+- T-0044 [in_progress] E4 · T-CORE: core run, emit, render, repo, CLI end to end; integration job blocking again (opus)
 - T-0045 [open] E4 · T-DISCOVER: discovery rungs 0-3 and the first-run ladder (opus)
 - T-0046 [open] E5 · Fixture: deferrable unique on a partitioned root, leaf-local key, and an edge referencing the leaf (sonnet)
 - T-0048 [open] E9 · Explicit --key on an uncomparable column type surfaces a raw pgx error instead of a refusal (opus)
@@ -26,7 +26,6 @@
 - T-0053 [open] E5 · pg gate follow-ups from T-FPR: regression test pinning the fingerprinter transaction (SAVEPOINT must not 25P01), rollback failure routed through endTx discipline, comment corrections; schema-only Introspector variant so the gate skips sampling (opus)
 - T-0055 [open] E5 · Shared leaf package for value validators including the name dictionary; register person_name and free_text in verify's second net with a verify-side false-positive threshold decision (opus)
 - T-0056 [open] E5 · Second net: weak threshold (0.5) plus neighbouring-column raise; the faithful reading is decorative, the alternative is a different control and needs a T1 review first (opus)
-- T-0057 [in_progress] E4 · Before core: move CatDerivedText into pipeline's category block; delete verify's dead --unmask prior workaround and assert film.fulltext masked as derived_text (sonnet)
 
 ## Recently closed
 
@@ -42,6 +41,7 @@
 - T-0047 [done] E4 · T-PGSHAPES: statement-shape grammar placeholders for plan and extract; plan exports Shapes() → done: grammar gains select-list item, variable-arity cast list, --where predicate with exclusions; plan exports Shapes() and its suite runs through pg.Source; extract shapes staged
 - T-0051 [done] E4 · T-FPR: apply ADR-009, delete introspect fingerprint, core-side Schema.Fingerprint, pg gate runs fingerprinter in its own transaction → done: e85be26; introspect fingerprint deleted, pg gate runs the injected fingerprinter inside its own BEGIN/ROLLBACK, load's test workaround removed, marker binds end to end
 - T-0054 [done] E4 · Classify decides text categories on timestamp and tsvector columns (pagila last_update credential, film.fulltext address); transform then refuses at exit 7 mid-run → done: classify silences value signals on non-accepting families, derived_text for tsvector, plan-time write-back refusal, cross-stage integration test over both fixtures; ADR-010 records the rule
+- T-0057 [done] E4 · Before core: move CatDerivedText into pipeline's category block; delete verify's dead --unmask prior workaround and assert film.fulltext masked as derived_text → done: 38acba5; CatDerivedText in pipeline, verify's workaround deleted, pagila run asserts fulltext masked as derived_text
 - T-0002 [done] E1 · COMPETITORS.md teardown → done: 636-line teardown of 23 tools, 156 sources, critiqued and revised
 - T-0003 [done] E1 · POSTMORTEMS.md Snaplet and Neosync → done: Snaplet and Neosync post-mortems with founder quotes, pricing history, five do-not-copy and three must-copy
 - T-0004 [done] E1 · HARD_PROBLEMS.md technical survey → done: four hard problems surveyed with simplest-correct, refinement, and trap for each
@@ -54,4 +54,3 @@
 - T-0011 [done] E1 · SYNTHESIS.md and CONCEPT.md revision → done: ten facts, three risks, CONCEPT.md rewritten (pseudonymised, fail closed, 14 non-goals), 23 questions for architecture
 - T-0013 [done] E0 · ADR-007 tool not company; OPEN_QUESTIONS.md; rename to lazyslice → done
 - T-0014 [cancelled] E2 · Language throughput benchmark, Go vs Python → cancelled
-- T-0015 [done] E2 · Three architecture proposals: mvp-first, risk-first, user-first → done: three proposals, each under 2000 words with verified library versions
