@@ -248,6 +248,14 @@ var fragments = []*fragment{
 		pattern: `value shape: 2-letter codes`,
 	},
 	{
+		// T-0054. The fragment names the type rather than the column, because
+		// the rule is about the type: every tsvector is derived text, whatever
+		// it is called and whatever its values look like.
+		name:    "derived_text",
+		format:  "tsvector is derived from text that may be masked",
+		pattern: `tsvector is derived from text that may be masked`,
+	},
+	{
 		name:    "json_log_shaped",
 		format:  "jsonb in a log-shaped table: the document is replaced whole",
 		pattern: `jsonb in a log-shaped table: the document is replaced whole`,

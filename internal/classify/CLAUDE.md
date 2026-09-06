@@ -214,6 +214,99 @@ was chosen and is recorded here rather than only in a comment.
   a jsonb document. It is recorded here because the duplication is real and the
   two walkers have to be kept in step.
 
+- **The accepted-types gate runs over the value signals too** (`bestSignal`,
+  `decide`, T-0054). ARCHITECTURE.md §4 says the gate is on the *name* signal
+  only: "a column whose sampled **values** validate for a category is classified
+  on those values whatever it is called". That sentence is now wrong about this
+  package, deliberately, and §4 is owed the amendment — `ARCHITECTURE.md` line
+  820, and `testdata/README.md` line 524 repeats it. This file is not where a
+  recorded decision is reversed: root CLAUDE.md routes that through `docs/adr/`,
+  so what is owed is an ADR superseding §4's sentence plus the two edits, from a
+  task whose paths reach those files. Until then this note is the record of the
+  drift, not the decision. What it cost: on pagila
+  every `last_update timestamptz` renders as `2017-02-15T09:34:33Z`, which has
+  no space, no `@`, two character classes and enough entropy, so `looksSecret`
+  called it `credential` on 100% of its rows; `internal/transform` was then
+  handed the fixed-literal masker for a timestamp, could not parse
+  `$lazyslice$invalid` back into a time, and refused at exit 7 in the middle of
+  every whole-pipeline run over pagila. A validator whose category the column's
+  type family cannot hold now decides nothing: not `certain`, not `likely`, and
+  not `low` either, because `low` is what the neighbouring-column rule raises and
+  a raise would put the same unwritable masker on the column by a longer route.
+  The hit is still *recorded* at `low` with `typeConflict` set and the reason
+  names the conflict (`4/5 samples look like secrets; timestamp is not an
+  accepted type for credential`), exactly as a type-conflicting name hit has
+  been recorded since T-0033. The gate reads the rule pack's own `accepts:`
+  list, not a hard-coded list of families, so `person_date` still decides a
+  `date` column on its values and only the categories whose maskers emit text
+  are shut out of a timestamp.
+  - **It is narrower than `accepts:`, by three families** (`silencedByType`).
+    `accepts:` answers which families a *name* hit may decide a column on, and
+    §4 keeps that tight because a name is weak evidence. Silencing a *value*
+    signal needs the stronger claim that the masking could not have been
+    performed at all — CLAUDE.md's rule is "when in doubt, mask it" — so
+    `enum`, `xml` and the catch-all `other` are outside the gate and are masked
+    on their values as they were before T-0054. An enum is writable under every
+    category (`mask.Writable` answers a labelled column before it looks at the
+    family, and every generator begins with `labelValue`), and `xml`/`other`
+    are not "a family that refuses the category" but "a type this package has
+    no family for": an ltree, a PostGIS geometry, an extension type, a domain
+    whose base `introspect` could not render. Nothing downstream is behind a
+    silence on those — `internal/plan` does not refuse a type `mask` has no tag
+    for, and `internal/verify`'s second net covers the character, uuid, inet,
+    cidr and macaddr families only — so a silence there would be a cleartext
+    copy under a green tick (THREAT_MODEL.md T1).
+  - It is not the enum exemption T-0033 removed, and it is not masking less
+    where masking was possible: a column it silences is one whose family this
+    package recognises and whose maskers for that category emit a value the
+    family cannot hold. `TestPagilaValueSignalsRespectAcceptedTypes` holds the
+    gate, and its `conflicts == 0` guard fails if the samples ever stop
+    tripping the validator, so the test cannot quietly stop testing it;
+    `TestValueSignalSurvivesATypeNothingCanJudge` holds the three families that
+    are outside it.
+- **A `tsvector` is `derived_text`, decided by its type alone** (`decide`,
+  `rules.yml`, T-0054). It has no name pattern and cannot be reached by one. A
+  tsvector holds the lexemes of the text it was built from — `film.fulltext` is
+  maintained by a trigger over `title` and `description` — so copying one ships
+  the words of a column that may itself be masked, in cleartext, beside it
+  (THREAT_MODEL.md T12); and there is no fake worth generating, because a
+  tsvector of invented lexemes is a search index that matches nothing, which is
+  what the empty one already honestly is. So: `certain`, always, with the reason
+  `tsvector is derived from text that may be masked`, and `mask`'s
+  `derived_text` generator empties it. The validators do not run over a tsvector
+  at all, for the reason they do not run over a `bytea`: its text form reads as
+  an address, and no answer they could give would change the decision.
+  - **`CatDerivedText` is declared in this package, not in `internal/pipeline`**
+    (`classify.go`), because T-0054's paths did not include that file. It belongs
+    in `pipeline.Category`'s list with the rest of them; the move is owed, and
+    nothing else changes when it happens, because a `Category` is a string and
+    the rule pack names it by that string.
+- **The rule pack's `accepts:` lists are checked against `mask`, not merged with
+  them** (`TestRulePackAgreesWithMaskAboutTypes`, T-0054). `mask` declares, per
+  category, the type tags its generators can be written into
+  (`mask/writable.go`), and `internal/plan`'s write-back check reads that rather
+  than this file. The two declarations exist for different readers — this one
+  gates a *decision* on its way in, that one gates the *plan* over the category
+  a decision ended up with — and a test walks them against each other so neither
+  can drift. If they disagreed, one gate would be answering a question about a
+  column the other had already let through, which is the whole of T-0054.
+- **The type-family table is still a second copy** (`types.go`). `mask.TypeTag`
+  is the shared home T-0054 gave `internal/transform` and `internal/plan`; this
+  package keeps its own because it maps a type onto more than a family (it
+  carries `famEnum`, `famXML` and `famOther`, which `mask` has no tag for and
+  `silencedByType` reads) and because it is the one that decides what a
+  validator even runs on. The two are read side by side through the rule pack
+  and through the test above; a third copy is what the shared home exists to
+  prevent.
+  - **The quoting is not copied any more.** `stripTypmod`, `unquoteType` and
+    `bareTypeName` were a fourth copy of three string functions whose only job
+    is to produce `mask.TypeTag`'s argument; they are now `mask.StripTypmod`,
+    `mask.UnquoteType` and `mask.BareTypeName`, and this package, `internal/plan`
+    and `internal/transform` all call them. What is still written three times is
+    the *domain* resolution (`domainBase`), which needs `pipeline.Schema` and so
+    cannot live in `mask`; the one home for it is `internal/pipeline`, whose
+    file T-0054's paths did not include.
+
 ## Measured
 
 `TestPagilaPrecisionAndRecall` and `TestFiftyNamesFromThreeSchemas` print a

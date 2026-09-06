@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/Liarea/lazyslice/internal/pipeline"
+	"github.com/Liarea/lazyslice/mask"
 )
 
 // A type family is the classifier's normalised name for a PostgreSQL type. The
@@ -142,7 +143,7 @@ func typeOf(schema *pipeline.Schema, col pipeline.Column) columnType {
 			}
 		}
 	}
-	name = stripTypmod(name)
+	name = mask.StripTypmod(name)
 	ct.Elem = name
 	// Column.TypeName is pg_catalog.format_type output, which qualifies any type
 	// that is not visible in the connection's search_path: an extension
@@ -154,7 +155,7 @@ func typeOf(schema *pipeline.Schema, col pipeline.Column) columnType {
 	// it an email column of a qualified citext is famOther, which no category
 	// accepts, and §4's own examples ("inet, macaddr, citext, domains, jsonb")
 	// would be silent cleartext.
-	if fam, ok := baseFamilies[strings.ToLower(bareTypeName(name))]; ok {
+	if fam, ok := baseFamilies[strings.ToLower(mask.BareTypeName(name))]; ok {
 		ct.Family = fam
 		return ct
 	}
@@ -166,75 +167,21 @@ func typeOf(schema *pipeline.Schema, col pipeline.Column) columnType {
 	return ct
 }
 
-// bareTypeName drops a schema qualification from a type name, quoting-aware:
-// "public.citext" is citext and `public."My Type"` is `My Type`. A type name
-// with no qualification, including a multi-word built-in such as "character
-// varying", is returned unchanged.
-func bareTypeName(name string) string {
-	inQuote := false
-	cut := -1
-	for i, r := range name {
-		switch r {
-		case '"':
-			inQuote = !inQuote
-		case '.':
-			if !inQuote {
-				cut = i
-			}
-		}
-	}
-	if cut < 0 {
-		return unquoteType(name)
-	}
-	return unquoteType(name[cut+1:])
-}
-
 // isEnum resolves a type name against Schema.Enums by both spellings.
 // Schema.Enums is keyed "nspname.typname" (internal/introspect/sql.go), while
 // format_type writes an enum that is visible in the search_path unqualified, so
 // a lookup by the qualified key alone can never match one.
 func isEnum(schema *pipeline.Schema, name string) bool {
-	if _, ok := schema.Enums[unquoteType(name)]; ok {
+	if _, ok := schema.Enums[mask.UnquoteType(name)]; ok {
 		return true
 	}
-	bare := bareTypeName(name)
+	bare := mask.BareTypeName(name)
 	for key := range schema.Enums {
-		if bareTypeName(key) == bare {
+		if mask.BareTypeName(key) == bare {
 			return true
 		}
 	}
 	return false
-}
-
-// stripTypmod removes the "(15)" from "character varying(15)" and the "(5,2)"
-// from "numeric(5,2)". A quoted identifier may hold a bracket, so the cut is
-// made only outside quotes.
-func stripTypmod(name string) string {
-	inQuote := false
-	for i, r := range name {
-		switch r {
-		case '"':
-			inQuote = !inQuote
-		case '(':
-			if !inQuote {
-				return strings.TrimSpace(name[:i])
-			}
-		}
-	}
-	return name
-}
-
-// unquoteType turns format_type's quoted spelling, public."bıgınt", back into
-// the schema-qualified name Schema.Enums and Schema.Domains are keyed by.
-func unquoteType(name string) string {
-	var b strings.Builder
-	for _, r := range name {
-		if r == '"' {
-			continue
-		}
-		b.WriteRune(r)
-	}
-	return b.String()
 }
 
 // domainBase returns the base type named by a domain's CREATE DOMAIN text.
@@ -242,12 +189,12 @@ func domainBase(schema *pipeline.Schema, domain string) (string, bool) {
 	if schema == nil {
 		return "", false
 	}
-	want := unquoteType(domain)
+	want := mask.UnquoteType(domain)
 	for _, d := range schema.Domains {
 		// The qualified spelling first, then the bare one: Column.Domain is
 		// written "nspname.typname" today, but a domain named unqualified
 		// somewhere must resolve to the same base type rather than to famOther.
-		if unquoteType(d.Name) != want && bareTypeName(d.Name) != bareTypeName(domain) {
+		if mask.UnquoteType(d.Name) != want && mask.BareTypeName(d.Name) != mask.BareTypeName(domain) {
 			continue
 		}
 		const as = " AS "

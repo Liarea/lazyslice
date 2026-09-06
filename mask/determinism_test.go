@@ -62,13 +62,15 @@ func TestDifferentKeyDifferentFake(t *testing.T) {
 		}
 	}
 	// The collapsing maskers — a credential's fixed literal, a NULLed
-	// photograph, a collapsed special category — have a domain of 1 and are
-	// meant to be key-independent. Everything else must move.
-	if same > 3 {
+	// photograph, a collapsed special category, an emptied tsvector — have a
+	// domain of 1 and are meant to be key-independent. Everything else must
+	// move.
+	if same > 4 {
 		t.Fatalf("%d of %d values were the same under two keys", same, len(a))
 	}
 	for _, tc := range corpus() {
-		if tc.id == CredentialMasker || tc.id == MaskerNull || tc.name == "special enum" {
+		if tc.id == CredentialMasker || tc.id == MaskerNull || tc.id == MaskerDerivedText ||
+			tc.name == "special enum" {
 			continue
 		}
 		x := rendered(applyOrFail(t, testKey(t), tc).Out)

@@ -215,6 +215,59 @@ next change to this module argues with a decision rather than rediscovering it.
   generator is the value-only floor beneath it. Object keys are walked in
   sorted order, never Go's map order, or the same document would draw different
   values in two runs.
+- **`derived_text` empties a derived column; it never fakes one** (`gen_derived.go`,
+  T-0054). A `tsvector` is built by a trigger or a generated expression from
+  other columns' text, so it carries the lexemes of a column that may itself be
+  masked: copying one ships the words of a masked value in cleartext beside it
+  (THREAT_MODEL.md T12), and a tsvector of invented lexemes is a search index
+  that matches nothing — which is what the empty one already is, honestly. So
+  `Mask` returns `''`, the empty tsvector, for every row, `Domain()` is 1, and
+  `Domain()` is **0** for any other type tag, so a category the rule pack
+  accepts only on `tsvector` refuses through `Pick`'s ordinary `*NoRoomError`
+  rather than by emitting a value some other type could not hold.
+  - **It is the one id `Small` exempts.** `Small` reports a *substitution* that
+    frequency can undo — a mapping onto a domain narrow enough that the
+    commonest fake is the commonest original. Emptying is not a substitution:
+    no ordering, frequency or partition of the source survives it, and listing a
+    column with nothing left in it under "what the green tick does not prove"
+    trains the reader to skim the list that matters. The other domain-1
+    generators (`fixed:`, `null`) are **not** exempt, because they can land on a
+    column the reader would want reported.
+- **`writableTags` is derived from `internal/classify/rules.yml`, not
+  independent of it** (`writable.go`, T-0054). `rules.yml`'s `accepts:` lists
+  are the source; this table is the copy, and it is a copy on purpose: the plan
+  check has to ask `mask` — where the generators are — whether a generator's
+  output fits a column, and this module cannot import the rule pack.
+  `TestRulePackAgreesWithMaskAboutTypes` (in `internal/classify`) walks the two
+  and fails on a disagreement. What that test does **not** cover: the other four
+  places a new category has to be added (`mask/register.go`,
+  `internal/pipeline/classify.go`'s `Category` list,
+  `internal/transform/writeback_test.go`'s `everyCategory`, and
+  `internal/classify/classify_test.go`'s `all`), and whether a family listed
+  here is one the generator can *really* emit into — only
+  `TestTransformNeverRefusesWhatThePlanCheckAdmits` exercises that, and only in
+  one direction. The single-declaration fix is to carry the compiled
+  `accepts:` map on `pipeline.Classification` so `internal/plan` reads the rule
+  pack itself; that needs `internal/pipeline`, which T-0054's paths did not
+  include, and it would delete `writableTags` and `WritableTypes`.
+  - **`special_category` is the one row that is deliberately narrower than the
+    rule pack.** The pack spells its `accepts:` `["*"]`, because §4 scores it
+    `certain` by name alone and silencing it by type would copy an `hiv_status`
+    column in cleartext. The generator is narrower: `Mask` calls `generic`,
+    whose switch covers boolean, the numeric families, date, timestamp, uuid,
+    bytea and the document families and falls through to the free-text filler
+    for `time`, `interval`, `inet`, `cidr`, `macaddr` and `tsvector` — and
+    filler is none of those. So `health_check_ip inet` ("health" matches the
+    pattern) and `medication_time time` are refused at plan with exit 12 rather
+    than written and failing in the loader mid-run (THREAT_MODEL.md T8). The
+    labelled-column bypass still applies first, so `testdata/README.md` trap 24
+    — `special_category` on an enum — is unaffected.
+- **The three quoting helpers are exported** (`StripTypmod`, `UnquoteType`,
+  `BareTypeName`, `typetag.go`). Their only job is to produce `TypeTag`'s
+  argument, and each caller having its own copy is each caller asking about a
+  slightly different column. `internal/classify`, `internal/plan` and
+  `internal/transform` all read these; `internal/verify` still has a copy and
+  is owed the same change.
 - **hstore is emptied rather than walked.** No hstore parser here; an empty map
   is the one answer that cannot leak.
 - **Two `CHECK` shapes are parsed**: a value list (`IN (...)`,

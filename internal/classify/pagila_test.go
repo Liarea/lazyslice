@@ -4,7 +4,9 @@ package classify
 
 import (
 	"sort"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/Liarea/lazyslice/internal/pipeline"
 	"github.com/Liarea/lazyslice/internal/ref"
@@ -354,5 +356,104 @@ func TestPagilaPrecisionAndRecall(t *testing.T) {
 	}
 	if s.precision() < 0.70 {
 		t.Errorf("precision = %.3f, want at least 0.70", s.precision())
+	}
+}
+
+// pagilaSamples are the values introspect would hand the classifier for the two
+// pagila columns T-0054 is about, as pgx decodes them: a `timestamp with time
+// zone` arrives as a time.Time, and a `tsvector` — a type pgx has no codec for —
+// arrives as the text form Postgres prints.
+//
+// They are here because the fixture above records no samples at all, and the
+// bug this file now guards against is invisible without them: it is a *value*
+// signal firing on a column whose type cannot hold what the category's masker
+// emits.
+func pagilaSamples() mapSampler {
+	s := mapSampler{}
+	stamps := anyOf(
+		time.Date(2017, 2, 15, 9, 34, 33, 0, time.UTC),
+		time.Date(2017, 2, 15, 9, 34, 33, 0, time.UTC),
+		time.Date(2017, 2, 15, 10, 2, 19, 0, time.UTC),
+		time.Date(2020, 12, 23, 7, 12, 45, 0, time.UTC),
+		time.Date(2022, 6, 1, 18, 45, 30, 0, time.UTC),
+	)
+	for _, t := range pagilaSchema().Tables {
+		for _, c := range t.Columns {
+			if c.Name == "last_update" {
+				s[col(t.Ref, c.Name)] = stamps
+			}
+		}
+	}
+	// film.fulltext as Postgres prints a tsvector: lexeme:position pairs, which
+	// carry digits and words and so satisfy the address validator's "mixed
+	// digits and words" shape on every row.
+	s[col(ref.TableRef{Schema: "public", Name: "film"}, "fulltext")] = anyOf(
+		"'academi':1 'battl':15 'canadian':20 'dinosaur':2 'epistl':7",
+		"'ace':1 'administr':9 'ancient':19 'astound':4 'car':17 'china':20",
+		"'adapt':1 'astound':4 'baloon':19 'factori':20 'holes':1",
+		"'affair':1 'boat':4 'documentari':7 'shark':14 'sumo':20",
+		"'african':1 'chase':11 'dentist':16 'egg':4 'forens':10 'mad':20",
+	)
+	return s
+}
+
+// The blocker T-0054 was opened for, at the place it starts.
+//
+// Every `last_update` in pagila is a `timestamp with time zone` whose text form
+// ("2017-02-15T09:34:33Z") has no space and no "@", mixes character classes and
+// clears the entropy threshold, so the credential validator fires on 100% of the
+// samples. `film.fulltext` is a tsvector whose printed lexemes are digits and
+// words, which is the address validator's shape. Neither category's masker can
+// write into either column: the run used to reach `internal/transform` and die
+// at exit 7 with rows already moved.
+//
+// ARCHITECTURE.md §4's accepted-types gate now runs over a value signal as it
+// always did over a name signal, so neither column can be decided above `low`
+// for a category its type cannot hold, and the reason says which conflict it
+// was.
+func TestPagilaValueSignalsRespectAcceptedTypes(t *testing.T) {
+	t.Parallel()
+	cls, err := New().Classify(pagilaSchema(), pagilaSamples(), nil)
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+
+	conflicts := 0
+	for c, d := range cls.Decisions {
+		if c.Column != "last_update" {
+			continue
+		}
+		if d.Masked || d.Confidence > pipeline.ConfLow {
+			t.Errorf("%s is %s at %v (%s); a timestamp holds no category whose masker emits text",
+				c, d.Category, d.Confidence, d.Reason)
+		}
+		if d.Category == pipeline.CatNone {
+			continue
+		}
+		// A category recorded at low is the value signal that fired, kept as a
+		// record with the conflict named rather than dropped silently.
+		want := "is not an accepted type for " + string(d.Category)
+		if !strings.Contains(d.Reason, want) {
+			t.Errorf("%s is %s at low and its reason does not say why it was not masked: %s", c, d.Category, d.Reason)
+			continue
+		}
+		conflicts++
+	}
+	if conflicts == 0 {
+		t.Error("no last_update column recorded a type conflict: the samples no longer trip the validator, so this test is no longer testing the gate")
+	}
+
+	fulltext := col(ref.TableRef{Schema: "public", Name: "film"}, "fulltext")
+	d, ok := cls.Decisions[fulltext]
+	if !ok {
+		t.Fatal("film.fulltext has no decision")
+	}
+	if d.Category == pipeline.CatAddress {
+		t.Errorf("film.fulltext is address (%s); a tsvector holds no street", d.Reason)
+	}
+	// It is masked, but by its type and not by its values: a tsvector carries
+	// the lexemes of the text it was derived from, which may itself be masked.
+	if d.Category != CatDerivedText || !d.Masked {
+		t.Errorf("film.fulltext is %s masked=%v, want %s masked (%s)", d.Category, d.Masked, CatDerivedText, d.Reason)
 	}
 }

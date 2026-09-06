@@ -36,8 +36,9 @@ error)`.
   key is fetched (§3.6); a parent the role cannot read is exit 12, never
   silently dropped.
 
-**Test.** `go test ./internal/plan/...` for the one case no fixture can carry
-(the exit-13 refusal), then `go test -tags integration ./internal/plan/...` for
+**Test.** `go test ./internal/plan/...` for the cases no fixture can carry (the
+exit-13 refusal, and the exit-12 write-back refusal in `writeback_test.go`),
+then `go test -tags integration ./internal/plan/...` for
 the suite that matters: `plan_integration_test.go` runs the walk against both
 fixtures, named for the `testdata/README.md` traps it covers, and asserts that
 two runs over one snapshot produce byte-identical plans.
@@ -257,3 +258,80 @@ reason for each.
   in both directions against a real Postgres. A table in `testdata/nasty.sql`
   is still owed: these two live here only because that file is shared with the
   suites that count its tables.
+
+- **The plan-time write-back check** (`writeback.go`, `plan.refused.unwritable`,
+  exit 12, T-0054). For every column the classification masks, in every table
+  still in scope, the plan asks `mask` whether the chosen generator can write
+  into that column's type, and refuses by name if it cannot. It runs after
+  `--skip-table` and the privilege pass — so a column in a table this run will
+  never read cannot refuse it — and before the first key is fetched.
+  - **Why it exists.** `internal/transform` could only discover a mismatch per
+    value: it masks, tries to parse the masker's text back into the Go kind the
+    column arrived as, fails, and refuses at exit 7 with rows already moved. On
+    pagila the classifier decided `credential` on every `last_update
+    timestamptz`, `$lazyslice$invalid` is in none of the timestamp layouts, and
+    every whole-pipeline run over the fixture died there. Transform keeps that
+    refusal as a backstop; this is the check that makes it unreachable
+    (`internal/transform`'s `TestTransformNeverRefusesWhatThePlanCheckAdmits`).
+  - **Why here and not only in `internal/classify`.** That package now gates a
+    category by the column's type on the way *in*, and it is the better place to
+    catch it. But the category on a `Decision` at the end of classification is
+    not always the one that gate saw: FK propagation, the same-column-name rule
+    and a committed `lazyslice.yml` all move a category onto a column after the
+    fact. This check runs over the answer rather than over each step to it, and
+    it reads `mask`'s own declaration rather than the rule pack, so the two have
+    to agree for a plan to pass.
+  - **It asks two questions and both are `mask`'s** (`mask.Writable`): is the
+    admissible domain non-zero — a `phone` column declared `integer` has nothing
+    to write, E.164 does not fit in nine digits — and can the type hold the kind
+    of value the category emits. A domain alone would not catch the blocker: the
+    credential literal has a domain of 1 on every column in the world.
+  - **What it does not judge, deliberately.** An enum or any type `mask` has no
+    family for is passed: every generator answers a labelled column with one of
+    its labels, and refusing on ignorance would turn a working run into a plan
+    refusal. A masked column with no category at all is also passed — that is a
+    classification bug, and transform names it as one.
+  - **It is not §5's unique-index domain rule.** `d_required = n²/2ε` and the
+    refusal that prints the largest `--take` a column can carry is a separate
+    plan-time check that has not landed; `constraintsOf` leaves `Unique`, `Rows`
+    and `Distinct` unset because `Writable` does not read them.
+  - **The catalogue row borrows `{reason}`.** The message has to name the
+    category and the type family to be actionable — the operator's fix is either
+    an `--unmask` or a rule change, and neither is choosable from a table and a
+    column name — and `event.ArgKey` has a key for neither. Both halves are
+    identifiers, never a row (THREAT_MODEL.md T4). An `ArgCategory` and an
+    `ArgType`, and this message re-templated onto them, are owed to a task whose
+    paths include `internal/event/event.go`.
+  - **The type reduction is `mask`'s** (`mask.TypeTag`, `mask.MaxLen`, and the
+    three quoting helpers `mask.StripTypmod`, `mask.UnquoteType` and
+    `mask.BareTypeName`), the same one `internal/transform` builds its
+    `Constraints` with. A check that judged a different family than transform
+    masks would be no check at all, so the table lives in one place and every
+    caller reads it. What this file still writes for itself is `domainBase` and
+    the enum lookup, which need `pipeline.Schema` and so cannot live in `mask`:
+    `internal/classify` and `internal/transform` have their own copies of that
+    resolution, three in all, and the one home for it would be
+    `internal/pipeline`, whose file T-0054's paths did not include.
+    `internal/verify/columns.go` has a fourth copy of the quoting as well, and
+    is outside those paths too.
+  - **The refusal is held by a unit test as well as by the fixture suite**
+    (`writeback_test.go`). `writeback_integration_test.go` asserts that the real
+    classifier over both fixtures produces nothing this check refuses, but it
+    re-derives that answer from `mask.Writable` rather than calling
+    `checkWriteBack`, so it would stay green if the refusal were lost.
+    `TestUnwritableColumnIsRefusedAtPlan` builds a schema and a classification
+    by hand — `credential` on a `timestamptz` — and asserts the code, the exit,
+    the table, the column, the message and that only the privilege pass ran
+    before it; `TestWritableColumnIsNotRefusedAtPlan` is the other side, so a
+    check that refused everything fails too.
+- **`writeback_integration_test.go` is the suite T-CORE reads.** Every other
+  test in this package hands the planner a classification written by hand, and
+  `internal/transform`'s own tests build both the schema and the batch; neither
+  can see a disagreement *between* the stages, which is what T-0054 was. This
+  one introspects both fixtures for real, classifies with the real classifier
+  and rule pack, plans pagila from `customer --take 50` and nasty from
+  `tenant_users --take 3`, and masks a batch of each planned table's own rows.
+  It reads those rows on a connection of its own rather than through the
+  snapshot reader: "twenty rows of whatever this table holds" is not a shape the
+  planner sends, and the source's allowlist would refuse it (THREAT_MODEL.md
+  T9).

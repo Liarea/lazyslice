@@ -57,6 +57,16 @@ const (
 	// past --memory-budget (THREAT_MODEL.md T11).
 	CodeMemoryBudget event.Code = "plan.refused.memory_budget"
 
+	// CodeUnwritable is exit 12: a column the classification masks whose type
+	// cannot hold what its category's masker emits -- `credential` on a
+	// timestamp, `address` on a tsvector. mask declares, per category, the type
+	// tags its generators can be written into (mask/writable.go), and this is
+	// where the plan says no. It exists so that internal/transform is never the
+	// first place a type mismatch is discovered: transform can only refuse per
+	// value, which is exit 7 in the middle of a run with rows already moved
+	// (writeback.go, T-0054).
+	CodeUnwritable event.Code = "plan.refused.unwritable"
+
 	// CodeNotRecreatable is exit 13: a foreign key the target's schema cannot
 	// carry (ARCHITECTURE.md §11.1, ForeignKey.NotRecreatable). It is raised at
 	// plan, before the snapshot is used for keys and before anything in the

@@ -73,6 +73,10 @@ func corpus() []tcase {
 			Constraints{TypeTag: famBytea, Nullable: true}},
 		{"jsonb", CatSemiStruct, MaskerSemiStruct,
 			`{"b":{"name":"Ada","age":36},"a":[1,true,null,"x"]}`, Constraints{TypeTag: famJSONB}},
+		// A tsvector as Postgres prints one: the lexemes of the text it was
+		// derived from, which is why it is emptied rather than copied.
+		{"tsvector", CatDerivedText, MaskerDerivedText,
+			"'ada':1 'kaminski':2 'bell':4 'street':5", Constraints{TypeTag: famTSVector}},
 	}
 }
 

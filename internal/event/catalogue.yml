@@ -224,6 +224,23 @@
   message: "{table} takes the estimated key and filter memory past {count} bytes: raise {flag}, or lower --take, --cap or --depth"
   args: [table, count, flag]
 
+# {reason} carries the category the column is masked under and the type family
+# its column has, in that order, because event.ArgKey has no key for either
+# (internal/event/event.go) and the message is only actionable if it names both:
+# the operator's fix is either an --unmask on the column or a rule change, and
+# neither is choosable from a table and a column name alone. Both halves are
+# identifiers -- a category from the rule pack and a type family from a fixed
+# list -- and neither is a row (THREAT_MODEL.md T4). Owed to the task that can
+# write internal/event/event.go: an ArgCategory and an ArgType, and this message
+# re-templated onto them. T-0054's paths did not include that file.
+
+- code: plan.refused.unwritable
+  kind: error
+  stage: plan
+  exit: 12
+  message: "{table}.{column} cannot be masked in place: {reason}"
+  args: [table, column, reason]
+
 # {reason} carries the parent table of the edge. event.ArgKey has no key for the
 # other end of a foreign key (internal/event/event.go), and this message has to
 # name both ends and the columns to be actionable, so it borrows {reason} the

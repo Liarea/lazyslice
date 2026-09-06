@@ -35,6 +35,19 @@ import (
 
 type classifier struct{}
 
+// CatDerivedText is a column the database derives from text that may itself be
+// masked: a tsvector maintained by a trigger over a name, an address or a note.
+// It is never copied — the derivation carries the words of the column it was
+// built from — and it is never faked: the masker emits the type's empty value
+// (mask.CatDerivedText, the same string).
+//
+// It is declared here rather than beside the other categories in
+// internal/pipeline because T-0054's paths do not include that file. The
+// constant belongs in pipeline.Category's list with the rest of them; the task
+// that can write it is owed the move, and nothing else changes when it happens,
+// because a Category is a string and the rule pack names it by that string.
+const CatDerivedText = pipeline.Category("derived_text")
+
 // New returns the rule-pack classifier.
 func New() pipeline.Classifier { return classifier{} }
 
@@ -261,6 +274,21 @@ func prose(d *nameDict, s string) bool {
 	return d.containsName(s)
 }
 
+// signals is what the validators said about one column's samples.
+//
+// The three are kept apart because ARCHITECTURE.md §4's accepted-types gate
+// applies to a value signal exactly as it does to a name signal (T-0054; see
+// internal/classify/CLAUDE.md). strong and weak are validators whose category
+// the column's type family can hold; refused is one it cannot, recorded so that
+// the reason can say why the column was *not* decided on it, and never so that a
+// decision can be made from it.
+type signals struct {
+	strong  *valueSignal
+	weak    *valueSignal
+	refused *valueSignal
+	total   int
+}
+
 // base gives every column its name, type and value decision.
 func (st *state) base() {
 	dict := dictionary()
@@ -278,9 +306,9 @@ func (st *state) base() {
 			}
 			st.dec[cref] = w
 			values := st.samples(cref)
-			sig, strong, total := bestSignal(dict, values, st.pack, ct.Family)
-			st.decide(w, col, ct, values, sig, strong, total)
-			st.appendContext(w, t, ct, total)
+			sig := bestSignal(dict, values, st.pack, ct.Family)
+			st.decide(w, col, ct, values, sig)
+			st.appendContext(w, t, ct, sig.total)
 			st.markNeverMasked(w, t, col, ct)
 		}
 	}
@@ -298,21 +326,35 @@ func (st *state) samples(c ref.ColumnRef) []string {
 	return out
 }
 
-// bestSignal runs every validator over the non-NULL samples and returns the
-// first that reaches a threshold, whether it reached the strong one, and the
+// bestSignal runs the validators over the non-NULL samples and reports the
+// first that reaches a threshold on a category the column's type family can
+// hold, the first that reaches the strong threshold on one it cannot, and the
 // number of values considered.
-func bestSignal(dict *nameDict, values []string, p *compiledPack, family string) (sig *valueSignal, strong bool, total int) {
-	total = len(values)
-	if total == 0 {
-		return nil, false, 0
+//
+// The type gate is the whole of the difference from an earlier version of this
+// function, and it is T-0054's fix: a validator whose category the family
+// refuses can no longer decide the column, because the masker chosen from that
+// category emits a value the column cannot hold. Two live examples, both on
+// pagila: every `last_update timestamptz` renders as "2017-02-15T09:45:30Z",
+// which has no space and no "@" and mixes two character classes, so looksSecret
+// called it a credential on 100% of its rows -- and `film.fulltext tsvector`
+// renders as "'academi':1 'battl':15", which carries digits and words, so
+// addressShape called it an address. Both were masked, and internal/transform
+// then could not write "$lazyslice$invalid" into a timestamp: exit 7, mid-run,
+// on every whole-pipeline run over pagila.
+//
+// The gate is narrower than the rule pack's accepts: lists, because those lists
+// answer a slightly different question. See silencedByType.
+func bestSignal(dict *nameDict, values []string, p *compiledPack, family string) signals {
+	sig := signals{total: len(values)}
+	if sig.total == 0 {
+		return sig
 	}
 	if isJSONFamily(family) {
-		if s := jsonSignal(p, values); s != nil {
-			return s, true, total
-		}
-		return nil, false, total
+		sig.strong = jsonSignal(p, values)
+		return sig
 	}
-	if family == famBytea {
+	if family == famBytea || family == famTSVector {
 		// A bytea sample is arbitrary binary, and asText renders it as a Go
 		// string: run through the text validators, a PNG reads as an address
 		// and a compressed blob reads as a secret. ARCHITECTURE.md §4 gives
@@ -322,12 +364,15 @@ func bestSignal(dict *nameDict, values []string, p *compiledPack, family string)
 		// only produce a decision the pack itself contradicts. The name rule
 		// and byteaInPersonShapedTable are the only routes to a decision on
 		// one.
-		return nil, false, total
+		//
+		// A tsvector is here for the same reason and one more: it is decided by
+		// its type alone (decide), so no validator's answer about it could
+		// change anything.
+		return sig
 	}
-	if total < minSamples {
-		return nil, false, total
+	if sig.total < minSamples {
+		return sig
 	}
-	var weak *valueSignal
 	for _, v := range validators {
 		matched := 0
 		for _, s := range values {
@@ -335,15 +380,70 @@ func bestSignal(dict *nameDict, values []string, p *compiledPack, family string)
 				matched++
 			}
 		}
-		ratio := float64(matched) / float64(total)
-		if ratio >= validatorThreshold {
-			return &valueSignal{cat: v.cat, phrase: v.phrase, matched: matched, total: total}, true, total
+		ratio := float64(matched) / float64(sig.total)
+		hit := &valueSignal{cat: v.cat, phrase: v.phrase, matched: matched, total: sig.total}
+		if silencedByType(p, v.cat, family) {
+			// The values look like a category this column cannot hold. It is
+			// recorded once, for the reason line, and it decides nothing: the
+			// weak threshold is not consulted for a refused category either,
+			// because `low` is what the neighbouring-column rule raises and a
+			// raise here would put the same unwritable masker on the column by
+			// a longer route.
+			if ratio >= validatorThreshold && sig.refused == nil {
+				sig.refused = hit
+			}
+			continue
 		}
-		if weak == nil && ratio >= weakThreshold {
-			weak = &valueSignal{cat: v.cat, phrase: v.phrase, matched: matched, total: total}
+		if ratio >= validatorThreshold {
+			sig.strong = hit
+			return sig
+		}
+		if sig.weak == nil && ratio >= weakThreshold {
+			sig.weak = hit
 		}
 	}
-	return weak, false, total
+	return sig
+}
+
+// silencedByType reports whether a value signal for this category on a column
+// of this family must be discarded because no masker for the category could
+// write into the column.
+//
+// It is not the same question as `accepted:`. The rule pack's list is the set
+// of families a *name* hit may decide a column on, and ARCHITECTURE.md §4 keeps
+// it deliberately tight: a name is weak evidence, so a name on a family the
+// list omits is recorded at `low` and copied. Sampled values are evidence about
+// this column, and CLAUDE.md's rule is "when in doubt, mask it" — so silencing
+// one needs the stronger claim that the masking could not have been performed
+// at all, not merely that the pack does not list the family.
+//
+// Three families are outside the gate for that reason, and each of them was
+// masked before T-0054 and is masked again:
+//
+//   - famEnum. A labelled column is writable under *every* category:
+//     mask.Writable answers `len(labels(c)) > 0` before it looks at the family
+//     at all, and every generator begins with labelValue, so a masked enum is
+//     one of its own labels (ARCHITECTURE.md §5). internal/plan leaves an enum
+//     unjudged for the same reason.
+//   - famXML and famOther. These are not "a family that refuses the category",
+//     they are "a type this package has no family for" — an xml, an ltree, a
+//     PostGIS geometry, an extension type, a domain whose base introspect could
+//     not render. Nothing downstream is behind a silence here: internal/plan
+//     does not refuse a type mask has no tag for, and internal/verify's second
+//     net (columns.go, netText) runs over the character, uuid, inet, cidr and
+//     macaddr families only. Copying such a column on the strength of a type
+//     nobody recognised is exactly THREAT_MODEL.md T1's fail-open direction.
+//
+// What is left is the set the fix was opened for and nothing else: a family
+// this package does recognise, whose maskers for the category emit a value it
+// cannot hold — timestamp, date, time, interval, boolean, bytea, numeric,
+// tsvector and the rest of the non-text families, per category.
+func silencedByType(p *compiledPack, cat pipeline.Category, family string) bool {
+	switch family {
+	case famEnum, famXML, famOther:
+		return false
+	}
+	return !p.accepted(cat, family)
 }
 
 // jsonSignal walks the sampled documents. ARCHITECTURE.md §4 masks a json or
@@ -367,11 +467,22 @@ func jsonSignal(p *compiledPack, values []string) *valueSignal {
 }
 
 // decide applies ARCHITECTURE.md §4's scoring rule to one column.
-func (st *state) decide(w *work, col pipeline.Column, ct columnType, values []string, sig *valueSignal, strong bool, total int) {
-	var best *valueSignal
-	if strong {
-		best = sig
+func (st *state) decide(w *work, col pipeline.Column, ct columnType, values []string, sig signals) {
+	if ct.Family == famTSVector {
+		// A tsvector is decided by its type and by nothing else. It is built
+		// from other columns' text -- by a trigger, as pagila's film.fulltext
+		// is, or by a generated expression -- so it holds the lexemes of a
+		// column that may itself be masked, and copying it would ship those
+		// words in cleartext beside the masked original (THREAT_MODEL.md T12).
+		// There is no fake worth generating either: a tsvector of invented
+		// lexemes is a search index that matches nothing, which is what the
+		// empty one honestly is. So: always masked, always to ''::tsvector.
+		w.d.Category = CatDerivedText
+		w.d.Confidence = pipeline.ConfCertain
+		w.frags = append(w.frags, render("derived_text"))
+		return
 	}
+	best := sig.strong
 	hit, hasName := st.pack.match(normaliseName(col.Name))
 	nameAccepted := hasName && st.pack.accepted(hit.Category, ct.Family)
 
@@ -427,16 +538,32 @@ func (st *state) decide(w *work, col pipeline.Column, ct columnType, values []st
 			render("samples", best.matched, best.total, best.phrase),
 			render("no_name_signal"))
 
-	case sig != nil:
+	case sig.weak != nil:
 		// The samples point at a category without reaching the threshold that
 		// decides on values alone. ARCHITECTURE.md §4 is silent on a partial
 		// hit; recording it at `low` is what gives the neighbouring-column rule
 		// something to raise once another column in the table is `likely`, and
 		// `low` is below the mask threshold on its own.
-		w.d.Category = sig.cat
+		w.d.Category = sig.weak.cat
 		w.d.Confidence = pipeline.ConfLow
 		w.frags = append(w.frags,
-			render("samples", sig.matched, sig.total, sig.phrase),
+			render("samples", sig.weak.matched, sig.weak.total, sig.weak.phrase),
+			render("no_name_signal"))
+
+	case sig.refused != nil:
+		// The values validate for a category whose masker emits a value this
+		// column's type cannot hold -- a timestamp full of high-entropy text
+		// reading as `credential` is the case that took every pagila run down at
+		// exit 7 (T-0054). The decision is recorded at `low` with the conflict
+		// named, exactly as a type-conflicting *name* hit is, and typeConflict
+		// keeps every raising pass off it: `low` is below the mask threshold, so
+		// the column is copied and the line says why it was not masked.
+		w.d.Category = sig.refused.cat
+		w.d.Confidence = pipeline.ConfLow
+		w.typeConflict = true
+		w.frags = append(w.frags,
+			render("samples", sig.refused.matched, sig.refused.total, sig.refused.phrase),
+			render("type_conflict", ct.Family, string(sig.refused.cat)),
 			render("no_name_signal"))
 
 	default:
@@ -448,7 +575,7 @@ func (st *state) decide(w *work, col pipeline.Column, ct columnType, values []st
 				render("no_name_signal"))
 			break
 		}
-		if total >= minSamples && allTwoLetterCodes(values) {
+		if sig.total >= minSamples && allTwoLetterCodes(values) {
 			w.frags = append(w.frags, render("two_letter_codes"), render("no_name_signal"))
 			break
 		}

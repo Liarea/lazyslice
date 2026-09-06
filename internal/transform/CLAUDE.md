@@ -69,12 +69,48 @@ sees that case and must not paper over it with a retry.
   which are exactly `mask.Constraints` and exactly what keeps a masked value
   inside the shape the application checks (§5). `Verify` is given the schema
   for the same reason; §2's `Transformer` comment is owed the same line.
-- **The type families are a third copy of one vocabulary** (`constraints.go`).
-  `mask`'s family constants are unexported and `internal/classify`'s are in
-  another stage package, which internal/CLAUDE.md forbids reaching into. The
-  reduction here mirrors `internal/classify/types.go` (array suffix, domain
-  through its `CREATE DOMAIN` text, enum by both spellings, typmod stripped).
-  The fix is a shared home for the family names, not a fourth copy.
+- **The type-name table moved into `mask`** (`mask.TypeTag`, `mask.MaxLen`,
+  T-0054). An earlier version of this file recorded the table here as "a third
+  copy of one vocabulary" and said the fix was a shared home rather than a
+  fourth copy; `internal/plan`'s write-back check needed the same reduction and
+  is what forced it. It is not a tidy-up: the plan check asks whether a column
+  can be written into and this package builds the `Constraints` the generator
+  reads, and if the two named different families the check would be about a
+  different column than the one masked. The family *names* are still spelled out
+  here, because `isDocument` and the shape switch branch on three of them and
+  `mask`'s constants are unexported; `TestFamilyNamesMatchMask` walks the two
+  vocabularies against each other. What is still written twice is the domain and
+  enum resolution, which needs the schema and so cannot live in `mask`;
+  `internal/classify/types.go` keeps its own table for the reason its CLAUDE.md
+  gives.
+- **A `tsvector` is emptied, never copied** (`derived_text`, T-0054). It is a
+  family this package now names (`famTSVector`), and the write path is the
+  ordinary one: `mask`'s `derived_text` generator returns the empty string, the
+  column's value arrives as the text form pgx gives an unknown OID, `coerce`
+  keeps it as text, and the loader writes the empty tsvector. There is nothing
+  special in this package for it, which is the point — the decision is
+  `internal/classify`'s (a tsvector holds the lexemes of text that may itself be
+  masked) and the value is `mask`'s.
+  - **The category is spelled `pipeline.Category(mask.CatDerivedText)` here**
+    (`writeback_test.go`) because `internal/pipeline` does not declare it and
+    `internal/classify` declares its own `classify.CatDerivedText`: T-0054's
+    paths reached neither file. Both sites become `pipeline.CatDerivedText`
+    when the constant is moved beside the other sixteen; the move is owed a
+    task of its own and nothing else changes when it lands, because a
+    `Category` is a string and the rule pack names it by that string.
+- **The exit-7 refusal is now a backstop, not a discovery**
+  (`TestTransformNeverRefusesWhatThePlanCheckAdmits`, T-0054). This package can
+  only notice a type mismatch per value: it masks, tries to parse the masker's
+  text back into the Go kind the column arrived as, fails, and stops the run
+  after rows have moved. That is how pagila's `credential`-on-a-timestamp
+  reached anyone. `internal/plan` now refuses such a column at exit 12 before a
+  key is fetched, and the test masks a probe column under every category on
+  every type family and asserts one direction: anything this package refuses is
+  something `mask.Writable` — which is what the plan check reads — had already
+  said no to. The other direction is deliberately not asserted; a combination
+  the plan refuses may still survive here, and a refusal already made is not a
+  bug in this package. Do not delete the refusal: a backstop that has never
+  fired is what it is for.
 - **Every JSON string leaf is masked as `free_text`** (`json.go`,
   `leafCategory`). §4 sends a leaf's key name "through the name rules", which are
   the embedded rule pack in `internal/classify`; the same import ban applies, and
@@ -124,7 +160,9 @@ sees that case and must not paper over it with a retry.
   `numeric`'s `atttypmod` packs a precision and a scale, not a byte count, and
   `mask`'s `digitBudget` reads `MaxLen` as a digit bound; a `numeric(5,2)`'s own
   precision therefore does not reach the masker at all. That is a gap in
-  `mask.Constraints`, reported rather than papered over here.
+  `mask.Constraints`, reported rather than papered over here. The rule itself
+  moved to `mask.MaxLen` with T-0054, so `internal/plan`'s write-back check
+  reads the same length this package hands the generator.
 - **FK propagation is honoured, not re-decided.** §12 lists it under this
   package and §4 states it as a classification rule, which
   `internal/classify`'s pass 4 implements. What this package owes it is

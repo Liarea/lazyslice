@@ -193,6 +193,14 @@ func (p *run) plan(ctx context.Context) (*pipeline.Plan, error) {
 	if err := p.applySkipAndPrivileges(ctx, root); err != nil {
 		return nil, err
 	}
+	// The write-back check comes before the first key is fetched: a masked
+	// column its type cannot hold is a refusal the operator should get instead
+	// of a run that dies at transform with rows already moved (writeback.go,
+	// T-0054). It runs after the skip and privilege pass so that a table this
+	// run will never read cannot refuse it.
+	if err := p.checkWriteBack(); err != nil {
+		return nil, err
+	}
 	if err := p.resolveIdentities(ctx); err != nil {
 		return nil, err
 	}

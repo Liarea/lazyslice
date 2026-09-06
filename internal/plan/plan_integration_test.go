@@ -55,6 +55,17 @@ func allowlist(t *testing.T) []pg.Shape {
 // fixture loads a fixture, opens one snapshot over it and introspects it.
 func fixture(ctx context.Context, t *testing.T, load func(context.Context, string) error) (pipeline.Reader, *pipeline.Schema) {
 	t.Helper()
+	r, schema, _ := fixtureURL(ctx, t, load)
+	return r, schema
+}
+
+// fixtureURL is fixture, and also the connection URL of the container it
+// started. Only the write-back suite needs it: it reads a batch of real rows
+// back through a connection of its own, because the reader above answers only
+// statements on the source's allowlist and "one batch of whatever this table
+// holds" is not a shape the planner sends (writeback_integration_test.go).
+func fixtureURL(ctx context.Context, t *testing.T, load func(context.Context, string) error) (pipeline.Reader, *pipeline.Schema, string) {
+	t.Helper()
 	testutil.SkipWithoutDocker(ctx, t)
 
 	url := testutil.Postgres(ctx, t, "")
@@ -92,7 +103,7 @@ func fixture(ctx context.Context, t *testing.T, load func(context.Context, strin
 	if err != nil {
 		t.Fatalf("introspecting: %v", err)
 	}
-	return r, schema
+	return r, schema, url
 }
 
 // analyse fills pg_class.reltuples, which is -1 until something analyses: both

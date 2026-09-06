@@ -50,15 +50,23 @@ const (
 	famFloat     = "float"
 	famDate      = "date"
 	famTimestamp = "timestamp"
-	famUUID      = "uuid"
-	famInet      = "inet"
-	famCIDR      = "cidr"
-	famMacaddr   = "macaddr"
-	famBytea     = "bytea"
-	famJSON      = "json"
-	famJSONB     = "jsonb"
-	famHstore    = "hstore"
-	famEnum      = "enum"
+	// famTime and famInterval name families no category accepts. They are
+	// spelled out rather than left to fall through as an unknown type, because
+	// the write-back check (writable.go) has to tell "a time column, which no
+	// text generator can write into" apart from "a type this module has never
+	// heard of, which it does not judge".
+	famTime     = "time"
+	famInterval = "interval"
+	famUUID     = "uuid"
+	famInet     = "inet"
+	famCIDR     = "cidr"
+	famMacaddr  = "macaddr"
+	famBytea    = "bytea"
+	famJSON     = "json"
+	famJSONB    = "jsonb"
+	famHstore   = "hstore"
+	famTSVector = "tsvector"
+	famEnum     = "enum"
 )
 
 // numericFamily reports whether the family holds a number rather than a string.
@@ -237,7 +245,7 @@ func ColumnDomain(c Constraints) int64 {
 		// a person_date column.
 		return math.MaxInt64
 	case famBytea, famBigint, famNumeric, famFloat, famUUID, famInet, famCIDR,
-		famJSON, famJSONB, famHstore, famTimestamp:
+		famJSON, famJSONB, famHstore, famTSVector, famTimestamp:
 		return math.MaxInt64
 	case famMacaddr:
 		return math.MaxInt64
