@@ -79,6 +79,8 @@ jobs:
   # against containers on a runner with a Docker daemon, on the oldest and the
   # newest supported majors (ADR-003, ARCHITECTURE.md section 14).
   integration:
+    # Non-blocking until T-CORE lands the pipeline (gate 4): the invariant suite must fail for the right reason today. T-CORE removes these two lines.
+    continue-on-error: true
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
