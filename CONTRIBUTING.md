@@ -110,4 +110,4 @@ sending us personal data before you write the report.
 
 ## Licence and sign-off
 
-Contributions are accepted under the Apache License 2.0, the same licence as the project. There is no contributor licence agreement. Instead, every commit carries a Developer Certificate of Origin sign-off (`git commit -s`), which adds a `Signed-off-by:` line stating you have the right to submit the change under that licence. See https://developercertificate.org/. The project will not relicense contributions under a non-open-source licence.
+Contributions are accepted under the Apache License 2.0, the same licence as the project. There is no contributor licence agreement. Instead, every commit carries a Developer Certificate of Origin sign-off (`git commit -s`), which adds a `Signed-off-by:` line stating you have the right to submit the change under that licence. See https://developercertificate.org/. lazyslice will not be relicensed away from Apache-2.0; contributions are accepted on that basis. Every source file carries an `SPDX-License-Identifier: Apache-2.0` header. The name lazyslice is governed by [docs/TRADEMARK.md](docs/TRADEMARK.md).
