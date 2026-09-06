@@ -358,6 +358,7 @@ const (
     CatSpecial      Category = "special_category"
     CatBinary       Category = "binary_personal"
     CatSemiStruct   Category = "semi_structured"
+    CatDerivedText Category = "derived_text" // tsvector, always masked to empty (ADR-010)
 )
 
 type Confidence int
