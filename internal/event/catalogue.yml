@@ -144,3 +144,83 @@
   exit: 10
   message: "{count} columns are not in {path} and {flag} is set"
   args: [count, path, flag]
+
+# The plan stage (ARCHITECTURE.md §3). Planner.Plan takes no event.Sink -- it is
+# pure, and core.Run is the only producer -- so the codes below are declared in
+# internal/plan/codes.go beside the *plan.Refusal that carries them, and emitted
+# by core from that error. Exit codes are ADR-005's table: 2 usage, 11 budget,
+# 12 plan refused, 13 target schema not recreatable.
+#
+# {flag} carries a flag spelling with identifiers substituted, such as
+# "--key public.click_stream=col,col or --skip-table public.click_stream". It is
+# built from the table's own name and never from a row (THREAT_MODEL.md T4).
+
+- code: plan.refused.no_root
+  kind: error
+  stage: plan
+  exit: 2
+  message: "{flag} names no table in the source"
+  args: [flag]
+
+- code: plan.refused.key_column
+  kind: error
+  stage: plan
+  exit: 2
+  message: "{flag} on {table} names {column}, which is not a column of it or is a system column: there is no ctid rung"
+  args: [table, column, flag]
+
+- code: plan.refused.key_not_unique
+  kind: error
+  stage: plan
+  exit: 12
+  message: "{flag} does not identify a row in {table}: at least one key appears more than once"
+  args: [table, flag]
+
+- code: plan.refused.no_identity
+  kind: error
+  stage: plan
+  exit: 12
+  message: "{table} has no row identity: pass {flag}"
+  args: [table, flag]
+
+- code: plan.refused.unreadable
+  kind: error
+  stage: plan
+  exit: 12
+  message: "{role} cannot read {table}, which the slice needs as a parent: {statement}"
+  args: [table, role, statement]
+
+- code: plan.refused.skip_parent
+  kind: error
+  stage: plan
+  exit: 12
+  message: "{flag} cannot drop {table}: the slice needs it as a parent and would not be referentially complete without it"
+  args: [table, flag]
+
+- code: plan.refused.row_budget
+  kind: error
+  stage: plan
+  exit: 11
+  message: "{table} takes the slice past {count} rows: raise {flag}, or lower --take, --cap or --depth"
+  args: [table, count, flag]
+
+- code: plan.refused.memory_budget
+  kind: error
+  stage: plan
+  exit: 11
+  message: "{table} takes the estimated key and filter memory past {count} bytes: raise {flag}, or lower --take, --cap or --depth"
+  args: [table, count, flag]
+
+# {reason} carries the parent table of the edge. event.ArgKey has no key for the
+# other end of a foreign key (internal/event/event.go), and this message has to
+# name both ends and the columns to be actionable, so it borrows {reason} the
+# way target.refused.start_timeout above records its own missing key. Owed to
+# the task that adds an ArgKey for it (e.g. ArgParent): add the key and
+# re-template this message; do not leave a refusal that names one end of an edge.
+
+- code: target.schema.not_recreatable
+  kind: error
+  stage: plan
+  exit: 13
+  message: "the foreign key on {table} ({column}) into {reason} cannot be recreated in the target"
+  args: [table, column, reason]
