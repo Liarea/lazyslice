@@ -3,12 +3,12 @@ id: T-0035
 title: "Verify negative control: a source email planted in a masked target column makes lazyslice verify exit 9 naming table and column"
 epic: E4
 phase: 4
-status: open
+status: done
 owner: opus
 created: 2026-09-05
 started: ""
-closed: ""
-outcome: ""
+closed: 2026-09-06
+outcome: "done: implemented inside T-VERIFY's integration suite"
 ---
 
 # T-0035 · Verify negative control: a source email planted in a masked target column makes lazyslice verify exit 9 naming table and column
@@ -25,6 +25,8 @@ Integration test in internal/invariants or internal/verify; referenced from the 
 
 - 2026-09-05 created
 
+- 2026-09-06 closed: done: implemented inside T-VERIFY's integration suite
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+Went well: planted source email makes verify exit 9 naming table and column. Went badly: nothing. Change: none.

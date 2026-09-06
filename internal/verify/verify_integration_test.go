@@ -134,7 +134,7 @@ func (s schemaSampler) Samples(c ref.ColumnRef) []any {
 // whole-pipeline run over pagila dies there, and this suite is where it
 // surfaces, because nothing else runs classify, transform and load together
 // against a real fixture. It is a defect in another package: reported in
-// T-0043's return value, owed a tracker task of its own, and blocking T-0044
+// T-0054's return value, owed a tracker task of its own, and blocking T-0044
 // (T-CORE), which is the next caller of classify.New() outside internal/classify.
 //
 // The workaround here is the *product's* own per-column opt-out
@@ -150,7 +150,7 @@ func (s schemaSampler) Samples(c ref.ColumnRef) []any {
 // If the classifier ever hits the blocker on a column not named here, the run
 // stops at transform naming that column: add it, or better, fix the blocker and
 // delete the list.
-const unmaskReason = "the classify/transform blocker reported in T-0043: " +
+const unmaskReason = "the classify/transform blocker reported in T-0054: " +
 	"a category decided on a timestamp or tsvector column picks a masker whose output cannot be written back"
 
 var blockedByTransform = []ref.ColumnRef{
