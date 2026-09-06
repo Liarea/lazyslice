@@ -5,19 +5,18 @@
 | E0 Frame | 0 | 0 | 0 | 3 | 0 | 0 |
 | E1 Research | 1 | 0 | 0 | 10 | 0 | 0 |
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
-| E3 Foundations | 3 | 2 | 1 | 7 | 0 | 0 |
-| E4 Vertical slice | 4 | 0 | 0 | 0 | 0 | 0 |
+| E3 Foundations | 3 | 1 | 0 | 9 | 0 | 0 |
+| E4 Vertical slice | 4 | 1 | 0 | 3 | 0 | 0 |
 | E5 Hardening | 5 | 0 | 0 | 0 | 0 | 0 |
 | E9 Later | later | 3 | 0 | 0 | 0 | 0 |
 
 ## Open and in progress
 
 - T-0019 [open] E9 · Go vs Python COPY throughput benchmark to validate ADR-001 (opus)
-- T-0026 [in_progress] E3 · Foundation review and fixes (opus)
 - T-0028 [open] E3 · Create GitHub repository Liarea/lazyslice and homebrew-tap, push main, add HOMEBREW_TAP_TOKEN secret (human)
 - T-0029 [open] E9 · Before going public: git-crypt the AI-specific paths and rewrite pre-encryption history (fable)
-- T-0030 [open] E3 · Licence mechanics: SPDX headers on every Go file, spdx lint target (opus)
 - T-0031 [open] E9 · Licence for the lazyslice.yml schema and docs; confirm copyright holder statement (fable)
+- T-0035 [open] E4 · Verify negative control: a source email planted in a masked target column makes lazyslice verify exit 9 naming table and column (opus)
 
 ## Recently closed
 
@@ -43,6 +42,6 @@
 - T-0023 [done] E3 · Per-directory CLAUDE.md files → done: 3b18a1e; 22 CLAUDE.md files across cmd, internal packages, testdata, docs, tracker, .claude
 - T-0024 [done] E3 · ADR-008 first run from lazygit, lazydocker, k9s source → done: research/FIRST_RUN_STUDY.md from lazygit, lazydocker, k9s source; docs/adr/008-first-run.md proposed with six-step Docker order, question ladder, locality predicate
 - T-0025 [done] E3 · ROADMAP.md with gates and Later → done: ROADMAP.md with phases 4 to 8 gates, Not-in-this-phase lists, Later seeded from non-goals
+- T-0026 [done] E3 · Foundation review and fixes → done: 1a000f8 review fixes; five spec-level findings resolved by the orchestrator in the follow-up commit
 - T-0027 [done] E3 · Apply ADR-008 consequences to ARCHITECTURE.md, catalogue, ADR index → done: 94466d0; six-step Docker order, gate order, locality predicate, three exit-4 event codes, ADR index updated
-- T-0001 [done] E0 · Write CONCEPT.md → done
-- T-0012 [done] E0 · Operating model, root CLAUDE.md, tracker tool → done
+- T-0030 [done] E3 · Licence mechanics: SPDX headers on every Go file, spdx lint target → done: SPDX headers on every Go file, make spdx wired into lint

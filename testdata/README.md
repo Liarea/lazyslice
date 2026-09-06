@@ -362,15 +362,7 @@ where §3.6 applies `--skip-table`. Read literally, `click_stream`'s identity is
 computed and refused whatever flags are passed, and every run over this fixture
 exits 12 at plan; `internal/invariants/harness_test.go` depends on the other
 reading and all six invariants are unrunnable on this fixture without it.
-**§3 has to be corrected before phase 4 implements it**: the identity ladder
-belongs after `req.Skipped` is applied, and the text has to say that
-`--skip-table` clears an exit-12 identity refusal for a child-only table. Note
-what the correction is *not*: reachability is no part of it here.
-`click_stream` **is** reachable — a depth-1 child of the root — so ordering the
-ladder after a reachability or `SchemaOnly` determination would leave the
-refusal exactly where it is. Only the flag removes it. Until §3 says so, this
-entry is the record of the conflict, and it is a gate 4 blocker rather than a
-documentation nicety.
+**Decided in ARCHITECTURE.md §3 (tracker T-0032, landed 2026-09-06):** the identity ladder runs after `req.Skipped` is applied, and `--skip-table` clears an exit-12 identity refusal for a child-only table. Reachability is no part of it: `click_stream` is a depth-1 child of the root, and only the flag removes the refusal.
 
 **The documented bypass, which must not be one.** §3.4 puts `--key` on the
 first rung and says an explicit key always wins over a probed guess, so
@@ -429,17 +421,7 @@ empty array left empty. The five rows cover every edge exactly once:
 | Katherine 90021 | `NULL` | a `NULL` **column**, which is a different thing |
 | Edsger 90028 | `'{}'` | an empty array, which must stay empty |
 
-**ARCHITECTURE.md specifies none of this, and that is a gap in §4 and §5, not
-in the fixture.** §4's signal list is "Postgres types (`inet`, `macaddr`,
-`citext`, domains, `jsonb`)" with no array case, and §5's masker signature and
-generator rules never mention arrays; `text[]` appears in §2 only as the
-key-chunk encoding, which is an unrelated use. So the paragraph above states no
-required behaviour: it describes what the fixture contains and what a rule
-would have to cover (element type, length, dimensions, `NULL` elements, the
-empty array). **Deciding it is an ARCHITECTURE.md §4/§5 edit and a gate 4
-blocker**, not a fixture question — this README is not where the rule gets
-written. Until §4 and §5 say something, `people.alt_emails` is held only by
-I2's grep, which finds a source address wherever it survives.
+**Decided in ARCHITECTURE.md §4 and §5 (tracker T-0034, landed 2026-09-06):** arrays are classified on their element type and masked element-wise; length, dimensions and lower bounds are preserved; a `NULL` element stays `NULL`, an empty array stays empty, and a `NULL` column stays `NULL`. Every row of this table is covered by that rule.
 
 **16a. JSONB with personal data nested two levels deep, masked leaf by leaf**
 — `people.contact`.
@@ -539,21 +521,7 @@ neighbouring-column rule makes it worse rather than better: `people` carries
 is raised to `possible` anyway. The word "boolean" appears in ARCHITECTURE.md
 only inside the JSON-leaf rule.
 
-**§4 has to decide this, and this README cannot.** The question it has to
-answer is whether a category declares the PostgreSQL types its maskers accept,
-so that a name hit on an incompatible type — an `email` or `phone` rule on
-`boolean`, `date` or an integer type — is recorded at `low` with a reason
-naming the type conflict and is never raised to `possible` by the
-neighbouring-column rule. That would be a type *gate on the name signal*, and
-not the copy-as-is-by-type exemption §4 removed for enums: a column whose
-**values** look like addresses would still be masked whatever it is called,
-which is trap 20.
-
-**Until §4 answers it this trap states no required behaviour, and it is a gate
-4 blocker** — either §4 gains the gate, or the architecture means this column
-to be masked and this entry and the `boolean` column both have to go. What the
-fixture contributes either way is the column: a name that every email rule hits
-on a type that cannot hold an address.
+**Decided in ARCHITECTURE.md §4 (tracker T-0033, landed 2026-09-06):** every category declares the types its maskers accept; a name hit on a type the category does not accept is recorded at `low` with a reason naming the conflict, and the neighbouring-column rule never raises it. It gates the name signal only: values that validate still classify a column whatever it is called (trap 20). `people.email_verified` therefore lands at `low` and is copied.
 
 **20. False negative: `people.ref text`, holding email addresses.**
 

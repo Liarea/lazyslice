@@ -19,7 +19,7 @@ Gate 3 item: brew install from the tap prints a version. Needs a GitHub repo, a 
 
 ## Acceptance
 
-git remote origin set; CI runs on push; a throwaway pre-release tag produces binaries and a cask
+git remote origin set; CI runs on push; HOMEBREW_TAP_TOKEN set on Liarea/lazyslice (done 2026-09-05); a throwaway pre-release tag produces binaries and a cask
 
 ## Log
 

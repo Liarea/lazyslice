@@ -405,6 +405,10 @@ func assertClassifierFindsNothing(ctx context.Context, t *testing.T, db *databas
 	// is flagging every column it sees. So the same predicate is first run
 	// against the source, which the grep half has just proved is full of
 	// addresses and numbers: on that input it has to find something.
+	//
+	// The negative control this test cannot supply (a source value planted in a
+	// masked target column must make `lazyslice verify` exit 9 naming the table
+	// and column) is scheduled as tracker task T-0035 in phase 4.
 	if flagged := flaggedColumns(t, classifyEvents(ctx, t, db, db.source, "the source")); len(flagged) == 0 {
 		t.Fatalf("I2: `classify --json` on the source flagged no column under any of the codes this "+
 			"test knows (%s), and the source is the fixture whose addresses and numbers the grep half "+
