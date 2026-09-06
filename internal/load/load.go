@@ -12,29 +12,517 @@
 // and ANALYZE all happen after the data, so no edge is deferred and load order
 // inside a cycle does not matter.
 //
-// Scaffold status: no-op. Load returns pipeline.ErrNotImplemented.
+// The property this package exists to hold is THREAT_MODEL.md T8's, stated as it
+// is rather than as one would wish it: after any failure the target is either
+// empty or carries a marker row at running or failed, and every table in it
+// holds either none of its rows or all of them. One transaction per table is
+// what makes the second half true; the marker row, written before the first
+// drop, is what makes the first half survive a kill -9, where no cleanup of ours
+// runs at all.
 package load
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"time"
 
+	"github.com/Liarea/lazyslice/internal/event"
+	"github.com/Liarea/lazyslice/internal/load/ddl"
+	"github.com/Liarea/lazyslice/internal/pg"
 	"github.com/Liarea/lazyslice/internal/pipeline"
+	"github.com/Liarea/lazyslice/internal/ref"
 )
 
-type loader struct{}
+// Run is what this run records in the marker table (ARCHITECTURE.md section
+// 11.2). Every field is a fingerprint, an identifier or a count: nothing here is
+// a value from either database, and no field holds a DSN.
+//
+// Root and Take are not here — they are the plan's, and Load is given the plan.
+// SchemaFingerprint is not here either, and deliberately: it is section 11.2's
+// one field whose value must be computed by the same function the gate later
+// recomputes, and there are two definitions of it in the tree (see
+// SchemaFingerprint). A caller that could pass it in could pass the other one,
+// and a marker written with one and checked with the other never binds — so
+// Load computes it from the schema it is loading and offers the gate's end of
+// the same binding as GateFingerprint.
+type Run struct {
+	ToolVersion               string
+	SourceFingerprint         string
+	SourceSystemID            string
+	ClassificationFingerprint string
+	SecretFingerprint         string
+
+	// TargetTables are the user tables the target already holds, as the gate
+	// enumerated them. pipeline.Writer has Exec, CopyFrom and Begin and no way
+	// to read (section 2), so a table the target holds under a name the source
+	// does not use is dropped only when the caller names it here; one this
+	// package is not told about is left alone rather than dropped silently.
+	TargetTables []ref.TableRef
+}
+
+type loader struct {
+	run  Run
+	sink event.Sink
+}
 
 // New returns the target loader.
-func New() pipeline.Loader { return loader{} }
+//
+// sink may be nil, in which case nothing is printed. It is here, and Load's
+// signature in ARCHITECTURE.md section 2 has no room for it, because section
+// 11.1 requires each drop to be printed before it happens: the loader is the
+// only stage that destroys anything, and a list of drops returned at the end of
+// the stage is a list printed after the tables are gone. core.Run stays the only
+// producer of events by handing its own sink in.
+func New(run Run, sink event.Sink) pipeline.Loader {
+	if sink == nil {
+		sink = event.Discard
+	}
+	return loader{run: run, sink: sink}
+}
 
 var _ pipeline.Loader = loader{}
 
-func (loader) Load(
-	_ context.Context,
-	_ pipeline.Writer,
-	_ *pipeline.Plan,
-	_ *pipeline.Schema,
-	_ <-chan pipeline.RowBatch,
+// Load recreates the object classes in section 11.1, copies every table under
+// one transaction opened at Seq 0 and committed at Last, then creates indexes,
+// adds foreign keys NOT VALID and validates them, resets sequences and runs
+// ANALYZE.
+func (l loader) Load(
+	ctx context.Context,
+	w pipeline.Writer,
+	plan *pipeline.Plan,
+	schema *pipeline.Schema,
+	in <-chan pipeline.RowBatch,
 ) (*pipeline.LoadResult, error) {
-	return nil, fmt.Errorf("load: %w", pipeline.ErrNotImplemented)
+	// The channel is drained on every path. Extract writes into it with a
+	// select on its own context, so a load that stopped early and left the
+	// channel full would hang the run rather than fail it.
+	defer drain(ctx, in)
+
+	if w == nil {
+		return nil, errors.New("load: no target")
+	}
+	if plan == nil {
+		return nil, errors.New("load: no plan")
+	}
+	if schema == nil {
+		return nil, errors.New("load: no schema")
+	}
+
+	// ARCHITECTURE.md section 11.1 raises the not-recreatable refusal (exit 13)
+	// at plan, before the snapshot is used for keys and before anything in the
+	// target is dropped. Nothing calls ddl.Recreatable there yet: internal/plan
+	// checks ForeignKey.NotRecreatable and nothing else, and stage packages do
+	// not import each other, so the caller is core and core does not exist. The
+	// check is made here as well — first, before the marker row and before the
+	// first drop — so that a source whose default calls a function v1 does not
+	// recreate is refused with exit 13 rather than destroying every table in the
+	// target and then failing at CREATE TABLE with 42883 under exit 7. Here is
+	// the backstop and not the place it belongs: wiring it into plan is owed,
+	// and internal/load/CLAUDE.md records it.
+	if err := ddl.Recreatable(schema); err != nil {
+		return nil, err
+	}
+
+	// Section 11.2's schema_fingerprint, computed here rather than accepted from
+	// the caller: the gate recomputes it over the target's catalog, and the two
+	// ends only bind when they are the same function (see SchemaFingerprint and
+	// GateFingerprint). It is computed before the marker row, because a schema
+	// that cannot be rendered to DDL is a failure that should happen before the
+	// target is touched at all.
+	fingerprint, err := SchemaFingerprint(schema)
+	if err != nil {
+		return nil, err
+	}
+
+	started := time.Now()
+
+	// The marker row is written before the first drop, so that a run which dies
+	// between the drop and the last commit leaves the target with a row at
+	// running — which the next run's gate treats exactly as it treats complete,
+	// and truncates (ARCHITECTURE.md section 11.2).
+	if err = pg.EnsureMarker(ctx, w); err != nil {
+		return nil, err
+	}
+	runID, err := pg.StartRun(ctx, w, l.markerRow(plan, fingerprint))
+	if err != nil {
+		return nil, err
+	}
+
+	res, err := l.load(ctx, w, plan, schema, in)
+	if err != nil {
+		// Best effort, on a context of its own: a cancelled run still has a
+		// marker row to close, and a row left at running authorises the next
+		// run to truncate exactly as failed does, so a failure here changes
+		// nothing about what happens next.
+		closing, cancel := context.WithTimeout(context.WithoutCancel(ctx), markerCloseTimeout)
+		defer cancel()
+		//nolint:errcheck // A marker this cannot close stays at running, which
+		// authorises the next run to truncate exactly as failed does (§11.2),
+		// so there is nothing to do with the error and the failure being
+		// returned is the one worth printing.
+		pg.FinishRun(closing, w, runID, pg.StatusFailed, totalRows(res))
+		return nil, err
+	}
+	res.Elapsed = time.Since(started)
+	if err := pg.FinishRun(ctx, w, runID, pg.StatusComplete, totalRows(res)); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+// markerCloseTimeout bounds the marker update on a failure path, where the
+// run's own context may already be cancelled.
+const markerCloseTimeout = 5 * time.Second
+
+func (l loader) markerRow(plan *pipeline.Plan, fingerprint string) pg.MarkerRow {
+	return pg.MarkerRow{
+		ToolVersion:               l.run.ToolVersion,
+		SourceFingerprint:         l.run.SourceFingerprint,
+		SourceSystemID:            l.run.SourceSystemID,
+		SchemaFingerprint:         fingerprint,
+		ClassificationFingerprint: l.run.ClassificationFingerprint,
+		RootTable:                 plan.Root.String(),
+		Take:                      plan.Take,
+		SecretFingerprint:         l.run.SecretFingerprint,
+	}
+}
+
+func (l loader) load(
+	ctx context.Context,
+	w pipeline.Writer,
+	plan *pipeline.Plan,
+	schema *pipeline.Schema,
+	in <-chan pipeline.RowBatch,
+) (*pipeline.LoadResult, error) {
+	res := &pipeline.LoadResult{
+		Rows:      map[ref.TableRef]int64{},
+		Sequences: map[ref.TableRef][]string{},
+	}
+
+	if err := l.drop(ctx, w, schema); err != nil {
+		return res, err
+	}
+	pre, err := ddl.PreData(schema, plan)
+	if err != nil {
+		return res, err
+	}
+	for _, sql := range pre {
+		if err := w.Exec(ctx, sql); err != nil {
+			return res, refuse(CodeRefusedDDL, exitLoad, ref.TableRef{}, "", err)
+		}
+	}
+	if err := l.copy(ctx, w, plan, in, res); err != nil {
+		return res, err
+	}
+	if err := l.postData(ctx, w, plan, schema, res); err != nil {
+		return res, err
+	}
+	return res, nil
+}
+
+// drop empties the target of everything ARCHITECTURE.md section 11.1 is about to
+// recreate, printing each table before it goes.
+//
+// The marker table is never dropped: it is this run's own record, written a
+// moment ago, and a source table that happens to share its name is not a reason
+// to destroy it.
+func (l loader) drop(ctx context.Context, w pipeline.Writer, schema *pipeline.Schema) error {
+	for _, d := range ddl.DropTables(schema, l.run.TargetTables) {
+		if d.Table.Name == pg.MarkerTable {
+			continue
+		}
+		l.sink.Send(event.Event{
+			At:    time.Now(),
+			Stage: event.Load,
+			Kind:  event.Info,
+			Code:  CodeDropping,
+			Table: d.Table,
+			Args:  event.Args{event.ArgTable: d.Table.String()},
+		})
+		if err := w.Exec(ctx, d.SQL); err != nil {
+			return refuse(CodeRefusedDDL, exitLoad, d.Table, "", err)
+		}
+	}
+	for _, sql := range ddl.DropObjects(schema) {
+		if err := w.Exec(ctx, sql); err != nil {
+			return refuse(CodeRefusedDDL, exitLoad, ref.TableRef{}, "", err)
+		}
+	}
+	return nil
+}
+
+// copy runs the extract → transform → load contract's receiving end.
+//
+// Tables are strictly sequential on the channel and every table ends with a
+// batch carrying Last (ARCHITECTURE.md section 2), so the transaction boundary
+// is read from Seq and Last and never inferred from a change of Table. A batch
+// that breaks the contract is an error rather than a guess: guessing is how a
+// table ends up committed in two halves.
+//
+// The channel closing is not the same thing as the stream finishing.
+// internal/extract closes it on every path, its error returns included, so a
+// producer that dies between tables — a cancelled standby read, a read refused
+// on a later table, a dropped source connection — reaches here as an orderly end
+// of channel with an early prefix of tables committed, the rest created and
+// empty, and every foreign key validating, because an empty child satisfies any
+// foreign key. That is THREAT_MODEL.md T8's "some tables loaded and status =
+// complete" exactly. The plan is therefore the second half of the contract:
+// every step it does not mark SchemaOnly must have delivered its Last, and a
+// missing boundary fails the load so the marker is closed failed.
+func (l loader) copy(
+	ctx context.Context,
+	w pipeline.Writer,
+	plan *pipeline.Plan,
+	in <-chan pipeline.RowBatch,
+	res *pipeline.LoadResult,
+) error {
+	delivered := map[ref.TableRef]bool{}
+	var cur *tableCopy
+	defer func() {
+		if cur != nil {
+			cur.abort(ctx)
+		}
+	}()
+
+	for b := range in {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if cur == nil {
+			if b.Seq != 0 {
+				return fmt.Errorf("load: %s opens at Seq %d, not 0", b.Table, b.Seq)
+			}
+			// A table whose every column is generated is copied as zero
+			// columns: the target recomputes all of them, and COPY with an
+			// empty column list is not a statement. It still gets a row count.
+			if len(b.Cols) == 0 {
+				if _, ok := res.Rows[b.Table]; !ok {
+					res.Rows[b.Table] = 0
+				}
+				if b.Last {
+					delivered[b.Table] = true
+					continue
+				}
+				return fmt.Errorf("load: %s has no columns and more than one batch", b.Table)
+			}
+			started, err := l.begin(ctx, w, b)
+			if err != nil {
+				return err
+			}
+			cur = started
+		}
+		if cur.table != b.Table {
+			return fmt.Errorf("load: %s arrived before %s was marked last", b.Table, cur.table)
+		}
+		for _, row := range b.Rows {
+			if err := cur.send(ctx, row); err != nil {
+				cur.abort(ctx)
+				cur = nil
+				return err
+			}
+		}
+		if !b.Last {
+			continue
+		}
+		n, err := cur.commit(ctx)
+		table := cur.table
+		cur = nil
+		if err != nil {
+			return err
+		}
+		res.Rows[table] = n
+		delivered[table] = true
+		l.sink.Send(event.Event{
+			At:    time.Now(),
+			Stage: event.Load,
+			Kind:  event.Progress,
+			Code:  CodeTableLoaded,
+			Table: table,
+			Done:  n,
+			Args: event.Args{
+				event.ArgTable: table.String(),
+				event.ArgCount: fmt.Sprintf("%d", n),
+			},
+		})
+	}
+	if cur != nil {
+		t := cur.table
+		cur.abort(ctx)
+		cur = nil
+		return fmt.Errorf("load: the batches for %s ended without one marked last", t)
+	}
+	for _, step := range plan.Steps {
+		if step.Mode == pipeline.SchemaOnly {
+			continue
+		}
+		if !delivered[step.Table] {
+			return fmt.Errorf(
+				"load: the row stream ended before %s, which the plan copies; a load that stops "+
+					"between tables is not a complete load", step.Table)
+		}
+	}
+	return nil
+}
+
+// postData is item 6 of section 11.1: indexes, foreign keys NOT VALID then
+// VALIDATE CONSTRAINT, setval, ANALYZE — in that order, after every table has
+// been committed.
+func (l loader) postData(
+	ctx context.Context,
+	w pipeline.Writer,
+	plan *pipeline.Plan,
+	schema *pipeline.Schema,
+	res *pipeline.LoadResult,
+) error {
+	steps, err := ddl.PostDataSteps(schema, plan)
+	if err != nil {
+		return err
+	}
+	for _, s := range steps {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := w.Exec(ctx, s.SQL); err != nil {
+			if s.Kind == ddl.StepValidate {
+				return refuse(CodeRefusedFKInvalid, exitFK, s.Table, s.Object, err)
+			}
+			return refuse(CodeRefusedDDL, exitLoad, s.Table, s.Object, err)
+		}
+		if s.Kind == ddl.StepSetval {
+			res.Sequences[s.Table] = append(res.Sequences[s.Table], s.Object)
+		}
+	}
+	return nil
+}
+
+// tableCopy is one table's transaction and the CopyFrom running inside it.
+//
+// CopyFrom reads a channel, so it runs in a goroutine of its own and the batches
+// are fed to it here. Every wait selects on that goroutine's result as well, so
+// a COPY the server has already refused fails the table rather than deadlocking
+// against a channel nobody is reading.
+type tableCopy struct {
+	table  ref.TableRef
+	tx     pipeline.Tx
+	rows   chan []any
+	done   chan copyResult
+	result *copyResult
+}
+
+type copyResult struct {
+	n   int64
+	err error
+}
+
+func (l loader) begin(ctx context.Context, w pipeline.Writer, b pipeline.RowBatch) (*tableCopy, error) {
+	tx, err := w.Begin(ctx)
+	if err != nil {
+		return nil, refuse(CodeRefusedCopy, exitLoad, b.Table, "", err)
+	}
+	// ADR-005: synchronous_commit = off per transaction. The target is a
+	// disposable local copy; a lost commit after a power cut costs one re-run
+	// and the marker says which one.
+	if err := tx.Exec(ctx, "SET LOCAL synchronous_commit = off"); err != nil {
+		rollback(ctx, tx)
+		return nil, refuse(CodeRefusedCopy, exitLoad, b.Table, "", err)
+	}
+	tc := &tableCopy{
+		table: b.Table,
+		tx:    tx,
+		rows:  make(chan []any),
+		done:  make(chan copyResult, 1),
+	}
+	cols := append([]string(nil), b.Cols...)
+	go func() {
+		n, err := tx.CopyFrom(ctx, tc.table, cols, tc.rows)
+		tc.done <- copyResult{n: n, err: err}
+	}()
+	return tc, nil
+}
+
+func (tc *tableCopy) send(ctx context.Context, row []any) error {
+	select {
+	case tc.rows <- row:
+		return nil
+	case res := <-tc.done:
+		tc.result = &res
+		if res.err != nil {
+			return refuse(CodeRefusedCopy, exitLoad, tc.table, "", res.err)
+		}
+		return fmt.Errorf("load: the copy into %s ended before its rows did", tc.table)
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// commit closes the row channel, waits for CopyFrom and commits. The
+// transaction is rolled back on any failure, so the table is empty rather than
+// part-written.
+func (tc *tableCopy) commit(ctx context.Context) (int64, error) {
+	res := tc.wait()
+	if res.err != nil {
+		rollback(ctx, tc.tx)
+		return 0, refuse(CodeRefusedCopy, exitLoad, tc.table, "", res.err)
+	}
+	if err := tc.tx.Commit(ctx); err != nil {
+		return 0, refuse(CodeRefusedCopy, exitLoad, tc.table, "", err)
+	}
+	return res.n, nil
+}
+
+// abort ends the table's transaction without committing. It is what makes a
+// failure leave the table empty rather than holding the batches that did arrive.
+func (tc *tableCopy) abort(ctx context.Context) {
+	tc.wait()
+	rollback(ctx, tc.tx)
+}
+
+// rollback ends a transaction that must not commit.
+//
+// The error is dropped here, in one place rather than at three call sites,
+// because there is nothing to do with it: a rollback that itself fails leaves
+// the transaction to end with the connection, which is the same outcome — the
+// table holds none of its rows — and the failure being reported instead is the
+// one worth printing.
+func rollback(ctx context.Context, tx pipeline.Tx) {
+	//nolint:errcheck // deliberate: see the comment above.
+	tx.Rollback(ctx)
+}
+
+func (tc *tableCopy) wait() copyResult {
+	if tc.result != nil {
+		return *tc.result
+	}
+	close(tc.rows)
+	res := <-tc.done
+	tc.result = &res
+	return res
+}
+
+func totalRows(res *pipeline.LoadResult) int64 {
+	if res == nil {
+		return 0
+	}
+	var n int64
+	for _, v := range res.Rows {
+		n += v
+	}
+	return n
+}
+
+// drain empties the batch channel so that a producer blocked on a full channel
+// can finish. It stops early when the context is done, which is the case where
+// extract is stopping too.
+func drain(ctx context.Context, in <-chan pipeline.RowBatch) {
+	for {
+		select {
+		case _, ok := <-in:
+			if !ok {
+				return
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
 }

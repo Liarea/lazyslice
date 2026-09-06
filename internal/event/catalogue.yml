@@ -272,3 +272,90 @@
   exit: 7
   message: "masker {reason} refused a value in {table}.{column}: it is not copied through"
   args: [table, column, reason]
+
+# The load stage (ARCHITECTURE.md §11). Loader.Load takes no event.Sink in §2,
+# and core.Run is the only producer of events (§7), so the refusals below are
+# declared in internal/load/codes.go beside the *load.Refusal that carries them
+# and emitted by core from that error. The exit codes are ADR-005's table: 7
+# "extract or load", 8 "FK verification".
+#
+# Two codes are the exception and are sent from inside internal/load, through the
+# sink core hands to load.New: §11.1 requires each drop to be printed *before* it
+# happens, and a list returned at the end of the stage is a list printed after
+# the tables are gone.
+#
+# {column} carries an index, constraint or sequence name as well as a column
+# name: event.ArgKey has no key for any of the three (internal/event/event.go),
+# and a refusal that could not name the object it failed on would not be
+# actionable. Owed to the task that adds those keys: add them and re-template
+# these messages, as target.refused.start_timeout above records its own missing
+# key. {reason} carries the server's five-character SQLSTATE, which is an
+# identifier and not a value: a PgError's Detail, Where and Hint quote the row
+# and are dropped before the refusal is built (THREAT_MODEL.md T4).
+
+- code: load.target.dropping
+  kind: info
+  stage: load
+  message: "dropping {table} in the target"
+  args: [table]
+
+- code: load.table.loaded
+  kind: progress
+  stage: load
+  message: "{table}: {count} rows"
+  args: [table, count]
+
+- code: load.refused.ddl
+  kind: error
+  stage: load
+  exit: 7
+  message: "the target refused the statement that recreates {table} ({column}): SQLSTATE {reason}"
+  args: [table, column, reason]
+
+- code: load.refused.copy
+  kind: error
+  stage: load
+  exit: 7
+  message: "the rows of {table} did not go in: SQLSTATE {reason}; the table is empty, not half loaded"
+  args: [table, reason]
+
+- code: load.refused.fk_invalid
+  kind: error
+  stage: load
+  exit: 8
+  message: "the foreign key {column} on {table} does not validate: the slice is missing rows it references"
+  args: [table, column]
+
+# The two schema-recreation refusals internal/load/ddl raises (§11.1). §11.1
+# raises them at plan -- before the snapshot is used for keys and before
+# anything in the target is dropped -- so their stage is plan, beside
+# target.schema.not_recreatable above, which internal/plan raises for the other
+# case §11.1 names. Exit 13 is ADR-005's "target schema not recreatable".
+#
+# The stage is where the check belongs and not yet where it runs. internal/plan
+# calls its own checkRecreatable, which covers ForeignKey.NotRecreatable and
+# nothing else; ddl.Recreatable, which raises the two codes below, is called
+# only by load.Load, as its first statement and before the first drop. So the
+# target is not destroyed for a schema that cannot be recreated, but the
+# refusal currently arrives after the snapshot has been used for keys. Wiring
+# it into plan (or into core before the drop) is owed and recorded in
+# internal/load/CLAUDE.md; when it lands, this comment goes.
+#
+# There is deliberately no flag that drops the offending default and carries on:
+# the application's first INSERT is the point of the tool. The remedy is the
+# load-into-existing-schema mode ADR-005's reversal condition names, deferred
+# with an epic in ARCHITECTURE.md §14.
+
+- code: target.schema.not_recreatable.function
+  kind: error
+  stage: plan
+  exit: 13
+  message: "{table}.{column} depends on {reason}, a function lazyslice does not recreate in the target"
+  args: [table, column, reason]
+
+- code: target.schema.not_recreatable.collation
+  kind: error
+  stage: plan
+  exit: 13
+  message: "{table}.{column} uses the collation {reason}, which lazyslice does not recreate in the target"
+  args: [table, column, reason]
