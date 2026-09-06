@@ -3,10 +3,10 @@ id: T-0051
 title: "T-FPR: apply ADR-009, delete introspect fingerprint, core-side Schema.Fingerprint, pg gate runs fingerprinter in its own transaction"
 epic: E4
 phase: 4
-status: open
+status: in_progress
 owner: opus
 created: 2026-09-06
-started: ""
+started: 2026-09-06
 closed: ""
 outcome: ""
 ---
@@ -24,6 +24,8 @@ outcome: ""
 ## Log
 
 - 2026-09-06 created
+
+- 2026-09-06 started
 
 ## Post-mortem
 

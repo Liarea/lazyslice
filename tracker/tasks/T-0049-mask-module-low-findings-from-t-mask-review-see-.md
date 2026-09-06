@@ -25,6 +25,8 @@ outcome: ""
 
 - 2026-09-06 created
 
+- 2026-09-06 started
+
 ## Post-mortem
 
 _(filled on close: what went well, what went badly, what we change next time)_
