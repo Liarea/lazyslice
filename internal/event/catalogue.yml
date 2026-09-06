@@ -169,6 +169,19 @@
   message: "{flag} on {table} names {column}, which is not a column of it or is a system column: there is no ctid rung"
   args: [table, column, flag]
 
+# {reason} carries the offending character or pair -- ";", "--", "/*", a
+# backslash, a dollar sign, an unbalanced parenthesis -- and {count} its 1-based
+# position in the predicate. Neither is a value and neither echoes the predicate
+# text: THREAT_MODEL.md T5 withholds `where` literals, and punctuation is not a
+# row (internal/plan/where.go).
+
+- code: plan.refused.where_syntax
+  kind: error
+  stage: plan
+  exit: 2
+  message: "{flag} carries {reason} at character {count}: the source only accepts a predicate that stays one"
+  args: [flag, reason, count]
+
 - code: plan.refused.key_not_unique
   kind: error
   stage: plan

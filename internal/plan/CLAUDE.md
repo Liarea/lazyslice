@@ -52,18 +52,55 @@ ARCHITECTURE.md §3 is the specification. Where it is silent, or where §2's
 signature does not carry what §3 asks for, these are the choices made and the
 reason for each.
 
-- **Statement shapes are not registered.** `internal/pg`'s allowlist grammar
-  has `{ident}`, `{idents}`, `{int}` and `{snapshot}`
-  (`internal/pg/tracer.go`), and the planner's statements are not expressible
-  in it. Three things are missing, and they are what a task to fix this has to
-  add: a placeholder for a select-list item (`t."a"::text AS o1`), a
-  placeholder for a variable-arity cast list (`unnest($1::int8[], $2::text[])
-  AS k(k1, k2)`, whose arity and casts vary per identity), and a placeholder
-  for the user's own `--where` predicate. Until they land, this package exports
-  no `Shapes()`, `internal/plan` cannot be wired to a `pg.Source` at all — every
-  statement it sends would be refused — and the integration suite reads through
-  a plain `pgx` transaction. Nothing in this package can close that: the
-  grammar is `internal/pg`'s.
+- **Statement shapes are registered** (`shapes.go`, `Shapes()`), and the
+  integration suite plans through a real `pg.Source` with them on its
+  allowlist. This closed the gap an earlier version of this file recorded:
+  `internal/pg`'s grammar had `{ident}`, `{idents}`, `{int}` and `{snapshot}`
+  only, and the planner's statements — built per table and per key arity — were
+  not expressible in it. The four placeholders that closed it live in
+  `internal/pg/tracer.go`, where they are reviewed once: `{selectlist}`,
+  `{casts}`, `{keypred}` and `{where}`.
+  - **A clause the planner sometimes omits is its own shape**, not an optional
+    part of one: `plan.seed` and `plan.seed_where`, `plan.map_keys` and
+    `plan.map_keys_not_null`, and a bounded and an unbounded form of each key
+    probe. A template cannot say "this clause may be absent", and the direction
+    that fails safe is the narrow one — a shape too narrow refuses a statement
+    of ours and `shapes_test.go` catches it, where a shape with an optional
+    `LIMIT` would admit the statement that lost its bound (THREAT_MODEL.md T9).
+  - `shapes_test.go` builds a statement of every shape with the real builders
+    in `sql.go` and runs it through a real `pg.Tracer`, so a clause added there
+    and not added here fails a unit test rather than the first run against a
+    production source. It is a unit test and needs no database; the import of
+    `internal/pg` is a test-only edge, the one `internal/introspect`'s
+    integration suite already has.
+  - **The second layer is a property of the composed allowlist, not of this
+    file.** A `Source` carries one tracer and every stage registers into it
+    additively, so another stage's shape that admits an unbounded read admits
+    it for our statements too — which is what a table-agnostic
+    `SELECT ... FROM t ORDER BY ...` in `pg.ExtractShapes()` did to the
+    planner's bounded root read until it was given a `LIMIT` of its own. A
+    tracer over `Shapes()` alone cannot see that, so
+    `TestTheComposedAllowlistStillRefusesAnUnboundedRead` compiles the union of
+    `Shapes()`, `pg.SourceShapes()` and `pg.ExtractShapes()` and asserts the
+    unbounded seed is still refused. That test, not
+    `TestStatementsOutsideTheGrammarAreStillRefused`, is what says what holds at
+    run time.
+- **`--where` is checked where it arrives** (`where.go`, `checkWhere`, called
+  first in `run.plan`), against the same characters and the same parenthesis
+  balance `internal/pg`'s `{where}` admits, and a predicate that breaks the rule
+  is `plan.refused.where_syntax` at exit 2 naming the character and its
+  position. The tracer stays the backstop it is meant to be. Leaving it as the
+  only check cost two things: an ordinary predicate carrying a backslash or a
+  dollar sign (`email ~ '^\w+@example\.com$'`) reached the operator as "the
+  source refused a statement: statement does not match any registered shape",
+  which names neither `--where` nor the character — and documentation is not
+  the fix for that (root CLAUDE.md) — and the refusal incremented the tracer's
+  violation count, so an operator's typo was recorded in the trace and the
+  report as a T9 allowlist violation, indistinguishable from a statement one of
+  our own bugs generated. The rule is duplicated rather than imported because
+  §2's import graph has the stage packages importing `pipeline` and nothing else
+  of the tree; `TestTheWhereCheckAndTheShapeAgree` runs both over one list of
+  predicates so the two cannot drift.
 - **Privileges are read here.** §3.6 consults `RolePrivileges.Unreadable`, and
   `Planner.Plan`'s signature (§2) has no privileges argument and cannot gain
   one from this package's paths. The planner therefore asks the catalog the

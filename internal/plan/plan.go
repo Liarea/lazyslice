@@ -172,7 +172,14 @@ type item struct {
 }
 
 func (p *run) plan(ctx context.Context) (*pipeline.Plan, error) {
-	// The schema refusal comes first: it is raised before the snapshot is used
+	// The request is checked before the schema is: --where is text from outside
+	// this program, and a predicate the source allowlist would refuse is a usage
+	// error named here rather than an allowlist violation named nowhere
+	// (where.go, THREAT_MODEL.md T9). Nothing has been built or read yet.
+	if err := checkWhere(p.req.Where); err != nil {
+		return nil, err
+	}
+	// The schema refusal comes next: it is raised before the snapshot is used
 	// for keys and before anything in the target is dropped (§11.1).
 	if err := p.checkRecreatable(); err != nil {
 		return nil, err

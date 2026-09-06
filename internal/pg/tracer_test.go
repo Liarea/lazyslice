@@ -220,3 +220,132 @@ func TestSourceShapesCoverThisPackagesOwnStatements(t *testing.T) {
 		}
 	}
 }
+
+// The four placeholders the planner and extract needed and the first four could
+// not express: a select-list item, a variable-arity typed array argument list, a
+// key predicate, and the operator's own --where text (internal/plan/shapes.go).
+// Each is a structure, so the test is what it refuses as much as what it takes.
+func TestKeyJoinPlaceholders(t *testing.T) {
+	const (
+		mapKeys = `SELECT DISTINCT {selectlist} FROM {ident} t ` +
+			`JOIN unnest({casts}) AS k({idents}) ON {keypred} WHERE {keypred} ORDER BY {idents}`
+		seedWhere = `SELECT {selectlist} FROM {ident} t WHERE ({where}) ORDER BY {idents} LIMIT {int}`
+	)
+	tr, err := NewTracer(
+		Shape{Name: "map_keys", SQL: mapKeys},
+		Shape{Name: "seed_where", SQL: seedWhere},
+	)
+	if err != nil {
+		t.Fatalf("NewTracer: %v", err)
+	}
+
+	accepted := map[string]string{
+		// A composite key whose columns travel as int8, as text, and as text
+		// cast back to a type that has no array of its own.
+		`SELECT DISTINCT t."id" AS o1, t."code"::text AS o2 FROM "public"."orders" t ` +
+			`JOIN unnest($1::int8[], $2::text[], $3::uuid[]) AS k(k1, k2, k3) ` +
+			`ON t."a" = k.k1 AND t."b" = k.k2::timestamp with time zone AND t."c" = k.k3 ` +
+			`WHERE t."a" IS NOT NULL AND t."b" IS NOT NULL ORDER BY o1, o2`: "map_keys",
+		`SELECT t."id" AS o1 FROM "public"."orders" t WHERE (id > 100) ORDER BY t."id" LIMIT 500`: "seed_where",
+	}
+	for sql, want := range accepted {
+		if got := tr.match(normaliseSQL(sql)); got != want {
+			t.Errorf("match(%q) = %q, want %q", sql, got, want)
+		}
+	}
+
+	for _, sql := range []string{
+		// A select-list item that is a call rather than a column.
+		`SELECT DISTINCT pg_read_file('/etc/passwd') AS o1 FROM "public"."orders" t ` +
+			`JOIN unnest($1::int8[]) AS k(k1) ON t."a" = k.k1 WHERE t."a" IS NOT NULL ORDER BY o1`,
+		// A literal in the join instead of a bound array: the one thing the
+		// chunk join exists to keep out of the statement text.
+		`SELECT DISTINCT t."id" AS o1 FROM "public"."orders" t ` +
+			`JOIN unnest(ARRAY[1,2,3]) AS k(k1) ON t."a" = k.k1 WHERE t."a" IS NOT NULL ORDER BY o1`,
+		// A join condition that is a call, and one that compares to a literal.
+		`SELECT DISTINCT t."id" AS o1 FROM "public"."orders" t ` +
+			`JOIN unnest($1::int8[]) AS k(k1) ON pg_sleep(10) IS NOT NULL WHERE t."a" IS NOT NULL ORDER BY o1`,
+		`SELECT DISTINCT t."id" AS o1 FROM "public"."orders" t ` +
+			`JOIN unnest($1::int8[]) AS k(k1) ON t."a" = 'alice@example.com' WHERE t."a" IS NOT NULL ORDER BY o1`,
+		// A write dressed as a select list. SELECT INTO is CREATE TABLE AS, and
+		// `INTO evil` is two letters-only words, which the cast's type name
+		// swallowed while its continuation was `[a-z]+` (reTypeWord). Only the
+		// READ ONLY transaction refused it, and the tracer is meant to be a
+		// control of its own (THREAT_MODEL.md T9). The trailing item has to end
+		// in a cast with no alias for the trick to work, so both spellings are
+		// here.
+		`SELECT t."a"::int INTO evil FROM "public"."orders" t WHERE (id > 0) ORDER BY t."id" LIMIT 500`,
+		`SELECT DISTINCT t."id"::int8 into unlogged evil FROM "public"."orders" t ` +
+			`JOIN unnest($1::int8[]) AS k(k1) ON t."a" = k.k1 WHERE t."a" IS NOT NULL ORDER BY o1`,
+		// A predicate that balances the template's own parenthesis and appends
+		// a clause of its own. Every parenthesis in the statement is paired, so
+		// only the predicate's own balance refuses it.
+		`SELECT t."id" AS o1 FROM "public"."orders" t ` +
+			`WHERE (id > 0) UNION ALL SELECT c."pan" AS o1 FROM "public"."cards" c WHERE (true) ` +
+			`ORDER BY t."id" LIMIT 500`,
+		// A predicate that ends the statement, and one that comments the
+		// template's own LIMIT away.
+		`SELECT t."id" AS o1 FROM "public"."orders" t WHERE (id > 0); DROP TABLE users ORDER BY t."id" LIMIT 500`,
+		`SELECT t."id" AS o1 FROM "public"."orders" t WHERE (id > 0) --) ORDER BY t."id" LIMIT 500`,
+		`SELECT t."id" AS o1 FROM "public"."orders" t WHERE (id > 0) /*) ORDER BY t."id" LIMIT 500`,
+	} {
+		if got := tr.match(normaliseSQL(sql)); got != "" {
+			t.Errorf("match(%q) = %q, want no match", sql, got)
+		}
+	}
+}
+
+// Extract's statements are the planner's chunk join with the copied column list
+// in place of the identity columns (ARCHITECTURE.md §2, §12). They are reviewed
+// here, with the placeholders, so that the task which writes internal/extract
+// does not find the grammar too narrow the way internal/plan did
+// (shapes_extract.go).
+func TestExtractShapesCoverTheStatementsExtractWillSend(t *testing.T) {
+	tr, err := NewTracer(ExtractShapes()...)
+	if err != nil {
+		t.Fatalf("NewTracer: %v", err)
+	}
+
+	accepted := map[string]string{
+		`SELECT t."id", t."email", t."created_at" FROM "public"."customers" t ` +
+			`JOIN unnest($1::int8[]) AS k(k1) ON t."id" = k.k1 ORDER BY t."id"`: "extract.rows",
+		`SELECT t."code", t."uid", t."Payload" FROM "billing"."invoices" t ` +
+			`JOIN unnest($1::text[], $2::uuid[]) AS k(k1, k2) ` +
+			`ON t."code" = k.k1 AND t."uid" = k.k2 ORDER BY t."code", t."uid"`: "extract.rows",
+		`SELECT t."a" FROM "public"."device_readings" t ` +
+			`JOIN unnest($1::text[]) AS k(k1) ON t."taken_at" = k.k1::timestamp with time zone ` +
+			`ORDER BY t."taken_at"`: "extract.rows",
+		`SELECT t."id", t."name" FROM "public"."categories" t ORDER BY t."id" LIMIT 1001`: "extract.lookup",
+	}
+	for sql, want := range accepted {
+		if got := tr.match(normaliseSQL(sql)); got != want {
+			t.Errorf("match(%q) = %q, want %q", sql, got, want)
+		}
+	}
+
+	for _, sql := range []string{
+		// A whole-table read that is not a lookup's ordered read.
+		`SELECT * FROM "public"."customers" t`,
+		// The lookup read with its LIMIT dropped. Without the bound in the
+		// template this shape is plan.seed minus its bound, and registering it
+		// beside the planner's shapes would admit the unbounded root read
+		// internal/plan/shapes_test.go asserts is refused (shapes_extract.go,
+		// THREAT_MODEL.md T9).
+		`SELECT t."id", t."name" FROM "public"."categories" t ORDER BY t."id"`,
+		// A write dressed as a lookup's select list: SELECT INTO is CREATE
+		// TABLE AS, and it reached the seed shape while a cast's type name
+		// could absorb any word (reTypeWord).
+		`SELECT t."id"::int INTO evil FROM "public"."categories" t ORDER BY t."id" LIMIT 1001`,
+		// A lock on the source, which pins rows on a production database.
+		`SELECT t."id" FROM "public"."customers" t ` +
+			`JOIN unnest($1::int8[]) AS k(k1) ON t."id" = k.k1 ORDER BY t."id" FOR UPDATE`,
+		// A write dressed as an extract.
+		`INSERT INTO "public"."customers" SELECT t."id" FROM "public"."customers" t ` +
+			`JOIN unnest($1::int8[]) AS k(k1) ON t."id" = k.k1 ORDER BY t."id"`,
+		`WITH x AS (DELETE FROM "public"."customers" RETURNING *) SELECT * FROM x`,
+	} {
+		if got := tr.match(normaliseSQL(sql)); got != "" {
+			t.Errorf("match(%q) = %q, want no match", sql, got)
+		}
+	}
+}

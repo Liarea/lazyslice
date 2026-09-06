@@ -30,10 +30,62 @@ import (
 // collapsed and letter case ignored, and it may carry these placeholders and no
 // others:
 //
-//	{ident}     one identifier, optionally schema-qualified, quoted or not
-//	{idents}    a comma-separated list of one or more {ident}
-//	{int}       a non-negative integer literal
-//	{snapshot}  a quoted snapshot identifier as pg_export_snapshot returns it
+//	{ident}       one identifier, optionally schema-qualified, quoted or not
+//	{idents}      a comma-separated list of one or more {ident}
+//	{int}         a non-negative integer literal
+//	{snapshot}    a quoted snapshot identifier as pg_export_snapshot returns it
+//	{selectlist}  a comma-separated list of select-list items, each an {ident}
+//	              with an optional ::type cast and an optional AS alias
+//	              (`t."a"::text AS o1`)
+//	{casts}       a comma-separated list of typed array parameters, the
+//	              variable-arity argument list of a chunk join
+//	              (`$1::int8[], $2::text[]`)
+//	{keypred}     a conjunction of key terms, each `a.b = c.d` with an optional
+//	              cast on the right, or `a.b IS NOT NULL`
+//	{where}       the operator's own --where predicate
+//
+// The last four exist because the planner's statements are built per table and
+// per key arity (ARCHITECTURE.md §3, internal/plan/shapes.go) and extract's are
+// built the same way (§2 "extract"), and none of the first four can express
+// them. Each is still a structure and not an escape hatch: {selectlist},
+// {casts} and {keypred} admit identifiers, casts and equality — no value, no
+// function call, no subquery, no statement separator; the only parenthesis any
+// of them admits is a type modifier's, holding digits, and the only words a
+// cast may carry are the closed list of type-name continuations below — so none
+// of them can spell a write. The closed list is load-bearing and was learned
+// the hard way: while the continuation was `[a-z]+`, `t."a"::int INTO evil`
+// parsed as a select-list item and `SELECT ... INTO evil ...` is CREATE TABLE
+// AS (reTypeWord).
+//
+// {where} is the one placeholder whose text a person outside this program
+// wrote, so it is the one with an explicit exclusion list: no `;`, no `--`, no
+// `/*`, no `\`, no `$`, and parentheses that balance within the predicate to a
+// bounded depth. `1=1) --` would comment out the template's own
+// `ORDER BY ... LIMIT n` while still matching the shape, which is how a bounded
+// seed read (THREAT_MODEL.md T11) becomes an unbounded one inside the holder
+// transaction (T9); `;` would end the statement and start another; an
+// unbalanced `)` would close the template's own parenthesis and append whole
+// clauses (`id > 0) UNION ALL SELECT c."pan" ... WHERE (true`) with every
+// parenthesis in the statement still paired. A `;`, `(` or `)` inside a string
+// literal in a predicate is refused with the rest — the loud refusal costs an
+// operator a rephrasing, and telling a literal from structure costs a SQL
+// lexer. The `\` and `$`
+// exclusions are the two forms elideLiterals cannot close over (see below), so
+// a statement that matches a shape is always one whose trace is a statement
+// rather than a leading keyword and `<elided>`.
+//
+// What the exclusions buy is exactly this and no more: one statement, no
+// commented-out tail, clauses that cannot be appended to the template's own,
+// and a faithful trace. They do not make a predicate safe. A balanced predicate
+// is still arbitrary SQL — a function call (`id = lo_import('/etc/passwd')`, and
+// a `dblink(...)` that opens its own connection), a subquery, an unbounded
+// aggregate — because it is the operator's own SQL over their own source, and
+// what bounds it is the READ ONLY transaction and nothing here. The predicates
+// that are and are not admitted are pinned by name in
+// internal/plan/shapes_test.go, including the ones admitted on purpose; the
+// rephrasing an exclusion costs an operator is refused at --where instead, by
+// internal/plan/where.go, so a violation recorded here always means a bug in
+// our own SQL generation.
 //
 // Case is ignored because lazyslice generates every one of these statements and
 // the templates fix their structure; ignoring case widens what our own SQL may
@@ -267,10 +319,95 @@ const (
 	reIdents    = reIdent + `(?: *, *` + reIdent + `)*`
 	reInt       = `[0-9]+`
 	reSnapshot  = `'[0-9a-f]+-[0-9a-f]+-[0-9]+'`
+
+	// A type name as pg_catalog.format_type writes one: an identifier, then any
+	// of the multi-word spellings the built-in types have ("double precision",
+	// "timestamp(3) without time zone", "interval day to second(6)"), then an
+	// optional array suffix. A type whose own name needs quoting arrives from
+	// format_type already quoted, and reIdent takes it.
+	//
+	// reTypeWord is a closed list and not "a word", because a run of arbitrary
+	// words after a cast is a clause: `SELECT t."a"::int INTO evil FROM ...` is
+	// CREATE TABLE AS, and with `[a-z]+` as the continuation the `INTO evil` was
+	// read as part of the type name and the statement matched the seed shape.
+	// Only the READ ONLY transaction refused it, which is the layering
+	// THREAT_MODEL.md T9 describes the other way round — the transaction
+	// enforces, the tracer is the evidence — so the evidence was the layer that
+	// failed. And that transaction is not under every statement: Connect sets no
+	// default_transaction_read_only on the source pool, and Source.SystemID
+	// queries outside any BEGIN, so an autocommit path has this allowlist and
+	// nothing else. The list is every word format_type puts after the first one;
+	// a type spelling that needs another word is added here, once.
+	reTypeMod  = `(?:\( *[0-9]+ *(?:, *[0-9]+ *)?\))?`
+	reTypeWord = `(?:with|without|time|zone|varying|precision|double|to|year|month|day|hour|minute|second)`
+	reTypeName = reIdent + reTypeMod + `(?: ` + reTypeWord + reTypeMod + `){0,4}`
+	reCast     = `::` + reTypeName + `(?:\[ *\])?`
+
+	// A select-list item is a column, optionally read as another type, optionally
+	// renamed: `t."a"`, `t."a"::text`, `c1 AS o1`, `t."a"::text AS o1`. It is not
+	// an expression: the only parenthesis it can carry is a type modifier's, and
+	// the only thing inside that is digits, so there is nowhere in it for a call
+	// or for a value.
+	reSelectItem = reIdent + `(?:` + reCast + `)?(?: AS ` + reIdentPart + `)?`
+	reSelectList = reSelectItem + `(?: *, *` + reSelectItem + `)*`
+
+	// The argument list of a chunk join: one typed array parameter per identity
+	// column. The value never appears — it is bound — so this is the arity and
+	// the casts and nothing else.
+	reCastArg  = `\$[0-9]+::` + reTypeName + `\[ *\]`
+	reCastArgs = reCastArg + `(?: *, *` + reCastArg + `)*`
+
+	// A key predicate is the ON of a chunk join and the MATCH SIMPLE NOT NULL
+	// filter beside it: a conjunction of column-to-column equalities and IS NOT
+	// NULL tests, in either case over identifiers only.
+	reKeyTerm = `(?:` + reIdent + ` *= *` + reIdent + `(?:` + reCast + `)?|` + reIdent + ` IS NOT NULL)`
+	reKeyPred = reKeyTerm + `(?: AND ` + reKeyTerm + `)*`
+
+	// The operator's --where predicate: text that carries no statement
+	// separator, no comment introducer, no backslash and no dollar sign, and
+	// whose parentheses balance within the predicate.
+	//
+	// The alternation is how "no `--` and no `/*`" is said without a lookahead,
+	// which RE2 does not have: a `-` or a `/` is admitted only together with the
+	// character after it, and that character is neither the second half of a
+	// comment introducer nor itself excluded. A predicate that ends in `-` or
+	// `/`, or that writes `a/-1` with no space, is refused with them; each is a
+	// syntax error on the server or one space away from a predicate that passes.
+	// `-(` and `/(` are the one pairing the atoms cannot express, so a group may
+	// carry either as a prefix.
+	//
+	// Parentheses are structure here, not characters, because the template
+	// writes `WHERE ({where})` and an unbalanced predicate closes that
+	// parenthesis and opens a new clause: `id > 0) UNION ALL SELECT c."pan" AS
+	// o1 FROM "public"."cards" c WHERE (true` used to match the seed shape with
+	// every parenthesis in the statement paired. Requiring the predicate's own
+	// parentheses to balance, to whereMaxDepth levels, is what makes the
+	// statement the shape describes the statement that runs.
+	reWhereOrd   = `[^;\\$/()-]`
+	reWhereDash  = `-` + reWhereOrd
+	reWhereSlash = `/[^;\\$*/()-]`
+	reWhereAtom  = `(?:` + reWhereOrd + `|` + reWhereDash + `|` + reWhereSlash + `)`
+
+	// whereMaxDepth is how deeply a predicate's own parentheses may nest. RE2
+	// cannot count, so the depth is unrolled and therefore finite; six is past
+	// anything a hand-written predicate reaches, and a deeper one is refused by
+	// internal/plan before a statement is built rather than here.
+	whereMaxDepth = 6
 )
 
+// reWhere is the {where} expansion: balanced parentheses to whereMaxDepth, with
+// the excluded characters kept out at every level.
+var reWhere = whereAtDepth(whereMaxDepth)
+
+func whereAtDepth(depth int) string {
+	if depth <= 0 {
+		return `(?:` + reWhereAtom + `)+`
+	}
+	return `(?:` + reWhereAtom + `|[-/]?\((?:` + whereAtDepth(depth-1) + `)?\))+`
+}
+
 var (
-	placeholder = regexp.MustCompile(`\{(ident|idents|int|snapshot)\}`)
+	placeholder = regexp.MustCompile(`\{(ident|idents|int|snapshot|selectlist|casts|keypred|where)\}`)
 	// placeholderToken is anything shaped like a placeholder, so that every one
 	// of them is checked and not merely the template as a whole.
 	placeholderToken = regexp.MustCompile(`\{[a-zA-Z_]+\}`)
@@ -289,7 +426,7 @@ func compileShape(template string) (*regexp.Regexp, error) {
 	// tests instead.
 	for _, tok := range placeholderToken.FindAllString(norm, -1) {
 		if !placeholder.MatchString(tok) {
-			return nil, fmt.Errorf("the template carries %s, which is not one of {ident}, {idents}, {int}, {snapshot}", tok)
+			return nil, fmt.Errorf("the template carries %s, which is not one of {ident}, {idents}, {int}, {snapshot}, {selectlist}, {casts}, {keypred}, {where}", tok)
 		}
 	}
 
@@ -307,6 +444,14 @@ func compileShape(template string) (*regexp.Regexp, error) {
 			b.WriteString(reInt)
 		case "snapshot":
 			b.WriteString(reSnapshot)
+		case "selectlist":
+			b.WriteString(reSelectList)
+		case "casts":
+			b.WriteString(reCastArgs)
+		case "keypred":
+			b.WriteString(reKeyPred)
+		case "where":
+			b.WriteString(reWhere)
 		}
 		last = m[1]
 	}

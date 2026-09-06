@@ -21,6 +21,16 @@ const (
 	// and I5), and this is where asking for one lands.
 	CodeKeyColumn event.Code = "plan.refused.key_column"
 
+	// CodeWhereSyntax is exit 2: the --where predicate carries something the
+	// source's statement allowlist will not admit inside the seed shape — a
+	// statement separator, a comment introducer, a backslash, a dollar sign, or
+	// parentheses that do not balance (internal/pg/tracer.go's {where}). It is
+	// refused here, naming the character and its position, so that the operator
+	// is not told only that "the source refused a statement" and so that a
+	// recorded allowlist violation always means a bug in our own SQL generation
+	// rather than somebody's regex (where.go, THREAT_MODEL.md T9).
+	CodeWhereSyntax event.Code = "plan.refused.where_syntax"
+
 	// CodeKeyNotUnique is exit 12: an explicit --key was probed like any other
 	// candidate and does not identify a row. Accepting it would produce a slice
 	// whose rows are silently the wrong ones (testdata/README.md trap 12).
