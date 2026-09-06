@@ -333,10 +333,10 @@ const (
 	// Only the READ ONLY transaction refused it, which is the layering
 	// THREAT_MODEL.md T9 describes the other way round — the transaction
 	// enforces, the tracer is the evidence — so the evidence was the layer that
-	// failed. And that transaction is not under every statement: Connect sets no
-	// default_transaction_read_only on the source pool, and Source.SystemID
-	// queries outside any BEGIN, so an autocommit path has this allowlist and
-	// nothing else. The list is every word format_type puts after the first one;
+	// failed. And that transaction was not under every statement: Source.SystemID
+	// queries outside any BEGIN, so an autocommit path had this allowlist and
+	// nothing else until Connect began setting default_transaction_read_only=on
+	// (pg.go). The list is every word format_type puts after the first one;
 	// a type spelling that needs another word is added here, once.
 	reTypeMod  = `(?:\( *[0-9]+ *(?:, *[0-9]+ *)?\))?`
 	reTypeWord = `(?:with|without|time|zone|varying|precision|double|to|year|month|day|hour|minute|second)`

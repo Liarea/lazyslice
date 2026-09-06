@@ -237,3 +237,38 @@
   exit: 13
   message: "the foreign key on {table} ({column}) into {reason} cannot be recreated in the target"
   args: [table, column, reason]
+
+# The extract stage (ARCHITECTURE.md §2 "extract, transform, load", §12).
+# Extractor.Extract takes no event.Sink -- core.Run is the only producer -- so
+# the code below is declared in internal/extract/codes.go beside the *Refusal
+# that carries it, and emitted by core from that error. The exit code is
+# ADR-005's "7 extract or load".
+#
+# {reason} carries the server's five-character SQLSTATE, which is an identifier
+# and not a value: a PgError's Detail, Where and Hint quote the row and are
+# dropped before the refusal is built (THREAT_MODEL.md T4).
+
+- code: extract.refused.standby_cancelled
+  kind: error
+  stage: extract
+  exit: 7
+  message: "the source cancelled the read of {table}: the snapshot conflicts with recovery on a standby (SQLSTATE {reason}); retry, or run against the primary"
+  args: [table, reason]
+
+# The transform stage (ARCHITECTURE.md §4 and §5). Transformer.Transform takes
+# no event.Sink either, so this is declared in internal/transform/codes.go.
+#
+# ADR-005's exit table names "7 extract or load" and does not name transform
+# separately; a masker refusal stops the same movement of rows between the two,
+# so it takes the same exit. internal/transform/CLAUDE.md records the reading.
+#
+# The message names the column and the masker id and never the value: a value
+# the masker refused is still a production value, and an error string is a way
+# out of the process (THREAT_MODEL.md T4).
+
+- code: transform.refused.masker
+  kind: error
+  stage: transform
+  exit: 7
+  message: "masker {reason} refused a value in {table}.{column}: it is not copied through"
+  args: [table, column, reason]

@@ -230,15 +230,39 @@ func TestStatementsOutsideTheGrammarAreStillRefused(t *testing.T) {
 // what holds at run time is the property of the union. The test above compiles
 // the planner's shapes alone and cannot see a shape another stage adds that
 // admits a statement this package's own shapes refuse — which is what an
-// unbounded pg.ExtractShapes() lookup read did to the bounded root read
-// (internal/pg/shapes_extract.go, THREAT_MODEL.md T9).
+// unbounded extract lookup read did to the bounded root read
+// (internal/extract/shapes.go, THREAT_MODEL.md T9).
+//
+// extract's two templates are copied here as literals rather than imported.
+// internal/CLAUDE.md's Never list forbids a stage package reaching another
+// stage package directly, and this test is the wrong reason to make the first
+// exception: what it needs is two strings, not a package. They are pinned on
+// the other side by internal/extract's
+// TestTheShapeTemplatesAreWhatTheComposedAllowlistTestCopies, which fails if
+// either is edited without this copy following.
+var extractShapes = []pg.Shape{
+	{
+		Name: "extract.rows",
+		SQL: `SELECT {selectlist} FROM {ident} t ` +
+			`JOIN unnest({casts}) AS k({idents}) ON {keypred} ORDER BY {idents}`,
+	},
+	// A lookup shape is per table and carries its bound as a literal. This is
+	// the one extract would register for a plan with a lookup step on
+	// public.orders, which is the root of the statements below: the composed
+	// allowlist has to refuse an unbounded read of that very table anyway.
+	{
+		Name: "extract.lookup.public.orders",
+		SQL:  `SELECT {selectlist} FROM "public"."orders" t ORDER BY {idents} LIMIT 1001`,
+	},
+}
+
 func TestTheComposedAllowlistStillRefusesAnUnboundedRead(t *testing.T) {
 	shapes := make([]pg.Shape, 0, len(Shapes()))
 	for _, s := range Shapes() {
 		shapes = append(shapes, pg.Shape{Name: s.Name, SQL: s.SQL})
 	}
 	shapes = append(shapes, pg.SourceShapes()...)
-	shapes = append(shapes, pg.ExtractShapes()...)
+	shapes = append(shapes, extractShapes...)
 	tr, err := pg.NewTracer(shapes...)
 	if err != nil {
 		t.Fatalf("compiling the composed allowlist: %v", err)

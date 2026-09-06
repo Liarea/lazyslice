@@ -34,6 +34,16 @@ import (
 	"github.com/Liarea/lazyslice/internal/dsn"
 )
 
+// sqlSetReadOnly is the one statement Connect itself sends, on every source
+// connection as it is opened. It is a session SET and not a startup parameter
+// because a pooler refuses a startup parameter it does not know (see Connect),
+// and it is a literal template on the allowlist — narrower than any shape
+// carrying a placeholder, so it admits this statement and nothing else.
+const (
+	sqlSetReadOnly = `SET default_transaction_read_only = on`
+	shapeReadOnly  = "source.read_only"
+)
+
 // Connect opens a pool. The source and the target take different pools with
 // different tracers, so this is the one place a connection is made.
 //
@@ -41,6 +51,35 @@ import (
 // and both statement caches switched off with it: in the cached modes pgx
 // prepares statements of its own, and a Prepare on a source connection is
 // refused by the allowlist (ARCHITECTURE.md §2 "Source").
+//
+// It also brings default_transaction_read_only=on, set on every connection as
+// it is opened. ARCHITECTURE.md §2 makes every source transaction REPEATABLE
+// READ READ ONLY, and until this setting existed that covered only the
+// statements inside one: Source.SystemID queries outside any BEGIN, and on such
+// an autocommit path the allowlist was the whole defence — which is the
+// near-miss THREAT_MODEL.md T9 now records (`SELECT ... INTO evil` matched a
+// shape while a cast's type name could absorb any word). With it, the implicit
+// transaction around a statement issued outside an explicit one is read-only
+// too, and the server refuses the write with SQLSTATE 25006.
+//
+// It is a SET on the session and not a startup parameter, which is a topology
+// decision and not a style one. PgBouncer and the other poolers accept only a
+// fixed set of startup parameters and refuse the connection outright for any
+// other unless it is named in ignore_startup_parameters; a pooled endpoint is a
+// supported v1 topology (ADR-005 "Pooled endpoints", ARCHITECTURE.md §2
+// "Source.Reader", §8's --single-connection), so putting this in the startup
+// packet would make OpenSource unable to open any connection at all through
+// one, and pgxpool connects lazily, so it would surface as an opaque acquire
+// failure rather than at Connect. The SET costs one round trip per connection
+// and reaches the same server state.
+//
+// The statement goes through the allowlist like every other, so its shape is
+// registered here, on the tracer that will refuse it: a statement this package
+// sends and does not register is a refusal storm on the first acquire.
+//
+// It is a default and not a lock: an explicit BEGIN ... READ WRITE would
+// override it. Nothing in this package writes one, and the tracer would refuse
+// it.
 func Connect(ctx context.Context, d dsn.DSN, tracer *Tracer) (*pgxpool.Pool, error) {
 	cfg, err := pgxpool.ParseConfig(string(d))
 	if err != nil {
@@ -53,6 +92,13 @@ func Connect(ctx context.Context, d dsn.DSN, tracer *Tracer) (*pgxpool.Pool, err
 		cfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeExec
 		cfg.ConnConfig.StatementCacheCapacity = 0
 		cfg.ConnConfig.DescriptionCacheCapacity = 0
+		if regErr := tracer.Register(Shape{Name: shapeReadOnly, SQL: sqlSetReadOnly}); regErr != nil {
+			return nil, fmt.Errorf("pg: registering the read-only shape: %w", regErr)
+		}
+		cfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+			_, execErr := conn.Exec(ctx, sqlSetReadOnly)
+			return execErr
+		}
 	}
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
