@@ -687,6 +687,9 @@ type Emitter interface {
 
 **Value-free types.** Four structures leave the process or reach a file: `event.Event` (§7), `Config` (§10), `Plan` (`--plan --json`) and `Report`. `TestNoValueBearingFieldSerialised` walks the transitive field types of all four and fails if any reaches `dsn.DSN`, `RowBatch`, `Table.Samples` or a `mask.Value`; `TestReasonGrammar` covers `Decision.Reason`; `TestConfigHasNoSecretField` covers `secret:"true"`. `Schema` itself is never serialised by `introspect --json`: that subcommand emits a `SchemaSummary` with counts and fingerprints, and the test above covers it.
 
+
+**Type additions recorded after implementation (2026-09-06):** `Index.Immediate bool` carries `pg_index.indimmediate`; the index behind a DEFERRABLE primary key or unique constraint has it false and can never back a foreign key. `ForeignKey.NotRecreatable bool` marks an edge whose parent end is a leaf partition carrying a key the root cannot: introspect leaves the edge un-re-pointed and the planner refuses at plan time with exit 13 (`target.schema.not_recreatable`) before anything in the target is dropped (T-INTROSPECT-FIX2).
+
 ## 3. The subset planner
 
 Client-side monotone worklist with provenance tags (research/HARD_PROBLEMS.md §1.1), never SQL pushdown, because the plan must say why each row is present and the source must never see a temp table. Defaults: `--take 500`, per-parent-key cap `100`, `--depth 3`, `--row-budget 1000000`, `--memory-budget 256MiB`.

@@ -6,8 +6,8 @@
 | E1 Research | 1 | 0 | 0 | 10 | 0 | 0 |
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 1 | 0 | 9 | 0 | 0 |
-| E4 Vertical slice | 4 | 9 | 1 | 4 | 0 | 0 |
-| E5 Hardening | 5 | 0 | 0 | 0 | 0 | 0 |
+| E4 Vertical slice | 4 | 8 | 1 | 5 | 0 | 0 |
+| E5 Hardening | 5 | 1 | 0 | 0 | 0 | 0 |
 | E9 Later | later | 3 | 0 | 0 | 0 | 0 |
 
 ## Open and in progress
@@ -17,8 +17,7 @@
 - T-0029 [open] E9 · Before going public: git-crypt the AI-specific paths and rewrite pre-encryption history (fable)
 - T-0031 [open] E9 · Licence for the lazyslice.yml schema and docs; confirm copyright holder statement (fable)
 - T-0035 [open] E4 · Verify negative control: a source email planted in a masked target column makes lazyslice verify exit 9 naming table and column (opus)
-- T-0037 [in_progress] E4 · T-INTROSPECT: introspect stage (opus)
-- T-0038 [open] E4 · T-CLASSIFY: classify stage with rule pack (opus)
+- T-0038 [in_progress] E4 · T-CLASSIFY: classify stage with rule pack (opus)
 - T-0039 [open] E4 · T-PLAN: subset planner (opus)
 - T-0040 [open] E4 · T-MASK: mask module (opus)
 - T-0041 [open] E4 · T-EXTRACT: extract and transform stages (opus)
@@ -26,10 +25,12 @@
 - T-0043 [open] E4 · T-VERIFY: verify stage, includes T-0035 negative control (opus)
 - T-0044 [open] E4 · T-CORE: core run, emit, render, repo, CLI end to end; integration job blocking again (opus)
 - T-0045 [open] E4 · T-DISCOVER: discovery rungs 0-3 and the first-run ladder (opus)
+- T-0046 [open] E5 · Fixture: deferrable unique on a partitioned root, leaf-local key, and an edge referencing the leaf (sonnet)
 
 ## Recently closed
 
 - T-0036 [done] E4 · T-PG: source and target connections, target gate, statement-shape allowlist, dsn → done: connections, marker, target gate, statement-shape tracer, dsn; package integration tests green
+- T-0037 [done] E4 · T-INTROSPECT: introspect stage → done: 2dd2102 (stage) after fix2; PG18 contype filter, tolerant sampling, bounded TABLESAMPLE, FK end filters, extension walk narrowed, partition edges re-pointed only when the root can carry them
 - T-0002 [done] E1 · COMPETITORS.md teardown → done: 636-line teardown of 23 tools, 156 sources, critiqued and revised
 - T-0003 [done] E1 · POSTMORTEMS.md Snaplet and Neosync → done: Snaplet and Neosync post-mortems with founder quotes, pricing history, five do-not-copy and three must-copy
 - T-0004 [done] E1 · HARD_PROBLEMS.md technical survey → done: four hard problems surveyed with simplest-correct, refinement, and trap for each
@@ -53,4 +54,3 @@
 - T-0024 [done] E3 · ADR-008 first run from lazygit, lazydocker, k9s source → done: research/FIRST_RUN_STUDY.md from lazygit, lazydocker, k9s source; docs/adr/008-first-run.md proposed with six-step Docker order, question ladder, locality predicate
 - T-0025 [done] E3 · ROADMAP.md with gates and Later → done: ROADMAP.md with phases 4 to 8 gates, Not-in-this-phase lists, Later seeded from non-goals
 - T-0026 [done] E3 · Foundation review and fixes → done: 1a000f8 review fixes; five spec-level findings resolved by the orchestrator in the follow-up commit
-- T-0027 [done] E3 · Apply ADR-008 consequences to ARCHITECTURE.md, catalogue, ADR index → done: 94466d0; six-step Docker order, gate order, locality predicate, three exit-4 event codes, ADR index updated
