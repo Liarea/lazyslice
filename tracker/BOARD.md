@@ -5,7 +5,7 @@
 | E0 Frame | 0 | 0 | 0 | 3 | 0 | 0 |
 | E1 Research | 1 | 0 | 0 | 10 | 0 | 0 |
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
-| E3 Foundations | 3 | 3 | 1 | 6 | 0 | 0 |
+| E3 Foundations | 3 | 3 | 0 | 7 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 0 | 0 | 0 |
 | E5 Hardening | 5 | 0 | 0 | 0 | 0 | 0 |
 | E9 Later | later | 3 | 0 | 0 | 0 | 0 |
@@ -13,7 +13,6 @@
 ## Open and in progress
 
 - T-0019 [open] E9 · Go vs Python COPY throughput benchmark to validate ADR-001 (opus)
-- T-0022 [in_progress] E3 · Invariant suite I1-I6, black box (opus)
 - T-0026 [open] E3 · Foundation review and fixes (opus)
 - T-0028 [open] E3 · Create GitHub repository Liarea/lazyslice and homebrew-tap, push main, add HOMEBREW_TAP_TOKEN secret (human)
 - T-0029 [open] E9 · Before going public: git-crypt the AI-specific paths and rewrite pre-encryption history (fable)
@@ -40,6 +39,7 @@
 - T-0018 [done] E2 · Adversarial review of the decision set and one revision → done: 42 findings from three lenses, all addressed; import cycle, target gate, planner determinism, JSON masking, frequency leaks fixed
 - T-0020 [done] E3 · Repository scaffold per ARCHITECTURE.md sections 12 and 13 → done: 8254d0f; 20 packages, interfaces, Makefile, CI, goreleaser, SECURITY, CONTRIBUTING; make check green
 - T-0021 [done] E3 · Golden fixtures: Pagila and nasty.sql → done: 31aa82e; Pagila pinned v3.1.0 with checksums, nasty.sql 21 tables, 22 traps documented, 2M-row generator, testutil loaders
+- T-0022 [done] E3 · Invariant suite I1-I6, black box → done: 3b9c04f; I1-I6 as black-box tests against the binary and two containers, each failing for the right reason today
 - T-0023 [done] E3 · Per-directory CLAUDE.md files → done: 3b18a1e; 22 CLAUDE.md files across cmd, internal packages, testdata, docs, tracker, .claude
 - T-0024 [done] E3 · ADR-008 first run from lazygit, lazydocker, k9s source → done: research/FIRST_RUN_STUDY.md from lazygit, lazydocker, k9s source; docs/adr/008-first-run.md proposed with six-step Docker order, question ladder, locality predicate
 - T-0025 [done] E3 · ROADMAP.md with gates and Later → done: ROADMAP.md with phases 4 to 8 gates, Not-in-this-phase lists, Later seeded from non-goals
