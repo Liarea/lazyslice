@@ -3,10 +3,10 @@ id: T-0037
 title: "T-INTROSPECT: introspect stage"
 epic: E4
 phase: 4
-status: open
+status: in_progress
 owner: opus
 created: 2026-09-05
-started: ""
+started: 2026-09-06
 closed: ""
 outcome: ""
 ---
@@ -24,6 +24,8 @@ outcome: ""
 ## Log
 
 - 2026-09-05 created
+
+- 2026-09-06 started
 
 ## Post-mortem
 
