@@ -17,12 +17,27 @@
 // an unreadable table at plan.
 //
 // Table.Samples holds production values and is never serialised.
+//
+// This package does not fingerprint a schema (ADR-009). Schema.Fingerprint is
+// sha256 over the DDL text internal/load/ddl generates for the schema, so
+// Introspect returns the field empty. Owed: nothing in the tree fills it —
+// both ends of §11.2's binding compute their own value through internal/load
+// (load.SchemaFingerprint for the marker, load.GateFingerprint for the gate),
+// so the field is dead until internal/core, the caller that has both halves
+// and still a scaffold, fills it from load.SchemaFingerprint (ADR-009).
+// Column.Fingerprint, which is a different thing — ARCHITECTURE.md §5's
+// per-column value that expires an --unmask opt-out — is still computed here.
 package introspect
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/Liarea/lazyslice/internal/pipeline"
@@ -114,7 +129,9 @@ func (introspector) Introspect(ctx context.Context, r pipeline.Reader) (*pipelin
 	}
 	c.markIndexedForeignKeys()
 	c.collect()
-	c.schema.Fingerprint = schemaFingerprint(c.schema)
+	// Schema.Fingerprint is deliberately left empty: ADR-009 makes the schema
+	// fingerprint sha256 over the DDL internal/load/ddl generates, so this
+	// package does not compute one (see the package comment for what is owed).
 	return c.schema, nil
 }
 
@@ -749,4 +766,52 @@ func partitionKeyColumns(def string) []string {
 		out = append(out, member)
 	}
 	return out
+}
+
+// enc is the length-prefixed encoding of ARCHITECTURE.md §5:
+//
+//	enc(f1, ..., fn) = u32be(len(f1)) ‖ f1 ‖ ... ‖ u32be(len(fn)) ‖ fn
+//
+// It is used here for the same reason it is used there: without it
+// ("email", "a@b.com") and ("emai", "la@b.com") hash alike, and a fingerprint
+// that collides on a change is worse than no fingerprint at all.
+type enc struct{ buf bytes.Buffer }
+
+func (e *enc) field(s string) {
+	var n [4]byte
+	//nolint:gosec // G115: len of an in-memory string is never negative, and no
+	// catalog identifier, expression or definition is four gigabytes long.
+	binary.BigEndian.PutUint32(n[:], uint32(len(s)))
+	e.buf.Write(n[:])
+	e.buf.WriteString(s)
+}
+
+func (e *enc) fields(ss ...string) {
+	for _, s := range ss {
+		e.field(s)
+	}
+}
+
+func (e *enc) sum() []byte {
+	h := sha256.Sum256(e.buf.Bytes())
+	return h[:]
+}
+
+// columnFingerprint is sha256 over (TypeOID, TypMod, Nullable, Domain), the
+// four fields ARCHITECTURE.md §2 names, truncated to eight hex characters. An
+// --unmask opt-out expires when it changes, so a column that was retyped does
+// not silently keep its exemption.
+//
+// This is Column.Fingerprint and not Schema.Fingerprint: ADR-009 moved the
+// schema fingerprint out of this package altogether, and the per-column one it
+// says nothing about stayed, because §5's opt-out is what it answers.
+func columnFingerprint(c pipeline.Column) string {
+	var e enc
+	e.fields(
+		strconv.FormatUint(uint64(c.TypeOID), 10),
+		strconv.FormatInt(int64(c.TypMod), 10),
+		strconv.FormatBool(c.Nullable),
+		c.Domain,
+	)
+	return hex.EncodeToString(e.sum())[:8]
 }

@@ -157,6 +157,19 @@ type Schema struct {
 	// Fingerprint is sha256 over the recreated object classes only, so it is the
 	// same hash whether computed on the source or on a target we wrote, which is
 	// what the marker's binding needs (ARCHITECTURE.md section 11.2).
+	//
+	// ADR-009 makes that hash the DDL text internal/load/ddl generates for this
+	// Schema, and it is the only definition. Introspector.Introspect does not
+	// fill this field — it comes back empty — and nothing in the tree fills it
+	// yet: both ends of section 11.2's binding compute their own value through
+	// internal/load (the loader writes the marker with load.SchemaFingerprint,
+	// the gate recomputes it through load.GateFingerprint), so today this field
+	// is dead and no reader may assume it is set. Filling it from
+	// load.SchemaFingerprint is owed to the caller that has both halves,
+	// internal/core, which is still a scaffold (ADR-009).
+	// Nothing may fingerprint a Schema some other way:
+	// a marker written with one definition and checked with another binds
+	// nothing, and section 11.2 then refuses a target lazyslice itself wrote.
 	Fingerprint string
 }
 

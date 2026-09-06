@@ -6,6 +6,7 @@ package introspect
 
 import (
 	"context"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -61,16 +62,70 @@ func introspectFixture(ctx context.Context, t *testing.T, load func(context.Cont
 	if err := src.Violation(); err != nil {
 		t.Fatalf("the source allowlist refused a statement Introspect sent: %v", err)
 	}
-	// Two runs over one snapshot must produce the same schema fingerprint, or
-	// the marker in ARCHITECTURE.md §11.2 could never bind (ADR-004).
-	if first.Fingerprint != second.Fingerprint {
-		t.Errorf("two introspections of one snapshot fingerprint differently:\n %s\n %s",
-			first.Fingerprint, second.Fingerprint)
-	}
-	if len(first.Fingerprint) != 64 {
-		t.Errorf("Schema.Fingerprint = %q, want a sha256 in hex", first.Fingerprint)
+	// Two introspections of one snapshot must describe it identically (ADR-004),
+	// and this is the only place that property is asserted against a real
+	// catalog. ARCHITECTURE.md §11.2's marker stands on it: the fingerprint is
+	// sha256 over the DDL internal/load/ddl renders from this Schema, so a field
+	// whose order comes out of a Go map or an unordered catalog query makes the
+	// hash differ run to run, the marker lazyslice wrote stops binding, and
+	// every reload of that target is refused with exit 4 — fail-closed, and the
+	// reload path dead. ddl.TestFingerprintIsStableAndMovesWithTheSchema runs
+	// over a hand-built pipeline.Schema and cannot see a catalog-ordering bug at
+	// all, which is why the assertion is here and not only there.
+	assertSameSchema(t, first, second)
+	// ADR-009: this package does not fingerprint. Schema.Fingerprint is sha256
+	// over the DDL internal/load/ddl generates, so what is asserted here is that
+	// Introspect leaves it alone — a value set here would be the second,
+	// disagreeing definition ADR-009 removed, and §11.2's marker would bind
+	// against whichever end read it. The hash's own properties are asserted
+	// where it is defined (ddl.TestFingerprintIsStableAndMovesWithTheSchema) and
+	// end to end in internal/load's TestLoadPagilaIntoAMarkedTarget, which
+	// compares the fingerprint of a source with that of the target lazyslice
+	// wrote from it.
+	for _, s := range []*pipeline.Schema{first, second} {
+		if s.Fingerprint != "" {
+			t.Errorf("Introspect filled Schema.Fingerprint with %q; ADR-009 leaves it to the caller",
+				s.Fingerprint)
+		}
 	}
 	return first
+}
+
+// assertSameSchema fails unless two introspections of one snapshot describe it
+// identically. It compares the whole *pipeline.Schema rather than a hash, so it
+// is not tied to what any one fingerprint definition covers; only Table.Samples
+// is excluded, because sample values are production data (THREAT_MODEL.md T4),
+// never reach the DDL the fingerprint is taken over, and would be printed by a
+// failure here.
+func assertSameSchema(t *testing.T, first, second *pipeline.Schema) {
+	t.Helper()
+
+	a, b := withoutSamples(first), withoutSamples(second)
+	if reflect.DeepEqual(a, b) {
+		return
+	}
+	if len(a.Tables) != len(b.Tables) {
+		t.Fatalf("two introspections of one snapshot returned %d and %d tables",
+			len(a.Tables), len(b.Tables))
+	}
+	for i := range a.Tables {
+		if !reflect.DeepEqual(a.Tables[i], b.Tables[i]) {
+			t.Fatalf("two introspections of one snapshot describe %s differently:\n %+v\n %+v",
+				a.Tables[i].Ref, a.Tables[i], b.Tables[i])
+		}
+	}
+	a.Tables, b.Tables = nil, nil
+	t.Fatalf("two introspections of one snapshot differ outside the table list:\n %+v\n %+v", *a, *b)
+}
+
+// withoutSamples is a shallow copy of s whose tables carry no sample rows.
+func withoutSamples(s *pipeline.Schema) *pipeline.Schema {
+	out := *s
+	out.Tables = append([]pipeline.Table(nil), s.Tables...)
+	for i := range out.Tables {
+		out.Tables[i].Samples = nil
+	}
+	return &out
 }
 
 func introspectOnce(ctx context.Context, t *testing.T, src *pg.Source, id pipeline.SnapshotID) *pipeline.Schema {

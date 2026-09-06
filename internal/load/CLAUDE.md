@@ -104,22 +104,17 @@ then after-data: indexes, FKs, setval, ANALYZE, bookkeeping tables).
   has been used for keys, which §11.1's ordering exists to avoid. The two exit
   13 codes in `internal/event/catalogue.yml` still carry `stage: plan`, which
   is where the check belongs and where it must move.
-- **Owed: the gate hands its `CatalogFingerprinter` a connection that is not in
-  a transaction.** `internal/pg/target.go` calls the fingerprinter with
-  `&reader{conn: conn, own: false}` on a pooled connection in autocommit, and
-  `introspect.Introspect` wraps its sampling in a `SAVEPOINT`, which outside a
-  transaction block is 25P01 — so the obvious wiring (`Introspect` then
-  `ddl.Fingerprint`) fails at the gate every time, and §11.2's binding can
-  never be confirmed. `TestLoadPagilaIntoAMarkedTarget` wraps the introspector
-  it hands `GateFingerprint` in `inTransaction`, which issues its own `BEGIN`
-  and rolls back after — a test working around a defect: either the gate opens
-  the transaction, or introspect does not need one. `GateFingerprint`
-  deliberately does **not** issue that `BEGIN` itself, because once
-  `internal/pg` opens the transaction a `ROLLBACK` from here would end one this
-  package did not start. Owed to `internal/pg`. Nothing outside that test
-  exercises this path,
-  which is why it was not seen until the test stopped passing a foreign source
-  ref to `Gate`.
+- **`internal/pg` opens the transaction the `CatalogFingerprinter` runs in**
+  (T-FPR, ADR-009). It used to call the fingerprinter with
+  `&reader{conn: conn, own: false}` on a pooled connection in autocommit, where
+  `introspect.Introspect`'s sampling `SAVEPOINT` is 25P01, so the obvious
+  wiring (`Introspect` then `ddl.Fingerprint`) failed at the gate every time
+  and §11.2's binding could never be confirmed;
+  `TestLoadPagilaIntoAMarkedTarget` carried an `inTransaction` introspector
+  that issued its own `BEGIN` — a test working around a defect. That wrapper is
+  gone and the test hands `GateFingerprint` a bare `introspect.New()`, which is
+  what `core` will pass. `GateFingerprint` still issues no `BEGIN` of its own,
+  and must not: it would be ending a transaction it did not start.
 - **Owed: a source table named `lazyslice_meta` is not recreated at all.**
   `ddl.recreated` skips it by name in any schema, so a source that really has a
   table of that name loses it in the target and its rows fail at `CopyFrom`
@@ -128,12 +123,16 @@ then after-data: indexes, FKs, setval, ANALYZE, bookkeeping tables).
   refusal that says what happened. The gate is where a source owning the
   bookkeeping name should be refused, and it does not check.
 - **Both ends of §11.2's binding are this package's, so they cannot be wired
-  apart.** `ddl.Fingerprint` is over the DDL text, as §11.1 says;
-  `internal/introspect`'s `schemaFingerprint` is over the catalog fields that
-  text is rendered from (the divergence `internal/introspect/fingerprint.go`
-  records as owed to this task — it could not hash text nothing produced).
-  **Both exist and they do not agree**, and choosing between them is an ADR and
-  not this package's call. What is not left to a caller's memory is which one
+  apart.** `ddl.Fingerprint` is over the DDL text, as §11.1 says, and ADR-009
+  makes it the only definition: `internal/introspect`'s `schemaFingerprint`,
+  which hashed the catalog fields that text is rendered from, is deleted, and
+  `Introspect` now returns `Schema.Fingerprint` empty. **Owed: nothing fills
+  `pipeline.Schema.Fingerprint`.** Both ends here compute their own value —
+  `Load` through `SchemaFingerprint`, the gate through `GateFingerprint` — so
+  the field is dead in the tree, and filling it from `SchemaFingerprint` is
+  owed to `internal/core`, which is still a scaffold whose `Run` returns
+  `pipeline.ErrNotImplemented`. Nothing may read that field as though it were
+  set. What is not left to a caller's memory is which one
   each end uses: `load.SchemaFingerprint` is the single name, `Load` computes
   the marker's value with it rather than taking a `Run.SchemaFingerprint`, and
   `load.GateFingerprint(introspector)` is the `pg.TargetOption` `core` wires
@@ -145,14 +144,13 @@ then after-data: indexes, FKs, setval, ANALYZE, bookkeeping tables).
   source, load, re-introspect the target, require the two hashes equal, and
   require the gate reached through `GateFingerprint` to report `MarkerBound`
   against the real source ref — so the round trip §11.1 claims is a test and
-  not a sentence. **Still owed: the ADR**, and with it
-  `internal/introspect`'s side. `Schema.Fingerprint` does **not** round trip:
-  `schemaFingerprint` counts every non-virtual foreign key and does not exclude
-  `lazyslice_meta`, so a target we wrote fingerprints differently from its
-  source there — the same defect this package's `recreated` fixed on its own
-  side. Nothing wires `Schema.Fingerprint` anywhere and nothing should while
-  both definitions live; `internal/introspect` and `internal/pg` are outside
-  this task's write paths, so the ADR and that fix are a task of their own.
+  not a sentence — and it does so through the wiring `core` will use, with no
+  transaction of the test's own. The two properties that made the catalog hash
+  fail to round trip are asserted as unit tests here rather than left to the
+  integration suite: `TestTheMarkerTableIsNotAnObjectClass` for
+  `lazyslice_meta`, and `TestFingerprintCountsOnlyEdgesBetweenRecreatedTables`
+  for the edges — the catalog hash counted every non-virtual foreign key,
+  including one onto a leaf partition the target does not have.
 - **What `ddl.Recreatable` detects, and what it does not.** It detects a
   default, generated expression, check, exclusion or index definition whose text
   calls a function or procedure listed in `Schema.NotRecreated`, and a column or

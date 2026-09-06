@@ -230,38 +230,26 @@ per §2's comment on `Column`/`Index`/`Constraint`.
   §5 length-prefixed encoding of `(TypeOID, TypMod, Nullable, Domain)` — the
   four fields §2 names, and no others, so `Column.Checks` changing does not
   expire an `--unmask` opt-out.
-- **`Schema.Fingerprint`** is a full `sha256` in hex over a canonical rendering
-  of §11.1's object classes 1 to 7, in that order: the schemas recreated tables
-  live in, extensions, enums, domains, composites, sequences not owned by an
-  identity column, tables with their columns and non-foreign-key constraints,
-  then indexes and foreign keys. A leaf partition contributes nothing and
-  neither does a partition key, because §11.1 recreates a partitioned source
-  table as one plain table — the property §11.2's binding needs is that the
-  source and a target lazyslice wrote hash alike. **A partitioned root's index
-  enters as `plainIndexDef` of its definition**, for the same property:
-  `pg_get_indexdef` prints `CREATE UNIQUE INDEX ev_pkey ON ONLY public.ev ...`
-  for an index on a partitioned table and prints the same index on a plain table
-  without `ONLY`, and `ON ONLY` is accepted at creation but is not round-tripped
-  (verified on postgres:16). Hashing the raw text meant that any source holding a
-  partitioned table with an index or a primary key could never equal its own
-  target's hash: the marker would never bind, the gate would fall through to the
-  emptiness rule, and lazyslice would refuse a non-empty target it wrote itself
-  with exit 4 and no way forward — testdata/nasty.sql's `public.events` has
-  `PRIMARY KEY (event_id, occurred_at)`, so the project's own fixture hit it on
-  every second run.
-  **This diverges from §11.1 and is provisional.** §11.1 hashes those classes "as
-  their DDL text"; this hashes the catalog fields that text is rendered from,
-  because `internal/load/ddl` (§12) is still the scaffold whose every function
-  returns `ErrNotImplemented`, and a hash cannot be taken over text nothing
-  produces. The two agree on *what* is hashed and not on
-  *how*, which leaves a second definition of "the recreated schema" outside the
-  package that owns the first. Resolving it is an ADR — either the hash moves to
-  `internal/load/ddl` and takes the DDL text, with `Introspect` leaving
-  `Schema.Fingerprint` for its caller to fill, or §11.1 is amended to say the
-  catalog fields — not a decision this package may keep making alone. It is an
-  owed item on T-INTROSPECT rather than a settled design.
-  `TestSchemaFingerprintIsTheRecreatedObjectsOnly` asserts the half of the
-  binding property that can be asserted today.
+- **`Schema.Fingerprint` is not filled here (ADR-009).** This package once
+  hashed the catalog fields §11.1's DDL is rendered from, in
+  `fingerprint.go`'s `schemaFingerprint`, while `internal/load/ddl` hashed the
+  DDL text itself; the two disagreed — the catalog hash counted
+  `lazyslice_meta` and every non-virtual foreign key rather than only edges
+  whose ends are both recreated — so a target lazyslice wrote never
+  fingerprinted equal to its source and §11.2's marker never bound. ADR-009
+  settles it on the DDL text: `ddl.Fingerprint` is the only definition, and
+  `fingerprint.go` and `TestSchemaFingerprintIsTheRecreatedObjectsOnly` are
+  gone. `Introspect` returns `Schema.Fingerprint` empty. **Owed: nothing fills
+  it.** Both ends of §11.2's binding compute their own value through
+  `internal/load` (`load.SchemaFingerprint` for the marker,
+  `load.GateFingerprint` for the gate), so the field is dead in the tree until
+  `internal/core` — the caller that has both halves, and still a scaffold —
+  fills it from `load.SchemaFingerprint`. The integration suite asserts the
+  field comes back empty rather than asserting a hash, because a value set here
+  would be the second definition again; what it asserts instead is that two
+  introspections of one snapshot describe it identically
+  (`assertSameSchema`), which is the property §11.2's marker rests on and the
+  only place it is checked against a real catalog.
 - **A generated column's expression is read from `pg_attrdef`** — that is where
   Postgres stores it — with `attgenerated` deciding whether it lands in
   `Column.Generated` or `Column.Default`. One column never carries both.

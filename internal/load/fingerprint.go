@@ -19,16 +19,18 @@ import (
 // ends — the value the loader writes into the marker and the value the gate
 // recomputes over the target's catalog — and a marker written with one
 // definition and checked with another can never bind, which per section 11.2
-// leaves exit 4 on a target lazyslice itself wrote and no way forward. There is
-// a second, disagreeing definition in the tree (internal/introspect fills
-// Schema.Fingerprint by hashing the catalog fields this text is rendered from),
-// so which one section 11.1 means is an ADR that has not been written. What this
-// package can do without it, it does: Load computes the marker's value with this
-// function rather than accepting one, and GateFingerprint below hands the gate
-// the same function, so the two ends are one decision and not two.
+// leaves exit 4 on a target lazyslice itself wrote and no way forward. There was
+// a second, disagreeing definition in the tree, in internal/introspect; ADR-009
+// removed it, and this is now the only one. Load computes the marker's value
+// with this function rather than accepting one, and GateFingerprint below hands
+// the gate the same function, so the two ends are one decision and not two.
 //
-// Do not pass Schema.Fingerprint to either end while both definitions live. When
-// the ADR lands, one of these two disappears and this stays the single name.
+// Schema.Fingerprint is this value, but nothing fills it: introspect leaves the
+// field empty and both ends here compute their own value through this function,
+// so the field is dead in the tree. Filling it from here is owed to
+// internal/core, the caller that has both halves (ADR-009). Passing a
+// Schema.Fingerprint that came from anywhere else to either end is the failure
+// this function exists to make impossible.
 func SchemaFingerprint(s *pipeline.Schema) (string, error) {
 	return ddl.Fingerprint(s)
 }
@@ -42,13 +44,12 @@ func SchemaFingerprint(s *pipeline.Schema) (string, error) {
 // caller that has both is core, and this is the one call it makes so that it
 // cannot wire the gate to a definition the marker was not written with.
 //
-// Owed, and this function does not paper over it: internal/pg hands the
-// fingerprinter a pooled connection that is not in a transaction, and
-// introspect.Introspect wraps its sampling in a SAVEPOINT, which outside a
-// transaction block is 25P01. Until internal/pg opens one, in must be an
-// introspector that puts its own reader in a transaction — the alternative, a
-// BEGIN issued here, would roll back a transaction it did not open once
-// internal/pg does open one. internal/load/CLAUDE.md records it.
+// The reader it is handed is already in a transaction: internal/pg opens one
+// around this call and ends it (Target.catalogFingerprint), which is what lets
+// introspect take the SAVEPOINT its sampler needs — outside a transaction block
+// that is 25P01, and the binding could never be confirmed. This function issues
+// no BEGIN of its own and must not: it would be ending a transaction it did not
+// start.
 func GateFingerprint(in pipeline.Introspector) pg.TargetOption {
 	return pg.WithCatalogFingerprint(func(ctx context.Context, r pipeline.Reader) (string, error) {
 		if in == nil {

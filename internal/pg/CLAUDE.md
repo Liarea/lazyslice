@@ -165,12 +165,27 @@ for the privilege.
 - The table cap is applied to the **post-exemption** list — the tables the gate
   would actually probe.
 - The gate takes its **schema fingerprint from an injected
-  `CatalogFingerprinter`** (`WithCatalogFingerprint`), because
-  `Schema.Fingerprint` is defined over what `internal/introspect` reads and
-  this package does not introspect. `Gate`'s signature is ARCHITECTURE.md §2's
-  and has nowhere to pass it. **A `Target` with no fingerprinter can never find
-  a marker bound** — the fail-closed direction — so wiring introspect's
-  fingerprint in is owed by the task that builds the loader.
+  `CatalogFingerprinter`** (`WithCatalogFingerprint`), because ADR-009 defines
+  `Schema.Fingerprint` as `sha256` over the DDL `internal/load/ddl` generates
+  for the schema `internal/introspect` reads, and this package can import
+  neither — `internal/load` imports `internal/pg`, so the edge back is a cycle.
+  `load.GateFingerprint` is the only caller. `Gate`'s signature is
+  ARCHITECTURE.md §2's and has nowhere to pass it. **A `Target` with no
+  fingerprinter can never find a marker bound** — the fail-closed direction.
+- **This package opens the transaction the fingerprinter runs in**
+  (`Target.catalogFingerprint`): `BEGIN ISOLATION LEVEL REPEATABLE READ READ
+  ONLY`, the injected call, then `ROLLBACK`. It handed the fingerprinter a
+  pooled connection in autocommit until T-FPR, and `introspect.Introspect`
+  wraps its sampling in a `SAVEPOINT`, which outside a transaction block is
+  25P01 — so the binding could never be confirmed and a target lazyslice itself
+  wrote was refused with exit 4. `internal/load`'s integration test carried an
+  `inTransaction` wrapper around the introspector to work around it; that is
+  gone, and `TestLoadPagilaIntoAMarkedTarget` now passes `introspect.New()`
+  bare. The `BEGIN` belongs here and not on the other side of the injection,
+  because a caller that opened it would be ending a transaction this package
+  had started. `READ ONLY` is the free half: recomputing a fingerprint reads,
+  and the target pool has no tracer, so the server is what refuses a
+  fingerprinter that tried to write.
 - Locality is decided from the endpoint (`dsn.Ref.Loopback`) plus
   `--allow-remote-target`; `WithLocal` carries the case the connection string
   cannot show, a container whose compose `working_dir` is the cwd.
@@ -249,7 +264,7 @@ for the privilege.
   ARCHITECTURE.md §11.1 specifies load as "CopyFrom with explicit column lists
   excluding generated columns, types registered in AfterConnect", and §12 lists
   type registration under this package. It is **deferred to the task that
-  builds `internal/load`**, alongside the `CatalogFingerprinter` wiring:
+  builds `internal/load`**, as the `CatalogFingerprinter` wiring was:
   registering the source's enum, domain, composite and user-defined array OIDs
   on each target connection needs the catalog `internal/introspect` reads, and
   `Connect` has no access to it. Until it exists, a value of such a type has no
