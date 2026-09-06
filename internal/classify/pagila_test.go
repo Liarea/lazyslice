@@ -453,7 +453,7 @@ func TestPagilaValueSignalsRespectAcceptedTypes(t *testing.T) {
 	}
 	// It is masked, but by its type and not by its values: a tsvector carries
 	// the lexemes of the text it was derived from, which may itself be masked.
-	if d.Category != CatDerivedText || !d.Masked {
-		t.Errorf("film.fulltext is %s masked=%v, want %s masked (%s)", d.Category, d.Masked, CatDerivedText, d.Reason)
+	if d.Category != pipeline.CatDerivedText || !d.Masked {
+		t.Errorf("film.fulltext is %s masked=%v, want %s masked (%s)", d.Category, d.Masked, pipeline.CatDerivedText, d.Reason)
 	}
 }

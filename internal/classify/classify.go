@@ -35,19 +35,6 @@ import (
 
 type classifier struct{}
 
-// CatDerivedText is a column the database derives from text that may itself be
-// masked: a tsvector maintained by a trigger over a name, an address or a note.
-// It is never copied — the derivation carries the words of the column it was
-// built from — and it is never faked: the masker emits the type's empty value
-// (mask.CatDerivedText, the same string).
-//
-// It is declared here rather than beside the other categories in
-// internal/pipeline because T-0054's paths do not include that file. The
-// constant belongs in pipeline.Category's list with the rest of them; the task
-// that can write it is owed the move, and nothing else changes when it happens,
-// because a Category is a string and the rule pack names it by that string.
-const CatDerivedText = pipeline.Category("derived_text")
-
 // New returns the rule-pack classifier.
 func New() pipeline.Classifier { return classifier{} }
 
@@ -477,7 +464,7 @@ func (st *state) decide(w *work, col pipeline.Column, ct columnType, values []st
 		// There is no fake worth generating either: a tsvector of invented
 		// lexemes is a search index that matches nothing, which is what the
 		// empty one honestly is. So: always masked, always to ''::tsvector.
-		w.d.Category = CatDerivedText
+		w.d.Category = pipeline.CatDerivedText
 		w.d.Confidence = pipeline.ConfCertain
 		w.frags = append(w.frags, render("derived_text"))
 		return

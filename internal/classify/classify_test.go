@@ -441,10 +441,7 @@ func TestEveryCategoryHasAMasker(t *testing.T) {
 		pipeline.CatGeo, pipeline.CatPersonDate, pipeline.CatNationalID, pipeline.CatFinancial,
 		pipeline.CatNetworkID, pipeline.CatOnlineID, pipeline.CatCredential, pipeline.CatFreeText,
 		pipeline.CatSpecial, pipeline.CatBinary, pipeline.CatSemiStruct,
-		// Declared in this package rather than in internal/pipeline, because
-		// T-0054's paths did not include that file; the constant is owed the
-		// move (classify.go, CatDerivedText).
-		CatDerivedText,
+		pipeline.CatDerivedText,
 	}
 	for _, cat := range all {
 		if p.Masker[cat] == "" {

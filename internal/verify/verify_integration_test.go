@@ -117,60 +117,6 @@ func (s schemaSampler) Samples(c ref.ColumnRef) []any {
 	return nil
 }
 
-// blockedByTransform are the pagila columns this suite opts out of masking, and
-// unmaskReason is the reason it gives for each.
-//
-// The blocker. On pagila, `last_update` is a timestamp whose text form
-// ("2017-02-15 09:45:30") satisfies internal/classify's credential entropy
-// validator on more than 80% of its rows, so the classifier decides `credential`
-// at `likely` and internal/transform is handed the fixed-literal masker for a
-// timestamp column. It cannot parse "$lazyslice$invalid" back into a timestamp
-// and refuses at exit 7:
-//
-//	transform: masker fixed:$lazyslice$invalid refused public.address.last_update:
-//	a masked timestamp is in none of the 7 layouts this package parses
-//
-// public.film.fulltext is the same shape with `address` on a tsvector. Every
-// whole-pipeline run over pagila dies there, and this suite is where it
-// surfaces, because nothing else runs classify, transform and load together
-// against a real fixture. It is a defect in another package: reported in
-// T-0054's return value, owed a tracker task of its own, and blocking T-0044
-// (T-CORE), which is the next caller of classify.New() outside internal/classify.
-//
-// The workaround here is the *product's* own per-column opt-out
-// (ARCHITECTURE.md §8): a `--unmask TABLE.COL=REASON` prior handed to Classify,
-// with the reason naming the blocker. It is deliberately not a rule: an earlier
-// version of this file re-implemented rules.yml's `accepts:` gate over the value
-// signal, which ARCHITECTURE.md §4 refuses in terms ("This gates the *name*
-// signal only", T-0033) — a test is not the place to reverse an accepted
-// decision, least of all in the direction of masking less. A column opted out
-// here is outside the second net, which is what an opt-out means everywhere
-// else, and it is one line of output per column rather than a silent rewrite.
-//
-// If the classifier ever hits the blocker on a column not named here, the run
-// stops at transform naming that column: add it, or better, fix the blocker and
-// delete the list.
-const unmaskReason = "the classify/transform blocker reported in T-0054: " +
-	"a category decided on a timestamp or tsvector column picks a masker whose output cannot be written back"
-
-var blockedByTransform = []ref.ColumnRef{
-	{Table: ref.TableRef{Schema: "public", Name: "actor"}, Column: "last_update"},
-	{Table: ref.TableRef{Schema: "public", Name: "address"}, Column: "last_update"},
-	{Table: ref.TableRef{Schema: "public", Name: "category"}, Column: "last_update"},
-	{Table: ref.TableRef{Schema: "public", Name: "film"}, Column: "last_update"},
-	{Table: ref.TableRef{Schema: "public", Name: "film"}, Column: "fulltext"},
-}
-
-// unmaskPrior is the lazyslice.yml the classifier is handed: nothing but the
-// opt-outs above, each carrying a reason, as --unmask records them.
-func unmaskPrior() *pipeline.Config {
-	cols := make(map[ref.ColumnRef]pipeline.ColumnConfig, len(blockedByTransform))
-	for _, c := range blockedByTransform {
-		cols[c] = pipeline.ColumnConfig{Unmask: &pipeline.Unmask{Reason: unmaskReason, By: "flag"}}
-	}
-	return &pipeline.Config{Columns: cols}
-}
-
 func introspectAndPlanShapes() []pg.Shape {
 	var out []pg.Shape
 	for _, s := range introspect.Shapes() {
@@ -231,14 +177,9 @@ func pipelineRun(ctx context.Context, t *testing.T) *run {
 	if err != nil {
 		t.Fatalf("introspecting: %v", err)
 	}
-	cls, err := classify.New().Classify(schema, schemaSampler{schema: schema}, unmaskPrior())
+	cls, err := classify.New().Classify(schema, schemaSampler{schema: schema}, nil)
 	if err != nil {
 		t.Fatalf("classifying: %v", err)
-	}
-	for _, c := range blockedByTransform {
-		if d, ok := cls.Decisions[c]; ok && d.Masked {
-			t.Fatalf("the opt-out on %s did not take effect, so the run will die at transform: %s", c, d.Reason)
-		}
 	}
 	root := rootTable
 	p, err := plan.New().Plan(ctx, reader, schema, cls, pipeline.PlanRequest{Root: &root, Take: take})
@@ -323,11 +264,7 @@ func pipelineRun(ctx context.Context, t *testing.T) *run {
 	if err := <-transformErr; err != nil {
 		var refusal *transform.Refusal
 		if errors.As(err, &refusal) {
-			t.Fatalf("transform refused %s: %v\n"+
-				"If this is the blocker blockedByTransform names — a category decided on a column whose "+
-				"type the masker's output cannot be written back into — add %s to blockedByTransform with "+
-				"the tracker id, or fix the blocker in internal/classify and delete the list.",
-				refusal.Col, err, refusal.Col)
+			t.Fatalf("transform refused %s: %v", refusal.Col, err)
 		}
 		t.Fatalf("transform: %v", err)
 	}
@@ -501,6 +438,40 @@ func TestVerifyPassesACorrectTarget(t *testing.T) {
 		}
 		if looked == 0 {
 			t.Errorf("check %q passed over nothing at all", name)
+		}
+	}
+
+	// The classify/transform defect T-0054 fixed used to force this run through
+	// a per-column --unmask prior on five pagila columns; Classify above is
+	// handed a nil prior, so this is the assertion that the fix holds: fulltext
+	// is masked as derived_text rather than dying at transform, and the four
+	// last_update columns the same defect touched are copied unmasked rather
+	// than opted out.
+	fulltext := ref.ColumnRef{Table: ref.TableRef{Schema: "public", Name: "film"}, Column: "fulltext"}
+	if d, ok := r.cls.Decisions[fulltext]; !ok || d.Category != pipeline.CatDerivedText || !d.Masked {
+		t.Errorf("public.film.fulltext decided %v masked=%v, want derived_text masked", d.Category, d.Masked)
+	}
+	target := connect(ctx, t, r.targetURL)
+	var total, nonEmpty int
+	if err := target.QueryRow(ctx,
+		`SELECT count(*), count(*) FILTER (WHERE fulltext::text <> '') FROM public.film`,
+	).Scan(&total, &nonEmpty); err != nil {
+		t.Fatalf("reading target film.fulltext: %v", err)
+	}
+	if total == 0 {
+		t.Fatalf("the slice copied no film rows, so the derived_text assertion proves nothing")
+	}
+	if nonEmpty != 0 {
+		t.Errorf("%d rows of public.film.fulltext hold a non-empty tsvector, want every row masked to the empty one", nonEmpty)
+	}
+	for _, table := range []string{"actor", "address", "category", "film"} {
+		col := ref.ColumnRef{Table: ref.TableRef{Schema: "public", Name: table}, Column: "last_update"}
+		d, ok := r.cls.Decisions[col]
+		switch {
+		case !ok:
+			t.Errorf("%s: no decision for last_update, want it decided unmasked", col)
+		case d.Masked:
+			t.Errorf("%s decided masked (%s), want last_update copied unmasked", col, d.Reason)
 		}
 	}
 

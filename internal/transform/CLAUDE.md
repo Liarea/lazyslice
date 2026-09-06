@@ -91,13 +91,6 @@ sees that case and must not paper over it with a retry.
   special in this package for it, which is the point — the decision is
   `internal/classify`'s (a tsvector holds the lexemes of text that may itself be
   masked) and the value is `mask`'s.
-  - **The category is spelled `pipeline.Category(mask.CatDerivedText)` here**
-    (`writeback_test.go`) because `internal/pipeline` does not declare it and
-    `internal/classify` declares its own `classify.CatDerivedText`: T-0054's
-    paths reached neither file. Both sites become `pipeline.CatDerivedText`
-    when the constant is moved beside the other sixteen; the move is owed a
-    task of its own and nothing else changes when it lands, because a
-    `Category` is a string and the rule pack names it by that string.
 - **The exit-7 refusal is now a backstop, not a discovery**
   (`TestTransformNeverRefusesWhatThePlanCheckAdmits`, T-0054). This package can
   only notice a type mismatch per value: it masks, tries to parse the masker's
