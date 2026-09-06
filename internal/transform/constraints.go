@@ -14,12 +14,14 @@ import (
 // (ARCHITECTURE.md §5 "Preserve what the application checks").
 //
 // The type families are mask's own names, which are internal/classify's names
-// (internal/classify/types.go). Neither list can be imported from here — mask's
-// constants are unexported, and internal/classify is another stage package,
-// which internal/CLAUDE.md forbids reaching into — so the vocabulary and the
-// reduction below are a third copy of one thing. internal/transform/CLAUDE.md
-// records that, and the fix is a shared home for the type families rather than
-// a fourth copy.
+// (internal/classify/types.go). The *table* that maps a catalog type name onto
+// one of them is no longer a copy: T-0054 moved it into mask (mask.TypeTag),
+// because internal/plan's write-back check has to reduce a column to the same
+// family this package does, and a plan that judged a different family than
+// transform masks would be a check about a different column. The family names
+// below stay spelled out here, because this package tests three of them for
+// their own behaviour (isDocument, maxLen) and mask's constants are unexported;
+// TestFamilyNamesMatchMask walks the two vocabularies against each other.
 
 // The family names, as mask/domain.go spells them.
 const (
@@ -44,58 +46,14 @@ const (
 	famJSON      = "json"
 	famJSONB     = "jsonb"
 	famHstore    = "hstore"
-	famEnum      = "enum"
-	famOther     = "other"
+	// famTSVector is the family T-0054 added. A tsvector is derived from text
+	// that may itself be masked, so it is never copied: internal/classify
+	// decides `derived_text` on it by type alone and the masker empties it, and
+	// the empty tsvector travels as "" -- which is what ''::tsvector is.
+	famTSVector = "tsvector"
+	famEnum     = "enum"
+	famOther    = "other"
 )
-
-// baseFamilies maps pg_catalog.format_type output, with any type modifier and
-// any array suffix already removed, onto a family. A type not here is famOther,
-// which the generators treat as a string of unknown width.
-var baseFamilies = map[string]string{
-	"text":                        famText,
-	"character varying":           famVarchar,
-	"varchar":                     famVarchar,
-	"character":                   famBpchar,
-	"char":                        famBpchar,
-	"bpchar":                      famBpchar,
-	"citext":                      famCitext,
-	"name":                        famText,
-	"boolean":                     famBoolean,
-	"bool":                        famBoolean,
-	"smallint":                    famInteger,
-	"integer":                     famInteger,
-	"int":                         famInteger,
-	"int2":                        famInteger,
-	"int4":                        famInteger,
-	"bigint":                      famBigint,
-	"int8":                        famBigint,
-	"numeric":                     famNumeric,
-	"decimal":                     famNumeric,
-	"money":                       famNumeric,
-	"real":                        famFloat,
-	"double precision":            famFloat,
-	"float4":                      famFloat,
-	"float8":                      famFloat,
-	"date":                        famDate,
-	"timestamp":                   famTimestamp,
-	"timestamp without time zone": famTimestamp,
-	"timestamp with time zone":    famTimestamp,
-	"timestamptz":                 famTimestamp,
-	"time":                        famTime,
-	"time without time zone":      famTime,
-	"time with time zone":         famTime,
-	"timetz":                      famTime,
-	"interval":                    famInterval,
-	"uuid":                        famUUID,
-	"inet":                        famInet,
-	"cidr":                        famCIDR,
-	"macaddr":                     famMacaddr,
-	"macaddr8":                    famMacaddr,
-	"bytea":                       famBytea,
-	"json":                        famJSON,
-	"jsonb":                       famJSONB,
-	"hstore":                      famHstore,
-}
 
 // columnShape is one column reduced to what masking needs. For an array column
 // the family and the constraints are the *element's*: ARCHITECTURE.md §5 masks
@@ -126,10 +84,10 @@ func (t transformer) shapeOf(tbl *pipeline.Table, col pipeline.Column) columnSha
 			}
 		}
 	}
-	name = stripTypmod(name)
+	name = mask.StripTypmod(name)
 
 	var labels []string
-	switch fam, ok := baseFamilies[strings.ToLower(bareTypeName(name))]; {
+	switch fam, ok := mask.TypeTag(mask.BareTypeName(name)); {
 	case ok:
 		shape.family = fam
 	default:
@@ -142,29 +100,13 @@ func (t transformer) shapeOf(tbl *pipeline.Table, col pipeline.Column) columnSha
 
 	shape.constraints = mask.Constraints{
 		TypeTag:    shape.family,
-		MaxLen:     maxLen(shape.family, col.TypMod),
+		MaxLen:     mask.MaxLen(shape.family, col.TypMod),
 		EnumLabels: labels,
 		Checks:     col.Checks,
 		Nullable:   col.Nullable,
 		Unique:     uniqueColumn(tbl, col.Name),
 	}
 	return shape
-}
-
-// maxLen is atttypmod less the four-byte header, and only for the families
-// where atttypmod is a length. numeric's modifier packs a precision and a
-// scale, not a byte count, and reading it as one would clamp a masked number to
-// a nonsense width — mask/domain.go's digitBudget takes MaxLen as a digit
-// bound. A numeric's own precision therefore does not reach the masker; that is
-// a gap in mask.Constraints, recorded in internal/transform/CLAUDE.md.
-func maxLen(family string, typmod int32) int {
-	switch family {
-	case famVarchar, famBpchar, famCitext:
-		if typmod > 4 {
-			return int(typmod - 4)
-		}
-	}
-	return 0
 }
 
 // uniqueColumn reports that the column sits alone under a unique index or is
@@ -201,12 +143,12 @@ func (t transformer) enumLabels(name string) ([]string, bool) {
 	if t.schema == nil {
 		return nil, false
 	}
-	if labels, ok := t.schema.Enums[unquoteType(name)]; ok {
+	if labels, ok := t.schema.Enums[mask.UnquoteType(name)]; ok {
 		return labels, true
 	}
-	bare := bareTypeName(name)
+	bare := mask.BareTypeName(name)
 	for key, labels := range t.schema.Enums {
-		if bareTypeName(key) == bare {
+		if mask.BareTypeName(key) == bare {
 			return labels, true
 		}
 	}
@@ -220,9 +162,9 @@ func (t transformer) domainBase(domain string) (string, bool) {
 	if t.schema == nil {
 		return "", false
 	}
-	want := unquoteType(domain)
+	want := mask.UnquoteType(domain)
 	for _, d := range t.schema.Domains {
-		if unquoteType(d.Name) != want && bareTypeName(d.Name) != bareTypeName(domain) {
+		if mask.UnquoteType(d.Name) != want && mask.BareTypeName(d.Name) != mask.BareTypeName(domain) {
 			continue
 		}
 		const as = " AS "
@@ -240,48 +182,4 @@ func (t transformer) domainBase(domain string) (string, bool) {
 		return base, base != ""
 	}
 	return "", false
-}
-
-// stripTypmod removes the "(15)" from "character varying(15)" and the "(5,2)"
-// from "numeric(5,2)". A quoted identifier may hold a bracket, so the cut is
-// made only outside quotes.
-func stripTypmod(name string) string {
-	inQuote := false
-	for i, r := range name {
-		switch r {
-		case '"':
-			inQuote = !inQuote
-		case '(':
-			if !inQuote {
-				return strings.TrimSpace(name[:i])
-			}
-		}
-	}
-	return name
-}
-
-// unquoteType turns format_type's quoted spelling back into the name
-// Schema.Enums and Schema.Domains are keyed by.
-func unquoteType(name string) string {
-	return strings.ReplaceAll(name, `"`, "")
-}
-
-// bareTypeName drops a schema qualification from a type name, quoting-aware.
-func bareTypeName(name string) string {
-	inQuote := false
-	cut := -1
-	for i, r := range name {
-		switch r {
-		case '"':
-			inQuote = !inQuote
-		case '.':
-			if !inQuote {
-				cut = i
-			}
-		}
-	}
-	if cut < 0 {
-		return unquoteType(name)
-	}
-	return unquoteType(name[cut+1:])
 }

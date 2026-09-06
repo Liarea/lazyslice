@@ -3,11 +3,13 @@
 package classify
 
 import (
+	"sort"
 	"strings"
 	"testing"
 
 	"github.com/Liarea/lazyslice/internal/pipeline"
 	"github.com/Liarea/lazyslice/internal/ref"
+	"github.com/Liarea/lazyslice/mask"
 )
 
 func mustClassify(t *testing.T, prior *pipeline.Config) *pipeline.Classification {
@@ -439,6 +441,10 @@ func TestEveryCategoryHasAMasker(t *testing.T) {
 		pipeline.CatGeo, pipeline.CatPersonDate, pipeline.CatNationalID, pipeline.CatFinancial,
 		pipeline.CatNetworkID, pipeline.CatOnlineID, pipeline.CatCredential, pipeline.CatFreeText,
 		pipeline.CatSpecial, pipeline.CatBinary, pipeline.CatSemiStruct,
+		// Declared in this package rather than in internal/pipeline, because
+		// T-0054's paths did not include that file; the constant is owed the
+		// move (classify.go, CatDerivedText).
+		CatDerivedText,
 	}
 	for _, cat := range all {
 		if p.Masker[cat] == "" {
@@ -451,6 +457,146 @@ func TestEveryCategoryHasAMasker(t *testing.T) {
 	if len(p.Masker) != len(all) {
 		t.Errorf("the rule pack declares %d categories, pipeline declares %d", len(p.Masker), len(all))
 	}
+}
+
+// TestRulePackAgreesWithMaskAboutTypes walks the rule pack's accepts: lists
+// against mask's own declaration of which type tags each category's generators
+// can be written into (mask/writable.go).
+//
+// The two exist for different readers and are checked against each other rather
+// than merged. This package gates a *decision* by the list: a signal for a
+// category the column's type cannot hold is recorded at low and never masked
+// (ARCHITECTURE.md §4, and T-0054 extended it from the name signal to the value
+// signal). internal/plan gates the *plan* by mask's list, over the category a
+// decision ended up with rather than over each step to it. If they disagreed,
+// one of the two gates would be answering a question about a column the other
+// had already let through, which is the failure T-0054 closed: classify decided
+// credential on a timestamp, and transform was the first thing to notice, at
+// exit 7 with rows already moved.
+func TestRulePackAgreesWithMaskAboutTypes(t *testing.T) {
+	t.Parallel()
+	p, err := pack()
+	if err != nil {
+		t.Fatalf("rule pack: %v", err)
+	}
+	for cat, accepts := range p.Accepts {
+		got := map[string]bool{}
+		for _, tag := range mask.WritableTypes(mask.Category(cat)) {
+			got[tag] = true
+		}
+		if len(got) == 0 {
+			t.Errorf("the rule pack has category %q and mask declares no type it can be written into", cat)
+			continue
+		}
+		if accepts == nil {
+			// The rule pack's ["*"]: every family, which only special_category
+			// has. mask declares no such entry, deliberately, and this is the
+			// one place the two lists part company. The pack decides
+			// special_category on any type at all — it is scored `certain` by
+			// name alone (ARCHITECTURE.md §4), and silencing it by type would
+			// copy an hiv_status column in cleartext — while the generator
+			// falls through to the free-text filler on time, interval, inet,
+			// cidr, macaddr and tsvector, which none of those can hold. The gap
+			// is a plan refusal at exit 12 before a row moves, not a value the
+			// loader chokes on mid-run (mask/writable.go, internal/plan).
+			if cat != pipeline.CatSpecial {
+				t.Errorf("category %q accepts every family in the rule pack; only special_category may", cat)
+			}
+			if len(got) == 0 {
+				t.Errorf("category %q accepts every family in the rule pack and mask can write into none", cat)
+			}
+			continue
+		}
+		for fam := range accepts {
+			if !got[fam] {
+				t.Errorf("the rule pack accepts %s on a %s column and mask cannot write one there", cat, fam)
+			}
+		}
+		for fam := range got {
+			if !accepts[fam] {
+				t.Errorf("mask can write %s into a %s column and the rule pack accepts only %v; "+
+					"the plan would then admit a column the classifier declined to decide",
+					cat, fam, keysOf(accepts))
+			}
+		}
+	}
+}
+
+// TestValueSignalSurvivesATypeNothingCanJudge holds T-0054's accepted-types
+// gate to its own scope. The gate exists so that a validator cannot decide a
+// column whose type the category's masker demonstrably cannot write into — a
+// `credential` on a timestamp. It must not reach a column that *is* writable,
+// or one nothing downstream knows anything about, because the answer there is
+// a cleartext copy under a green tick (CLAUDE.md, "when in doubt, mask it";
+// THREAT_MODEL.md T1).
+//
+// Three families are outside it (silencedByType): an enum, which every
+// generator answers with one of its own labels, and xml and the catch-all
+// `other`, which are not a family that refuses the category but a type this
+// package has no family for. All three are masked here; the timestamptz beside
+// them, whose family is known and does refuse the category, is not — and the
+// neighbouring-column rule may not raise it either, though three columns of
+// this table are `likely` email.
+func TestValueSignalSurvivesATypeNothingCanJudge(t *testing.T) {
+	t.Parallel()
+	tbl := ref.TableRef{Schema: "public", Name: "records"}
+	schema := &pipeline.Schema{
+		Enums: map[string][]string{"public.contact_kind": {"work", "home"}},
+		Tables: []pipeline.Table{
+			tt("public", "records", []string{"id"},
+				tc("id", "bigint"),
+				tc("ref_a", "public.contact_kind"),
+				tc("ref_b", "xml"),
+				tc("ref_c", "public.geometry"),
+				tc("ref_d", "timestamp with time zone"),
+			),
+		},
+	}
+	// Test data about five fictional people, as elsewhere in this package.
+	emails := anyOf(
+		"ada.lovelace@example.com", "grace.hopper@example.com", "alan.turing@example.com",
+		"katherine.johnson@example.com", "edsger.dijkstra@example.com")
+	samples := mapSampler{
+		col(tbl, "id"):    anyOf(int64(1), int64(2), int64(3), int64(4), int64(5)),
+		col(tbl, "ref_a"): emails,
+		col(tbl, "ref_b"): emails,
+		col(tbl, "ref_c"): emails,
+		col(tbl, "ref_d"): emails,
+	}
+	cls, err := New().Classify(schema, samples, nil)
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+	for _, c := range []struct{ column, why string }{
+		{"ref_a", "an enum is writable under every category: every generator answers a labelled column with one of its labels"},
+		{"ref_b", "xml is a type this package has no family for, and nothing downstream is behind a silence here"},
+		{"ref_c", "an extension type is a type this package has no family for"},
+	} {
+		d := decision(t, cls, col(tbl, c.column))
+		if !d.Masked {
+			t.Errorf("records.%s is not masked (%s): %+v", c.column, c.why, d)
+		}
+		if d.Category != pipeline.CatEmail {
+			t.Errorf("records.%s category = %q, want email", c.column, d.Category)
+		}
+	}
+	stamp := decision(t, cls, col(tbl, "ref_d"))
+	if stamp.Masked {
+		t.Errorf("records.ref_d is masked: a timestamptz cannot hold what any text category emits (%+v)", stamp)
+	}
+	if stamp.Confidence != pipeline.ConfLow {
+		t.Errorf("records.ref_d confidence = %v, want low", stamp.Confidence)
+	}
+}
+
+// keysOf is the sorted key set of a family set, for a failure message.
+func keysOf(set map[string]bool) []string {
+	out := make([]string, 0, len(set))
+	for k := range set {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // TestNormaliseName covers the identifier folding the whole rule pack is

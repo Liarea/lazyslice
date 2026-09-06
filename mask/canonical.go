@@ -147,7 +147,12 @@ func Canonical(cat Category, in Value, c Constraints) (Value, string, error) {
 		return Value{Text: fold(s)}, TagText, nil
 	case CatBinary:
 		return Value{Text: s}, TagBytes, nil
-	case CatNone, CatPersonName, CatAddress, CatCredential, CatFreeText, CatSpecial:
+	case CatNone, CatPersonName, CatAddress, CatCredential, CatFreeText, CatSpecial,
+		CatDerivedText:
+		// A derived column's canonical form is its folded text. The masked value
+		// is empty whatever it was, but the canonical bytes are what reaches the
+		// residual filter, and verify reproduces them from the target the same
+		// way (ARCHITECTURE.md section 6).
 		return Value{Text: fold(s)}, TagText, nil
 	default:
 		return Value{Text: fold(s)}, TagText, nil

@@ -61,6 +61,13 @@ const (
 	CatSpecial    Category = "special_category"
 	CatBinary     Category = "binary_personal"
 	CatSemiStruct Category = "semi_structured"
+	// CatDerivedText is a column the database derives from text that may
+	// itself be masked -- a tsvector maintained by a trigger or a generated
+	// expression over a name, an address or a note. It is never copied: the
+	// derivation carries the words of the source column, so copying it would
+	// ship in cleartext exactly what the column it was derived from is being
+	// masked for. Its masker emits the type's empty value.
+	CatDerivedText Category = "derived_text"
 )
 
 // KeyLen is the length of a run key in bytes.

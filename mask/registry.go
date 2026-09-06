@@ -148,5 +148,16 @@ func Pick(cat Category, c Constraints) (ID, error) {
 // whether or not anybody counted its values, and a silent one is a column the
 // report calls masked and says nothing else about.
 func Small(id ID, c Constraints) bool {
+	if id == MaskerDerivedText {
+		// The one exemption, and it is not a weakening. Small reports a
+		// *substitution* an attacker can undo by frequency: a mapping from the
+		// source's values onto a domain narrow enough that the commonest fake
+		// is the commonest original. derived_text is not a substitution at all
+		// — every row is emptied, the same emptiness, and no ordering,
+		// frequency or partition of the source survives it. Reporting a column
+		// with nothing left in it under "what the green tick does not prove"
+		// would train the reader to skim the list that matters.
+		return false
+	}
 	return smallDomain(Admissible(id, c), c)
 }

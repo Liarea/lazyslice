@@ -78,6 +78,14 @@ categories:
   - category: semi_structured
     masker: semi_structured
     accepts: [json, jsonb, hstore]
+  # A column the database derives from other columns' text. It has no name
+  # pattern and cannot be reached by one: internal/classify decides it on the
+  # type alone, always, because a tsvector holds the lexemes of the text it was
+  # built from and that text may itself be masked (T-0054). The masker emits
+  # ''::tsvector.
+  - category: derived_text
+    masker: derived_text
+    accepts: [tsvector]
 
 patterns:
   # Special categories are scored `certain` by name alone (ARCHITECTURE.md §4),

@@ -54,6 +54,9 @@ func TestFormatPreservationPerCategory(t *testing.T) {
 		"free text":    wantMatch(`^[a-z ]{1,200}$`),
 		"special enum": wantOneOf("single", "married", "widowed"),
 		"special text": wantMatch(`^[a-z ]+$`),
+		// '' is the empty tsvector, and it is the whole of what this generator
+		// emits.
+		"tsvector": wantExactly(""),
 	}
 	for _, tc := range corpus() {
 		check, ok := checks[tc.name]

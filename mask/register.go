@@ -34,6 +34,7 @@ const (
 	MaskerSpecial     ID = "special_category"
 	MaskerNull        ID = "null"
 	MaskerSemiStruct  ID = "semi_structured"
+	MaskerDerivedText ID = "derived_text"
 )
 
 func init() {
@@ -54,4 +55,5 @@ func init() {
 	Register(MaskerSpecial, CatSpecial, specialCategoryMasker{})
 	Register(MaskerNull, CatBinary, nullMasker{})
 	Register(MaskerSemiStruct, CatSemiStruct, semiStructuredMasker{})
+	Register(MaskerDerivedText, CatDerivedText, derivedTextMasker{})
 }
