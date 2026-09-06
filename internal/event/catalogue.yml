@@ -88,3 +88,59 @@
   exit: 4
   message: "could not check the target {database}: {reason}"
   args: [database, reason]
+
+# The classify stage (ARCHITECTURE.md §4). Classifier.Classify takes no
+# event.Sink -- it is pure, and core.Run is the only producer -- so the codes
+# below are declared in internal/classify/codes.go beside the results that
+# produce them and emitted by core from a *pipeline.Classification.
+#
+# {reason} carries Decision.Reason, which is rendered from the fixed template
+# set in internal/classify/reasons.go and parsed back by
+# classify.ParseReason: it holds identifiers, category names, type families,
+# a closed set of validator phrases and counts, and never a sampled value
+# (THREAT_MODEL.md T4, ARCHITECTURE.md §2 "Value-free types").
+
+# The mask-or-copy verdict is carried by the code and not by an argument:
+# event.Args has no category or confidence key (internal/event/event.go), so a
+# single "decided" code would leave a reader of the --json stream unable to tell
+# a masked column from a copied one. internal/invariants/i2_masking_test.go is
+# that reader, and its prefix lists ("classify.masked", "classify.copied") are
+# where these two spellings come from.
+
+- code: classify.masked.column
+  kind: decision
+  stage: classify
+  message: "{table}.{column}: {reason}"
+  args: [table, column, reason]
+
+- code: classify.copied.column
+  kind: decision
+  stage: classify
+  message: "{table}.{column}: {reason}"
+  args: [table, column, reason]
+
+- code: classify.column.drift
+  kind: warn
+  stage: classify
+  message: "{table}.{column} is not in {path}: classified fresh and masked at or above possible"
+  args: [table, column, path]
+
+# An opt-out is not honoured when the column's type fingerprint has changed
+# since it was recorded, and also when it records no fingerprint at all: an
+# opt-out nothing can revoke is the fail-open version of THREAT_MODEL.md T3's
+# control, so internal/classify treats it as expired rather than as permanent.
+# pipeline.Classification.Expired still describes itself as the narrower set;
+# that comment is owed the same widening.
+
+- code: classify.column.opt_out_expired
+  kind: warn
+  stage: classify
+  message: "the opt-out on {table}.{column} is not honoured: it records no type fingerprint, or the column's type changed"
+  args: [table, column]
+
+- code: classify.refused.strict_schema
+  kind: error
+  stage: classify
+  exit: 10
+  message: "{count} columns are not in {path} and {flag} is set"
+  args: [count, path, flag]

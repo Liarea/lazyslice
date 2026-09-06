@@ -1,0 +1,159 @@
+# The embedded rule pack (ARCHITECTURE.md §4).
+#
+# This file is compiled into the binary by internal/classify/rulepack.go. It is
+# not loadable at runtime and there is no flag that points at another copy of
+# it: the classifier is not pluggable (ADR-006), because a pluggable classifier
+# is a supported way to see less personal data. Changing a rule here changes
+# Classification.Fingerprint, which is printed as "classification changed —
+# masked values will differ" (ARCHITECTURE.md §5 "Determinism scope"), so a
+# change to this file is a release note rather than a tidy-up.
+#
+# Row shape:
+#   categories: one row per pipeline.Category that a column can be masked
+#     under. `masker` is the mask.ID the decision carries; `accepts` is the
+#     type-family list ARCHITECTURE.md §4 "Accepted types per category"
+#     requires — a name hit on a type outside it is recorded at `low` with a
+#     reason naming the conflict and is never raised by the neighbouring-column
+#     rule. `["*"]` accepts every family, which only `special_category` does:
+#     it is scored `certain` by name alone and testdata/README.md trap 24 masks
+#     it on an enum.
+#   patterns: one row per name rule. `match` is a regexp over the *normalised*
+#     column name (lower case, camelCase split on, digits split off), so
+#     "EmailAddress" is matched as "email_address". `name` is what the reason
+#     line prints as {pattern} and is the only part of a rule that reaches a
+#     rendered string. `priority` breaks a tie when two rules match one name:
+#     ip_address is network_id and not address, email_address is email and not
+#     address, and password_hash is credential and not person_name.
+#   tables: name rules over the *table*, not the column.
+#
+# The type families are the ones internal/classify/types.go maps
+# pg_catalog.format_type output onto; an unrecognised type is "other" and is
+# accepted by no category.
+
+version: "1"
+
+categories:
+  - category: email
+    masker: email
+    accepts: [text, varchar, bpchar, citext]
+  - category: person_name
+    masker: person_name
+    accepts: [text, varchar, bpchar, citext]
+  - category: phone
+    masker: phone
+    accepts: [text, varchar, bpchar, citext, bigint, integer, numeric]
+  - category: address
+    masker: address
+    accepts: [text, varchar, bpchar, citext]
+  - category: geo
+    masker: geo
+    accepts: [text, varchar, bpchar, citext, numeric, float]
+  - category: person_date
+    masker: person_date
+    accepts: [date, timestamp, text, varchar, bpchar]
+  - category: national_id
+    masker: national_id
+    accepts: [text, varchar, bpchar, citext, bigint, integer, numeric]
+  - category: financial_account
+    masker: financial_account
+    accepts: [text, varchar, bpchar, citext, bigint, integer, numeric]
+  - category: network_id
+    masker: network_id
+    accepts: [inet, cidr, macaddr, text, varchar, bpchar, citext]
+  - category: online_id
+    masker: online_id
+    accepts: [text, varchar, bpchar, citext, uuid]
+  - category: credential
+    masker: "fixed:$lazyslice$invalid"
+    accepts: [text, varchar, bpchar, citext, bytea]
+  - category: free_text
+    masker: free_text
+    accepts: [text, varchar, bpchar, citext]
+  - category: special_category
+    masker: special_category
+    accepts: ["*"]
+  - category: binary_personal
+    masker: "null"
+    accepts: [bytea]
+  - category: semi_structured
+    masker: semi_structured
+    accepts: [json, jsonb, hstore]
+
+patterns:
+  # Special categories are scored `certain` by name alone (ARCHITECTURE.md §4),
+  # so they outrank every other rule on a name that matches both.
+  - name: special_category
+    category: special_category
+    priority: 90
+    match: '(^|_)(marital(_?status)?|ethnicity|ethnic(_?origin)?|race|religion|religious(_?belief)?|sexual(_?orientation)?|sexuality|gender(_?identity)?|health(_?condition)?|diagnos[ei]s|disabilit(y|ies)|biometrics?|genetics?|dna|trade_?union|union_?membership|political(_?(views?|affiliation|party))?|criminal(_?record)?|convictions?|pregnan(t|cy)|hiv|medical(_?history)?|blood_?type|allerg(y|ies)|medications?|prescriptions?|immigration_?status|asylum|refugee)(_|$)'
+
+  - name: credential
+    category: credential
+    priority: 80
+    match: '(^|_)(passwords?|passwd|pwd|password_?hash|password_?digest|encrypted_?password|salts?|secrets?|api_?keys?|access_?tokens?|refresh_?tokens?|auth_?tokens?|tokens?|token_?digests?|private_?keys?|client_?secrets?|otp_?secrets?|totp_?secrets?|recovery_?codes?|signing_?keys?|encryption_?keys?)(_|$)'
+
+  - name: national_id
+    category: national_id
+    priority: 75
+    match: '(^|_)(ssn|social_?security(_?numbers?)?|national_?ids?|national_?insurance(_?numbers?)?|nino|nhs_?numbers?|tax_?ids?|passports?|passport_?numbers?|driver_?licen[sc]es?|drivers_?licen[sc]es?|licen[sc]e_?numbers?|id_?card(_?numbers?)?|personnummer|dni|nif|cpf|cnpj|aadhaar)(_|$)'
+
+  - name: financial_account
+    category: financial_account
+    priority: 70
+    match: '(^|_)(ibans?|bics?|swift_?codes?|sort_?codes?|account_?numbers?|bank_?accounts?|card_?numbers?|credit_?cards?|debit_?cards?|cardholders?|cvv|cvc|routing_?numbers?|bank_?codes?)(_|$)'
+
+  - name: email
+    category: email
+    priority: 65
+    match: '(^|_)(e_?mails?|e_?mail_?address(es)?|mails?|correos?|correo_?electronico|courriels?|e_?posts?)(_|$)'
+
+  - name: phone
+    category: phone
+    priority: 60
+    match: '(^|_)(phones?|phone_?numbers?|telephones?|tel|mobiles?|mobile_?numbers?|cell|cellphones?|msisdn|faxe?s?|whatsapp|contact_?numbers?|telefones?|telefonos?|telefon)(_|$)'
+
+  - name: network_id
+    category: network_id
+    priority: 58
+    match: '(^|_)(ips?|ipv_?4|ipv_?6|ip_?address(es)?|macs?|mac_?address(es)?|remote_?addr)(_|$)'
+
+  - name: person_date
+    category: person_date
+    priority: 55
+    match: '(^|_)(birth_?dates?|date_?of_?birth|dob|birthdays?|birth|born_?on|deceased_?at|death_?dates?|date_?of_?death|fecha_?de_?nacimiento|geburtsdatum)(_|$)'
+
+  - name: geo
+    category: geo
+    priority: 50
+    match: '(^|_)(latitudes?|longitudes?|lat|lng|lon|geo|geolocations?|coordinates?|coords?|gps)(_|$)'
+
+  - name: binary_personal
+    category: binary_personal
+    priority: 48
+    match: '(^|_)(photos?|pictures?|avatars?|profile_?images?|selfies?|signatures?|fingerprints?|id_?scans?)(_|$)'
+
+  - name: address
+    category: address
+    priority: 45
+    match: '(^|_)(address(es)?|address_?lines?|street(_?address)?|streets?|city|cities|town|postal_?codes?|postcodes?|zips?|zip_?codes?|district|county|province|locality|locations?|suburb|direccion|adresse|indirizzo|endereco)(_|$)'
+
+  - name: online_id
+    category: online_id
+    priority: 40
+    match: '(^|_)(usernames?|user_?names?|nicknames?|screen_?names?|handles?|logins?|account_?names?|twitter|facebook|instagram|linkedin|skype|telegram|discord|mastodon|websites?|urls?|homepages?|profile_?urls?|device_?ids?|advertising_?ids?|imei|imsi|cookie_?ids?)(_|$)'
+
+  - name: person_name
+    category: person_name
+    priority: 35
+    match: '(^|_)(names?|first_?names?|last_?names?|given_?names?|family_?names?|middle_?names?|sur_?names?|full_?names?|maiden_?names?|display_?names?|real_?names?|forenames?|apellidos?|nombres?|nachname|vorname|prenom)(_|$)'
+
+  - name: free_text
+    category: free_text
+    priority: 20
+    match: '(^|_)(notes?|comments?|descriptions?|bio|biography|messages?|body|reasons?|remarks?|memo|content|contents|text|raw|cooked|excerpts?|summary)(_|$)'
+
+tables:
+  # ARCHITECTURE.md §4: "any jsonb in a table named like audit|log|history|event"
+  # replaces the document with {} rather than walking it leaf by leaf
+  # (testdata/README.md trap 16b).
+  log_shaped: '(^|_)(audit|audits|log|logs|history|histories|event|events|activity|activities|trace|traces)(_|$)'
