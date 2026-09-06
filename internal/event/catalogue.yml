@@ -47,3 +47,44 @@
   # message before Q1' ships; do not reuse {statement} for a non-SQL command.
   message: "target container did not become ready after {seconds}s"
   args: [seconds]
+
+# The five gate refusals internal/pg declares (internal/pg/target.go) and could
+# not record here, because internal/event/catalogue.yml was not a file that
+# task's paths allowed it to write (internal/pg/CLAUDE.md, "Decisions made
+# during implementation"). The exit codes are the ones ARCHITECTURE.md §9
+# assigns each rule: identity is exit 2, every other refusal is exit 4.
+
+- code: target.refused.same_database
+  kind: error
+  stage: discover
+  exit: 2
+  message: "target {database} on {host} is the source database"
+  args: [database, host]
+
+- code: target.refused.remote
+  kind: error
+  stage: discover
+  exit: 4
+  message: "target {host} is not on this machine: pass {flag} to write to it"
+  args: [host, flag]
+
+- code: target.refused.table_cap
+  kind: error
+  stage: discover
+  exit: 4
+  message: "target {database} holds {count} user tables, more than lazyslice will check"
+  args: [database, count]
+
+- code: target.refused.not_empty
+  kind: error
+  stage: discover
+  exit: 4
+  message: "{table} in the target is not empty: {reason}"
+  args: [table, reason]
+
+- code: target.refused.probe_failed
+  kind: error
+  stage: discover
+  exit: 4
+  message: "could not check the target {database}: {reason}"
+  args: [database, reason]
