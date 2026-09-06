@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 //go:build tools
 
 // This file is never built. It exists so that `go mod tidy` keeps the two

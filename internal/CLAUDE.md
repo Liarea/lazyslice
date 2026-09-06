@@ -19,7 +19,9 @@ depend on. See each subdirectory's own CLAUDE.md for which.
   never imports `pipeline`. `TestImportGraph` enforces this; do not add an
   edge that fails it.
 - A new package under here gets its own `CLAUDE.md` before it gets a second
-  file of code (root CLAUDE.md, this task's own rule).
+  file of code. This is a convention of this directory, established when the
+  per-directory files were written (tracker T-0023) — root CLAUDE.md does not
+  state it, and an earlier version of this file wrongly said it did.
 - Package doc comments carry a "Scaffold status" line while the package is a
   no-op; update or remove that line in the same commit that ends the no-op.
 

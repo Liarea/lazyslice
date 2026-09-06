@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package transform
 
 import "github.com/Liarea/lazyslice/internal/pipeline"

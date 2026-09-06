@@ -25,9 +25,14 @@ for the privilege.
 - `TestSourceNeverCopiesOrBatches` must keep passing: no `CopyFrom`,
   `SendBatch` or `Prepare` on a `Source` connection, ever.
 - The gate's `Eligibility.Verdict` is tri-state; `NotProbed` must never be
-  treated as eligible. Any probe error, timeout, or a table above the 2,000
-  cap is `Refused`, never skipped-as-ok (THREAT_MODEL.md T2). RLS-enabled
-  tables and probe errors count as **not empty**, never `pg_stat_user_tables`.
+  treated as eligible. Any probe error or timeout is `Refused`, never
+  skipped-as-ok (THREAT_MODEL.md T2). RLS-enabled tables and probe errors
+  count as **not empty**, never `pg_stat_user_tables`.
+- The 2,000 cap is on the **number of user tables in the target**, not on any
+  one table's rows: a target with more than 2,000 user tables is refused
+  outright, exit 4 printing the table count (ARCHITECTURE.md §9 rule 5). It is
+  never a sample of 2,000 and never a pass, because `Verdict` has no state in
+  which "not probed" reads as eligible.
 - Target identity is a disjunction over sameness (same `host:port/database`,
   or same `system_identifier` + `current_database()`), not a conjunction over
   difference — refuse on any match, exit 2 before any write-side connection is

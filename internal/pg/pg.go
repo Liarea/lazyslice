@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package pg is the only package that speaks Postgres. It implements
 // pipeline.Source, pipeline.Target, pipeline.Reader, pipeline.Writer and the
 // target gate, and it registers the shape allowlist on the source pool.

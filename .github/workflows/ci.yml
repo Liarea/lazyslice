@@ -46,6 +46,88 @@ jobs:
           (cd mask && go mod tidy)
           git diff --exit-code -- go.mod go.sum mask/go.mod mask/go.sum
 
+      # research/LICENSE_DECISION.md recommendation 1: the licence is carried
+      # per-file by an SPDX header. `make lint` runs this too; it is named
+      # separately here so a missing header reads as a licence failure rather
+      # than as a lint failure.
+      - name: every Go file carries its licence identifier
+        run: make spdx
+
+  # The release config's first execution must not be the tag itself.
+  #
+  # goreleaser creates the GitHub release before it reaches the cask publish
+  # pipe, so a configuration error discovered at tag time leaves a published
+  # tag with a half-finished release behind it — the outcome .goreleaser.yaml's
+  # skip_upload comment says it exists to avoid. A snapshot build takes about
+  # three seconds and turns every one of those into a pull-request failure.
+  #
+  # The assertions are the three things that have actually been wrong here: an
+  # archive with no LICENSE (Apache-2.0 §4(a) requires the licence to reach
+  # every recipient), a cask with no postflight (unsigned, un-notarized
+  # binaries are killed by Gatekeeper, so `brew install` succeeds and
+  # `lazyslice --version` does not), and a build that produced fewer than the
+  # six platforms .goreleaser.yaml names.
+  release-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # `make tools` and `make snapshot` rather than the commands themselves,
+      # so the Makefile holds the only pin of the goreleaser version and the
+      # only spelling of the snapshot build. Repeating either here is how this
+      # job comes to validate a different goreleaser than `make snapshot` runs
+      # on a laptop — the exact drift it was added to catch.
+      - name: install the pinned build tools
+        run: make tools
+
+      - name: the config is valid
+        run: bin/tools/goreleaser check
+
+      - name: the release builds
+        run: make snapshot
+
+      - name: and what it built is what we promised
+        run: |
+          set -euo pipefail
+
+          # `|| true` because a build that produced nothing must reach the
+          # message below rather than abort the script under `set -e`.
+          archives=$( { ls dist/lazyslice_*_*.tar.gz dist/lazyslice_*_*.zip 2>/dev/null || true; } | wc -l)
+          if [ "$archives" -ne 6 ]; then
+            echo "release-config: $archives archive(s), want 6 (darwin/linux/windows x amd64/arm64)"
+            ls -1 dist/ || true
+            exit 1
+          fi
+
+          cask=dist/homebrew/Casks/lazyslice.rb
+          if ! grep -q 'postflight' "$cask"; then
+            echo "release-config: the generated cask has no postflight, so the binary it installs carries"
+            echo "com.apple.quarantine and macOS kills it on first run. Restore the hooks.post.install"
+            echo "block in .goreleaser.yaml's homebrew_casks entry."
+            exit 1
+          fi
+          if ! grep -q 'com.apple.quarantine' "$cask"; then
+            echo "release-config: the cask's postflight does not remove com.apple.quarantine"
+            exit 1
+          fi
+
+          for archive in dist/lazyslice_*_darwin_arm64.tar.gz dist/lazyslice_*_linux_amd64.tar.gz; do
+            if ! tar tzf "$archive" | grep -qx 'LICENSE'; then
+              echo "release-config: $archive contains no LICENSE. archives.files REPLACES goreleaser's"
+              echo "defaults, so LICENSE has to be named there; Apache-2.0 section 4(a) requires every"
+              echo "recipient of the work to get a copy of the licence, and a tag is immutable."
+              exit 1
+            fi
+          done
+
+          echo "release-config: 6 archives, a quarantine-removing postflight, LICENSE in the archives"
+
   # CLAUDE.md's hardest rule, enforced over the whole tree rather than over the
   # registered flags of one command tree, which is all a Go test can see.
   forbidden:
@@ -78,9 +160,27 @@ jobs:
   # The tests that matter are statements about a real Postgres, so they run
   # against containers on a runner with a Docker daemon, on the oldest and the
   # newest supported majors (ADR-003, ARCHITECTURE.md section 14).
+  #
+  # Until T-CORE lands the pipeline (gate 4) `make integration` is *expected*
+  # to fail, because the invariant suite runs a scaffold that implements no
+  # stage. `continue-on-error: true` was how that was expressed, and it made
+  # every step's outcome irrelevant to the job's conclusion: a run that failed
+  # to compile, or found no Docker daemon and turned every test into a skip
+  # (internal/testutil.SkipWithoutDocker), reported the same green as a correct
+  # one. That is the failure internal/invariants/harness_test.go warns about in
+  # its own comment — "a suite that skips when the thing it tests does not
+  # exist reports green on an empty repository" — reintroduced one layer up.
+  #
+  # So the expectation is inverted and asserted instead. The job fails if the
+  # suite executed no test, if it skipped anything, if it failed to build, or
+  # if it did not fail with the scaffold's own error. The first two need the
+  # run to be verbose — `go test` without -v prints one `ok` line per package
+  # and no per-test line, so a grep for `--- SKIP` over the default output
+  # matches nothing however many tests skipped — which is what
+  # `GOTESTFLAGS=-v` is for. When T-CORE lands, the scaffold check is deleted
+  # and the first two stay: they are what says a Docker-less runner is not
+  # green.
   integration:
-    # Non-blocking until T-CORE lands the pipeline (gate 4): the invariant suite must fail for the right reason today. T-CORE removes these two lines.
-    continue-on-error: true
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -94,7 +194,47 @@ jobs:
           cache: true
       - name: docker is available
         run: docker version
-      - name: integration
+      - name: integration fails, and fails for the right reason
         env:
           LAZYSLICE_TEST_POSTGRES_IMAGE: postgres:${{ matrix.postgres }}
-        run: make integration
+        run: |
+          set -uo pipefail
+          # -v, because `go test` prints no per-test line at all without it:
+          # the output of a package whose tests all pass or all skip is one
+          # `ok` line, so the `--- SKIP` grep below — the guard that replaced
+          # `continue-on-error` for the no-Docker case — could never match.
+          make integration GOTESTFLAGS=-v 2>&1 | tee integration.log || true
+
+          status=0
+          # The positive signal, and the one that outlives the scaffold: a run
+          # that executed nothing at all cannot satisfy it, whatever the
+          # pipeline does later.
+          ran=$(grep -cE '^\s*--- (PASS|FAIL): ' integration.log || true)
+          if [ "$ran" -eq 0 ]; then
+            echo "::error::the integration suite executed no test: no '--- PASS' or '--- FAIL' line in"
+            echo "::error::$(wc -l < integration.log) line(s) of -v output. Nothing was asserted."
+            status=1
+          fi
+          if grep -q -- '--- SKIP' integration.log; then
+            echo "::error::the integration suite skipped a test. The only skip in internal/invariants is"
+            echo "::error::testutil.SkipWithoutDocker, so this run had no reachable Docker daemon and"
+            echo "::error::asserted nothing."
+            status=1
+          fi
+          if grep -qE 'build failed|\[build failed\]|cannot find package' integration.log; then
+            echo "::error::the integration suite did not compile, so nothing was asserted."
+            status=1
+          fi
+          # The phase 3 scaffold's own line. Every invariant stops at it today,
+          # which is the gate 3 statement: the suite fails because the pipeline
+          # is a no-op, not because the suite is broken.
+          if ! grep -q 'this build is the phase 3 scaffold' integration.log; then
+            echo "::error::the integration suite did not fail with the phase 3 scaffold's error. Either"
+            echo "::error::the pipeline has landed — in which case delete this wrapper and run"
+            echo "::error::\`make integration\` directly — or the suite is failing for some other reason."
+            status=1
+          fi
+          if [ "$status" -eq 0 ]; then
+            echo "integration: failed at the scaffold, as gate 3 says it must"
+          fi
+          exit "$status"

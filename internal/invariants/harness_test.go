@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 //go:build integration
 
 package invariants
@@ -11,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -42,16 +45,69 @@ type fixture struct {
 	// root and take describe the slice I1 to I5 are asserted over. They are
 	// chosen to pull something worth checking: customer reaches address, city,
 	// country, store, staff, rental and payment; people reaches orders,
-	// order_items, attachments, invoices in another schema, and itself.
+	// order_items, attachments, tenant_users, organisations,
+	// public."LegacyCustomer", invoices in another schema, and itself.
 	root string
 	take int
+
+	// mustHoldRows names tables the slice is required to reach: each must
+	// exist in the target holding at least one row.
+	//
+	// It is the property ARCHITECTURE.md §6 item 5 states and that nothing
+	// else in this package checks. I1 skips a source edge whose child or
+	// parent is absent from the target, which is right for --skip-table and
+	// which also means a target that simply never created the child tables has
+	// no missing edge to report. I6 counts the root and nothing else. I2's
+	// guard is satisfied by one masked column. So an "upward only" pipeline —
+	// take the root's rows, follow foreign keys to their parents so referential
+	// integrity holds, and never create or load a single child table — passes
+	// all six with no orders, no rentals and no payments in the snapshot.
+	// This is the assertion that says subsetting happened.
+	//
+	// Each list carries at least two children and one grandchild, so a walk
+	// that stops at depth 1 fails here rather than passing quietly.
+	mustHoldRows []string
+
+	// mustBeSubset names the tables of mustHoldRows the target must hold
+	// *fewer* rows of than the source. It is a second, shorter list rather
+	// than a property of every entry, because "some of its rows" and "not all
+	// of its rows" are two different claims and only the first is true of
+	// every table a correct slice reaches.
+	//
+	// nasty is the case that forces the split. Its slice is `--root
+	// public.people --take 3`, which seeds {90000, 90007, 90014}; but
+	// people.manager_id is an *incoming* edge of people, so the child step
+	// expands it and pulls 90021 and 90028 as well (their managers are 90000
+	// and 90007). All five people are selected at depth 1, and every child of
+	// the whole people table then arrives whole: orders 5 of 5, order_items 7
+	// of 7, billing.invoices 3 of 3. Requiring a proper subset of those would
+	// fail a pipeline that did exactly what §3 says, at every value of
+	// --take, and the cheapest way to make it green would be to delete this
+	// guard — which is the upward-only hole it exists to close.
+	//
+	// public.attachments is the one nasty table a correct run does subset: row
+	// 839's uploaded_by_person_id is NULL, so no person reaches it (§3's
+	// MATCH SIMPLE rule: any NULL references nothing). pagila's rental and
+	// payment are subset by --take 100 of 599 customers.
+	mustBeSubset []string
 
 	// extra carries the plan flags this fixture cannot run without.
 	//
 	// nasty.sql's public.click_stream has no primary key, no unique index and
 	// two rows identical in every column, so §3.4's identity ladder ends in
-	// exit 12 for it (testdata/README.md trap 12). It is child-only, so
-	// --skip-table is §3.6's answer, and the slice keeps every other trap.
+	// exit 12 for it (testdata/README.md trap 12). It is a depth-1 child of
+	// public.people and nothing references it, so --skip-table is §3.6's
+	// answer, and the slice keeps every other trap.
+	//
+	// **This depends on a reading §3 contradicts, and it is a gate 4
+	// blocker.** §3's pseudo-code computes identity[t] over every table in the
+	// catalogue and refuses on the first nil *before* unreadable(req, priv,
+	// root), which is where §3.6 applies --skip-table. Read literally, every
+	// run over nasty exits 12 at plan whatever is passed here, and all six
+	// invariants are unrunnable on the hostile fixture. The correction is to
+	// apply req.Skipped before the ladder; reachability is not the issue,
+	// because click_stream is reachable. testdata/README.md trap 12 is the
+	// record of the conflict.
 	extra []string
 
 	// countedRoot and countedTake are I6's slice.
@@ -61,8 +117,11 @@ type fixture struct {
 	// public.people is not: manager_id is a self-reference and parents are
 	// pulled uncapped, so a slice of three people legitimately ends up holding
 	// their managers too (testdata/README.md trap 1). I6 therefore roots the
-	// nasty run at public.tenant_users, which has no outgoing foreign key and
-	// is referenced only by its children.
+	// nasty run at public.tenant_users, which nothing reaches as a parent: its
+	// only incoming edges are from tenant_user_sessions and tenant_user_flags,
+	// and those are reached only as its own children. Its own outgoing edge
+	// (owner_person_id, the one that connects the component to public.people)
+	// pushes people, never itself.
 	countedRoot string
 	countedTake int
 }
@@ -75,6 +134,13 @@ var fixtures = []fixture{
 		take:        100,
 		countedRoot: "public.customer",
 		countedTake: 100,
+		// rental and payment are children of customer; payment is also a child
+		// of rental, so it is the grandchild case as well. address is the
+		// parent side, and the one that would still be there if the walk only
+		// went upward — it is in the list so the message names which direction
+		// failed.
+		mustHoldRows: []string{"public.rental", "public.payment", "public.address"},
+		mustBeSubset: []string{"public.rental", "public.payment"},
 	},
 	{
 		name:        "nasty",
@@ -84,6 +150,20 @@ var fixtures = []fixture{
 		extra:       []string{"--skip-table", "public.click_stream"},
 		countedRoot: "public.tenant_users",
 		countedTake: 3,
+		// orders and attachments are children of people; order_items is a
+		// grandchild through orders; billing.invoices is a child in the other
+		// schema, so a loader that never created schema `billing` fails here
+		// naming it (trap 8).
+		mustHoldRows: []string{
+			"public.orders",
+			"public.order_items",
+			"public.attachments",
+			"billing.invoices",
+		},
+		// Only attachments: see mustBeSubset. The manager_id child edge pulls
+		// every person into a --take 3 slice, so orders, order_items and
+		// invoices are correctly whole in the target.
+		mustBeSubset: []string{"public.attachments"},
 	},
 }
 
@@ -106,15 +186,33 @@ func binary(t *testing.T) string {
 	return path
 }
 
+// buildDir is where the binary under test is written. It is a fresh directory
+// per test binary, remembered so TestMain can remove it: a fixed path under
+// os.TempDir() is shared between concurrent runs of this suite and between a
+// developer and whatever else is on the machine, and nothing ever cleaned it
+// up.
+var buildDir string
+
+// TestMain removes the build directory after the run. It is the only reason
+// this package has a TestMain; the suite itself needs no setup.
+func TestMain(m *testing.M) {
+	code := m.Run()
+	if buildDir != "" {
+		_ = os.RemoveAll(buildDir)
+	}
+	os.Exit(code)
+}
+
 func buildBinary() (string, error) {
 	root, err := repoRoot()
 	if err != nil {
 		return "", err
 	}
-	dir := filepath.Join(os.TempDir(), "lazyslice-invariants")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	dir, err := os.MkdirTemp("", "lazyslice-invariants-")
+	if err != nil {
 		return "", fmt.Errorf("making the build directory: %w", err)
 	}
+	buildDir = dir
 	path := filepath.Join(dir, "lazyslice")
 
 	cmd := exec.Command("go", "build", "-o", path, "./cmd/lazyslice")
@@ -199,14 +297,7 @@ func runTool(ctx context.Context, t *testing.T, dir string, args ...string) resu
 
 	cmd := exec.CommandContext(runCtx, binary(t), args...)
 	cmd.Dir = dir
-	// A clean environment except for what a compiler and a Docker client need:
-	// the developer's own DATABASE_URL, PGHOST or LAZYSLICE_SECRET would be
-	// found by the discovery ladder and quietly change what is being tested.
-	cmd.Env = append(os.Environ(),
-		"DATABASE_URL=", "POSTGRES_URL=", "PG_URL=", "DB_URL=",
-		"PGHOST=", "PGPORT=", "PGUSER=", "PGPASSWORD=", "PGDATABASE=", "PGSERVICE=",
-		"LAZYSLICE_SECRET=",
-	)
+	cmd.Env = cleanEnv()
 
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
@@ -224,6 +315,48 @@ func runTool(ctx context.Context, t *testing.T, dir string, args ...string) resu
 		res.exit = exitErr.ExitCode()
 	}
 	return res
+}
+
+// cleanEnv is os.Environ() with every variable that could steer discovery
+// **removed**, not set to the empty string.
+//
+// The difference is the whole point. An implementation that reads
+// `os.LookupEnv("LAZYSLICE_SECRET")` and treats "present" as "use this" would
+// run with an empty masking key under the old spelling, and I3's "same secret,
+// same target" would then be asserting something else entirely. Removing the
+// variable is the only spelling that says "the developer does not have one".
+//
+// The list is every rung of the discovery ladder and every libpq variable that
+// can change where a connection goes or how it authenticates: PGPASSFILE,
+// PGSSLMODE, PGOPTIONS and PGSERVICEFILE are as capable of redirecting a run
+// as PGHOST is, and a developer's ~/.pg_service.conf is exactly the kind of
+// thing that makes a suite pass on one laptop and not another.
+func cleanEnv() []string {
+	drop := map[string]bool{
+		"DATABASE_URL": true, "POSTGRES_URL": true, "PG_URL": true, "DB_URL": true,
+		"PGHOST": true, "PGPORT": true, "PGUSER": true, "PGPASSWORD": true,
+		"PGDATABASE": true, "PGSERVICE": true, "PGSERVICEFILE": true,
+		"PGPASSFILE": true, "PGSSLMODE": true, "PGOPTIONS": true,
+	}
+
+	env := os.Environ()
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		name, _, ok := strings.Cut(kv, "=")
+		switch {
+		case !ok:
+			continue
+		case drop[name]:
+			continue
+		case strings.HasPrefix(name, "LAZYSLICE_"):
+			// Every knob the tool reads for itself, by prefix rather than by
+			// list, so a variable added in phase 4 is excluded the day it
+			// exists rather than the day someone remembers this file.
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
 }
 
 // mustRun runs the binary and fails the test unless it exits 0.
@@ -294,9 +427,140 @@ func (d *databases) snapshotArgs(f fixture, root string, take int) []string {
 }
 
 // snapshot runs the pipeline once and returns the invocation.
+//
+// When the run is the fixture's own slice — the root and take I1 to I5 are
+// asserted over — the tables the slice is required to reach are checked
+// immediately, before any invariant looks at the target. Every one of the six
+// is otherwise satisfiable by a snapshot that contains no child rows at all
+// (see fixture.mustHoldRows), so this is the coverage claim and not I1's.
 func (d *databases) snapshot(ctx context.Context, t *testing.T, f fixture, root string, take int) result {
 	t.Helper()
-	return mustRun(ctx, t, d.dir, d.snapshotArgs(f, root, take)...)
+
+	res := mustRun(ctx, t, d.dir, d.snapshotArgs(f, root, take)...)
+	if root == f.root && take == f.take {
+		d.assertSliceReached(ctx, t, f)
+	}
+	return res
+}
+
+// assertSliceReached fails unless every table in f.mustHoldRows is in the
+// target holding some of its rows, and every table in f.mustBeSubset holds
+// fewer of them than the source does.
+//
+// Two claims, kept apart because only the first is true of every table a
+// correct slice reaches. "Some of its rows" has two failures and they mean
+// different things. Absent: the loader never created the table, which is the
+// "upward only" pipeline — it satisfies I1 (no edge between two present tables
+// is missing), I6 (the root is exactly --take) and I2 (one masked column
+// arrived), and it contains none of the data anybody wanted. Zero rows: the
+// table was created and the walk never reached it, which is
+// research/COMPLAINTS.md FK-10's silently empty slice.
+//
+// "Not all of its rows" is the opposite failure — nothing was subset, the cap,
+// the take and the depth did nothing — and it is asserted only over
+// f.mustBeSubset, because a table whose every row a correct slice legitimately
+// reaches (nasty's orders, order_items and billing.invoices: see mustBeSubset)
+// would otherwise fail on a pipeline that is right.
+func (d *databases) assertSliceReached(ctx context.Context, t *testing.T, f fixture) {
+	t.Helper()
+
+	if len(f.mustHoldRows) == 0 {
+		t.Fatalf("the %s fixture names no table the slice must reach, so every invariant in this "+
+			"package is satisfied by a target holding the root and nothing else", f.name)
+	}
+	if len(f.mustBeSubset) == 0 {
+		t.Fatalf("the %s fixture names no table the slice must hold *fewer* rows of than the source, "+
+			"so a run that copied every table whole passes this guard; name at least one table a "+
+			"correct slice does not reach entirely", f.name)
+	}
+	mustBeSubset := map[string]bool{}
+	for _, name := range f.mustBeSubset {
+		mustBeSubset[name] = true
+	}
+
+	source := connect(ctx, t, d.source)
+	target := connect(ctx, t, d.target)
+	present := tableSet(ctx, t, target)
+
+	for _, name := range f.mustHoldRows {
+		ref := parseTable(t, name)
+		if !present[ref] {
+			t.Errorf("the slice: %s is not in the target at all, so the snapshot holds no %s row; "+
+				"§6 item 5 says every step with mode ChildOK or ParentOnly has exactly Keys.Len() rows "+
+				"in the target, and a table nobody created has none of them",
+				ref, ref.Name)
+			continue
+		}
+		want := countRows(ctx, t, source, ref)
+		if want == 0 {
+			t.Errorf("the slice: %s holds no rows in the %s source, so requiring the target to hold "+
+				"some of them proves nothing; fix the fixture or drop it from mustHoldRows", ref, f.name)
+			continue
+		}
+		got := countRows(ctx, t, target, ref)
+		if got == 0 {
+			t.Errorf("the slice: %s holds %d row(s) in the %s source and none in the target, so the walk "+
+				"never reached it (research/COMPLAINTS.md FK-10: the silently empty slice)", ref, want, f.name)
+			continue
+		}
+		if mustBeSubset[name] && got >= want {
+			t.Errorf("the slice: %s holds %d row(s) in the %s source and %d in the target, so nothing was "+
+				"subset: --take %d, --cap and --depth changed nothing for this table. It is in "+
+				"mustBeSubset because a correct run cannot reach all of its rows",
+				ref, want, f.name, got, f.take)
+		}
+	}
+
+	// mustBeSubset is a list of names; a typo in it asserts nothing and says
+	// nothing, which is the shape this guard exists to refuse.
+	for _, name := range f.mustBeSubset {
+		if !slices.Contains(f.mustHoldRows, name) {
+			t.Errorf("the %s fixture's mustBeSubset names %s, which is not in mustHoldRows, so nothing "+
+				"counted its rows", f.name, name)
+		}
+	}
+}
+
+// mutateTarget deletes a handful of rows from a loaded table of the target and
+// returns the table it touched.
+//
+// It is what makes I3's and I5's second run provable. Both compare the target
+// after a second invocation against the state the first invocation left in it,
+// so an invocation that exited 0 without truncating and reloading — one that
+// found its own bound marker and short-circuited, say — produces a
+// byte-identical dump: the strongest possible pass for the weakest possible
+// pipeline. assertSecondRunHappened reads lazyslice_meta, which is a second
+// signal but still the implementation's own account of itself (§11.2 says the
+// marker row is inserted before the first drop, so the guard is trusting the
+// thing under test). This is not: the rows are gone, and only a run that
+// actually truncated and reloaded can put them back.
+//
+// The table comes from mustHoldRows, so it is one the slice is required to
+// have reached, and the deletion is of the whole table rather than of some
+// rows, because a foreign key from a table not yet dropped would refuse a
+// partial delete. It runs after the first dump is taken.
+func (d *databases) mutateTarget(ctx context.Context, t *testing.T, f fixture, invariant string) tableRef {
+	t.Helper()
+
+	conn := connect(ctx, t, d.target)
+	for _, name := range f.mustHoldRows {
+		ref := parseTable(t, name)
+		if countRows(ctx, t, conn, ref) == 0 {
+			continue
+		}
+		if _, err := conn.Exec(ctx, `DELETE FROM `+ref.quoted()); err != nil {
+			// A foreign key pointing at this table refuses the delete. That is
+			// not a failure of the pipeline, so try the next candidate.
+			continue
+		}
+		if n := countRows(ctx, t, conn, ref); n != 0 {
+			t.Fatalf("%s: emptying %s left %d row(s)", invariant, ref, n)
+		}
+		return ref
+	}
+	t.Fatalf("%s: no table in the %s fixture's mustHoldRows could be emptied, so this test cannot tell "+
+		"a second run that reloaded the target from one that exited 0 and did nothing", invariant, f.name)
+	return tableRef{}
 }
 
 // ---------- talking to the databases ----------
@@ -337,6 +601,210 @@ func parseTable(t *testing.T, s string) tableRef {
 		t.Fatalf("invariants: %q is not a schema-qualified table name", s)
 	}
 	return tableRef{Schema: schema, Name: name}
+}
+
+// columnRef is one column of one relation, in catalogue spelling: the
+// identifiers as pg_attribute holds them, never quoted.
+//
+// Everything this package compares a column by goes through it — the emitted
+// yml's `columns:` keys, the `--json` stream's table and column fields, and
+// the cells read out of both databases — because those three channels spell an
+// identifier three ways. §10's examples are all unquoted lower case; a
+// statement lazyslice generates has to write public."LegacyCustomer" quoted
+// (testdata/README.md trap 9); and the catalogue holds LegacyCustomer bare.
+// Comparing the raw strings drops the quoted columns from every assertion in
+// I2 without saying so.
+type columnRef struct {
+	Table  tableRef
+	Column string
+}
+
+func (c columnRef) String() string { return c.Table.String() + "." + c.Column }
+
+// parseColumnRef reads a possibly-quoted, dot-separated `schema.table.column`.
+func parseColumnRef(s string) (columnRef, bool) {
+	parts, ok := splitQualifiedName(s)
+	if !ok || len(parts) != 3 {
+		return columnRef{}, false
+	}
+	for _, p := range parts {
+		if p == "" {
+			return columnRef{}, false
+		}
+	}
+	return columnRef{Table: tableRef{Schema: parts[0], Name: parts[1]}, Column: parts[2]}, true
+}
+
+// splitQualifiedName splits a dotted identifier into its parts, unquoting each
+// one, and reports whether the quoting was well formed.
+//
+// A dot inside double quotes is part of the identifier, not a separator:
+// public."a.b".c is three parts, not four. `""` inside a quoted part is one
+// double quote, which is SQL's own escape.
+func splitQualifiedName(s string) ([]string, bool) {
+	var parts []string
+	var cur strings.Builder
+	quoted := false
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case c == '"' && quoted && i+1 < len(s) && s[i+1] == '"':
+			cur.WriteByte('"')
+			i++
+		case c == '"':
+			quoted = !quoted
+		case c == '.' && !quoted:
+			parts = append(parts, cur.String())
+			cur.Reset()
+		default:
+			cur.WriteByte(c)
+		}
+	}
+	if quoted {
+		return nil, false
+	}
+	return append(parts, cur.String()), true
+}
+
+// partitionRoots maps every partition leaf to the partitioned table at the top
+// of its inheritance chain.
+//
+// §3.3: "A partition is never a step; its root is", and "the target holds the
+// root as a plain table". So the source's rows live in public.events_2024 and
+// public.events_2025 while the run's yml and the target both say public.events.
+// Without this map every comparison I2 makes over a partitioned table's
+// columns silently matches nothing and reports clean by omission.
+//
+// Only declarative partitioning is collapsed (the top of the chain must be
+// relkind 'p'), because that is what §3.3 is about; old-style inheritance is a
+// different question and testdata/ has none.
+func partitionRoots(ctx context.Context, t *testing.T, conn *pgx.Conn) map[tableRef]tableRef {
+	t.Helper()
+
+	rows, err := conn.Query(ctx, `
+		WITH RECURSIVE up(leaf, ancestor) AS (
+			SELECT i.inhrelid, i.inhparent FROM pg_inherits i
+			UNION ALL
+			SELECT u.leaf, i.inhparent FROM up u JOIN pg_inherits i ON i.inhrelid = u.ancestor
+		)
+		SELECT ln.nspname, lc.relname, rn.nspname, rc.relname
+		FROM up
+		JOIN pg_class lc ON lc.oid = up.leaf
+		JOIN pg_namespace ln ON ln.oid = lc.relnamespace
+		JOIN pg_class rc ON rc.oid = up.ancestor
+		JOIN pg_namespace rn ON rn.oid = rc.relnamespace
+		WHERE rc.relkind = 'p'
+		  AND NOT EXISTS (SELECT 1 FROM pg_inherits i2 WHERE i2.inhrelid = up.ancestor)`)
+	if err != nil {
+		t.Fatalf("invariants: listing partitions: %v", err)
+	}
+	defer rows.Close()
+
+	out := map[tableRef]tableRef{}
+	for rows.Next() {
+		var leaf, root tableRef
+		if scanErr := rows.Scan(&leaf.Schema, &leaf.Name, &root.Schema, &root.Name); scanErr != nil {
+			t.Fatalf("invariants: listing partitions: %v", scanErr)
+		}
+		out[leaf] = root
+	}
+	if rows.Err() != nil {
+		t.Fatalf("invariants: listing partitions: %v", rows.Err())
+	}
+	return out
+}
+
+// allColumns is every column of every ordinary or partitioned relation, in
+// catalogue spelling.
+//
+// Partitioned roots are included ('p'), because §3.3 makes the root the step
+// and a leaf's columns are the root's. It is what says whether a column name
+// in the emitted yml names anything at all.
+func allColumns(ctx context.Context, t *testing.T, conn *pgx.Conn) map[columnRef]bool {
+	t.Helper()
+
+	rows, err := conn.Query(ctx, `
+		SELECT n.nspname, c.relname, a.attname
+		FROM pg_attribute a
+		JOIN pg_class c ON c.oid = a.attrelid
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE c.relkind IN ('r', 'p')
+		  AND a.attnum > 0 AND NOT a.attisdropped
+		  AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+		  AND n.nspname NOT LIKE 'pg_toast%'
+		  AND n.nspname NOT LIKE 'pg_temp%'`)
+	if err != nil {
+		t.Fatalf("invariants: listing columns: %v", err)
+	}
+	defer rows.Close()
+
+	out := map[columnRef]bool{}
+	for rows.Next() {
+		var ref columnRef
+		if scanErr := rows.Scan(&ref.Table.Schema, &ref.Table.Name, &ref.Column); scanErr != nil {
+			t.Fatalf("invariants: listing columns: %v", scanErr)
+		}
+		out[ref] = true
+	}
+	if rows.Err() != nil {
+		t.Fatalf("invariants: listing columns: %v", rows.Err())
+	}
+	return out
+}
+
+// admissibleDomains is the number of distinct values each column of small,
+// countable type can hold, for the columns where the catalogue knows it:
+// enums (their label count), booleans (2), and `varchar(n)`/`char(n)` at n ≤ 2.
+//
+// It is §5's `d = min(column domain, generator.Domain())` from the side this
+// suite can see. Every other type is absent from the map rather than given a
+// large number, because a guess would be a claim about a generator's Domain()
+// that phase 4 has not written yet.
+//
+// Domains (typtype 'd') resolve to their base type, which is how pagila's
+// public.year and public."bıgınt" reach the right answer.
+func admissibleDomains(ctx context.Context, t *testing.T, conn *pgx.Conn) map[columnRef]int64 {
+	t.Helper()
+
+	rows, err := conn.Query(ctx, `
+		SELECT n.nspname, c.relname, a.attname,
+		       CASE
+		         WHEN bt.typtype = 'e'
+		           THEN (SELECT count(*) FROM pg_enum e WHERE e.enumtypid = bt.oid)
+		         WHEN bt.typname = 'bool' THEN 2
+		         WHEN bt.typname IN ('varchar', 'bpchar')
+		              AND a.atttypmod > 4 AND a.atttypmod - 4 <= 2
+		           THEN power(95, a.atttypmod - 4)::bigint
+		       END AS domain
+		FROM pg_attribute a
+		JOIN pg_class c ON c.oid = a.attrelid
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		JOIN pg_type ty ON ty.oid = a.atttypid
+		JOIN pg_type bt ON bt.oid = CASE WHEN ty.typtype = 'd' THEN ty.typbasetype ELSE ty.oid END
+		WHERE c.relkind IN ('r', 'p')
+		  AND a.attnum > 0 AND NOT a.attisdropped
+		  AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+		  AND n.nspname NOT LIKE 'pg_toast%'
+		  AND n.nspname NOT LIKE 'pg_temp%'`)
+	if err != nil {
+		t.Fatalf("invariants: reading column domains: %v", err)
+	}
+	defer rows.Close()
+
+	out := map[columnRef]int64{}
+	for rows.Next() {
+		var ref columnRef
+		var domain *int64
+		if scanErr := rows.Scan(&ref.Table.Schema, &ref.Table.Name, &ref.Column, &domain); scanErr != nil {
+			t.Fatalf("invariants: reading column domains: %v", scanErr)
+		}
+		if domain != nil {
+			out[ref] = *domain
+		}
+	}
+	if rows.Err() != nil {
+		t.Fatalf("invariants: reading column domains: %v", rows.Err())
+	}
+	return out
 }
 
 // dataTables lists every ordinary table holding rows of its own: relkind 'r',

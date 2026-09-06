@@ -24,8 +24,11 @@ Sampler, prior *Config) (*Classification, error)`.
   registration hook for a caller-supplied rule. A pattern in `lazyslice.yml`
   may only add a category or raise a confidence, never lower one
   (`TestConfigCannotLowerConfidence`).
-- A category with no registered masker in `mask` cannot exist — a test walks
-  both lists.
+- Every category that a column can be *masked* under has a registered masker
+  in `mask`, and a test walks both lists (ADR-006 "Consequences"). The
+  exception is the one category that names the absence of a signal: `CatNone`
+  is what a copied column carries, it reaches no masker, and it is excluded
+  from that walk by name rather than by a wildcard.
 
 **Test.** `go test ./internal/classify/...` — no database needed, this package
 is pure.

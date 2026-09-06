@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package introspect reads the source catalog into a pipeline.Schema.
 //
 // Definition text comes from the catalog's own deparser (pg_get_expr,

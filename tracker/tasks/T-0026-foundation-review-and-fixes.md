@@ -3,10 +3,10 @@ id: T-0026
 title: "Foundation review and fixes"
 epic: E3
 phase: 3
-status: open
+status: in_progress
 owner: opus
 created: 2026-09-05
-started: ""
+started: 2026-09-05
 closed: ""
 outcome: ""
 ---
@@ -24,6 +24,8 @@ outcome: ""
 ## Log
 
 - 2026-09-05 created
+
+- 2026-09-05 started
 
 ## Post-mortem
 

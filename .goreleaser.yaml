@@ -44,7 +44,16 @@ archives:
     format_overrides:
       - goos: windows
         formats: [zip]
+    # `files` REPLACES goreleaser's default list (LICENSE*, README*, CHANGELOG*)
+    # rather than adding to it, so LICENSE has to be named here. Apache-2.0
+    # §4(a) requires every recipient of the work to get a copy of the licence,
+    # and a released archive is a distribution: without this line every binary
+    # published from this config ships without its own terms. A tag is
+    # immutable, so this is fixed before the first one rather than in a
+    # follow-up release. The CI release-config job asserts LICENSE is in the
+    # archive.
     files:
+      - LICENSE
       - README.md
       - SECURITY.md
 
@@ -74,16 +83,25 @@ homebrew_casks:
       owner: Liarea
       name: homebrew-tap
       branch: main
-      # Minted per run by the release workflow from a GitHub App installed on
-      # the tap, so there is no long-lived token in repository secrets
-      # (THREAT_MODEL.md T10). This field is not rendered by the usual template
-      # engine: the publish pipe hands the raw string to goreleaser's
-      # ApplySingleEnvOnly, which accepts the exact form `{{ .Env.NAME }}` and
-      # nothing else, so envOrDefault here fails the release. `make snapshot`
-      # never reaches the publish pipe, so the variable's absence locally does
-      # not matter; on CI the workflow always sets it, empty when the App is
-      # unconfigured, and skip_upload below stops publishing before the token
-      # is read.
+      # Set by the release workflow from the repository secret of the same
+      # name, which is the one credential that actually exists on
+      # Liarea/lazyslice. An earlier version of the workflow minted an
+      # installation token from a GitHub App and set this from its output; the
+      # App was never created, so the secrets it read were empty, the token
+      # here rendered empty, skip_upload below rendered `true`, and every tag
+      # published binaries and silently no cask while reporting success.
+      # THREAT_MODEL.md T10's argument against a long-lived personal access
+      # token stands, and the App remains the better answer — but a workflow
+      # that reads a credential nobody has set is worse than one that reads the
+      # credential it has. Reversal: create the App on Liarea/homebrew-tap, set
+      # HOMEBREW_TAP_APP_ID and HOMEBREW_TAP_APP_PRIVATE_KEY, restore the
+      # tap-token step and delete the PAT.
+      #
+      # This field is not rendered by the usual template engine: the publish
+      # pipe hands the raw string to goreleaser's ApplySingleEnvOnly, which
+      # accepts the exact form `{{ .Env.NAME }}` and nothing else, so
+      # envOrDefault here fails the release. `make snapshot` never reaches the
+      # publish pipe, so the variable's absence locally does not matter.
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     directory: Casks
     homepage: https://github.com/Liarea/lazyslice
@@ -94,6 +112,23 @@ homebrew_casks:
     # been created, and a half-published tag is the worst of the three
     # outcomes.
     skip_upload: '{{ if eq (envOrDefault "HOMEBREW_TAP_TOKEN" "") "" }}true{{ else }}auto{{ end }}'
+    # Gatekeeper. These binaries are cross-compiled on ubuntu-latest, unsigned
+    # and un-notarized; cosign signs the checksum file, which Gatekeeper knows
+    # nothing about. Homebrew applies com.apple.quarantine to everything it
+    # stages, so without this the cask installs successfully and the first
+    # `lazyslice --version` is killed or produces a Gatekeeper dialog — the
+    # exact silent-ish failure Gate 3's "brew install from your tap installs a
+    # binary that prints its version" exists to catch. goreleaser does not add
+    # the workaround for you: its own cask template names "removing the macOS
+    # quarantine attribute" as something the author puts in a hook
+    # (goreleaser#5958). The CI release-config job asserts the generated cask
+    # still has one.
+    hooks:
+      post:
+        install: |
+          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/lazyslice"]
+          end
 
 # Keyless cosign signature over the checksum file, which names every artifact
 # in the release, so one signature covers them all (THREAT_MODEL.md T10). The

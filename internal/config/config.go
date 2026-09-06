@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package config resolves the machine-local state directory (ADR-004).
 //
 // This is not lazyslice.yml, which is committed and holds decisions. This is the

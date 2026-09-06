@@ -5,7 +5,7 @@
 | E0 Frame | 0 | 0 | 0 | 3 | 0 | 0 |
 | E1 Research | 1 | 0 | 0 | 10 | 0 | 0 |
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
-| E3 Foundations | 3 | 3 | 0 | 7 | 0 | 0 |
+| E3 Foundations | 3 | 2 | 1 | 7 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 0 | 0 | 0 |
 | E5 Hardening | 5 | 0 | 0 | 0 | 0 | 0 |
 | E9 Later | later | 3 | 0 | 0 | 0 | 0 |
@@ -13,7 +13,7 @@
 ## Open and in progress
 
 - T-0019 [open] E9 · Go vs Python COPY throughput benchmark to validate ADR-001 (opus)
-- T-0026 [open] E3 · Foundation review and fixes (opus)
+- T-0026 [in_progress] E3 · Foundation review and fixes (opus)
 - T-0028 [open] E3 · Create GitHub repository Liarea/lazyslice and homebrew-tap, push main, add HOMEBREW_TAP_TOKEN secret (human)
 - T-0029 [open] E9 · Before going public: git-crypt the AI-specific paths and rewrite pre-encryption history (fable)
 - T-0030 [open] E3 · Licence mechanics: SPDX headers on every Go file, spdx lint target (opus)

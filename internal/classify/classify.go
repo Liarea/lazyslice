@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package classify decides what every column holds: names, types, validated
 // samples, dictionaries, and a reason string for each decision
 // (ARCHITECTURE.md section 4).

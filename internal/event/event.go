@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package event is the progress event model (ARCHITECTURE.md section 7).
 //
 // core.Run is the only producer. The line printer, the NDJSON writer and the

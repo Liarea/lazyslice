@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package tui holds the two Bubble Tea screens --tui opens: the classification
 // reasons screen and the plan screen (ADR-002).
 //

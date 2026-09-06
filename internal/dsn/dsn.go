@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package dsn parses connection strings and holds the two types that keep
 // passwords out of everything else.
 //

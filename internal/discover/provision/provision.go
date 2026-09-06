@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package provision is the --create-target path (ARCHITECTURE.md section 9
 // "Provisioning"). It is the only code in lazyslice that creates or starts a
 // container, and it is never called without --create-target or a "yes" to Q1.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 //go:build integration
 
 package invariants
@@ -22,14 +24,24 @@ import (
 // truncates. A determinism bug and a broken re-run therefore both fail here,
 // and the message says which line of which table moved.
 //
-// Two things are asserted before the comparison, because "the two dumps are
-// equal" is the easiest assertion in this package to satisfy by accident. A
-// data dump of a database with no rows is a few hundred bytes of SET
+// Three things are asserted before the comparison, because "the two dumps are
+// equal" is the easiest assertion in this package to satisfy by accident.
+//
+// A data dump of a database with no rows is a few hundred bytes of SET
 // boilerplate and is byte-identical between runs, so assertDumpHasData
-// requires the target to hold data at all; and the second run is compared
-// against the state the first run left behind, so an invocation that exited 0
-// without truncating or reloading would pass perfectly, which
-// assertSecondRunHappened rules out through lazyslice_meta.
+// requires the target to hold data at all.
+//
+// The second run is compared against the state the first run left behind, so
+// an invocation that exited 0 without truncating or reloading would pass
+// perfectly. Two guards rule that out, and only the second of them is proof.
+// assertSecondRunHappened reads lazyslice_meta, which is the implementation's
+// own account of itself: §11.2 says the marker row goes in before the first
+// drop, so a run that inserted its marker, found its own bound fingerprint,
+// short-circuited and exited 0 satisfies it while touching no data. So the
+// target is *emptied* of one loaded table between the two runs, and the
+// comparison against `first` then passes only if the second run really did
+// truncate and reload — the rows it deleted have to come back, byte for byte,
+// which nothing but a full reload can do.
 func TestI3SameInputsSameTarget(t *testing.T) {
 	ctx := context.Background()
 
@@ -52,12 +64,16 @@ func TestI3SameInputsSameTarget(t *testing.T) {
 					db.secretPath(), err)
 			}
 
+			emptied := db.mutateTarget(ctx, t, f, "I3")
+
 			db.snapshot(ctx, t, f, f.root, f.take)
 			assertSecondRunHappened(t, "I3", runsBefore, markerRunIDs(ctx, t, target, "I3"))
 			second := dumpData(ctx, t, db.target)
 
 			if diff := diffDumps(first, second); diff != "" {
-				t.Errorf("I3: two runs with the same source, secret and config produced different targets, at %s", diff)
+				t.Errorf("I3: two runs with the same source, secret and config produced different targets, "+
+					"at %s\n(%s was emptied between the two runs, so a second run that reloaded nothing "+
+					"fails here rather than passing)", diff, emptied)
 			}
 		})
 	}

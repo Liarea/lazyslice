@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package load recreates the source schema in the target and copies the rows in.
 //
 // lazyslice owns the target schema (ADR-005): after the gate has passed, every

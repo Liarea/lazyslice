@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package emit reads and writes lazyslice.yml (ARCHITECTURE.md section 10).
 //
 // The file is a record of what happened, not a configuration to be filled in:

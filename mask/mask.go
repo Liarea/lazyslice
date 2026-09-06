@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package mask is the deterministic masking module of lazyslice.
 //
 // It is a nested Go module, github.com/Liarea/lazyslice/mask (ADR-006), so a
