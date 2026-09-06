@@ -823,6 +823,8 @@ Names + types + validated samples + dictionaries + a reason string, biased to re
 - **Never masked, always explained:** generated columns (never copied; the target recomputes them) and surrogate keys (`id bigint` and the FK columns that reference them). Surrogate keys are preserved verbatim, which means every snapshot carries an exact join key back to the production row; THREAT_MODEL.md "Positions" and §6 item 6 state that first. There is no copy-as-is exemption by type: an enum column, a partition-key column and a `varchar(2)` column are classified like any other, and a masked enum emits a valid label (§5). The earlier draft's enum exemption was a copy-as-is default by type and is removed.
 - **Explanation.** Every decision has one line: `users.email  email  certain  name matches email; 200/200 samples parse as addresses  → masker email`. `?` shows the table. Reasons come from the template set in `internal/classify/reasons.go` (§2 "Value-free types").
 
+**Recorded after transform landed (2026-09-06, T-EXTRACT):** every JSON string leaf is masked as `free_text`, §4's own default for an unrecognised key, rather than through the name rules; the shape of the fake is lost (an email leaf becomes filler) but coverage is unchanged, and the residual entry for every leaf is derivable by verify. §14's one-level JSON key collection in classify is what restores per-leaf categories, by putting them on the Decision where verify can read them.
+
 ## 5. Deterministic masking
 
 Module `github.com/Liarea/lazyslice/mask` (ADR-006). The scheme (research/HARD_PROBLEMS.md §2.1):
