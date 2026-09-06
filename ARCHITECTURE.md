@@ -1207,6 +1207,8 @@ CREATE TABLE lazyslice_meta (
 
 Every run inserts its row with `status = running` before the first drop and updates it to `complete` or `failed` at the end. The gate treats the marker as **bound** when the latest row's `source_fingerprint` (and `source_system_id`, when both the row and the current source have one) matches the current source and its `schema_fingerprint` equals the fingerprint recomputed over the target's current catalog; only a bound marker authorises truncation. A row still at `running` is a run that died (SIGKILL, OOM, power loss); the target may hold some tables' rows, no FKs and no `complete` status, and the next run truncates it exactly as it would a `complete` one. An unbound marker — planted by someone else, left by a run against a different source, or sitting beside a table we did not create — authorises nothing and the gate falls through to the emptiness check (§9). A bound marker whose latest `secret_fingerprint`, `classification_fingerprint` or `tool_version` differs from the run's prints `secret changed — masked values will differ`, `classification changed — masked values will differ` or `lazyslice version changed — masked values may differ`, and truncates. The marker asserts "a compatible lazyslice wrote exactly this here", never "nothing else did"; the gate still requires every other user table to be empty on an unmarked target.
 
+**Amended by ADR-009 (2026-09-06):** the schema fingerprint of §11.2 is `sha256` over the DDL text `internal/load/ddl` generates for the schema, computed by `internal/core` after introspection and by `load.GateFingerprint` for the target's end of the marker binding. Introspect does not fingerprint.
+
 ## 12. Repository layout
 
 ```
