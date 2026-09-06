@@ -690,6 +690,8 @@ type Emitter interface {
 
 **Type additions recorded after implementation (2026-09-06):** `Index.Immediate bool` carries `pg_index.indimmediate`; the index behind a DEFERRABLE primary key or unique constraint has it false and can never back a foreign key. `ForeignKey.NotRecreatable bool` marks an edge whose parent end is a leaf partition carrying a key the root cannot: introspect leaves the edge un-re-pointed and the planner refuses at plan time with exit 13 (`target.schema.not_recreatable`) before anything in the target is dropped (T-INTROSPECT-FIX2).
 
+**Recorded after the planner landed (2026-09-06, T-PLAN):** `Plan.Polymorphic []string` carries detected polymorphic pairs; `Plan.Unmapped` is reserved for unmapped `_type` values once §3.2's mapping exists. `PlanRequest` zero values are literal: `internal/core` substitutes the §3 defaults before calling `Plan`, and the CLI rejects `--take 0`, `--cap 0` and `--depth 0` with exit 2. `RolePrivileges` travels in `PlanRequest`; the planner issues no catalog queries of its own. §3.4's "discriminator" is read narrowly: a boolean, an enum, or a `_type`/status/kind/state/code-named column of a comparable kind; a table whose only distinguishing column is none of these reaches exit 12 naming `--key`.
+
 ## 3. The subset planner
 
 Client-side monotone worklist with provenance tags (research/HARD_PROBLEMS.md §1.1), never SQL pushdown, because the plan must say why each row is present and the source must never see a temp table. Defaults: `--take 500`, per-parent-key cap `100`, `--depth 3`, `--row-budget 1000000`, `--memory-budget 256MiB`.
