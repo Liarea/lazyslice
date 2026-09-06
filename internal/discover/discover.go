@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package discover walks the discovery ladder: lazyslice.yml, environment
 // variables and .env files, libpq settings, running Postgres containers,
 // exited containers, compose service names (ARCHITECTURE.md section 9).

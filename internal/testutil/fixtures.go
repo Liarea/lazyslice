@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 package testutil
 
 import (
@@ -6,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -44,6 +47,10 @@ func LoadPagila(ctx context.Context, connURL string) error {
 	}
 	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
 
+	if err := requireSuperuser(ctx, conn); err != nil {
+		return err
+	}
+
 	const ensureOwner = `DO $ensure$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'postgres') THEN
@@ -69,6 +76,40 @@ $ensure$;`
 		return fmt.Errorf("testutil: analysing pagila: %w", err)
 	}
 	return nil
+}
+
+// requireSuperuser fails before pagila is loaded when the connecting role is
+// not a superuser.
+//
+// Both of the two things LoadPagila does beyond issuing the dump need it, and
+// neither says so when it fails. `CREATE ROLE postgres` needs `CREATEROLE` or
+// superuser; the dump's own `ALTER ... OWNER TO postgres` needs the
+// *connecting* user to be a superuser or a member of the target role, and it
+// appears about 40 statements into a 1,900-line file. Without this guard a
+// non-superuser connection fails deep inside the dump with `42501: must be
+// member of role "postgres"` and a line number, which reads as a broken
+// fixture rather than as a wrong connection URL.
+//
+// It is a precondition and not a repair: LoadPagila must never grant itself
+// the privilege, and it must never create `postgres` as a superuser to get
+// around this (testdata/README.md, and internal/testutil/CLAUDE.md's "Never").
+func requireSuperuser(ctx context.Context, conn *pgconn.PgConn) error {
+	res, err := conn.Exec(ctx, `SELECT current_user, current_setting('is_superuser')`).ReadAll()
+	if err != nil {
+		return fmt.Errorf("testutil: asking whether the connecting role may load pagila: %w", err)
+	}
+	if len(res) != 1 || len(res[0].Rows) != 1 || len(res[0].Rows[0]) != 2 {
+		return errors.New("testutil: asking whether the connecting role may load pagila: unexpected result shape")
+	}
+	role, isSuperuser := string(res[0].Rows[0][0]), string(res[0].Rows[0][1])
+	if isSuperuser == "on" {
+		return nil
+	}
+	return fmt.Errorf("testutil: loading pagila needs a superuser connection and %q is not one: the dump "+
+		"ends most objects with `ALTER ... OWNER TO postgres`, which needs the connecting role to be a "+
+		"superuser, and the role itself has to be created first. Point LoadPagila at the container's own "+
+		"superuser (internal/testutil.Postgres returns such a URL); do not create `postgres` as a "+
+		"superuser to work around this", role)
 }
 
 // StreamRows is the number of rows LoadNasty(..., big=true) puts in
@@ -188,12 +229,20 @@ func readFixture(name string) (string, error) {
 // LoadNasty cuts it off before calling this.
 //
 // The COPY header is recognised by the shape pg_dump writes, a line of its own
-// reading `COPY ... FROM stdin;`. Nothing else in testdata/ has a line like
-// that -- neither pagila file has a backslash command, pagila-schema.sql and
-// nasty.sql have no copy blocks at all, and no function body in any of them
-// starts a line with COPY or a backslash.
+// reading `COPY ... FROM stdin;`, and only where a statement may actually
+// begin. That second condition is the one an earlier version of this loader
+// did not have. A line reading `COPY ... FROM stdin;` inside a dollar-quoted
+// function body, inside a psql conditional, or halfway through any statement
+// this loader is deliberately not parsing, is not a copy header: cutting the
+// statement there sends two halves to the server as SQL, and the failure is a
+// syntax error pointing at the wrong line. So the header is taken only when
+// nothing is part-written -- the pending text is empty, or ends in a
+// semicolon -- and never inside a dollar-quoted string. Anything else stays
+// where it is and goes to the server with the statement around it, which is
+// the only reading that can be right without a parser.
 func execScript(ctx context.Context, conn *pgconn.PgConn, script string) error {
 	var pending strings.Builder
+	inDollarQuote := ""
 
 	flush := func() error {
 		sql := pending.String()
@@ -212,7 +261,7 @@ func execScript(ctx context.Context, conn *pgconn.PgConn, script string) error {
 		line := strings.TrimSuffix(lines[i], "\r")
 		trimmed := strings.TrimSpace(line)
 
-		if copySQL, ok := copyHeader(trimmed); ok {
+		if copySQL, ok := copyHeader(trimmed); ok && statementMayBegin(pending.String(), inDollarQuote) {
 			if err := flush(); err != nil {
 				return err
 			}
@@ -235,20 +284,90 @@ func execScript(ctx context.Context, conn *pgconn.PgConn, script string) error {
 			}
 			continue
 		}
-		if strings.HasPrefix(trimmed, `\`) {
+		if strings.HasPrefix(trimmed, `\`) && inDollarQuote == "" {
 			return fmt.Errorf("testutil: %q: unsupported backslash command in a fixture", trimmed)
 		}
 
 		pending.WriteString(line)
 		pending.WriteByte('\n')
+		inDollarQuote = trackDollarQuote(inDollarQuote, line)
 	}
 	return flush()
 }
 
+// statementMayBegin reports whether the next line of a script could start a
+// statement: nothing is part-written in pending, and no dollar-quoted string is
+// open.
+//
+// Comments and blank lines do not count as part-written, because pg_dump puts a
+// comment block immediately above every COPY header it writes; nor do the
+// completed statements of earlier lines, because those end in a semicolon and
+// are flushed by the caller anyway.
+//
+// Its three cases are covered by fixtures_unit_test.go, because none of the
+// files in testdata/ contains a `COPY ... FROM stdin;` line inside a
+// dollar-quoted body or halfway through a statement: this function is right or
+// wrong entirely on the strength of that test.
+func statementMayBegin(pending, inDollarQuote string) bool {
+	if inDollarQuote != "" {
+		return false
+	}
+	var last byte
+	for _, line := range strings.Split(pending, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "--") {
+			continue
+		}
+		last = trimmed[len(trimmed)-1]
+	}
+	return last == 0 || last == ';'
+}
+
+// dollarTag matches a dollar-quote delimiter: `$$` or `$tag$`.
+var dollarTag = regexp.MustCompile(`\$[A-Za-z_\x80-￿][A-Za-z0-9_\x80-￿]*\$|\$\$`)
+
+// trackDollarQuote returns the dollar-quote tag still open after line, given
+// the one open before it, and "" when none is.
+//
+// It is not a lexer and does not need to be. Its only job is to keep
+// execScript from mistaking a line inside a function body for the start of a
+// statement: the delimiter that opens a body has to be matched exactly to
+// close it (PostgreSQL's own rule), and nothing in testdata/ nests one dollar
+// quote inside another under the same tag.
+func trackDollarQuote(open, line string) string {
+	// A line comment cannot open a dollar quote, and pg_dump writes none
+	// inside a body, so the cheap approximation is to stop at `--` when
+	// nothing is open. When something is open, `--` is body text.
+	if open == "" {
+		if i := strings.Index(line, "--"); i >= 0 {
+			line = line[:i]
+		}
+	}
+	for _, tag := range dollarTag.FindAllString(line, -1) {
+		switch open {
+		case "":
+			open = tag
+		case tag:
+			open = ""
+		}
+	}
+	return open
+}
+
 // copyHeader recognises pg_dump's data header and returns it unchanged, for use
 // as the SQL of a copy-protocol exchange.
+//
+// Both ends of the match are case-insensitive. SQL keywords are, pg_dump
+// happens to write them upper case, and a fixture hand-written or re-dumped by
+// a tool that writes `copy public.t (a, b) from stdin;` would otherwise be
+// accumulated as ordinary SQL and fail against the server with `57014` or a
+// syntax error on its first data line -- a loud failure, but one that names
+// the data rather than the header. strings.EqualFold on the prefix rather than
+// ToLower on the whole line, because the rest of the line is an identifier
+// list that must reach the server exactly as written.
 func copyHeader(line string) (string, bool) {
-	if !strings.HasPrefix(line, "COPY ") {
+	const prefix = "COPY "
+	if len(line) < len(prefix) || !strings.EqualFold(line[:len(prefix)], prefix) {
 		return "", false
 	}
 	if !strings.HasSuffix(strings.ToLower(line), "from stdin;") {

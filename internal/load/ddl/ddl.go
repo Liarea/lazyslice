@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package ddl generates the CREATE statements for the object classes v1
 // recreates (ARCHITECTURE.md section 11.1). It is a deliberately narrow
 // reimplementation of pg_dump --schema-only, and section 11.1 is its whole

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package dockerctx resolves the Docker endpoint lazyslice talks to: the
 // --docker-host flag, then DOCKER_HOST, then the active Docker context, then
 // the default sockets.

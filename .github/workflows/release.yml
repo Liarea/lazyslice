@@ -17,10 +17,6 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
-    env:
-      # Read at step level to decide whether a tap token can be minted at all.
-      # A secrets expression cannot be used in an `if`, so it lands here first.
-      HOMEBREW_TAP_APP_ID: ${{ secrets.HOMEBREW_TAP_APP_ID }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -31,37 +27,90 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: tests must pass before anything is published
-        run: |
-          go test -count=1 ./...
-          (cd mask && go test -count=1 ./...)
+      # `make check` and not two `go test` lines. A tag is not required to
+      # point at a commit ci.yml ever ran — a tag on an unpushed branch, or a
+      # branch and its tag pushed in one operation with this workflow winning
+      # the race — so the artefact that actually reaches users has to carry the
+      # same gate a branch push does. That gate is lint, the forbidden-name
+      # grep and the raced tests in both modules, which is what `make check`
+      # is. The forbidden grep in particular is CLAUDE.md's hardest rule (no
+      # name that turns masking off) and it was not running here at all.
+      - name: the pinned build tools
+        run: make tools
+
+      - name: the same gate a branch push gets, before anything is published
+        run: make check
 
       - uses: sigstore/cosign-installer@v4
 
-      # The tap is another repository, so publishing the cask needs a credential
-      # this one does not have. It is an installation token minted for this run
-      # from a GitHub App installed on Liarea/homebrew-tap, and it expires with
-      # the job: THREAT_MODEL.md T10 rules out a long-lived personal access
-      # token in repository secrets, whose compromise publishes a formula
-      # pointing at a binary CI never built.
-      #
-      # When the App is not configured the step is skipped, the token below is
-      # empty, and .goreleaser.yaml skips the cask. The release itself still
-      # publishes, and it publishes signed.
-      - id: tap-token
-        if: env.HOMEBREW_TAP_APP_ID != ''
-        uses: actions/create-github-app-token@v3
-        with:
-          app-id: ${{ env.HOMEBREW_TAP_APP_ID }}
-          private-key: ${{ secrets.HOMEBREW_TAP_APP_PRIVATE_KEY }}
-          owner: Liarea
-          repositories: homebrew-tap
-
+      # The version here must equal Makefile's GORELEASER_VERSION, which is
+      # what `make tools`, `make snapshot` and ci.yml's release-config job all
+      # use. The action takes a literal, so this is the one place the pin is
+      # repeated: bump both in the same pull request, or the tag builds with a
+      # goreleaser no pull request ever validated the config against.
       - uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
-          version: v2.18.0
+          version: v2.18.0 # keep equal to Makefile's GORELEASER_VERSION
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_TAP_TOKEN: ${{ steps.tap-token.outputs.token }}
+          # The tap is another repository, so publishing the cask needs a
+          # credential this one does not have. HOMEBREW_TAP_TOKEN is the
+          # repository secret that exists.
+          #
+          # THREAT_MODEL.md T10's third control reads "no long-lived tokens in
+          # repository secrets", and this line is that control knowingly unmet:
+          # HOMEBREW_TAP_TOKEN is a scoped PAT with write access to
+          # Liarea/homebrew-tap. T10 itself has not been amended, so the threat
+          # model and this file disagree until it is — a tracker item in front
+          # of gate 4, not a thing to leave to a reader of one YAML comment.
+          #
+          # An earlier version of this job minted an installation token from a
+          # GitHub App on Liarea/homebrew-tap — the credential T10 prefers,
+          # because it expires with the job. The App was never
+          # created: secrets.HOMEBREW_TAP_APP_ID was empty, the `if` skipped
+          # the step, the token handed to goreleaser was empty,
+          # .goreleaser.yaml's skip_upload rendered `true`, and goreleaser
+          # skipped the cask with a log line and exited 0. Every tag published
+          # binaries, published no cask, and reported success. Reversal
+          # condition for going back: the App exists on Liarea/homebrew-tap and
+          # both of its secrets are set, at which point restore the tap-token
+          # step and delete this PAT.
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      # The skip is silent by design in goreleaser: with no tap credential the
+      # cask pipe logs a line and the release still succeeds, which is the
+      # right behaviour for the tool and the wrong one for a gate. Gate 3 says
+      # `brew install` from the tap installs a binary that prints its version,
+      # and a release that published no cask cannot meet it. So a release of a
+      # non-prerelease tag that produced no uploaded cask fails the job, after
+      # the binaries are up rather than instead of them.
+      - name: a release tag must have published a cask
+        if: ${{ !contains(github.ref_name, '-') }}
+        run: |
+          set -euo pipefail
+          if [ ! -f dist/artifacts.json ]; then
+            echo "release: goreleaser wrote no dist/artifacts.json"
+            exit 1
+          fi
+          # A cask artifact exists whether or not it was uploaded; the config
+          # goreleaser recorded alongside it is what says which. skip_upload
+          # renders "true" exactly when HOMEBREW_TAP_TOKEN was empty.
+          skipped=$(jq -r '
+            [.[] | select(.type == "Homebrew Cask")
+                 | .extra.BrewCaskConfig.skip_upload] | join(",")' dist/artifacts.json)
+          if [ -z "$skipped" ]; then
+            echo "release: goreleaser generated no Homebrew cask at all for ${{ github.ref_name }}."
+            exit 1
+          fi
+          if [ "$skipped" != "auto" ] && [ "$skipped" != "false" ]; then
+            echo "release: ${{ github.ref_name }} is not a prerelease tag, and the Homebrew cask was not"
+            echo "published: goreleaser recorded skip_upload=\"$skipped\". That renders \"true\" when"
+            echo "HOMEBREW_TAP_TOKEN is empty (.goreleaser.yaml), and the cask pipe then logs a line and"
+            echo "exits 0 — the binaries are up and the tap has nothing new in it. Set the repository"
+            echo "secret and re-run. Gate 3's 'brew install from your tap installs a binary that prints"
+            echo "its version' cannot be met by this release."
+            exit 1
+          fi
+          echo "release: the Homebrew cask was published (skip_upload=$skipped)"

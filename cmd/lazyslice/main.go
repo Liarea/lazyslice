@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Command lazyslice snapshots a production SQL database into a safe local copy:
 // subset by a root table, follow foreign keys, mask personal data, load.
 //

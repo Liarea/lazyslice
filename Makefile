@@ -36,7 +36,7 @@ LDFLAGS := -s -w \
 	-X main.commit=$(COMMIT) \
 	-X main.date=$(DATE)
 
-.PHONY: all build test lint integration forbidden fmt check tools clean help
+.PHONY: all build test lint integration forbidden spdx fmt check tools clean help
 
 ## build: compile the binary into bin/
 build:
@@ -54,8 +54,16 @@ test:
 ## These are the tests that matter: the planner, the gate, the loader and the
 ## residual scan are statements about a real Postgres. They start containers
 ## through internal/testutil, so they are slow and they are not in `check`.
+##
+## GOTESTFLAGS is for a caller that needs to read the run rather than only its
+## exit code: CI passes -v, because `go test` prints no `--- SKIP` or
+## `--- PASS` line without it and a grep for one over the default output can
+## never match. It is the whole of the knob; the command stays defined here so
+## that CI and a laptop run the same one.
+GOTESTFLAGS ?=
+
 integration:
-	go test -tags integration -count=1 -timeout 30m ./...
+	go test -tags integration -count=1 -timeout 30m $(GOTESTFLAGS) ./...
 
 ## forbidden: fail on any name that would turn masking off
 ##
@@ -79,8 +87,36 @@ forbidden:
 	fi
 	@echo "==> forbidden: no name that turns masking off"
 
-## lint: golangci-lint over both modules
-lint:
+## spdx: fail on any Go file whose first line is not the SPDX identifier
+##
+## research/LICENSE_DECISION.md recommendation 1: the licence is carried
+## per-file by "an SPDX-License-Identifier: Apache-2.0 header in every source
+## file", which is the machine-readable form a compliance scanner reads. The
+## check is a first-line comparison rather than a grep of the whole file, so a
+## header buried halfway down — where no scanner looks — fails.
+##
+## `git ls-files --cached --others --exclude-standard` rather than `find`, so
+## generated output under bin/ or dist/ is not a licence question -- it is
+## gitignored -- while a new file the author has not staged yet still is. A
+## check that only looked at the index would pass locally and fail in CI on the
+## commit that adds the file.
+SPDX := // SPDX-License-Identifier: Apache-2.0
+
+spdx:
+	@missing=$$(for f in $$(git ls-files --cached --others --exclude-standard '*.go'); do \
+		if [ "$$(head -n 1 "$$f")" != '$(SPDX)' ]; then echo "$$f"; fi; \
+	done); \
+	if [ -n "$$missing" ]; then \
+		echo "$$missing"; \
+		echo; \
+		echo "spdx: the files above do not start with '$(SPDX)'."; \
+		echo "Every Go file carries the licence per-file (research/LICENSE_DECISION.md recommendation 1)."; \
+		exit 1; \
+	fi
+	@echo "==> spdx: every Go file carries the licence identifier"
+
+## lint: the SPDX header check, then golangci-lint over both modules
+lint: spdx
 	@if [ -z "$(GOLANGCI_LINT)" ]; then \
 		echo "golangci-lint not found; run: make tools"; exit 1; \
 	fi

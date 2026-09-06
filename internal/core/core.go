@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package core wires the nine stages together. It is the only place that does.
 //
 // Run drives discover, introspect, classify, plan, extract, transform, load,

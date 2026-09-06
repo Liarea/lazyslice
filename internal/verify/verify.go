@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package verify proves what the run did, and is the only place that says the
 // green tick is earned.
 //

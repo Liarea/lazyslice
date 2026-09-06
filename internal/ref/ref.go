@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package ref holds the two identifiers every other package needs: TableRef
 // and ColumnRef.
 //

@@ -6,8 +6,12 @@
 No product code, no docs content — this is orchestration only.
 
 **Contract.** Each workflow exports `meta` (`name`, `description`, `phases`)
-and reads `args.step` to resume at a named step, matching root CLAUDE.md's
-phase list and `docs/BUILD_PLAN.md`'s gates. `implement.js` is the contract
+matching `docs/BUILD_PLAN.md`'s gates. Resuming at a named step is **not**
+uniform: only `foundations.js` and `hardening.js` read `args.step` today.
+`research.js`, `architecture.js` and `slice.js` resume by re-running and
+skipping work that is already on disk or already closed in the tracker, so
+`args: { step: '...' }` does nothing for them — check the file before
+promising a step to anyone. `implement.js` is the contract
 every phase task in a workflow runs through — a task spec's shape
 (`id`, `title`, `model`, `paths`, `brief`, optional `reviewers`/`checks`) is
 defined by how `implement.js` consumes it, not restated per workflow.

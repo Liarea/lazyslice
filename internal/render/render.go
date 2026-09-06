@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package render turns events into output. It holds the two sinks that ship in
 // v1: Lines, the default human transcript, and NDJSON, what --json writes.
 //

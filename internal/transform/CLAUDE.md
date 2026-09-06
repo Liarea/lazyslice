@@ -11,6 +11,24 @@ propagation, and the residual Bloom filter (`bloom.go`). The masking
 (RowBatch, error)`; `Residual` (`Add`/`MayContain`/`Cells`/`Bytes`) is
 implemented in `bloom.go` per ARCHITECTURE.md §6.
 
+The masker contract this package calls into is `mask`'s, not its own
+(ARCHITECTURE.md §5, ADR-006), and it is fixed:
+
+```go
+Mask(h [32]byte, in mask.Value, c mask.Constraints) (mask.Value, error)
+Domain(c mask.Constraints) int64
+```
+
+`h = HMAC-SHA256(K_cat, mask.Encode(typeTag, canonical(value)))` with
+`K_cat = HKDF-SHA256(K, nil, "lazyslice/v1/"+category, 32)`. This package
+derives nothing: it canonicalises per category, hands `h` and the column's
+`Constraints` to the registered masker, and takes the `Value` back. `h` is the
+only source of variation a generator gets — no clock, no global seed, no input
+length — which is why `Transform` can be pure. `NULL` stays `NULL` and `''`
+stays `''` (§5); a masked enum comes back a valid label; a `Domain()` too
+small for a unique column was already refused at plan, so this package never
+sees that case and must not paper over it with a retry.
+
 **Rules.**
 - `Transform` is pure apart from `Residual.Add` — same key, same
   classification, same input, same output, every time. This is what invariant

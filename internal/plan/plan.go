@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package plan computes the subset: which rows of which tables the snapshot
 // will hold, and why each one is there (ARCHITECTURE.md section 3).
 //

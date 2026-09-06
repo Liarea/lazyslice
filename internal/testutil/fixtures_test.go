@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 //go:build integration
 
 package testutil
@@ -189,14 +191,23 @@ func TestLoadNastyBig(t *testing.T) {
 // by schema.table.column and holding format_type's spelling.
 var nastyColumnTypes = map[string]string{
 	// Types (testdata/README.md traps 13 to 18).
-	"public.people.status":                  "account_status",
-	"public.people.display_name":            "text",
-	"public.people.email_verified":          "boolean",
-	"public.people.ref":                     "text",
-	"public.people.alt_emails":              "text[]",
-	"public.people.contact":                 "jsonb",
-	"public.events.payload":                 "jsonb",
-	"public.tenant_user_sessions.client_ip": "inet",
+	"public.people.status":         "account_status",
+	"public.people.marital_status": "marital_status",
+	"public.people.display_name":   "text",
+	"public.people.email_verified": "boolean",
+	"public.people.ref":            "text",
+	"public.people.alt_emails":     "text[]",
+	"public.people.contact":        "jsonb",
+	"public.events.payload":        "jsonb",
+	// Trap 18, both branches. origin is the type signal with no name to help;
+	// audit_log.client_ip is the name and the type agreeing; adapter is the
+	// macaddr branch of section 4's type list, which had no fixture at all.
+	"public.tenant_user_sessions.origin":  "inet",
+	"public.tenant_user_sessions.adapter": "macaddr",
+	"public.audit_log.client_ip":          "inet",
+	// Trap 23: the unique varchar(n) personal column section 5's worked
+	// example is about. atttypmod is the trap, so the length is asserted.
+	"public.LegacyCustomer.ContactNumber": "character varying(15)",
 	// Keys that are not integers (trap 10). These are the types that decide
 	// which Chunk encoding and which cast the plan uses.
 	"public.sites.site_code":           "text",
@@ -222,16 +233,24 @@ func assertNastyTypes(ctx context.Context, t *testing.T, conn *pgx.Conn) {
 		}
 	}
 
-	// The enum itself, not just a column that uses it.
-	if got := scanString(ctx, t, conn, `
-		SELECT t.typtype FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace
-		WHERE n.nspname = 'public' AND t.typname = 'account_status'`); got != "e" {
-		t.Errorf("public.account_status has typtype %q, want \"e\"", got)
-	}
-	if n := scanInt(ctx, t, conn, `
-		SELECT count(*) FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid
-		WHERE t.typname = 'account_status'`); n != 4 {
-		t.Errorf("public.account_status has %d labels, want 4", n)
+	// The enum types themselves, not just the columns that use them. Both are
+	// needed: account_status is the enum nothing flags (it proves the type
+	// reaches the target and is not sampled as free text), marital_status is
+	// the enum a special-category name rule flags, which is what makes
+	// section 5's "a masked enum emits a valid label" and its small-domain
+	// collapse testable at all (traps 13 and 24).
+	enums := map[string]int{"account_status": 4, "marital_status": 6}
+	for _, name := range sortedKeys(enums) {
+		if got := scanString(ctx, t, conn, `
+			SELECT t.typtype FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace
+			WHERE n.nspname = 'public' AND t.typname = $1`, name); got != "e" {
+			t.Errorf("public.%s has typtype %q, want \"e\"", name, got)
+		}
+		if n := scanInt(ctx, t, conn, `
+			SELECT count(*) FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid
+			WHERE t.typname = $1`, name); n != enums[name] {
+			t.Errorf("public.%s has %d labels, want %d", name, n, enums[name])
+		}
 	}
 
 	// The generated column, which the loader must not name in a COPY column
@@ -250,10 +269,25 @@ func assertNastyTypes(ctx context.Context, t *testing.T, conn *pgx.Conn) {
 		SELECT count(*) FROM public.people WHERE contact #>> '{profile,contact,email}' IS NOT NULL`); n != 5 {
 		t.Errorf("%d of 5 people have contact.profile.contact.email; the JSON depth trap is gone", n)
 	}
-	// The array trap: three of five rows have values, two are NULL.
-	if n := scanInt(ctx, t, conn, `
-		SELECT count(*) FROM public.people WHERE alt_emails IS NOT NULL`); n != 3 {
-		t.Errorf("%d of 5 people have alt_emails, want 3", n)
+	// The array trap (15). Four rows carry an array and one is NULL, and the
+	// three edges the masker's "map each element, keep the length, keep NULL
+	// as NULL" contract is about each have exactly one row: an array with a
+	// NULL element, an empty array, and a NULL column. Without them "same
+	// length" and "NULL preserved" are claims no fixture can fail.
+	arrays := map[string]struct {
+		sql  string
+		want int
+	}{
+		"rows with an array":            {`SELECT count(*) FROM public.people WHERE alt_emails IS NOT NULL`, 4},
+		"rows with a NULL element":      {`SELECT count(*) FROM public.people WHERE array_position(alt_emails, NULL) IS NOT NULL`, 1},
+		"rows with an empty array":      {`SELECT count(*) FROM public.people WHERE alt_emails = '{}'::text[]`, 1},
+		"rows with the column NULL":     {`SELECT count(*) FROM public.people WHERE alt_emails IS NULL`, 1},
+		"rows with more than one value": {`SELECT count(*) FROM public.people WHERE array_length(alt_emails, 1) > 1`, 2},
+	}
+	for _, what := range sortedKeys(arrays) {
+		if n := scanInt(ctx, t, conn, arrays[what].sql); n != arrays[what].want {
+			t.Errorf("people.alt_emails: %s is %d, want %d (trap 15)", what, n, arrays[what].want)
+		}
 	}
 }
 
@@ -340,9 +374,83 @@ func assertNastyStructure(ctx context.Context, t *testing.T, conn *pgx.Conn) {
 		t.Error(`public."LegacyCustomer"."EmailAddress" is gone; the quoting trap is not a trap`)
 	}
 
+	assertEveryTableReachesPeople(ctx, t, conn)
+	assertMaskedColumnDomains(ctx, t, conn)
+
 	// Traps 11 and 12: the two rungs of the identity ladder below a primary
 	// key, and the table where there is no rung left and the run must refuse.
 	assertIdentityLadder(ctx, t, conn)
+}
+
+// assertEveryTableReachesPeople is why nasty.sql's traps are traps.
+//
+// public.people is the root every invariant run slices from. A table with no
+// foreign-key path to it is unreachable, so the planner emits
+// Step{t, SchemaOnly} for it: no chunked read, no COPY, no masking, no
+// residual scan, zero rows in the target. Its traps then cost nothing to pass.
+// That is what had happened to tenant_users, organisations, attachments and
+// public."LegacyCustomer" — eight of twenty-one tables, carrying traps 2, 4,
+// 5, 6, 9 and 18 between them.
+//
+// The reachability is computed the way the planner walks it, child to parent
+// over pg_constraint, and the assertion is over every table rather than over a
+// list, so a table added later has to connect itself or say here why not.
+func assertEveryTableReachesPeople(ctx context.Context, t *testing.T, conn *pgx.Conn) {
+	t.Helper()
+
+	stranded := scanStrings(ctx, t, conn, `
+		WITH RECURSIVE reaches AS (
+		    SELECT 'public.people'::regclass::oid AS oid
+		  UNION
+		    SELECT con.conrelid
+		    FROM pg_constraint con
+		    JOIN reaches r ON con.confrelid = r.oid
+		    WHERE con.contype = 'f'
+		)
+		SELECT n.nspname || '.' || c.relname
+		FROM pg_class c
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE c.relkind IN ('r', 'p')
+		  AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+		  AND n.nspname NOT LIKE 'pg_toast%'
+		  AND c.oid NOT IN (SELECT oid FROM reaches)
+		ORDER BY 1`)
+	if len(stranded) > 0 {
+		t.Errorf("%d table(s) in nasty.sql have no foreign-key path to public.people, so a run rooted "+
+			"there makes them SchemaOnly and every trap on them is vacuous: %s",
+			len(stranded), strings.Join(stranded, ", "))
+	}
+}
+
+// assertMaskedColumnDomains covers the ARCHITECTURE.md section 5 machinery
+// that had no fixture anywhere in testdata/: a unique index on a column that
+// will be masked, a varchar(n) personal column, and a CHECK the masker has to
+// keep satisfying. Without all three, d_required = n²/2ε, the switch to a
+// larger generator, the exit-12 refusal and "preserve what the application
+// checks" are untested claims. The three unique indexes on audit_log do not
+// count: entry_uid is never masked, and they exist for trap 11's ladder.
+func assertMaskedColumnDomains(ctx context.Context, t *testing.T, conn *pgx.Conn) {
+	t.Helper()
+
+	unique := scanStrings(ctx, t, conn, `
+		SELECT ci.relname
+		FROM pg_index ix
+		JOIN pg_class ci ON ci.oid = ix.indexrelid
+		WHERE ix.indrelid = 'public."LegacyCustomer"'::regclass AND ix.indisunique
+		ORDER BY ci.relname`)
+	want := []string{"LegacyCustomer_ContactNumber_key", "LegacyCustomer_EmailAddress_key", "LegacyCustomer_pkey"}
+	if strings.Join(unique, ",") != strings.Join(want, ",") {
+		t.Errorf(`public."LegacyCustomer" unique indexes are %v, want %v: traps 23 and 24 are the only `+
+			`fixture for a unique index on a masked column`, unique, want)
+	}
+
+	if n := scanInt(ctx, t, conn, `
+		SELECT count(*) FROM pg_constraint
+		WHERE contype = 'c' AND conrelid = 'public."LegacyCustomer"'::regclass
+		  AND conname = 'LegacyCustomer_EmailAddress_check'`); n != 1 {
+		t.Error(`the CHECK on public."LegacyCustomer"."EmailAddress" is gone; ` +
+			`section 5's "preserve what the application checks" has no fixture without it`)
+	}
 }
 
 // assertIdentityLadder covers the two rungs of ARCHITECTURE.md section 3.4

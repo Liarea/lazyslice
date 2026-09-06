@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package invariants is the black-box suite. It runs the built lazyslice
 // binary against a real source and a real target and asserts, from outside the
 // process, the six properties ARCHITECTURE.md says a snapshot has:

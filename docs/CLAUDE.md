@@ -4,8 +4,10 @@ Decisions, plans, and generated references. `adr/` holds the ADRs;
 `BUILD_PLAN.md`, `OPERATING_MODEL.md`, `RUNBOOK.md` are hand-written;
 `FLAGS.md`, `ERRORS.md`, `KEYBINDINGS.md` (not yet generated) are `tools/`
 output and must never be hand-edited; `prompting/` holds per-model cheat
-sheets; `launch/` is currently empty (reserved for a future launch-readiness
-doc, ADR-007's "tool not company" territory).
+sheets. `launch/` is an empty directory left over from the phase 0 scaffold;
+nothing has been decided about what goes in it, and no document in this
+repository assigns it a purpose. Do not write one into a CLAUDE.md — either
+delete the directory or land an ADR that says what it is for.
 
 **Contract.** `docs/adr/README.md` is this directory's own format spec for
 ADRs (Status/Context/Options/Decision/Consequences/Reversal condition,

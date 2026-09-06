@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 //go:build integration
 
 package invariants
@@ -44,10 +46,15 @@ var (
 const minPhoneDigits = 7
 
 // cell is one value of one column of one row, as text.
+//
+// Column is the column it belongs to, named by the relation §3.3 makes the
+// step: for a row that lives in a partition leaf, the partitioned root. The
+// leaf it was physically read from is kept in ReadFrom, so a message can name
+// the relation a person would go and look at.
 type cell struct {
-	Table  tableRef
-	Column string
-	Value  string
+	Column   columnRef
+	ReadFrom tableRef
+	Value    string
 }
 
 // scanCells reads every non-null value of every column of every ordinary table
@@ -56,8 +63,16 @@ type cell struct {
 // It is a full scan on purpose. The target is small by construction, and the
 // two fixtures together are about 50,000 rows, so the honest thing is to look
 // at all of them rather than to sample and call the result an invariant.
+//
+// Rows read from a partition leaf are attributed to the partitioned root
+// (partitionRoots), because that is the relation the plan, the emitted yml and
+// the target all name (§3.3). Without it nasty's public.events.payload — the
+// jsonb of traps 7 and 16b — matches nothing on either side of any comparison
+// in I2 and is exempted from all of them in silence.
 func scanCells(ctx context.Context, t *testing.T, conn *pgx.Conn) []cell {
 	t.Helper()
+
+	roots := partitionRoots(ctx, t, conn)
 
 	var out []cell
 	for _, ref := range dataTables(ctx, t, conn) {
@@ -65,14 +80,21 @@ func scanCells(ctx context.Context, t *testing.T, conn *pgx.Conn) []cell {
 		if len(cols) == 0 {
 			continue
 		}
-		out = append(out, scanTableCells(ctx, t, conn, ref, cols)...)
+		named := ref
+		if root, ok := roots[ref]; ok {
+			named = root
+		}
+		out = append(out, scanTableCells(ctx, t, conn, ref, named, cols)...)
 	}
 	return out
 }
 
 // scanTableCells reads one table, every column cast to text so that arrays,
-// jsonb, inet and enums arrive in the form they are written in.
-func scanTableCells(ctx context.Context, t *testing.T, conn *pgx.Conn, ref tableRef, cols []string) []cell {
+// jsonb, inet and enums arrive in the form they are written in. The rows are
+// read from ref and attributed to named, which differ for a partition leaf.
+func scanTableCells(
+	ctx context.Context, t *testing.T, conn *pgx.Conn, ref, named tableRef, cols []string,
+) []cell {
 	t.Helper()
 
 	projected := make([]string, len(cols))
@@ -101,7 +123,11 @@ func scanTableCells(ctx context.Context, t *testing.T, conn *pgx.Conn, ref table
 			if v == nil || *v == "" {
 				continue
 			}
-			out = append(out, cell{Table: ref, Column: cols[i], Value: *v})
+			out = append(out, cell{
+				Column:   columnRef{Table: named, Column: cols[i]},
+				ReadFrom: ref,
+				Value:    *v,
+			})
 		}
 	}
 	if rows.Err() != nil {
@@ -125,7 +151,7 @@ func collectPersonalLiterals(cells []cell) personalLiterals {
 		for _, m := range internationalPhonePattern.FindAllString(c.Value, -1) {
 			found.add(strings.TrimSpace(m), c)
 		}
-		if phoneColumnPattern.MatchString(c.Column) && digitCount(c.Value) >= minPhoneDigits {
+		if phoneColumnPattern.MatchString(c.Column.Column) && digitCount(c.Value) >= minPhoneDigits {
 			found.add(strings.TrimSpace(c.Value), c)
 		}
 	}
@@ -139,7 +165,15 @@ func (p personalLiterals) add(literal string, from cell) {
 	if _, seen := p[literal]; seen {
 		return
 	}
-	p[literal] = from.Table.String() + "." + from.Column
+	// The column is named as the plan names it — the partitioned root, never
+	// the leaf (§3.3) — with the leaf appended when the two differ, so that a
+	// message says both what the run was supposed to mask and where to go and
+	// look at the row.
+	where := from.Column.String()
+	if from.ReadFrom != from.Column.Table {
+		where += " (in partition " + from.ReadFrom.String() + ")"
+	}
+	p[literal] = where
 }
 
 func digitCount(s string) int {
@@ -154,8 +188,7 @@ func digitCount(s string) int {
 
 // leak is one source literal found again in the target.
 type leak struct {
-	Table   tableRef
-	Column  string
+	Column  columnRef
 	Source  string // "schema.table.column" the literal was found in on the source
 	Literal string
 }
@@ -174,7 +207,7 @@ func findLeaks(targetCells []cell, source personalLiterals) []leak {
 	for _, c := range targetCells {
 		for literal, from := range source {
 			if strings.Contains(c.Value, literal) {
-				out = append(out, leak{Table: c.Table, Column: c.Column, Source: from, Literal: literal})
+				out = append(out, leak{Column: c.Column, Source: from, Literal: literal})
 			}
 		}
 	}

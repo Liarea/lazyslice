@@ -19,13 +19,15 @@ From Go, `internal/testutil.LoadPagila(ctx, url)` and
 `internal/testutil.LoadNasty(ctx, url, big)`.
 `internal/testutil/fixtures_test.go` loads both under `make integration` and
 asserts, in two passes: the table list and every row count below, and then the
-traps themselves out of the catalogue — the enum, the generated column, the
-identity columns and their sequence positions, the partitioning, the two
+traps themselves out of the catalogue — the two enums, the generated column,
+the identity columns and their sequence positions, the partitioning, the two
 composite foreign keys and their match types, the unique-index and no-identity
-tables, and the key column types. Strip `GENERATED ALWAYS` off a column or
-un-partition a table and that test fails, rather than a phase 4 test failing
-later and saying something else. Change a fixture and change that test with it,
-deliberately, in the same commit as this file.
+tables, the key column types, the array's four edges, the unique indexes and
+`CHECK` on the masked columns, and that **every** table has a foreign-key path
+to `public.people`. Strip `GENERATED ALWAYS` off a column, un-partition a table
+or disconnect a component and that test fails, rather than a phase 4 test
+failing later and saying something else. Change a fixture and change that test
+with it, deliberately, in the same commit as this file.
 
 ---
 
@@ -118,6 +120,25 @@ the partitioned root, so its count is the sum of its seven leaves.
 21 tables, 5 people, and one trap per thing that goes wrong. It needs no
 extension and no superuser, and it loads unchanged on PostgreSQL 14, 16 and 18.
 
+**Every table has a foreign-key path to `public.people`, and that is a
+requirement rather than an accident.** `public.people` is the root every
+invariant run slices from, and a table with no path to it is unreachable, so
+ARCHITECTURE.md §3 emits `Step{t, SchemaOnly}` for it: no chunked read, no
+`COPY`, no masking, no residual scan, zero rows in the target. Its traps then
+cost nothing to pass. Eight tables were in that state until the edges named in
+traps 2, 4 and 6 and the quoted one in trap 9 were added, and
+`assertEveryTableReachesPeople` in `internal/testutil/fixtures_test.go` is what
+stops it happening again. A table added here connects itself or is not a trap.
+
+**Every run over this fixture carries `--skip-table public.click_stream`.**
+Trap 12's table has no row identity at all, which is its point, and §3's
+identity ladder ends in exit 12 for it. It is a child of `public.people`
+reached at depth 1, so the flag changes the slice rather than merely tidying
+it, and it is child-only, which is the condition §3.6 puts on the flag. Read
+trap 12 before assuming the refusal happens after `--skip-table` is applied; as
+§3's pseudo-code is written today it happens before, and nothing else in the
+file can run without the flag.
+
 | Table | Rows | | Table | Rows |
 |---|---:|---|---|---:|
 | `billing.invoices` | 3 | | `public.orders` | 5 |
@@ -140,8 +161,9 @@ extension and no superuser, and it loads unchanged on PostgreSQL 14, 16 and 18.
 
 A walk with no visited set never terminates here. lazyslice must expand a
 manager chain once per row, stop, and report `people` once in the plan rather
-than once per level. `--take 1` rooted at Katherine Johnson (90021) pulls Grace
-Hopper (90007) and then Ada Lovelace (90000) as parents, and stops.
+than once per level. `--root public.people --where person_id=90021 --take 1`
+(Katherine Johnson) pulls Grace Hopper (90007) and then Ada Lovelace (90000) as
+parents, and stops. `--root` names a table; the row is chosen by `--where`.
 
 **2. Three-table foreign-key cycle** — `organisations -> teams -> projects ->
 organisations`.
@@ -151,6 +173,12 @@ exactly why ARCHITECTURE.md §11.1 loads data first and adds foreign keys after.
 The planner must terminate; the loader must succeed; and the target must end
 with all three constraints present and valid. `organisations.primary_team_id` is
 `NOT NULL`, so "just leave the cycle-closing column null" is not an escape.
+
+`organisations.founded_by` is `NOT NULL REFERENCES public.people`, and it is
+what makes any of the above happen at all: the cycle is pulled as a child of
+the root, so the loader has rows to fail on. Without that edge the three tables
+are `SchemaOnly`, the load is of zero rows, and "the loader must succeed" is
+true of a loader that does nothing. The cycle itself is untouched by it.
 
 **3. A second cycle, of length two, that is also a parent-and-child pair** —
 `people.preferred_order_id -> orders` and `orders.person_id -> people`.
@@ -171,6 +199,13 @@ Key sets here are pairs. Every chunked read, every `unnest` and every emitted
 `where` has to carry both columns in the declared order. A one-column shortcut
 anywhere gives a slice that is wrong rather than an error: tenant 1 user 1 and
 tenant 2 user 1 are different people, and `tenant_users` contains both.
+
+`tenant_users.owner_person_id` is `NOT NULL REFERENCES public.people` and is
+what puts this component in the slice at all; before it, traps 4, 5 and 18 were
+exercised by nothing but I6's row count on a `SchemaOnly` table. It is also the
+one outgoing edge `tenant_users` has, which is why I6 can still root at it: its
+only incoming edges are from its own two children, so nothing reaches it as a
+parent and it holds exactly `--take` rows.
 
 `tenant_user_sessions.user_id` is **nullable**, and session 5044 has a tenant
 and no user. That row's parent edge must not be followed: the constraint is
@@ -204,11 +239,22 @@ is the line
 polymorphic pair detected, not followed: no constraint
 ```
 
-and the rows stay out of the slice. research/COMPLAINTS.md FK-10 is the
-silently empty slice this trap exists to make impossible. Attachment 839 points
-at `people` 99999, which does not exist, so an implementation that does follow
-the pair one day still has to survive a dangling owner rather than fail the
-load.
+and **no row is selected because of the pair**. That is the correct wording,
+and an earlier version of this entry said "the rows stay out of the slice",
+which was both weaker and wrong: `attachments.uploaded_by_person_id` is a real
+declared edge into `public.people`, so three of the four rows are in the slice,
+pulled through the constraint PostgreSQL does know about. That makes the trap
+stronger. The row is present, the polymorphic parent is still not followed,
+`owner_type = 'projects'` on attachment 826 still selects no `projects` row
+through that pair, and the tool still has to say so. Without the declared edge
+the whole table was `SchemaOnly` and the required line was never printed by
+anything.
+
+research/COMPLAINTS.md FK-10 is the silently empty slice this trap exists to
+make impossible. Attachment 839 points at `people` 99999, which does not exist,
+and its `uploaded_by_person_id` is `NULL`, so the dangling polymorphic owner
+sits on the one row the declared edge does not reach: an implementation that
+does follow the pair one day still has to survive it rather than fail the load.
 
 **7. Partitioned table with two partitions** — `events`, with `events_2024`
 (5 rows) and `events_2025` (2 rows).
@@ -230,13 +276,23 @@ way through, the edge carries the schema of both ends, and the target must have
 schema `billing` created before the table that lives in it.
 
 **9. Quoted, mixed-case identifier** — `public."LegacyCustomer"`, with columns
-`"CustomerID"`, `"EmailAddress"`, `"MobileNumber"`, `"Notes"`.
+`"CustomerID"`, `"MigratedFromPersonID"`, `"EmailAddress"`, `"ContactNumber"`,
+`"MobileNumber"`, `"Notes"`.
 
 These objects exist only when quoted. Every statement lazyslice generates — the
 count probe, the chunked read, the residual scan, the `COPY` target, the
 emitted `lazyslice.yml` — must quote them. An identifier concatenated into SQL
 without quoting fails here with `42P01` rather than quietly reading something
 else, which is the point: this trap turns a class of silent bug into a loud one.
+
+`"MigratedFromPersonID" integer REFERENCES public.people (person_id)` is what
+makes the claim above testable. No table in the `people` component has a quoted
+column of any kind, so before this edge existed the table was `SchemaOnly` and
+not one of those five statements was ever generated for it. The column is
+`integer` against a `bigint` primary key, which PostgreSQL allows, so a
+widening key comparison is in the fixture too — and the `COPY` column list of a
+loaded `"LegacyCustomer"` now contains quoted identifiers, which is where an
+unquoted concatenation fails.
 
 **10. Keys that are not integers** — `sites.site_code text`,
 `devices.device_id uuid`, and `device_readings (device_id uuid, taken_at
@@ -287,14 +343,66 @@ exit 12, naming public.click_stream and --key public.click_stream=col,col
 — because a guessed identity produces a slice whose rows are silently the wrong
 ones. A regression that makes the planner guess shows up here and nowhere else.
 
+**Every other run over `nasty.sql` carries `--skip-table public.click_stream`,
+and it has to.** `click_stream.person_id` references `public.people`, so it is
+a **child of the root, reached at depth 1** by every run this fixture is
+sliced by — the flag is what keeps its rows out of the slice, not a formality
+for a table nobody selects. It is also **child-only**: nothing references
+`click_stream`, so no selected row needs it as a parent, and that is the
+condition §3.6 puts on the flag ("`--skip-table TABLE` … drops a child-only
+table to `SchemaOnly` on request … it cannot skip a parent table"). Both halves
+matter: the first says the flag changes the slice, the second says the flag is
+allowed at all.
+
+**This is where the fixture and ARCHITECTURE.md §3 do not agree, and the
+disagreement is §3's.** §3's pseudo-code computes `identity[t]` over
+`tables := sort(schema.Tables ...)` — every table in the catalogue — and
+refuses on the first `nil`, *before* `unreadable(req, priv, root)`, which is
+where §3.6 applies `--skip-table`. Read literally, `click_stream`'s identity is
+computed and refused whatever flags are passed, and every run over this fixture
+exits 12 at plan; `internal/invariants/harness_test.go` depends on the other
+reading and all six invariants are unrunnable on this fixture without it.
+**§3 has to be corrected before phase 4 implements it**: the identity ladder
+belongs after `req.Skipped` is applied, and the text has to say that
+`--skip-table` clears an exit-12 identity refusal for a child-only table. Note
+what the correction is *not*: reachability is no part of it here.
+`click_stream` **is** reachable — a depth-1 child of the root — so ordering the
+ladder after a reachability or `SchemaOnly` determination would leave the
+refusal exactly where it is. Only the flag removes it. Until §3 says so, this
+entry is the record of the conflict, and it is a gate 4 blocker rather than a
+documentation nicety.
+
+**The documented bypass, which must not be one.** §3.4 puts `--key` on the
+first rung and says an explicit key always wins over a probed guess, so
+`--key public.click_stream=person_id,url,clicked_at` is accepted today — and
+the first two rows of this table are identical in every column, so that key
+identifies two rows at once and produces exactly the silently-wrong-rows slice
+this trap exists to prevent. An explicit key that is not unique has to be
+probed and refused like any other candidate, with the same exit 12. Trap 12 has
+a hole until it is.
+
 #### Types
 
-**13. Enum type** — `public.account_status`, used by `people.status`.
+**13. Enum type, not flagged** — `public.account_status`, used by
+`people.status`.
 
-The type must exist in the target before the table that uses it. The classifier
-must not treat it as free text. A masker that replaced a value with an
-arbitrary string would fail the load with `22P02`, so the correct behaviour for
-an enum is to leave it alone unless the category says otherwise.
+The type must exist in the target before the table that uses it, and the
+classifier must not sample it as free text. **An enum is classified like any
+other column**: ARCHITECTURE.md §4 is explicit that "there is no exemption by
+type: an enum column, a partition-key column and a `varchar(2)` column are
+classified like any other, and a masked enum emits a valid label (§5). The
+earlier draft's enum exemption was a copy-as-is default by type and is
+removed." An earlier version of this entry said the opposite — "leave it alone
+unless the category says otherwise" — which was the removed exemption in
+disguise.
+
+What this column proves is therefore narrow, and that is the point of splitting
+it from trap 24. `status` takes no name hit and no validator hit, so it
+classifies at `none` and is copied. It proves the type reaches the target
+before the table, and that nothing treats an enum as free text. It proves
+nothing at all about masking an enum, because it is never masked. The other
+half is trap 24, `public.marital_status` on `people.marital_status`, whose name
+a special-category rule does hit.
 
 **14. Generated column** — `people.display_name`, `GENERATED ALWAYS AS
 (given_name || ' ' || family_name) STORED`.
@@ -310,11 +418,31 @@ mask.
 
 An array is not a scalar and not free text. The classifier must reach the
 element type, and the masker must map each element and return an array of the
-same length, with `NULL` preserved as `NULL` — three of the five rows have
-values, two are `NULL`.
+same length and dimensions, with a `NULL` element preserved as `NULL` and an
+empty array left empty. The five rows cover every edge exactly once:
 
-**16. JSONB with personal data nested two levels deep** — `people.contact` and
-`events.payload`.
+| Row | Value | What it is for |
+|---|---|---|
+| Ada 90000 | two addresses | the ordinary case, and "same length" |
+| Grace 90007 | one address | a one-element array |
+| Alan 90014 | `ARRAY[NULL, 'a.turing@example.org']` | a `NULL` **element**, which must stay `NULL` |
+| Katherine 90021 | `NULL` | a `NULL` **column**, which is a different thing |
+| Edsger 90028 | `'{}'` | an empty array, which must stay empty |
+
+**ARCHITECTURE.md specifies none of this, and that is a gap in §4 and §5, not
+in the fixture.** §4's signal list is "Postgres types (`inet`, `macaddr`,
+`citext`, domains, `jsonb`)" with no array case, and §5's masker signature and
+generator rules never mention arrays; `text[]` appears in §2 only as the
+key-chunk encoding, which is an unrelated use. So the paragraph above states no
+required behaviour: it describes what the fixture contains and what a rule
+would have to cover (element type, length, dimensions, `NULL` elements, the
+empty array). **Deciding it is an ARCHITECTURE.md §4/§5 edit and a gate 4
+blocker**, not a fixture question — this README is not where the rule gets
+written. Until §4 and §5 say something, `people.alt_emails` is held only by
+I2's grep, which finds a source address wherever it survives.
+
+**16a. JSONB with personal data nested two levels deep, masked leaf by leaf**
+— `people.contact`.
 
 ```json
 {"profile": {"contact": {"email": "ada.lovelace@example.com",
@@ -323,12 +451,34 @@ values, two are `NULL`.
 ```
 
 The email and the phone are at `profile.contact.email` and
-`profile.contact.phone`, below the one level of JSON key collection the v1 rule
-pack reaches (ARCHITECTURE.md §14). So the required v1 behaviour is not "find
-them": it is that the column is classified as carrying personal data on the
-strength of its sampled values, is masked as a whole, and that the residual scan
-over the target finds no address from the source in it. Silently shipping the
-document unchanged is the failure this trap catches.
+`profile.contact.phone`. At Gate 4 the rule pack collects **no** JSON keys at
+all — §14 puts one-level key collection in phase 5 — so the required v1
+behaviour is not "find them by key": it is that the column is classified as
+carrying personal data on the strength of its sampled values, that every scalar
+leaf is replaced (§4: string leaves through the category masker chosen by
+running the leaf's key name through the name rules, defaulting to `free_text`;
+numbers and booleans re-derived from `h`; `null` stays `null`; structure and key
+names kept), and that the residual scan over the target finds no address from
+the source in it. Each masked leaf is a separate Bloom-filter entry keyed by its
+JSON path (§6 item 1), which is what makes one surviving leaf findable inside a
+document that otherwise changed. Silently shipping the document unchanged is
+the failure this trap catches.
+
+**16b. JSONB in an event table, collapsed to `{}`** — `events.payload`.
+
+Different required behaviour, from the same §4 paragraph: "Wildly varying keys,
+or any `jsonb` in a table named like `audit|log|history|event`, replace the
+document with `{}`." `public.events` matches `event`, so `payload` is **not**
+walked leaf by leaf: the document is replaced with `{}`, no per-leaf masker
+runs, and no per-leaf filter entries exist for it. A run that masks these
+payloads leaf-wise instead has ignored the rule; a run that ships them
+unchanged has ignored the section. Both are bugs, and they are different bugs,
+which is why this is its own entry — an earlier version of trap 16 named both
+columns and stated only the leaf behaviour, which would have had a phase 4
+implementer assert leaf masking on the column the design collapses.
+
+The `actor.contact.email` values in these payloads are the same addresses as
+`people.contact`'s, so the I2 grep covers both columns whichever path is taken.
 
 **17. Free text with full names in it** — `people.notes` and
 `public."LegacyCustomer"."Notes"`.
@@ -340,20 +490,70 @@ as free text, and the residual scan must find no source name or phone in the
 target — including names that belong to a *different* row than the one the note
 is on, which is why the notes cross-reference each other.
 
-**18. `inet`** — `tenant_user_sessions.client_ip`, IPv4 and IPv6.
+**18. Type signals, with and without a name** — `tenant_user_sessions.origin`
+(`inet`), `tenant_user_sessions.adapter` (`macaddr`), `audit_log.client_ip`
+(`inet`).
 
-A type signal on its own: the name says nothing. `2001:db8::1` is in there so
-that a masker that only understands dotted quads fails visibly.
+Three columns, because §4 lists three separate things and an earlier version of
+this entry conflated two of them. It named `tenant_user_sessions.client_ip` as
+"a type signal on its own: the name says nothing", which was wrong: `client_ip`
+is as strong a name hit as any column in the file, and under §4 it reaches
+`certain` on the name plus `net.ParseIP` agreeing. The branch the entry claimed
+to isolate had no fixture at all.
+
+| Column | Type | Signal it proves |
+|---|---|---|
+| `tenant_user_sessions.origin` | `inet` | **Type alone.** No name rule in any language recognises `origin`, so only the type plus `net.ParseIP` over the samples can classify it — §4's `likely`, "values look like X" |
+| `audit_log.client_ip` | `inet` | **Name and type agreeing**, which §4 scores `certain`. A run that classifies this and `origin` alike has collapsed two signals into one |
+| `tenant_user_sessions.adapter` | `macaddr` | `macaddr` is named in §4's v1 type-signal list and had no column anywhere in `testdata/`. The name says nothing, so again the type is the only signal |
+
+`2001:db8::1` is in `origin` and `2001:db8::7` in `client_ip`, so a masker that
+only understands dotted quads fails visibly on either.
+
+**`citext` is deliberately absent**, and this line is here so that its absence
+is a decision rather than an oversight. §4 names it as a v1 type signal, but it
+needs `CREATE EXTENSION citext`, and `nasty.sql` takes no extensions so that it
+loads on 14, 16 and 18 with no superuser. The nearest cover is pagila's two
+domains (`public.year`, `public."bıgınt"`), which exercise the "resolve the
+underlying type of a domain" half of the same rule. A `citext` fixture needs a
+third file with an extension in it, and that is a phase 5 question.
 
 #### Names that lie
 
 **19. False positive: `people.email_verified boolean`.**
 
 The name matches every email rule anyone would write. The type says it cannot
-be an address, and the values are `true`/`false`. lazyslice must **not** mask
-it: masking a boolean produces either a load failure or a silently inverted
-flag, and either way the reason line would have said "email" about a column that
-never held one. The type check has to beat the name check here.
+be an address, and the values are `true`/`false`. Masking it produces either a
+load failure (`22P02`, an `email` masker's output written to a `boolean`) or a
+silently inverted flag, and either way the reason line would have said "email"
+about a column that never held one.
+
+**ARCHITECTURE.md as written masks it, and that is the bug this entry now
+records.** §4 says "Name hit alone → `possible`", then "after the
+neighbouring-column rule and FK propagation have run, `possible` and above is
+masked", then "there is no exemption by type", then "the failure mode is mask
+more, never less". Under those four sentences `email_verified` takes a name
+hit, lands at `possible`, and is masked with the `email` category masker. The
+neighbouring-column rule makes it worse rather than better: `people` carries
+`ref` at `likely` and `notes` as free text, so every `low` column in the table
+is raised to `possible` anyway. The word "boolean" appears in ARCHITECTURE.md
+only inside the JSON-leaf rule.
+
+**§4 has to decide this, and this README cannot.** The question it has to
+answer is whether a category declares the PostgreSQL types its maskers accept,
+so that a name hit on an incompatible type — an `email` or `phone` rule on
+`boolean`, `date` or an integer type — is recorded at `low` with a reason
+naming the type conflict and is never raised to `possible` by the
+neighbouring-column rule. That would be a type *gate on the name signal*, and
+not the copy-as-is-by-type exemption §4 removed for enums: a column whose
+**values** look like addresses would still be masked whatever it is called,
+which is trap 20.
+
+**Until §4 answers it this trap states no required behaviour, and it is a gate
+4 blocker** — either §4 gains the gate, or the architecture means this column
+to be masked and this entry and the `boolean` column both have to go. What the
+fixture contributes either way is the column: a name that every email rule hits
+on a type that cannot hold an address.
 
 **20. False negative: `people.ref text`, holding email addresses.**
 
@@ -404,11 +604,29 @@ Empty by default. It is filled only when the file is loaded with `-v big=1`
 seconds and a couple of hundred megabytes and every test that is not about
 streaming would pay for both.
 
-Every row hangs off the lowest `person_id`, so a slice rooted at Ada Lovelace
-pulls all two million and a slice rooted at anyone else pulls none. That is the
-fixture for the claim that extract streams rather than buffers: resident memory
-must not grow with the row count, the progress line must move, and the run must
-not hold two million rows anywhere at once.
+Every row hangs off the lowest `person_id`, so a slice that selects Ada
+Lovelace can reach all two million and a slice that selects anyone else reaches
+none. That is the fixture for the claim that extract streams rather than
+buffers: resident memory must not grow with the row count, the progress line
+must move, and the run must not hold two million rows anywhere at once.
+
+**The flags are part of the trap, and they were missing from this entry.**
+Under the defaults §3 states — `--take 500`, per-parent-key cap `100`,
+`--depth 3`, `--row-budget 1000000`, `--memory-budget 256MiB` — `stream_rows`
+is a child of `people` and its step is capped at 100 rows per parent key, so a
+default run pulls 100 rows, not 2,000,000. Even with the cap raised, the walk
+hits `checkBudgets` and exits 11 naming `public.stream_rows` long before two
+million. The streaming run is therefore:
+
+```
+lazyslice --root public.people --where person_id=90000 --take 1 \
+          --cap 2000000 --row-budget 3000000 --memory-budget <what the key set needs>
+```
+
+and the default `--cap 100` and `--row-budget 1000000` are exactly what make
+every other test over this fixture cheap. A budget refusal here is the correct
+behaviour for the defaults and a bug for the run above; the entry has to name
+which one it is talking about, and this one is talking about the run above.
 
 The gate is a psql conditional at the very end of the file:
 
@@ -431,3 +649,58 @@ fixture that grows a `\connect` fails loudly instead of loading half of itself.
 `TestLoadNastyBig` runs the `big` path and asserts both the 2,000,000 rows and
 the sequence position, because a gate stuck off is indistinguishable from a
 working one if only the off state is ever tested.
+
+#### Masking domains
+
+**23. A unique index, a `varchar(n)` and a `CHECK`, all on masked columns** —
+`public."LegacyCustomer"."EmailAddress"` and `"ContactNumber"`.
+
+The whole of ARCHITECTURE.md §5's domain machinery had no fixture anywhere in
+`testdata/` before these. No masked column carried a unique index; no column in
+the file was `varchar(n)`; no column had a `CHECK`. The three unique indexes
+that existed were all on `audit_log.entry_uid`, which is never masked and which
+is there for trap 11's identity ladder. Pagila covers `varchar(n)` incidentally
+and has no unique index on a personal column either. So `d_required = n²/2ε`,
+the switch to a larger generator, the exit-12 refusal and "preserve what the
+application checks" were four untested claims.
+
+| Object | §5 sentence it proves |
+|---|---|
+| `CREATE UNIQUE INDEX "LegacyCustomer_EmailAddress_key" ON ... ("EmailAddress")` | "The plan picks, within the column's category, the registered generator with the largest `Domain()` that fits the column; the explanation says uniqueness chose it (`email` → hash-derived suffix, `alice.k7v2x@example.com`, domain ≥ 2⁶⁴)" |
+| `"ContactNumber" character varying(15)` with `CREATE UNIQUE INDEX "LegacyCustomer_ContactNumber_key"` | §5's own worked example, word for word: "A unique `varchar(15)` phone column". `phone` has `Domain()` ≈ 8 × 10⁴ and would collide at load with a `PgError` whose `Detail` we drop, so the plan must choose `phone_unique` — saying that libphonenumber validity is not preserved — or refuse the column by name at plan with exit 12 printing `d`, `d_required` and the three escapes. Choosing `phone` and hoping is the bug |
+| `CONSTRAINT "LegacyCustomer_EmailAddress_check" CHECK ("EmailAddress" LIKE '%@%.%')` | "Preserve what the application checks: `varchar(n)` length, `CHECK` shapes we can parse". A masked address in `example.com` satisfies it; a filler string does not, and the load fails with `23514` |
+
+`"ContactNumber"` is `NULL` on customer 44, because a unique index permits
+repeated `NULL`s and §5's "`NULL` stays `NULL`" has to hold under a
+uniqueness-driven generator too.
+
+Which of the two outcomes `"ContactNumber"` should produce depends on `n`, the
+planned row count of the table, and `n` here is at most 3. The entry does not
+prescribe one: it prescribes that the plan says which, prints the numbers, and
+never silently picks a generator whose `Domain()` is below `d_required`.
+
+**24. An enum the classifier flags** — `public.marital_status`, used by
+`people.marital_status`.
+
+Trap 13's `account_status` is copied, so it proves nothing about masking an
+enum. This one is masked, and it is the only fixture for three separate §5
+sentences:
+
+- **"A masked enum emits a valid label."** The column's type has six labels and
+  nothing else is insertable; a masker that emitted an arbitrary string fails
+  the load with `22P02`. Before this column existed, a masker that did exactly
+  that would have failed no test in this repository.
+- **`small_domain:`.** Six admissible values is far below `2 × distinct(samples)`
+  for any real column, so §5 requires the column to be listed under
+  `small_domain:` in the yml and in the plan, and under "what the green tick
+  does not prove".
+- **The `special_category` collapse.** `marital_status` is a special category by
+  name, which §4 scores `certain` by name alone. §5 says substitution over a
+  small domain offers no protection for a special category, so the masker
+  collapses the column to one fixed label — the first enum label, or `NULL`
+  when nullable — and the explanation says `collapsed: substitution over 6
+  values is not a mask`. The column is `NOT NULL`, so the collapse must be to a
+  label.
+
+The five rows use five different labels, so a collapse is visible as five
+identical values and a substitution is visible as five different ones.

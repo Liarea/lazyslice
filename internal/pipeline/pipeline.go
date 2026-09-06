@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package pipeline holds the stage interfaces and the types that cross between
 // stages (ARCHITECTURE.md section 2). It contains no implementations: the
 // engine-facing ones live in internal/pg, and classify, plan and transform are

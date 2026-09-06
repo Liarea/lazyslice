@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package extract streams the planned rows out of the source snapshot into a
 // channel of pipeline.RowBatch.
 //

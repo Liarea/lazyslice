@@ -24,8 +24,10 @@ Candidate, keyFP) (*Config, error)`, plus `Write(path, *Config) error` and
   the check itself runs in classify).
 - Written on success; on `--plan` only when `--config PATH` is given
   explicitly, and then with `plan_only: true` and no `snapshot_id`.
-- Uses `goccy/go-yaml`, not the standard library, specifically because the
-  emitted header comments must survive round-trips (ARCHITECTURE.md §13).
+- Uses `goccy/go-yaml` (ARCHITECTURE.md §13), because the emitted header
+  comments must survive a write-read-write round trip and the alternatives do
+  not preserve them. Go has no YAML in its standard library, so the choice is
+  between third-party parsers, not between one and the standard library.
 
 **Test.** `go test ./internal/emit/...`, including round-trip
 (write-then-read) fixtures and the withheld-`where` case.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package transform applies the classification to every batch on its way from
 // extract to load, and records what it masked in the residual filter.
 //

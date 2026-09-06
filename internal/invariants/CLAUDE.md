@@ -8,11 +8,39 @@ containers from `internal/testutil`.
 | Test | Invariant | How it is checked |
 |---|---|---|
 | `TestI1ForeignKeysResolve` | every foreign key in the target resolves | `pg_constraint` for the edges, an anti-join per edge, plus every source edge between two tables the target has |
-| `TestI2NothingFlaggedSurvives` | nothing flagged survives masking | `classify --json` on the target, scoped to the columns the run neither masked nor opted out, plus a grep for every source email and phone |
-| `TestI3SameInputsSameTarget` | same source, secret and config → byte-identical target | `pg_dump --data-only` twice, normalised, compared |
-| `TestI4SourceUnchanged` | the source is unchanged | row count and an ordered-row md5 per table, before and after |
-| `TestI5EmittedConfigReproducesTheSnapshot` | the emitted yml reproduces the snapshot | re-run with `--config` and no plan flags, compared as I3 |
+| `TestI2NothingFlaggedSurvives` | nothing flagged survives masking | `classify --json` on the target scoped to the columns the run neither masked nor opted out, a grep for every source email and phone, and a source-against-target distinct-value comparison over every masked column |
+| `TestI3SameInputsSameTarget` | same source, secret and config → byte-identical target | `pg_dump --data-only` twice, normalised, compared, with one loaded table emptied in between |
+| `TestI4SourceUnchanged` | the source is unchanged | row count and an ordered-row md5 per table, plus a catalog fingerprint (relations, indexes, columns, constraints, trigger state and every sequence's position), before and after |
+| `TestI5EmittedConfigReproducesTheSnapshot` | the emitted yml reproduces the snapshot | re-run from a fresh directory holding only the yml, with `--config` and no plan flags, compared as I3 |
 | `TestI6RootHoldsTakeRows` | the root holds `--take` rows | `count(*)` on the root of the target |
+
+Not in the table, and load-bearing for all six: `fixture.mustHoldRows`, asserted
+by the harness immediately after every snapshot of the fixture's own slice.
+Each fixture names tables the slice is required to reach — two children and a
+grandchild at least, and for nasty a table in a second schema — and each must
+be in the target with more than zero rows. Without
+it the whole suite is satisfied by an **upward-only** snapshot: take the root's
+`--take` rows, follow foreign keys to their parents so referential integrity
+holds, and never create or load a child table at all. I1 skips a source edge
+whose child is absent, I6 counts only the root, I2's guard is about masked
+columns, and I3/I5 compare a target with itself. §6 item 5 states the property
+in general (`every step with mode ChildOK or ParentOnly has exactly Keys.Len()
+rows in the target`); this is the part of it phase 3 can check without a plan.
+
+`fixture.mustBeSubset` is the second, shorter list, and it is deliberately not
+every entry of the first. "The target holds some of this table's rows" and "the
+target holds fewer than all of them" are two claims and only the first is true
+of every table a correct slice reaches. nasty is the proof: its run is
+`--root public.people --take 3`, `people.manager_id` is an *incoming* edge, so
+the child step pulls the seed's reports as well and all five people are
+selected at depth 1 — after which `orders`, `order_items` and
+`billing.invoices` arrive whole, correctly, at every value of `--take`.
+Requiring a proper subset of those fails a pipeline that did exactly what §3
+says, and the cheapest way to make it green again is to delete the guard.
+`public.attachments` is nasty's one genuinely subset table (row 839's
+`uploaded_by_person_id` is NULL, so no person reaches it); pagila's are
+`rental` and `payment`. A fixture with an empty `mustBeSubset` is a hard
+failure, and a name in it that is not in `mustHoldRows` is too.
 
 **Contract.** This package is compiled against the *binary*, never against a
 stage. It builds `./cmd/lazyslice`, runs it with flags, and then talks to the
@@ -37,13 +65,44 @@ is output under test and not one of our types.
   key the source declares between two tables the target has (a zero-FK target
   is the special case, not the whole check). I2 fails when the source held no
   personal literal, when `classify --json` named no column, when the same
-  predicate flags nothing on the *source*, or when no column the emitted yml
-  records as masked arrived in the target with a value in it. I3 and I5 fail
-  when the target's dump holds no COPY block or no data row — two empty
-  databases dump identically — and when `lazyslice_meta` records no `run_id`
-  that was not there before the second invocation, which is what separates
-  "the second run reproduced the target" from "the second run did nothing".
-  I6 fails if `--take` is not smaller than the root.
+  predicate flags nothing on the *source*, or when a column the emitted yml
+  records as masked arrived in the target with no value in it while the source
+  has one. I3 and I5 fail when the target's dump holds no COPY block or no
+  data row — two empty databases dump identically — and when `lazyslice_meta`
+  records no `run_id` that was not there before the second invocation. I6
+  fails if `--take` is not smaller than the root. And every fixture's
+  `mustHoldRows` fails a slice that reached no child table.
+- **A guard the implementation can satisfy by describing itself is not proof.**
+  `assertSecondRunHappened` reads `lazyslice_meta`, and §11.2 is what says the
+  marker goes in before the first drop — so a second invocation that inserted
+  its marker, found its own bound fingerprint, short-circuited and exited 0
+  passes it while touching no data, which is exactly the case it was written
+  to catch. I3 and I5 therefore **empty one loaded table between the two
+  runs**: the comparison against the first dump then passes only if the second
+  run truly truncated and reloaded. Keep both signals; the marker is the cheap
+  one and the mutation is the proof.
+- **I5 runs the second invocation from a fresh directory holding only the
+  emitted yml**, and asserts that the file **parses** with `root:` and `take:`
+  as top-level scalars holding the run's own values before feeding it back. Not
+  a text search: `strings.Contains(text, "public.customer")` is satisfied by
+  any `columns:` key beginning `public.customer.`, and `Contains(text, "3")` by
+  `depth: 3` or a hex fingerprint, so the very implementation the guard exists
+  to catch would pass it. Re-running in the first run's own working directory
+  leaves two channels that can carry the plan instead of the file — anything
+  the tool caches beside itself, and the target's `lazyslice_meta`, which
+  §11.2 already has carrying `classification_fingerprint` and `tool_version`.
+  A yml holding nothing but a `columns:` map would otherwise pass, and the
+  first person to commit it and run on a clean checkout gets a different
+  snapshot.
+- **I4's fingerprint has two halves, and the second is not about rows.** An
+  index created to make an extract tractable and left behind takes locks,
+  consumes disk and outlives the run, and it changes no row of any ordinary
+  table; so does an advanced sequence, a refreshed materialised view or a
+  disabled trigger. The catalog fingerprint covers relations, indexes,
+  columns, constraints, trigger state and every sequence's `last_value`, and
+  reports each class in its own message. `pg_temp` is out of reach from
+  another session, and the comment in the file says so rather than implying
+  coverage.
 - **I1 reads `pg_constraint`, never `information_schema`.** A constraint name
   is unique per table, not per schema, so joining `referential_constraints` to
   `table_constraints` on (schema, name) pairs a partitioned table's cloned
@@ -64,6 +123,62 @@ is output under test and not one of our types.
   masker-backed set alone, so a run that opted everything out still fails. A
   `warn` or an `error` is not by itself evidence of surviving personal data and
   is not treated as one.
+- **I2's third half is the one the run cannot scope, and it is why the other
+  two can be trusted.** The classifier half is scoped by the run's own yml and
+  the grep half knows two categories, email and phone; a pipeline that
+  implemented those two maskers, wrote `masker:` against every column and
+  copied the rest through verbatim passes both, with pagila's `first_name`,
+  `last_name`, `address`, `postal_code` and `staff.password` landing in the
+  target byte-identical to production. So for every column the run itself
+  recorded as masked, the distinct values in the target and in the source must
+  not overlap. Widening the masked set only adds assertions. `masker: "null"`
+  is excluded from the "must hold a value" guard, because its correct output is
+  NULL.
+- **What I2's third half excludes is exactly what §5 says must reuse an
+  admissible value, and nothing else.** `NULL` and `''` (§5 preserves both;
+  `scanCells` drops them). An empty array and an empty JSON document, which are
+  the same rule for a collection and which arrive as the non-empty text `{}`
+  (trap 15's `'{}'::text[]`, trap 16b's collapsed `events.payload`) — dropped
+  by `preservedEmpty`. And a **small admissible domain**: §5 says a masked
+  column with `d < 2 × distinct(samples)` is "a stable substitution over a
+  small alphabet", and that a special category at small `d` is "collapsed to
+  one fixed label (the first enum label...)". `people.marital_status` is
+  collapsed to `single`, which is row 90007's real value (trap 24), and any
+  boolean masker's output is in the source's own `{true, false}` (trap 19), so
+  disjointness is *unsatisfiable* there and asserting it fails a correct run.
+  Those columns are excluded by two signals — the yml's own top-level
+  `small_domain:` list (§10), and the target catalogue's count of the values
+  the type admits (`admissibleDomains`: enum labels, boolean, `varchar(n)` at
+  tiny `n`) — so a run that simply omitted the column from `small_domain:`
+  cannot turn the exclusion into a failure, nor the failure into an exclusion.
+  Excluded columns stay in the classifier half, the grep half and
+  `assertTargetHoldsMaskedRows`; the exclusions are printed; and a run where
+  *every* masked column is excluded is a hard failure. What no invariant here
+  can check is the complement — that the column was listed under
+  `small_domain:` and in the plan, and that a special category was collapsed
+  rather than substituted — because that needs the sample the classifier took.
+  It is a `lazyslice verify` assertion for phase 4.
+- **A column is compared as a parsed `columnRef`, never as a string.** The
+  emitted yml's `columns:` keys, the `--json` stream's table and column fields
+  and the catalogue all spell an identifier differently: §10's examples are
+  unquoted lower case, a generated statement has to write
+  `public."LegacyCustomer"."EmailAddress"` quoted (trap 9), and pg_attribute
+  holds it bare. And §3.3 makes a partitioned table's *root* the step, so the
+  source's rows are in `public.events_2024` while the yml and the target say
+  `public.events` — `scanCells` attributes a leaf's cells to its root
+  (`partitionRoots`) for that reason. A masked column whose key matches no
+  column of either database is a hard failure naming the key
+  (`assertMaskedColumnsExist`), never a quiet entry in `skipped`: the two
+  guards would otherwise report clean by omission over exactly the columns
+  traps 9, 16b and 23 exist for.
+- **`internal/verify` is not covered by anything in this package, and the two
+  `verify.` entries in `flaggedCodePrefixes` are unreachable.** I2 points
+  `classify` at the target; no command this suite runs emits a `verify.` code.
+  A `verify` stage that landed as `return nil` passes all six invariants. The
+  check that would catch it is a phase 4 negative control against the gate 4
+  verify stage — write a known source email literal into a target column the
+  run recorded as masked, run `lazyslice verify`, assert exit 9 naming table
+  and column — and the comment beside `flaggedCodePrefixes` says so.
 - **`classify` in this suite is always pointed at a config path that cannot
   exist.** `--no-config` suppresses only the *write* (§8); the read still
   defaults to `./lazyslice.yml`, which in the run's working directory is the
@@ -91,7 +206,19 @@ is output under test and not one of our types.
   `public.people` is reached through its own `manager_id`
   (`testdata/README.md` trap 1).
 - A connection URL carries a password. It goes to the binary as a flag and to
-  `pgx`; it never goes into a test name, a `t.Log` or a failure message.
+  `pgx`; it never goes into a test name, a `t.Log` or a failure message, and
+  `result.String()` redacts it. `pg_dump` gets the password through
+  `PGPASSWORD` (forwarded into the container with `docker exec -e PGPASSWORD`)
+  and a URL with the password stripped, because argv is world-readable and
+  `exec.ExitError` quotes it.
+- **The child environment is built by removing variables, never by setting
+  them empty** (`cleanEnv`). An implementation keyed on presence would run
+  with an empty masking key under `LAZYSLICE_SECRET=`, and I3's "same secret,
+  same target" would then be asserting something else. The list covers every
+  discovery rung and every libpq variable that can redirect a connection —
+  `PGPASSFILE`, `PGSSLMODE`, `PGOPTIONS`, `PGSERVICEFILE` included — and
+  everything with a `LAZYSLICE_` prefix, by prefix so a phase 4 variable is
+  covered the day it exists.
 
 **Test.** `go test -tags integration -count=1 -timeout 30m ./internal/invariants/...`
 (needs a Docker endpoint; `pg_dump` on `PATH` is a fallback, not a

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 //go:build integration
 
 package invariants
@@ -6,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -60,12 +63,13 @@ type dump struct {
 func dumpData(ctx context.Context, t *testing.T, connURL string) dump {
 	t.Helper()
 
-	name, args := pgDumpCommand(ctx, t, connURL)
+	name, args, env := pgDumpCommand(ctx, t, connURL)
 
 	dumpCtx, cancel := context.WithTimeout(ctx, dumpTimeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(dumpCtx, name, args...)
+	cmd.Env = append(cleanEnv(), env...)
 	var stdout, stderr strings.Builder
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -85,15 +89,35 @@ func dumpData(ctx context.Context, t *testing.T, connURL string) dump {
 	return d
 }
 
-// dumpArgs is the pg_dump invocation, whichever binary runs it.
-func dumpArgs(connURL string) []string {
+// dumpArgs is the pg_dump invocation, whichever binary runs it, together with
+// the environment that carries the password.
+//
+// The password never goes in argv. Every process on the machine can read
+// another's command line — `ps`, /proc/<pid>/cmdline, Activity Monitor — and
+// exec.ExitError's own message quotes the argv it ran, so a pg_dump that
+// failed would print the credential into a CI log. PGPASSWORD is read by libpq
+// and is not visible in `ps`. The URL that goes in argv has its password
+// stripped, so it is a reference and not a credential.
+func dumpArgs(t *testing.T, connURL string) (args, env []string) {
+	t.Helper()
+
+	u, err := testutil.URL(connURL)
+	if err != nil {
+		t.Fatalf("invariants: %v", err)
+	}
+	if u.User != nil {
+		if password, ok := u.User.Password(); ok {
+			env = append(env, "PGPASSWORD="+password)
+			u.User = url.User(u.User.Username())
+		}
+	}
 	return []string{
 		"--data-only",
 		"--no-owner",
 		"--no-acl",
 		"--exclude-table=" + markerPattern,
-		connURL,
-	}
+		u.String(),
+	}, env
 }
 
 // pgDumpCommand chooses how to run pg_dump against connURL.
@@ -112,12 +136,19 @@ func dumpArgs(connURL string) []string {
 // and compares the majors first, so the failure names both numbers and the
 // remedy rather than pg_dump's own version-mismatch abort under a message
 // telling the reader to install a client they already have.
-func pgDumpCommand(ctx context.Context, t *testing.T, connURL string) (string, []string) {
+//
+// The password reaches libpq through PGPASSWORD in both branches: as an
+// environment variable of the local process for the PATH branch, and through
+// `docker exec -e` for the container branch. `docker exec -e NAME` without a
+// value forwards the variable from this process's own environment, so the
+// credential is not in docker's argv either.
+func pgDumpCommand(ctx context.Context, t *testing.T, connURL string) (name string, args, env []string) {
 	t.Helper()
 
 	id, inside, findErr := dockerContainerFor(ctx, connURL)
 	if findErr == nil {
-		return "docker", append([]string{"exec", id, "pg_dump"}, dumpArgs(inside)...)
+		dumped, dumpEnv := dumpArgs(t, inside)
+		return "docker", append([]string{"exec", "-e", "PGPASSWORD", id, "pg_dump"}, dumped...), dumpEnv
 	}
 
 	path, err := exec.LookPath("pg_dump")
@@ -132,7 +163,8 @@ func pgDumpCommand(ctx context.Context, t *testing.T, connURL string) (string, [
 			"(postgresql-client / libpq) for the server's major.", findErr, err)
 	}
 	assertPgDumpMajorMatches(ctx, t, path, connURL, findErr)
-	return path, dumpArgs(connURL)
+	dumped, dumpEnv := dumpArgs(t, connURL)
+	return path, dumped, dumpEnv
 }
 
 // dockerContainerFor finds the running container that publishes connURL's port

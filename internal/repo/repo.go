@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+
 // Package repo protects the files lazyslice writes that must never be committed:
 // ./lazyslice.secret and any mapping_file named by the yml (THREAT_MODEL.md T6,
 // ARCHITECTURE.md section 9 "The repository").
