@@ -39,7 +39,13 @@ type Index struct {
 	Unique     bool
 	Partial    bool
 	Expression bool
-	Def        string // pg_get_indexdef, recreated verbatim in the target
+	// Immediate is pg_index.indimmediate: false for the index backing a
+	// DEFERRABLE primary key or unique constraint. Postgres refuses such a key
+	// as the referenced side of a foreign key ("cannot use a deferrable unique
+	// constraint for referenced table"), and nothing else on this struct tells
+	// one apart from a usable key.
+	Immediate bool
+	Def       string // pg_get_indexdef, recreated verbatim in the target
 }
 
 // Constraint is one table-level constraint.
@@ -117,6 +123,22 @@ type ForeignKey struct {
 	Validated  bool // convalidated; unvalidated FKs are hints
 	Virtual    bool // inferred polymorphic edge, parent-direction only
 	Indexed    bool // child columns covered by an index
+	// NotRecreatable marks an edge ARCHITECTURE.md section 11.1 item 6 cannot
+	// replay in the target, so the planner refuses at plan (exit 13,
+	// target.schema.not_recreatable) before anything is dropped rather than
+	// failing the ADD CONSTRAINT after every user table is gone.
+	//
+	// It is set by introspect for one case today: an edge that references a
+	// leaf partition whose root carries no unique or primary-key constraint
+	// over the referenced columns. A partitioned table's unique constraint must
+	// include the partition key and a leaf's need not, and section 11.1
+	// recreates a leaf's own indexes and constraints nowhere, so there is no key
+	// in the target for such an edge to reference.
+	//
+	// This field is not in ARCHITECTURE.md section 2's ForeignKey; the
+	// deviation is recorded in internal/introspect/CLAUDE.md and section 2 is
+	// owed the same line.
+	NotRecreatable bool
 }
 
 // Schema is the whole source catalog, as much of it as v1 understands.
