@@ -521,7 +521,7 @@ neighbouring-column rule makes it worse rather than better: `people` carries
 is raised to `possible` anyway. The word "boolean" appears in ARCHITECTURE.md
 only inside the JSON-leaf rule.
 
-**Decided in ARCHITECTURE.md §4 (tracker T-0033, landed 2026-09-06):** every category declares the types its maskers accept; a name hit on a type the category does not accept is recorded at `low` with a reason naming the conflict, and the neighbouring-column rule never raises it. It gates the name signal only: values that validate still classify a column whatever it is called (trap 20). `people.email_verified` therefore lands at `low` and is copied.
+**Decided in ARCHITECTURE.md §4 (tracker T-0033, landed 2026-09-06):** every category declares the types its maskers accept; a name hit on a type the category does not accept is recorded at `low` with a reason naming the conflict, and the neighbouring-column rule never raises it. It gates the name signal and, per ADR-010, silences a value signal on a recognised family the category does not accept; enum, xml and other families keep full recall, so trap 20 still classifies on values. `people.email_verified` therefore lands at `low` and is copied.
 
 **20. False negative: `people.ref text`, holding email addresses.**
 
