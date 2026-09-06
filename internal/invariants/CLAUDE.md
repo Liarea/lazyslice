@@ -8,7 +8,7 @@ containers from `internal/testutil`.
 | Test | Invariant | How it is checked |
 |---|---|---|
 | `TestI1ForeignKeysResolve` | every foreign key in the target resolves | `pg_constraint` for the edges, an anti-join per edge, plus every source edge between two tables the target has |
-| `TestI2NothingFlaggedSurvives` | nothing flagged survives masking | `classify --json` on the target, scoped to the columns the run did not mask, plus a grep for every source email and phone |
+| `TestI2NothingFlaggedSurvives` | nothing flagged survives masking | `classify --json` on the target, scoped to the columns the run neither masked nor opted out, plus a grep for every source email and phone |
 | `TestI3SameInputsSameTarget` | same source, secret and config → byte-identical target | `pg_dump --data-only` twice, normalised, compared |
 | `TestI4SourceUnchanged` | the source is unchanged | row count and an ordered-row md5 per table, before and after |
 | `TestI5EmittedConfigReproducesTheSnapshot` | the emitted yml reproduces the snapshot | re-run with `--config` and no plan flags, compared as I3 |
@@ -52,12 +52,18 @@ is output under test and not one of our types.
   a bare `CREATE UNIQUE INDEX`, so an inner join drops that edge in silence.
   Both shapes are in `testdata/`. `conparentid = 0` keeps one row per declared
   edge.
-- **I2's classifier half is scoped by §6 item 4.** The second net covers the
-  columns of the target that a category masker does *not* own; a masked email
-  still classifies as an email (§4, §5), so asserting "nothing flagged
-  anywhere" is a permanent false failure. The masked set is read out of the
-  emitted yml. A `warn` or an `error` is not by itself evidence of surviving
-  personal data and is not treated as one.
+- **I2's classifier half is scoped by §6 item 4:** "every unmasked,
+  non-opted-out column". Two kinds of column are outside the net. A masked one,
+  because a masked email still classifies as an email (§4, §5). An opted-out
+  one, because an `unmask:` block keeps the source's own values in the target by
+  design (§10's `public.film.description`, `masker: free_text` with a reason),
+  and `verify` exits 0 on it. Asserting "nothing flagged anywhere", or
+  "nothing flagged outside the masked set", is a false failure on a correct
+  run. Both sets are read out of the emitted yml (`readColumnScope`), and they
+  are kept apart: the vacuity guard ("not one column masked") counts the
+  masker-backed set alone, so a run that opted everything out still fails. A
+  `warn` or an `error` is not by itself evidence of surviving personal data and
+  is not treated as one.
 - **`classify` in this suite is always pointed at a config path that cannot
   exist.** `--no-config` suppresses only the *write* (§8); the read still
   defaults to `./lazyslice.yml`, which in the run's working directory is the
