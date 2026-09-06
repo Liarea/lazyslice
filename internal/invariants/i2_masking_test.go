@@ -18,10 +18,11 @@ import (
 // Two halves, because either alone can be fooled.
 //
 //  1. The tool's own opinion: `lazyslice classify --json` is pointed at the
-//     target and must find nothing to mask in any column the run did not mask.
-//     This is §6 item 4's second net run from outside the process, and it
-//     catches a masker that let a category through on a column the 200-row
-//     sample under-represented.
+//     target and must find nothing to mask in any column the run neither masked
+//     nor opted out — §6 item 4's "every unmasked, non-opted-out column". This
+//     is that second net run from outside the process, and it catches a masker
+//     that let a category through on a column the 200-row sample
+//     under-represented.
 //  2. A grep the tool has no say in: every email address and every phone
 //     number that exists in the source is looked for in every cell of the
 //     target. A classifier that never flagged a column at all passes the first
@@ -49,11 +50,11 @@ func TestI2NothingFlaggedSurvives(t *testing.T) {
 
 			db.snapshot(ctx, t, f, f.root, f.take)
 
-			masked := maskedColumns(t, db.configPath())
+			scope := readColumnScope(t, db.configPath())
 			targetCells := scanCells(ctx, t, connect(ctx, t, db.target))
-			assertTargetHoldsMaskedRows(t, f.name, targetCells, masked)
+			assertTargetHoldsMaskedRows(t, f.name, targetCells, scope.masked)
 
-			t.Run("classifier", func(t *testing.T) { assertClassifierFindsNothing(ctx, t, db, masked) })
+			t.Run("classifier", func(t *testing.T) { assertClassifierFindsNothing(ctx, t, db, scope) })
 			t.Run("grep", func(t *testing.T) {
 				assertNoSourceLiteralSurvives(t, targetCells, sourceLiterals)
 			})
@@ -88,12 +89,15 @@ func assertTargetHoldsMaskedRows(t *testing.T, fixture string, cells []cell, mas
 
 // assertClassifierFindsNothing runs `classify --json` against the target.
 //
-// The assertion is scoped to §6 item 4: a column the run masked with a
-// category masker is *expected* to classify as its category — a masked email
-// is still an email — so only the columns the run left alone are held to
-// "nothing flagged". masked comes from the emitted yml, which is the run's own
-// statement of which those are.
-func assertClassifierFindsNothing(ctx context.Context, t *testing.T, db *databases, masked map[string]bool) {
+// The assertion is scoped to §6 item 4, which covers "every unmasked,
+// non-opted-out column". Two kinds of column are therefore outside it. A
+// column the run masked with a category masker is *expected* to classify as
+// its category — a masked email is still an email. A column carrying an
+// `unmask:` block keeps the source's own values in the target by design (§10's
+// public.film.description), so the classifier is expected to flag it too, and
+// a run `verify` passes with exit 0 must not fail here. Both come out of the
+// emitted yml, which is the run's own statement of which columns they are.
+func assertClassifierFindsNothing(ctx context.Context, t *testing.T, db *databases, scope columnScope) {
 	t.Helper()
 
 	// The positive control, and the reason the code list below can be trusted.
@@ -117,15 +121,17 @@ func assertClassifierFindsNothing(ctx context.Context, t *testing.T, db *databas
 	var hits []string
 	for _, e := range flaggedColumns(t, classifyEvents(ctx, t, db, db.target, "the target")) {
 		column := e.Table + "." + e.Column
-		if masked[column] {
-			continue // §6 item 4: a column a category masker owns is out of scope
+		if scope.outsideSecondNet[column] {
+			// §6 item 4: a column a category masker owns, or one the run was
+			// told to leave alone, is outside the net.
+			continue
 		}
 		hits = append(hits, column+" ("+e.Code+")")
 	}
 	if len(hits) > 0 {
 		sort.Strings(hits)
-		t.Errorf("I2: the classifier flags %d column(s) of the target that the run did not mask:\n  %s",
-			len(hits), strings.Join(hits, "\n  "))
+		t.Errorf("I2: the classifier flags %d column(s) of the target that the run neither masked nor "+
+			"opted out:\n  %s", len(hits), strings.Join(hits, "\n  "))
 	}
 }
 
