@@ -6,7 +6,7 @@
 | E1 Research | 1 | 0 | 0 | 10 | 0 | 0 |
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 1 | 0 | 9 | 0 | 0 |
-| E4 Vertical slice | 4 | 1 | 0 | 3 | 0 | 0 |
+| E4 Vertical slice | 4 | 10 | 1 | 3 | 0 | 0 |
 | E5 Hardening | 5 | 0 | 0 | 0 | 0 | 0 |
 | E9 Later | later | 3 | 0 | 0 | 0 | 0 |
 
@@ -17,6 +17,16 @@
 - T-0029 [open] E9 · Before going public: git-crypt the AI-specific paths and rewrite pre-encryption history (fable)
 - T-0031 [open] E9 · Licence for the lazyslice.yml schema and docs; confirm copyright holder statement (fable)
 - T-0035 [open] E4 · Verify negative control: a source email planted in a masked target column makes lazyslice verify exit 9 naming table and column (opus)
+- T-0036 [in_progress] E4 · T-PG: source and target connections, target gate, statement-shape allowlist, dsn (opus)
+- T-0037 [open] E4 · T-INTROSPECT: introspect stage (opus)
+- T-0038 [open] E4 · T-CLASSIFY: classify stage with rule pack (opus)
+- T-0039 [open] E4 · T-PLAN: subset planner (opus)
+- T-0040 [open] E4 · T-MASK: mask module (opus)
+- T-0041 [open] E4 · T-EXTRACT: extract and transform stages (opus)
+- T-0042 [open] E4 · T-LOAD: load stage (opus)
+- T-0043 [open] E4 · T-VERIFY: verify stage, includes T-0035 negative control (opus)
+- T-0044 [open] E4 · T-CORE: core run, emit, render, repo, CLI end to end; integration job blocking again (opus)
+- T-0045 [open] E4 · T-DISCOVER: discovery rungs 0-3 and the first-run ladder (opus)
 
 ## Recently closed
 
