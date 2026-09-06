@@ -332,17 +332,18 @@ func Setvals(t pipeline.Table) []Setval {
 // and neither does the marker table itself, which lazyslice creates in the
 // target and the source does not have (see recreated).
 //
-// It is not the only definition of section 11.2's schema fingerprint in the
-// tree: internal/introspect fills Schema.Fingerprint by hashing the catalog
-// fields this text is rendered from, and the two do not agree. Choosing between
-// them is an ADR that has not been written, and internal/load/CLAUDE.md records
-// it as owed.
+// It is the only definition of section 11.2's schema fingerprint (ADR-009).
+// internal/introspect used to fill Schema.Fingerprint by hashing the catalog
+// fields this text is rendered from; that hash counted the marker table and
+// every non-virtual foreign key rather than only the edges foreignKeys
+// recreates, so it never round-tripped, and ADR-009 deleted it. Schema.
+// Fingerprint is now filled by the caller from this function, through
+// load.SchemaFingerprint.
 //
-// Until it is, do not call this from outside internal/load and do not pass
-// Schema.Fingerprint to either end of section 11.2's binding. Both ends are
-// internal/load's: load.Load computes the marker's value itself, and
+// Both ends of section 11.2's binding go through internal/load, so they cannot
+// be wired apart: load.Load computes the marker's value itself, and
 // load.GateFingerprint is the gate's CatalogFingerprinter. That is what stops a
-// marker being written with one definition and recomputed with the other, which
+// marker being written with one definition and recomputed with another, which
 // binds nothing and leaves exit 4 on a target lazyslice itself wrote.
 //
 // The encoding is length-prefixed for the reason section 5 gives: without it two
@@ -663,9 +664,21 @@ type namedStatement struct{ name, sql string }
 // table: pg_get_indexdef's ON ONLY, which it prints for an index on a
 // partitioned table's own relation, becomes ON.
 //
-// The same rewrite is in internal/introspect/fingerprint.go and for the same
-// reason: a partitioned source table is one plain table in the target, and ON
-// ONLY is not a thing a plain table can be indexed with.
+// It is the only rewrite of its kind in the tree (ADR-009 deleted the second
+// copy, in internal/introspect/fingerprint.go, along with the catalog hash it
+// served). It exists because section 11.1 recreates a partitioned source table
+// as one plain table, which cannot be indexed ON ONLY. On postgres:16,
+// pg_get_indexdef prints CREATE UNIQUE INDEX ev_pkey ON ONLY public.ev ... for
+// an index on a partitioned table's own relation and prints the same index on a
+// plain table without ONLY; ON ONLY is accepted at creation but is not
+// round-tripped, so the raw text of a source's index could never equal the text
+// of the target lazyslice wrote from it. Since Fingerprint is over this DDL,
+// that is not only a failed CREATE INDEX but a marker that never binds: any
+// source holding a partitioned table with an index or a primary key would be
+// refused with exit 4 on its second run against a target lazyslice itself wrote
+// (section 11.2) — testdata/nasty.sql's public.events has
+// PRIMARY KEY (event_id, occurred_at), so the project's own fixture hits it.
+// TestAPartitionedTableBecomesOnePlainTable covers the behaviour.
 //
 // The scan skips quoted identifiers, so an index actually named `x ON ONLY y` is
 // not rewritten inside its own name.

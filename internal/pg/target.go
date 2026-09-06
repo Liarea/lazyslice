@@ -90,16 +90,23 @@ var bookkeeping = map[string]bool{
 	strings.ToLower(MarkerTable): true,
 }
 
-// CatalogFingerprinter recomputes Schema.Fingerprint (ARCHITECTURE.md §11.1)
-// over the catalog reachable through r. The gate needs it for rule 4: a marker
-// is bound only when the fingerprint it recorded still matches the target's
-// current catalog.
+// CatalogFingerprinter recomputes Schema.Fingerprint (ADR-009) over the catalog
+// reachable through r. The gate needs it for rule 4: a marker is bound only when
+// the fingerprint it recorded still matches the target's current catalog.
 //
-// It is injected rather than implemented here because the fingerprint is defined
-// over the object classes internal/introspect reads, and internal/pg does not
-// introspect. A Target with no fingerprinter can never find a marker bound,
-// which is the fail-closed direction: the gate falls through to the emptiness
-// check and a populated target is still refused.
+// It is injected rather than implemented here because the fingerprint is sha256
+// over the DDL internal/load/ddl generates for the schema internal/introspect
+// reads, and this package can import neither: internal/load imports internal/pg,
+// so the edge back would be a cycle. load.GateFingerprint is the one caller, and
+// it is the whole wiring core does for §11.2's binding. A Target with no
+// fingerprinter can never find a marker bound, which is the fail-closed
+// direction: the gate falls through to the emptiness check and a populated
+// target is still refused.
+//
+// r is in a transaction this package opened and this package ends
+// (catalogFingerprint below). The fingerprinter must not BEGIN, COMMIT or
+// ROLLBACK on it; a SAVEPOINT, which is what introspect's sampler takes to
+// survive a table it cannot read, is exactly what the transaction is there for.
 type CatalogFingerprinter func(ctx context.Context, r pipeline.Reader) (string, error)
 
 // TargetOption configures a Target.
@@ -322,11 +329,47 @@ func (t *Target) markerBound(ctx context.Context, conn *pgxpool.Conn, m MarkerRo
 		// be confirmed and the marker authorises nothing.
 		return false, nil
 	}
-	current, err := t.fingerprint(ctx, &reader{conn: conn, own: false})
+	current, err := t.catalogFingerprint(ctx, conn)
 	if err != nil {
 		return false, fmt.Errorf("pg: gate: recomputing the target schema fingerprint: %w", err)
 	}
 	return current != "" && current == m.SchemaFingerprint, nil
+}
+
+// catalogFingerprint runs the injected fingerprinter over the target's catalog
+// inside a transaction this package opens and ends itself.
+//
+// The transaction is not a nicety. The fingerprinter reads the whole catalog —
+// dozens of statements that must see one version of it — and introspect wraps
+// its sampling in a SAVEPOINT so that a table the role cannot read does not end
+// the run. Outside a transaction block a SAVEPOINT is 25P01, so on a pooled
+// connection in autocommit the fingerprinter failed every time, §11.2's binding
+// could never be confirmed, and a target lazyslice itself wrote was refused with
+// exit 4. It is opened here rather than by the caller because a BEGIN issued
+// from the other side of the injection would end a transaction it did not
+// start, and because this package owns the connection.
+//
+// READ ONLY, because recomputing a fingerprint reads: it makes a fingerprinter
+// that tried to write fail at the server rather than at review. REPEATABLE READ
+// for the one-version-of-the-catalog property. ROLLBACK ends it either way —
+// there is nothing to commit, and a rollback that fails leaves the connection in
+// an unknown transaction state, so it is reported rather than swallowed: the
+// gate has rules left to run on this connection.
+func (t *Target) catalogFingerprint(ctx context.Context, conn *pgxpool.Conn) (string, error) {
+	if _, err := conn.Exec(ctx, sqlBeginReadOnly); err != nil {
+		return "", fmt.Errorf("pg: opening the transaction to read the target catalog: %w", err)
+	}
+	fp, fpErr := t.fingerprint(ctx, &reader{conn: conn, own: false})
+	// ROLLBACK succeeds on an aborted transaction, so it runs whether or not the
+	// fingerprinter failed, and the fingerprinter's own error is the one
+	// returned when both go wrong.
+	if _, err := conn.Exec(ctx, sqlRollback); err != nil && fpErr == nil {
+		return "", fmt.Errorf("pg: ending the transaction that read the target catalog: %w", err)
+	}
+	if fpErr != nil {
+		return "", fpErr
+	}
+	return fp, nil
 }
 
 // exemptFromEmptiness reports whether the emptiness rule skips this table. It

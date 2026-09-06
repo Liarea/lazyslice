@@ -461,7 +461,15 @@ func TestLoadPagilaIntoAMarkedTarget(t *testing.T) {
 	// core does for it, so it is the thing under test here rather than a
 	// fingerprinter this test builds for itself: a marker written with one
 	// definition and recomputed with another binds nothing.
-	target, err := pg.OpenTarget(ctx, dsn.DSN(targetURL), GateFingerprint(inTransaction{introspect.New()}))
+	//
+	// introspect.New() bare, with nothing between it and the gate. It used to be
+	// wrapped in an inTransaction introspector that issued its own BEGIN,
+	// because internal/pg handed the fingerprinter a pooled connection in
+	// autocommit and introspect's SAVEPOINT is 25P01 there; that wrapper was a
+	// test standing in for a defect, so the assertion below proved the test's
+	// own wiring rather than the run's. internal/pg opens the transaction now
+	// (Target.catalogFingerprint), and this call is exactly what core makes.
+	target, err := pg.OpenTarget(ctx, dsn.DSN(targetURL), GateFingerprint(introspect.New()))
 	if err != nil {
 		t.Fatalf("opening the target: %v", err)
 	}
@@ -517,42 +525,6 @@ func TestLoadPagilaIntoAMarkedTarget(t *testing.T) {
 		t.Errorf("%s holds %d rows after the reload, and held %d after the first run",
 			rootTable, n, firstRes.Rows[rootTable])
 	}
-}
-
-// command runs a statement that returns no rows through a pipeline.Reader,
-// which has Query and Close and nothing else (ARCHITECTURE.md §2).
-// inTransaction is an introspector that puts its reader in a transaction first.
-//
-// The BEGIN is not decoration and it is not this test's idea. internal/pg hands
-// the gate's fingerprinter a pooled connection that is not in a transaction
-// (target.go's reader{own: false}), and introspect wraps its sampling in a
-// SAVEPOINT, which outside a transaction block is 25P01. So the introspector
-// core passes to GateFingerprint cannot today be introspect.New() bare; the
-// reader has to be put in a transaction first, or internal/pg has to open one.
-// That is owed to internal/pg and recorded in internal/load/CLAUDE.md, and this
-// wrapper is what stands in for it until then.
-type inTransaction struct{ pipeline.Introspector }
-
-func (i inTransaction) Introspect(ctx context.Context, r pipeline.Reader) (*pipeline.Schema, error) {
-	if err := command(ctx, r, "BEGIN"); err != nil {
-		return nil, err
-	}
-	// A rollback that fails changes nothing: the transaction is read only and
-	// the connection is the gate's own.
-	defer func() { _ = command(ctx, r, "ROLLBACK") }()
-	return i.Introspector.Introspect(ctx, r)
-}
-
-func command(ctx context.Context, r pipeline.Reader, sql string) error {
-	rows, err := r.Query(ctx, sql)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		// Draining is the point; a command returns no row to scan.
-	}
-	return rows.Err()
 }
 
 // fingerprintOf introspects a database and fingerprints it with the same

@@ -390,6 +390,87 @@ func TestTheMarkerTableIsNotAnObjectClass(t *testing.T) {
 	}
 }
 
+// §11.1 recreates a partitioned source table as one plain table and none of its
+// leaves, so an edge with a leaf at either end is an edge the target cannot
+// carry — and must not enter the fingerprint. The catalog hash ADR-009 deleted
+// counted every non-virtual foreign key, so a source holding such an edge never
+// fingerprinted equal to the target lazyslice wrote from it, §11.2's marker
+// never bound, and the second run was refused with exit 4.
+func TestFingerprintCountsOnlyEdgesBetweenRecreatedTables(t *testing.T) {
+	root := tref("public", "ev")
+	leaf := tref("public", "ev_2024")
+	logRef := tref("public", "log")
+	logCols := []pipeline.Column{{Name: "ev_id", TypeName: "bigint"}}
+	evCols := []pipeline.Column{{Name: "event_id", TypeName: "bigint"}}
+
+	source := &pipeline.Schema{
+		Tables: []pipeline.Table{
+			{Ref: root, Partitioned: true, PartitionKey: []string{"event_id"},
+				Partitions: []ref.TableRef{leaf}, Columns: evCols},
+			{Ref: leaf, Parent: &root, Columns: evCols},
+			{Ref: logRef, Columns: logCols, Constraints: []pipeline.Constraint{{
+				Name: "log_ev_id_fkey", Kind: 'f',
+				Def: "FOREIGN KEY (ev_id) REFERENCES public.ev_2024(event_id)",
+			}}},
+		},
+		FKs: []pipeline.ForeignKey{{
+			Name: "log_ev_id_fkey", Child: logRef, ChildCols: []string{"ev_id"},
+			Parent: leaf, ParentCols: []string{"event_id"}, Validated: true,
+		}},
+	}
+	for _, stmt := range postdata(t, source) {
+		if strings.Contains(stmt, "log_ev_id_fkey") {
+			t.Errorf("an edge onto a leaf partition was recreated: %s", stmt)
+		}
+	}
+
+	// The target lazyslice wrote from that source, read back: one plain table,
+	// no leaf, and no edge, because the edge was never added.
+	target := &pipeline.Schema{
+		Tables: []pipeline.Table{
+			{Ref: root, Columns: evCols},
+			{Ref: logRef, Columns: logCols},
+		},
+	}
+	sourceFP, err := Fingerprint(source)
+	if err != nil {
+		t.Fatalf("Fingerprint: %v", err)
+	}
+	targetFP, err := Fingerprint(target)
+	if err != nil {
+		t.Fatalf("Fingerprint: %v", err)
+	}
+	if sourceFP != targetFP {
+		t.Errorf("a source with an edge onto a leaf partition fingerprints %s and the target "+
+			"lazyslice wrote from it fingerprints %s, so §11.2's marker can never bind",
+			sourceFP, targetFP)
+	}
+
+	// The counterpart, so that what is asserted above is "the leaf edge was
+	// skipped" and not "foreign keys are ignored": an edge whose two ends are
+	// both recreated does move the hash.
+	withEdge := &pipeline.Schema{
+		Tables: []pipeline.Table{
+			{Ref: root, Columns: evCols},
+			{Ref: logRef, Columns: logCols, Constraints: []pipeline.Constraint{{
+				Name: "log_ev_id_fkey", Kind: 'f',
+				Def: "FOREIGN KEY (ev_id) REFERENCES public.ev(event_id)",
+			}}},
+		},
+		FKs: []pipeline.ForeignKey{{
+			Name: "log_ev_id_fkey", Child: logRef, ChildCols: []string{"ev_id"},
+			Parent: root, ParentCols: []string{"event_id"}, Validated: true,
+		}},
+	}
+	edgeFP, err := Fingerprint(withEdge)
+	if err != nil {
+		t.Fatalf("Fingerprint: %v", err)
+	}
+	if edgeFP == targetFP {
+		t.Error("an edge between two recreated tables did not change the fingerprint")
+	}
+}
+
 func TestEveryRecreatedTableIsAnalysed(t *testing.T) {
 	post := postdata(t, fixture())
 	for _, want := range []string{`ANALYZE "public"."orders"`, `ANALYZE "public"."order_items"`} {
