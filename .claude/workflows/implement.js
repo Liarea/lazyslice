@@ -16,7 +16,7 @@ export const meta = {
 //   paths  directories or files the developer may write, as an array of repo-relative paths
 //   stage  pipeline stage name or 'peripheral'
 //   reviewers  1 or 3 (default 3); peripheral docs tasks use 1
-//   integration  run make integration in verify
+//   integration  true: run make integration in verify (only once the pipeline can pass I1-I6); a package pattern string like './internal/pg/...': run that package's integration-tagged tests instead
 //   checks  'full' (default) or 'none' for documentation-only tasks; parallel code tasks are verified by the orchestrator after the batch
 
 const REPO = '/Users/gareth/personal_repos/lazyslice'
@@ -76,7 +76,8 @@ if (blocking.length) {
   return { id: a.id, status: 'blocked', findings: blocking, dev, postmortem: dev.postmortem }
 }
 
-const verify = a.checks === 'none' ? { passed: true, output: 'checks skipped: documentation task' } : await agent(`Repo: ${REPO}. Run exactly: cd ${REPO} && make lint && make test${a.integration ? ' && make integration' : ''}. Report whether every command exited 0 and paste the last 30 lines of output. Do not change any file.`,
+const integ = a.integration === true ? ' && make integration' : (typeof a.integration === 'string' ? ` && go test -tags integration -count=1 ${a.integration}` : '')
+const verify = a.checks === 'none' ? { passed: true, output: 'checks skipped: documentation task' } : await agent(`Repo: ${REPO}. Run exactly: cd ${REPO} && make lint && make test${integ}. Report whether every command exited 0 and paste the last 30 lines of output. Do not change any file.`,
   { label: `verify:${a.id}`, phase: 'Verify', model: 'sonnet', effort: 'low', schema: { type: 'object', required: ['passed', 'output'], properties: { passed: { type: 'boolean' }, output: { type: 'string' } } } })
 
 if (!verify || !verify.passed) {
