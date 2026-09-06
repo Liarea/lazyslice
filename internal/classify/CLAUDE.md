@@ -276,11 +276,6 @@ was chosen and is recorded here rather than only in a comment.
   `derived_text` generator empties it. The validators do not run over a tsvector
   at all, for the reason they do not run over a `bytea`: its text form reads as
   an address, and no answer they could give would change the decision.
-  - **`CatDerivedText` is declared in this package, not in `internal/pipeline`**
-    (`classify.go`), because T-0054's paths did not include that file. It belongs
-    in `pipeline.Category`'s list with the rest of them; the move is owed, and
-    nothing else changes when it happens, because a `Category` is a string and
-    the rule pack names it by that string.
 - **The rule pack's `accepts:` lists are checked against `mask`, not merged with
   them** (`TestRulePackAgreesWithMaskAboutTypes`, T-0054). `mask` declares, per
   category, the type tags its generators can be written into

@@ -153,13 +153,7 @@ var everyCategory = []pipeline.Category{
 	pipeline.CatGeo, pipeline.CatPersonDate, pipeline.CatNationalID, pipeline.CatFinancial,
 	pipeline.CatNetworkID, pipeline.CatOnlineID, pipeline.CatCredential, pipeline.CatFreeText,
 	pipeline.CatSpecial, pipeline.CatBinary, pipeline.CatSemiStruct,
-	// derived_text is spelled through mask because internal/pipeline does not
-	// declare it: T-0054's paths reached neither internal/pipeline nor this
-	// file's counterpart in internal/classify, which declares its own
-	// classify.CatDerivedText. Both sites become pipeline.CatDerivedText when
-	// the constant is moved beside the other sixteen; a Category is a string
-	// and the rule pack names it by that string, so nothing else changes.
-	pipeline.Category(mask.CatDerivedText),
+	pipeline.CatDerivedText,
 }
 
 // TestTransformNeverRefusesWhatThePlanCheckAdmits is the statement that this
@@ -234,7 +228,7 @@ func TestDerivedTextEmptiesATSVector(t *testing.T) {
 	c := ref.ColumnRef{Table: table.Ref, Column: "fulltext"}
 	cls := &pipeline.Classification{Decisions: map[ref.ColumnRef]pipeline.Decision{
 		c: {
-			Col: c, Category: pipeline.Category(mask.CatDerivedText),
+			Col: c, Category: pipeline.CatDerivedText,
 			Confidence: pipeline.ConfCertain, Masker: mask.MaskerDerivedText, Masked: true,
 		},
 	}}

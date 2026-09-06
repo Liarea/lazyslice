@@ -295,18 +295,17 @@ so the check is the orphan count and not the catalogue);
 `TestVerifyFailsOnASequenceThatWasNotReset` (`setval(..., 1, false)`, exit 7).
 Every failing case also runs `noCheckBothWays`.
 
-**The integration suite carries a workaround, and it is loud.** On pagila the
-classifier decides `credential` on the `last_update` timestamps and `address` on
-`film.fulltext`, and `internal/transform` cannot write those maskers' output
-back into a `timestamp` or a `tsvector`: it refuses at exit 7 and *every*
-whole-pipeline run over pagila dies there. `blockedByTransform` opts those five
-columns out through the product's own `--unmask TABLE.COL=REASON` prior, with
-the blocker named as the reason. It is deliberately not a classification rule —
-an earlier version re-implemented `rules.yml`'s `accepts:` gate over the value
-signal, which ARCHITECTURE.md §4 refuses in terms (T-0033) and which is a
-reversal of an accepted decision in the direction of masking less. The blocker
-is a defect in another package, is reported in T-0043's return value, owes a
-tracker task, and blocks T-0044.
+**The integration suite no longer carries a workaround.** Pagila used to force
+every whole-pipeline run through a per-column `--unmask TABLE.COL=REASON` prior
+on five columns, because the classifier decided `credential` on the
+`last_update` timestamps and `address` on `film.fulltext`, and
+`internal/transform` could not write those maskers' output back into a
+`timestamp` or a `tsvector`. T-0054 fixed the classifier's decision on both
+shapes, so `TestVerifyPassesACorrectTarget` hands `Classify` a nil prior and
+asserts the fix directly: `public.film.fulltext` is decided `derived_text` and
+lands in the target as the empty tsvector, and `actor.last_update`,
+`address.last_update`, `category.last_update` and `film.last_update` are
+decided unmasked and copied.
 
 **Never:** use the run's own (released) snapshot; treat an unconfirmable
 residual hit as anything but exit 9; skip the cap on confirmation probes; treat
