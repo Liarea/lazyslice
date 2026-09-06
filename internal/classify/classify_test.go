@@ -1,0 +1,949 @@
+// SPDX-License-Identifier: Apache-2.0
+
+package classify
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/Liarea/lazyslice/internal/pipeline"
+	"github.com/Liarea/lazyslice/internal/ref"
+)
+
+func mustClassify(t *testing.T, prior *pipeline.Config) *pipeline.Classification {
+	t.Helper()
+	cls, err := classifyNasty(prior)
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+	return cls
+}
+
+func decision(t *testing.T, cls *pipeline.Classification, c ref.ColumnRef) pipeline.Decision {
+	t.Helper()
+	d, ok := cls.Decisions[c]
+	if !ok {
+		t.Fatalf("no decision for %s; the classifier must decide every column", c)
+	}
+	return d
+}
+
+// TestNastyTraps is the classifier's half of testdata/README.md's traps: the
+// false positive that must not be masked, the false negative that must be, and
+// the three shapes that are not scalar text.
+func TestNastyTraps(t *testing.T) {
+	t.Parallel()
+	cls := mustClassify(t, nil)
+
+	t.Run("EmailVerifiedIsNotFlagged", func(t *testing.T) {
+		// testdata/README.md trap 19. The name matches every email rule anyone
+		// would write; the type says it cannot be an address. ARCHITECTURE.md §4
+		// records it at low with a reason naming the conflict, and the
+		// neighbouring-column rule may not raise it even though people carries
+		// several columns at likely or above.
+		d := decision(t, cls, col(tPeople, "email_verified"))
+		if d.Masked {
+			t.Errorf("people.email_verified is masked: %+v", d)
+		}
+		if d.Confidence != pipeline.ConfLow {
+			t.Errorf("people.email_verified confidence = %v, want low", d.Confidence)
+		}
+		if d.Masker != "" {
+			t.Errorf("people.email_verified carries masker %q; an unmasked column has none", d.Masker)
+		}
+		if !strings.Contains(d.Reason, "boolean is not an accepted type for email") {
+			t.Errorf("people.email_verified reason = %q, want the type conflict named", d.Reason)
+		}
+	})
+
+	t.Run("RefIsFlaggedByItsValues", func(t *testing.T) {
+		// testdata/README.md trap 20. The name says nothing; only the samples do.
+		d := decision(t, cls, col(tPeople, "ref"))
+		if !d.Masked {
+			t.Fatalf("people.ref is not masked: %+v", d)
+		}
+		if d.Category != pipeline.CatEmail {
+			t.Errorf("people.ref category = %q, want email", d.Category)
+		}
+		if d.Confidence != pipeline.ConfLikely {
+			t.Errorf("people.ref confidence = %v, want likely (values only)", d.Confidence)
+		}
+		if !strings.Contains(d.Reason, "no name signal") {
+			t.Errorf("people.ref reason = %q, want it to say the values decided", d.Reason)
+		}
+		if !strings.Contains(d.Reason, "samples parse as addresses") {
+			t.Errorf("people.ref reason = %q, want the validator named", d.Reason)
+		}
+	})
+
+	t.Run("JSONBIsFlagged", func(t *testing.T) {
+		// testdata/README.md traps 16a and 16b.
+		contact := decision(t, cls, col(tPeople, "contact"))
+		if !contact.Masked || contact.Category != pipeline.CatSemiStruct {
+			t.Errorf("people.contact = %+v, want a masked semi_structured column", contact)
+		}
+		payload := decision(t, cls, col(tEvents, "payload"))
+		if !payload.Masked || payload.Category != pipeline.CatSemiStruct {
+			t.Errorf("events.payload = %+v, want a masked semi_structured column", payload)
+		}
+		if !strings.Contains(payload.Reason, "log-shaped table") {
+			t.Errorf("events.payload reason = %q, want the log-shaped rule named (trap 16b)", payload.Reason)
+		}
+		if strings.Contains(contact.Reason, "log-shaped table") {
+			t.Errorf("people.contact reason = %q; people is not a log-shaped table", contact.Reason)
+		}
+	})
+
+	t.Run("NotesAreFlaggedAsFreeText", func(t *testing.T) {
+		// testdata/README.md trap 17.
+		d := decision(t, cls, col(tPeople, "notes"))
+		if !d.Masked || d.Category != pipeline.CatFreeText {
+			t.Errorf("people.notes = %+v, want a masked free_text column", d)
+		}
+		legacy := decision(t, cls, col(tLegacy, "Notes"))
+		if !legacy.Masked || legacy.Category != pipeline.CatFreeText {
+			t.Errorf(`LegacyCustomer."Notes" = %+v, want a masked free_text column`, legacy)
+		}
+	})
+
+	t.Run("TextArrayIsFlaggedOnItsElementType", func(t *testing.T) {
+		// testdata/README.md trap 15.
+		d := decision(t, cls, col(tPeople, "alt_emails"))
+		if !d.Masked || d.Category != pipeline.CatEmail {
+			t.Errorf("people.alt_emails = %+v, want a masked email column", d)
+		}
+		if !strings.Contains(d.Reason, "classified on the element type text") {
+			t.Errorf("people.alt_emails reason = %q, want the element type named", d.Reason)
+		}
+	})
+}
+
+// TestNastyOtherColumns covers the decisions the traps above depend on being
+// right for a different reason: the two enums, the type signals, the generated
+// column and the surrogate keys.
+func TestNastyOtherColumns(t *testing.T) {
+	t.Parallel()
+	cls := mustClassify(t, nil)
+
+	t.Run("AnEnumNothingFlagsIsCopied", func(t *testing.T) {
+		d := decision(t, cls, col(tPeople, "status")) // trap 13
+		if d.Masked {
+			t.Errorf("people.status is masked: %+v; no name and no value signal hits it", d)
+		}
+	})
+
+	t.Run("AnEnumASpecialCategoryFlagsIsMasked", func(t *testing.T) {
+		d := decision(t, cls, col(tPeople, "marital_status")) // trap 24
+		if !d.Masked || d.Category != pipeline.CatSpecial {
+			t.Errorf("people.marital_status = %+v, want a masked special_category column", d)
+		}
+		if d.Confidence != pipeline.ConfCertain {
+			t.Errorf("people.marital_status confidence = %v, want certain by name alone", d.Confidence)
+		}
+	})
+
+	t.Run("TypeSignalsAreThreeSeparateThings", func(t *testing.T) {
+		// testdata/README.md trap 18: the type alone is likely, the name and the
+		// type agreeing is certain, and a run that scores them alike has
+		// collapsed two signals into one.
+		origin := decision(t, cls, col(tSessions, "origin"))
+		if origin.Category != pipeline.CatNetworkID || origin.Confidence != pipeline.ConfLikely {
+			t.Errorf("tenant_user_sessions.origin = %+v, want network_id at likely", origin)
+		}
+		adapter := decision(t, cls, col(tSessions, "adapter"))
+		if adapter.Category != pipeline.CatNetworkID || !adapter.Masked {
+			t.Errorf("tenant_user_sessions.adapter = %+v, want a masked network_id column", adapter)
+		}
+		clientIP := decision(t, cls, col(tAudit, "client_ip"))
+		if clientIP.Category != pipeline.CatNetworkID || clientIP.Confidence != pipeline.ConfCertain {
+			t.Errorf("audit_log.client_ip = %+v, want network_id at certain", clientIP)
+		}
+	})
+
+	t.Run("GeneratedAndSurrogateKeysAreNeverMasked", func(t *testing.T) {
+		for _, tc := range []struct {
+			c    ref.ColumnRef
+			says string
+		}{
+			{col(tPeople, "display_name"), "generated column"},
+			{col(tPeople, "person_id"), "surrogate key"},
+			{col(tPeople, "manager_id"), "foreign key to public.people"},
+			{col(tOrders, "person_id"), "foreign key to public.people"},
+		} {
+			d := decision(t, cls, tc.c)
+			if d.Masked {
+				t.Errorf("%s is masked: %+v", tc.c, d)
+			}
+			if !strings.Contains(d.Reason, tc.says) {
+				t.Errorf("%s reason = %q, want it to explain %q", tc.c, d.Reason, tc.says)
+			}
+		}
+	})
+
+	t.Run("APersonalKeyIsStillMasked", func(t *testing.T) {
+		// devices.device_id is a uuid primary key whose name matches online_id,
+		// and device_readings.device_id references it. ARCHITECTURE.md §4's
+		// exemption is for surrogate keys; a key the name rules place in a
+		// category is not one, and copying it verbatim would be an identifier
+		// for a person's device in the target in cleartext.
+		for _, c := range []ref.ColumnRef{col(tDevices, "device_id"), col(tReadings, "device_id")} {
+			d := decision(t, cls, c)
+			if !d.Masked || d.Category != pipeline.CatOnlineID {
+				t.Errorf("%s = %+v, want a masked online_id column", c, d)
+			}
+			if strings.Contains(d.Reason, "preserved verbatim") {
+				t.Errorf("%s reason = %q; a key with a category is not a surrogate key", c, d.Reason)
+			}
+		}
+	})
+
+	t.Run("EveryMaskedColumnHasAMasker", func(t *testing.T) {
+		// Over the prior-bearing classifications as well as the plain one:
+		// Masker is chosen from the category, and a yml raise is the one input
+		// that can move a category without a rule behind it, so the invariant
+		// has to hold on that path or transform is handed "mask this column"
+		// with nothing to mask it with (ADR-006).
+		for _, prior := range priorsUnderTest(t) {
+			for c, d := range mustClassify(t, prior).Decisions {
+				switch {
+				case d.Masked && d.Masker == "":
+					t.Errorf("%s is masked with no masker: %+v", c, d)
+				case d.Masked && d.Category == pipeline.CatNone:
+					t.Errorf("%s is masked as the no-signal category: %+v", c, d)
+				case !d.Masked && d.Masker != "":
+					t.Errorf("%s is not masked but names masker %q", c, d.Masker)
+				}
+			}
+		}
+	})
+
+	t.Run("SamplesFromAPartitionAreNamed", func(t *testing.T) {
+		d := decision(t, cls, col(tEvents, "payload"))
+		if !strings.Contains(d.Reason, "samples from partition public.events_2024") {
+			t.Errorf("events.payload reason = %q, want the leaf named (ARCHITECTURE.md §4)", d.Reason)
+		}
+	})
+
+	t.Run("TheUniqueIndexIsRecorded", func(t *testing.T) {
+		d := decision(t, cls, col(tLegacy, "EmailAddress"))
+		if !d.UniqueIndex {
+			t.Errorf(`LegacyCustomer."EmailAddress" = %+v, want UniqueIndex set`, d)
+		}
+		if !d.Masked || d.Category != pipeline.CatEmail {
+			t.Errorf(`LegacyCustomer."EmailAddress" = %+v, want a masked email column`, d)
+		}
+		partial := decision(t, cls, col(tAudit, "action"))
+		if !partial.UniqueIndex {
+			t.Errorf("audit_log.action = %+v, want UniqueIndex set by the partial index", partial)
+		}
+	})
+
+	t.Run("AQuotedCamelCaseNameStillMatches", func(t *testing.T) {
+		for _, c := range []ref.ColumnRef{
+			col(tLegacy, "EmailAddress"),
+			col(tLegacy, "ContactNumber"),
+			col(tLegacy, "MobileNumber"),
+		} {
+			if d := decision(t, cls, c); !d.Masked {
+				t.Errorf("%s = %+v, want it masked; the name rules read EmailAddress as email_address", c, d)
+			}
+		}
+	})
+}
+
+// TestNeighbouringColumnRule is the recall bias ARCHITECTURE.md §4 and
+// THREAT_MODEL.md T1 both name, and the one exception to it: a column at low
+// beside a column at likely is raised to possible and masked, unless its name
+// hit was on a type its category does not accept.
+func TestNeighbouringColumnRule(t *testing.T) {
+	t.Parallel()
+	member := ref.TableRef{Schema: "public", Name: "member"}
+	schema := &pipeline.Schema{
+		Tables: []pipeline.Table{
+			tt("public", "member", nil,
+				tc("email", "text"),         // certain: the name and the values agree
+				tc("contact_point", "text"), // low: half the samples parse as addresses
+				tc("nickname", "boolean"),   // low: a name hit on a type online_id refuses
+			),
+		},
+	}
+	samples := mapSampler{
+		ref.ColumnRef{Table: member, Column: "email"}: anyOf(
+			"a@example.com", "b@example.com", "c@example.com", "d@example.com"),
+		ref.ColumnRef{Table: member, Column: "contact_point"}: anyOf(
+			"e@example.com", "f@example.com", "unknown", "n/a"),
+		ref.ColumnRef{Table: member, Column: "nickname"}: anyOf(true, false, true, false),
+	}
+	cls, err := New().Classify(schema, samples, nil)
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+
+	raised := cls.Decisions[ref.ColumnRef{Table: member, Column: "contact_point"}]
+	if !raised.Masked {
+		t.Errorf("member.contact_point = %+v, want it raised to possible and masked", raised)
+	}
+	if raised.Source != pipeline.ByNeighbour {
+		t.Errorf("member.contact_point source = %v, want ByNeighbour", raised.Source)
+	}
+	if !strings.Contains(raised.Reason, "raised by the neighbouring-column rule") {
+		t.Errorf("member.contact_point reason = %q, want the rule named", raised.Reason)
+	}
+
+	if d := cls.Decisions[ref.ColumnRef{Table: member, Column: "nickname"}]; d.Masked {
+		t.Errorf("member.nickname = %+v; a type-conflicting name hit is never raised above low", d)
+	}
+}
+
+// TestConfigCannotLowerConfidence is ADR-004's tighten-only rule and
+// THREAT_MODEL.md T3's control: the yml supplies opt-outs and raises, never a
+// way to reduce a category or a confidence.
+func TestConfigCannotLowerConfidence(t *testing.T) {
+	t.Parallel()
+	base := mustClassify(t, nil)
+	refCol := col(tPeople, "ref")
+	notes := col(tPeople, "notes")
+
+	prior := &pipeline.Config{
+		ExtraPatterns: []pipeline.Pattern{
+			{Name: `\Aref\z`, Category: pipeline.CatFreeText, Confidence: pipeline.ConfLow},
+		},
+		Columns: map[ref.ColumnRef]pipeline.ColumnConfig{
+			notes: {Category: pipeline.CatNone, Confidence: pipeline.ConfNone},
+		},
+	}
+	got := mustClassify(t, prior)
+
+	if a, b := base.Decisions[refCol], got.Decisions[refCol]; b.Confidence < a.Confidence || b.Category != a.Category {
+		t.Errorf("a lower-confidence pattern changed %s from %v/%v to %v/%v", refCol,
+			a.Category, a.Confidence, b.Category, b.Confidence)
+	}
+	if a, b := base.Decisions[notes], got.Decisions[notes]; b.Confidence < a.Confidence || !b.Masked {
+		t.Errorf("a lower-confidence column entry changed %s from %v/%v to %v/%v (masked=%t)", notes,
+			a.Category, a.Confidence, b.Category, b.Confidence, b.Masked)
+	}
+}
+
+// TestAnOptOutExpiresWithTheType is ARCHITECTURE.md §10's type fingerprint: an
+// opt-out on a column that became something else is ignored, and the column is
+// masked again rather than staying exempt.
+func TestAnOptOutExpiresWithTheType(t *testing.T) {
+	t.Parallel()
+	notes := col(tPeople, "notes")
+	live := mustClassify(t, nil).Decisions[notes].TypeFP
+
+	current := &pipeline.Config{Columns: map[ref.ColumnRef]pipeline.ColumnConfig{
+		notes: {Unmask: &pipeline.Unmask{Reason: "product text", By: "gareth", TypeFP: live}},
+	}}
+	if d := mustClassify(t, current).Decisions[notes]; d.Masked {
+		t.Errorf("%s = %+v, want a live opt-out honoured", notes, d)
+	}
+
+	stale := &pipeline.Config{Columns: map[ref.ColumnRef]pipeline.ColumnConfig{
+		notes: {Unmask: &pipeline.Unmask{Reason: "product text", By: "gareth", TypeFP: "deadbeef"}},
+	}}
+	cls := mustClassify(t, stale)
+	if d := cls.Decisions[notes]; !d.Masked {
+		t.Errorf("%s = %+v, want a stale opt-out ignored", notes, d)
+	}
+	if len(cls.Expired) != 1 || cls.Expired[0] != notes {
+		t.Errorf("Expired = %v, want exactly %s", cls.Expired, notes)
+	}
+}
+
+// TestDriftIsEveryColumnTheYmlHasNotSeen is ADR-004 "Drift": a column absent
+// from the committed file is classified fresh and reported, which is what
+// --strict-schema turns into exit 10.
+func TestDriftIsEveryColumnTheYmlHasNotSeen(t *testing.T) {
+	t.Parallel()
+	notes := col(tPeople, "notes")
+	prior := &pipeline.Config{Columns: map[ref.ColumnRef]pipeline.ColumnConfig{notes: {}}}
+	cls := mustClassify(t, prior)
+	if len(cls.Drift) == 0 {
+		t.Fatal("Drift is empty; every column but one is new to this file")
+	}
+	for _, c := range cls.Drift {
+		if c == notes {
+			t.Errorf("%s is reported as drift, but the file carries it", c)
+		}
+	}
+	for i := 1; i < len(cls.Drift); i++ {
+		if !cls.Drift[i-1].Less(cls.Drift[i]) {
+			t.Fatalf("Drift is not in (schema, table, column) order at %d: %v", i, cls.Drift)
+		}
+	}
+}
+
+// TestClassificationIsDeterministic is what ADR-004 rests on: two runs over one
+// snapshot classify identically, down to the fingerprint.
+func TestClassificationIsDeterministic(t *testing.T) {
+	t.Parallel()
+	a, b := mustClassify(t, nil), mustClassify(t, nil)
+	if a.Fingerprint != b.Fingerprint {
+		t.Errorf("fingerprints differ across runs: %q and %q", a.Fingerprint, b.Fingerprint)
+	}
+	if len(a.Fingerprint) != 16 {
+		t.Errorf("fingerprint = %q, want 16 hex characters (ARCHITECTURE.md §5)", a.Fingerprint)
+	}
+	for c, d := range a.Decisions {
+		if b.Decisions[c] != d {
+			t.Errorf("%s differs between runs: %+v and %+v", c, d, b.Decisions[c])
+		}
+	}
+}
+
+// TestReasonGrammar is ARCHITECTURE.md §2 "Value-free types": every reason the
+// classifier can emit parses back against the template set in reasons.go, so no
+// sample value can reach the yml, an event or a rendered line through a reason.
+func TestReasonGrammar(t *testing.T) {
+	t.Parallel()
+	for _, prior := range priorsUnderTest(t) {
+		cls := mustClassify(t, prior)
+		for c, d := range cls.Decisions {
+			if bad, ok := ParseReason(d.Reason); !ok {
+				t.Errorf("%s reason %q holds a fragment no template produced: %q", c, d.Reason, bad)
+			}
+		}
+	}
+}
+
+// TestReasonGrammarRejectsProse is the other half: a string the templates did
+// not produce must not parse, or the test above would prove nothing.
+func TestReasonGrammarRejectsProse(t *testing.T) {
+	t.Parallel()
+	for _, s := range []string{
+		"",
+		"name matches email; 200/200 samples parse as ada.lovelace@example.com",
+		"values look like ada.lovelace@example.com",
+		"name matches email address of the customer",
+		"no name or value signal at all",
+		"opt-out recorded in lazyslice.yml: product catalogue text",
+	} {
+		if _, ok := ParseReason(s); ok {
+			t.Errorf("ParseReason(%q) accepted a string no template produced", s)
+		}
+	}
+}
+
+// TestEveryCategoryHasAMasker walks the rule pack against pipeline's category
+// list. CatNone is excluded by name rather than by a wildcard: it is what a
+// copied column carries and it reaches no masker (ADR-006 "Consequences").
+func TestEveryCategoryHasAMasker(t *testing.T) {
+	t.Parallel()
+	p, err := pack()
+	if err != nil {
+		t.Fatalf("rule pack: %v", err)
+	}
+	all := []pipeline.Category{
+		pipeline.CatPersonName, pipeline.CatEmail, pipeline.CatPhone, pipeline.CatAddress,
+		pipeline.CatGeo, pipeline.CatPersonDate, pipeline.CatNationalID, pipeline.CatFinancial,
+		pipeline.CatNetworkID, pipeline.CatOnlineID, pipeline.CatCredential, pipeline.CatFreeText,
+		pipeline.CatSpecial, pipeline.CatBinary, pipeline.CatSemiStruct,
+	}
+	for _, cat := range all {
+		if p.Masker[cat] == "" {
+			t.Errorf("category %q has no masker in the rule pack", cat)
+		}
+	}
+	if _, ok := p.Masker[pipeline.CatNone]; ok {
+		t.Errorf("the rule pack declares a masker for %q", pipeline.CatNone)
+	}
+	if len(p.Masker) != len(all) {
+		t.Errorf("the rule pack declares %d categories, pipeline declares %d", len(p.Masker), len(all))
+	}
+}
+
+// TestNormaliseName covers the identifier folding the whole rule pack is
+// written against.
+func TestNormaliseName(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ in, want string }{
+		{"EmailAddress", "email_address"},
+		{"ContactNumber", "contact_number"},
+		{"CustomerID", "customer_id"},
+		{"MigratedFromPersonID", "migrated_from_person_id"},
+		{"address2", "address_2"},
+		{"email_verified", "email_verified"},
+		{"Notes", "notes"},
+		{"first name", "first_name"},
+	} {
+		if got := normaliseName(tc.in); got != tc.want {
+			t.Errorf("normaliseName(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// priorsUnderTest is the set of committed lazyslice.yml files the invariants
+// above and TestReasonGrammar are asserted over. It is one list rather than one
+// per test because the invariants — every masked column has a masker, every
+// reason parses — are claims about the yml path as much as about the classifier,
+// and a prior that only one of them sees is a prior the other cannot fail on.
+func priorsUnderTest(t *testing.T) []*pipeline.Config {
+	t.Helper()
+	return []*pipeline.Config{
+		nil,
+		{
+			ExtraPatterns: []pipeline.Pattern{
+				{Name: `sku`, Category: pipeline.CatOnlineID, Confidence: pipeline.ConfCertain},
+				// A raise that names no category at all.
+				{Name: `\Aqty\z`, Confidence: pipeline.ConfCertain},
+				// A raise written against a table name, not a column name.
+				{Name: `\Aorder_items\z`, Category: pipeline.CatSpecial, Confidence: pipeline.ConfCertain},
+			},
+			Columns: map[ref.ColumnRef]pipeline.ColumnConfig{
+				col(tPeople, "notes"): {Unmask: &pipeline.Unmask{
+					Reason: "a free-form reason a user wrote", By: "gareth", TypeFP: fp("notes", "text")}},
+				col(tLegacy, "Notes"):     {Unmask: &pipeline.Unmask{Reason: "another one", By: "flag"}},
+				col(tAudit, "entry_uid"):  {Category: pipeline.CatOnlineID, Confidence: pipeline.ConfCertain},
+				col(tOrders, "placed_at"): {},
+				// A category the column's type family refuses.
+				col(tPeople, "ref"): {Category: pipeline.CatSemiStruct, Confidence: pipeline.ConfCertain},
+				// An opt-out that records no fingerprint, and one whose
+				// fingerprint is stale.
+				col(tSites, "contact_email"): {Unmask: &pipeline.Unmask{Reason: "shared inbox", By: "gareth"}},
+				col(tDevices, "owned_by"): {Unmask: &pipeline.Unmask{
+					Reason: "stale", By: "gareth", TypeFP: "deadbeef"}},
+			},
+		},
+	}
+}
+
+// TestAPersonalKeyIsNotASurrogateKey is the scope of ARCHITECTURE.md §4's
+// never-masked rule: the exemption is for "surrogate keys (id bigint and the FK
+// columns that reference them)", and a natural key that carries personal data is
+// not one. Exempting every integer or uuid key would copy an msisdn or an NHS
+// number into the target in cleartext under exit 0 (THREAT_MODEL.md T1), and
+// would make §4's own propagation sentence unreachable for the case it is most
+// often needed in.
+func TestAPersonalKeyIsNotASurrogateKey(t *testing.T) {
+	t.Parallel()
+	subs := ref.TableRef{Schema: "public", Name: "subscribers"}
+	visits := ref.TableRef{Schema: "public", Name: "visits"}
+	schema := &pipeline.Schema{
+		Tables: []pipeline.Table{
+			tt("public", "subscribers", []string{"msisdn"},
+				tc("msisdn", "bigint"),     // a natural key that is a phone number
+				tc("nhs_number", "bigint"), // a natural identifier beside it
+				tc("account_id", "bigint"), // a surrogate key by any reading
+			),
+			tt("public", "visits", []string{"visit_id"},
+				tc("visit_id", "bigint"),
+				tc("msisdn", "bigint"),
+				tc("address_id", "integer"), // a name hit on a type address refuses
+			),
+			tt("public", "addresses", []string{"address_id"},
+				tc("address_id", "integer"),
+				tc("line_1", "text"),
+			),
+		},
+		FKs: []pipeline.ForeignKey{
+			fk("visits_msisdn_fkey", visits, []string{"msisdn"}, subs, []string{"msisdn"}),
+			fk("visits_address_id_fkey", visits, []string{"address_id"},
+				ref.TableRef{Schema: "public", Name: "addresses"}, []string{"address_id"}),
+		},
+	}
+	cls, err := New().Classify(schema, nil, nil)
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+	for _, tc := range []struct {
+		c    ref.ColumnRef
+		cat  pipeline.Category
+		mask bool
+	}{
+		{ref.ColumnRef{Table: subs, Column: "msisdn"}, pipeline.CatPhone, true},
+		{ref.ColumnRef{Table: subs, Column: "nhs_number"}, pipeline.CatNationalID, true},
+		{ref.ColumnRef{Table: visits, Column: "msisdn"}, pipeline.CatPhone, true},
+		{ref.ColumnRef{Table: subs, Column: "account_id"}, pipeline.CatNone, false},
+		{ref.ColumnRef{Table: visits, Column: "visit_id"}, pipeline.CatNone, false},
+	} {
+		d := cls.Decisions[tc.c]
+		if d.Masked != tc.mask || d.Category != tc.cat {
+			t.Errorf("%s = category %q masked %t, want %q and %t (reason %q)",
+				tc.c, d.Category, d.Masked, tc.cat, tc.mask, d.Reason)
+		}
+	}
+	// A key the classifier found nothing in keeps the exemption and says so.
+	if d := cls.Decisions[ref.ColumnRef{Table: visits, Column: "visit_id"}]; !strings.Contains(d.Reason, "surrogate key") {
+		t.Errorf("visits.visit_id reason = %q, want the key exemption named", d.Reason)
+	}
+	// The exemption is lost only above the mask threshold. address_id is a name
+	// hit on a type its category refuses, which §4 pins at low, so it keeps the
+	// verbatim reason it had before.
+	addr := cls.Decisions[ref.ColumnRef{Table: visits, Column: "address_id"}]
+	if addr.Masked || !strings.Contains(addr.Reason, "preserved verbatim") {
+		t.Errorf("visits.address_id = %+v, want an unmasked key with the exemption named", addr)
+	}
+}
+
+// TestAMaskedKeyOverridesTheColumnsThatReferenceIt is ARCHITECTURE.md §4's
+// propagation sentence — "a masked PK or unique column's decision overrides the
+// decision on every column referencing it" — for the case it exists to close: an
+// integer or uuid FK child whose own name and values say nothing at all, which
+// markNeverMasked exempts as a surrogate key before propagation has run.
+//
+// Both failures are real if the exemption stands. The child ships the parent's
+// personal values in cleartext under exit 0 (THREAT_MODEL.md T1), and the parent
+// is replaced while the child is not, so the load hits a foreign key violation
+// or silently orphans the rows (T8). The two ends converge on the parent's
+// category and masker for the same reason: two maskers over one set of values
+// is a broken join.
+func TestAMaskedKeyOverridesTheColumnsThatReferenceIt(t *testing.T) {
+	t.Parallel()
+	people := ref.TableRef{Schema: "public", Name: "people"}
+	visits := ref.TableRef{Schema: "public", Name: "visits"}
+	labs := ref.TableRef{Schema: "public", Name: "lab_samples"}
+
+	visitsTable := tt("public", "visits", []string{"visit_id"},
+		tc("visit_id", "bigint"),
+		tc("subject_ref", "bigint"), // no name signal and no samples: exempt on its own
+	)
+	visitsTable.Indexes = []pipeline.Index{{
+		Name: "visits_subject_ref_key", Columns: []string{"subject_ref"}, Unique: true, Immediate: true,
+	}}
+	schema := &pipeline.Schema{
+		Tables: []pipeline.Table{
+			tt("public", "people", []string{"nhs_number"}, tc("nhs_number", "bigint")),
+			visitsTable,
+			tt("public", "lab_samples", nil,
+				tc("sample_id", "bigint"),
+				tc("patient_ref", "bigint"),
+			),
+		},
+		// The grandchild edge is listed first, so that one sweep in FK order
+		// would leave lab_samples.patient_ref verbatim.
+		FKs: []pipeline.ForeignKey{
+			fk("lab_samples_patient_ref_fkey", labs, []string{"patient_ref"}, visits, []string{"subject_ref"}),
+			fk("visits_subject_ref_fkey", visits, []string{"subject_ref"}, people, []string{"nhs_number"}),
+		},
+	}
+	cls, err := New().Classify(schema, nil, nil)
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+
+	parent := cls.Decisions[ref.ColumnRef{Table: people, Column: "nhs_number"}]
+	if !parent.Masked || parent.Category != pipeline.CatNationalID {
+		t.Fatalf("people.nhs_number = %+v, want a masked national_id key", parent)
+	}
+	for _, c := range []ref.ColumnRef{
+		{Table: visits, Column: "subject_ref"},
+		{Table: labs, Column: "patient_ref"},
+	} {
+		d := cls.Decisions[c]
+		if !d.Masked {
+			t.Errorf("%s = %+v, want it masked: it holds the values its parent is masked for", c, d)
+		}
+		if d.Category != parent.Category || d.Masker != parent.Masker {
+			t.Errorf("%s = category %q masker %q, want its parent's %q and %q",
+				c, d.Category, d.Masker, parent.Category, parent.Masker)
+		}
+		if strings.Contains(d.Reason, "preserved verbatim") {
+			t.Errorf("%s reason = %q; the key exemption is lifted, not printed beside the propagation", c, d.Reason)
+		}
+		if !strings.Contains(d.Reason, "propagated through foreign key") {
+			t.Errorf("%s reason = %q, want the propagation named", c, d.Reason)
+		}
+	}
+	// A key with nothing above it keeps the exemption.
+	if d := cls.Decisions[ref.ColumnRef{Table: visits, Column: "visit_id"}]; d.Masked ||
+		!strings.Contains(d.Reason, "surrogate key") {
+		t.Errorf("visits.visit_id = %+v, want the exemption kept: nothing masked references it", d)
+	}
+}
+
+// TestConfigCannotRaiseWithoutAUsableCategory is the other half of ADR-004's
+// tighten-only rule. A raise is applied only when it leaves a category the
+// column's type family accepts, because Decision.Masker is chosen from the
+// category: a decision that says "mask this" with no category is one transform
+// has nothing to mask with (ADR-006), and a JSON masker on a text column is a
+// pairing the rule pack's own `accepts:` list says cannot exist.
+func TestConfigCannotRaiseWithoutAUsableCategory(t *testing.T) {
+	t.Parallel()
+
+	t.Run("AConfidenceWithNoCategoryIsNotApplied", func(t *testing.T) {
+		widget := ref.TableRef{Schema: "public", Name: "widget"}
+		schema := &pipeline.Schema{Tables: []pipeline.Table{
+			tt("public", "widget", nil, tc("sku", "text")),
+		}}
+		prior := &pipeline.Config{ExtraPatterns: []pipeline.Pattern{
+			{Name: `sku`, Confidence: pipeline.ConfCertain},
+		}}
+		cls, err := New().Classify(schema, nil, prior)
+		if err != nil {
+			t.Fatalf("Classify: %v", err)
+		}
+		d := cls.Decisions[ref.ColumnRef{Table: widget, Column: "sku"}]
+		if d.Masked || d.Category != pipeline.CatNone || d.Masker != "" {
+			t.Errorf("widget.sku = %+v, want it left alone: a raise with no category has no masker", d)
+		}
+		if !strings.Contains(d.Reason, "no usable category") {
+			t.Errorf("widget.sku reason = %q, want the dropped raise named", d.Reason)
+		}
+	})
+
+	t.Run("ACategoryTheTypeRefusesIsNotTaken", func(t *testing.T) {
+		refCol := col(tPeople, "ref")
+		prior := &pipeline.Config{Columns: map[ref.ColumnRef]pipeline.ColumnConfig{
+			refCol: {Category: pipeline.CatSemiStruct, Confidence: pipeline.ConfCertain},
+		}}
+		d := decision(t, mustClassify(t, prior), refCol)
+		if d.Category != pipeline.CatEmail {
+			t.Errorf("people.ref category = %q, want email kept: semi_structured accepts no text column", d.Category)
+		}
+		if d.Masker != "semi_structured" && !strings.Contains(d.Reason, "not an accepted type for semi_structured") {
+			t.Errorf("people.ref reason = %q, want the conflict recorded", d.Reason)
+		}
+		if d.Confidence != pipeline.ConfCertain {
+			t.Errorf("people.ref confidence = %v, want the raise still applied to the classifier's category", d.Confidence)
+		}
+	})
+
+	t.Run("AConfidenceOverATypeConflictingCategoryIsNotApplied", func(t *testing.T) {
+		// The gate is on the category the raise would leave, not only on the one
+		// the yml named. people.email_verified is `email` at low on a boolean —
+		// ARCHITECTURE.md §4 pins it there and the neighbouring-column rule may
+		// not raise it — so a yml entry that supplies a confidence and no usable
+		// category must not be the one route to the email masker on a boolean.
+		verified := col(tPeople, "email_verified")
+		for _, tc := range []struct {
+			name  string
+			prior *pipeline.Config
+		}{
+			{"by column, confidence only", &pipeline.Config{
+				Columns: map[ref.ColumnRef]pipeline.ColumnConfig{
+					verified: {Confidence: pipeline.ConfCertain},
+				},
+			}},
+			{"by pattern, confidence only", &pipeline.Config{
+				ExtraPatterns: []pipeline.Pattern{
+					{Name: `\Aemail_verified\z`, Confidence: pipeline.ConfCertain},
+				},
+			}},
+			{"by pattern, with a category the type refuses", &pipeline.Config{
+				ExtraPatterns: []pipeline.Pattern{
+					{Name: `\Aemail_verified\z`, Category: pipeline.CatSemiStruct, Confidence: pipeline.ConfCertain},
+				},
+			}},
+		} {
+			d := decision(t, mustClassify(t, tc.prior), verified)
+			if d.Masked || d.Masker != "" {
+				t.Errorf("%s: people.email_verified = %+v, want it left unmasked with no masker", tc.name, d)
+			}
+			if d.Confidence != pipeline.ConfLow {
+				t.Errorf("%s: people.email_verified confidence = %v, want low", tc.name, d.Confidence)
+			}
+			if !strings.Contains(d.Reason, "no usable category") {
+				t.Errorf("%s: people.email_verified reason = %q, want the dropped raise named", tc.name, d.Reason)
+			}
+		}
+	})
+}
+
+// TestAnExtraPatternMatchesTheTableName is pipeline.Pattern's own contract —
+// "regex over column or table name". A user who writes a pattern for a table of
+// patient records to raise the whole table must not get silence, because a
+// raise that quietly does nothing is a recall failure the user believes they
+// have fixed (THREAT_MODEL.md T3).
+func TestAnExtraPatternMatchesTheTableName(t *testing.T) {
+	t.Parallel()
+	patients := ref.TableRef{Schema: "public", Name: "patients"}
+	schema := &pipeline.Schema{Tables: []pipeline.Table{
+		tt("public", "patients", nil, tc("code", "text"), tc("summary_line", "text")),
+	}}
+	prior := &pipeline.Config{ExtraPatterns: []pipeline.Pattern{
+		{Name: `\Apatients\z`, Category: pipeline.CatSpecial, Confidence: pipeline.ConfCertain},
+	}}
+	cls, err := New().Classify(schema, nil, prior)
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+	for _, name := range []string{"code", "summary_line"} {
+		d := cls.Decisions[ref.ColumnRef{Table: patients, Column: name}]
+		if !d.Masked || d.Category != pipeline.CatSpecial {
+			t.Errorf("patients.%s = %+v, want the whole table raised by its name", name, d)
+		}
+	}
+}
+
+// TestAnOptOutWithNoFingerprintIsIgnored is the fail-closed half of
+// THREAT_MODEL.md T3's control. The control is that an opt-out records the
+// column's type fingerprint and is ignored when it changes; an opt-out that
+// records none is one nothing can ever revoke, so a hand-written or older
+// lazyslice.yml cannot switch masking off permanently by leaving a field out.
+func TestAnOptOutWithNoFingerprintIsIgnored(t *testing.T) {
+	t.Parallel()
+	notes := col(tPeople, "notes")
+
+	for _, tc := range []struct {
+		name string
+		u    pipeline.Unmask
+	}{
+		{"no fingerprint", pipeline.Unmask{Reason: "hand written", By: "gareth"}},
+		{"no reason", pipeline.Unmask{By: "gareth", TypeFP: fp("notes", "text")}},
+		{"nothing at all", pipeline.Unmask{}},
+	} {
+		u := tc.u
+		cls := mustClassify(t, &pipeline.Config{Columns: map[ref.ColumnRef]pipeline.ColumnConfig{
+			notes: {Unmask: &u},
+		}})
+		if d := cls.Decisions[notes]; !d.Masked {
+			t.Errorf("%s: %s = %+v, want the opt-out ignored and the column masked", tc.name, notes, d)
+		}
+		if len(cls.Expired) != 1 || cls.Expired[0] != notes {
+			t.Errorf("%s: Expired = %v, want exactly %s", tc.name, cls.Expired, notes)
+		}
+	}
+
+	// A --unmask flag opt-out is made for one run and dies with it, so it
+	// carries no fingerprint by construction and is still honoured.
+	flagged := mustClassify(t, &pipeline.Config{Columns: map[ref.ColumnRef]pipeline.ColumnConfig{
+		notes: {Unmask: &pipeline.Unmask{Reason: "one run only", By: "flag"}},
+	}})
+	if d := flagged.Decisions[notes]; d.Masked {
+		t.Errorf("%s = %+v, want a --unmask opt-out honoured", notes, d)
+	}
+}
+
+// TestAUniqueExpressionIndexIsRecorded is ARCHITECTURE.md §5's "unique indexes
+// (including expression indexes such as lower(email))". The flag is what makes
+// the plan pick a generator whose domain reaches the row count; without it the
+// load fails on a unique violation, which is the failure the domain check
+// exists to prevent.
+func TestAUniqueExpressionIndexIsRecorded(t *testing.T) {
+	t.Parallel()
+	users := ref.TableRef{Schema: "public", Name: "users"}
+	u := tt("public", "users", nil, tc("email", "text"), tc("other", "text"))
+	u.Indexes = []pipeline.Index{{
+		Name: "users_lower_email_key", Unique: true, Expression: true, Immediate: true,
+		Def: "CREATE UNIQUE INDEX users_lower_email_key ON public.users USING btree (lower((email)::text))",
+	}}
+	cls, err := New().Classify(&pipeline.Schema{Tables: []pipeline.Table{u}}, nil, nil)
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+	if d := cls.Decisions[ref.ColumnRef{Table: users, Column: "email"}]; !d.UniqueIndex {
+		t.Errorf("users.email = %+v, want UniqueIndex set by the expression index", d)
+	}
+	if d := cls.Decisions[ref.ColumnRef{Table: users, Column: "other"}]; d.UniqueIndex {
+		t.Errorf("users.other = %+v, want UniqueIndex unset: no index covers it", d)
+	}
+	// The nasty fixture's own expression index, beside the partial one.
+	nasty := mustClassify(t, nil)
+	if d := decision(t, nasty, col(tAudit, "entry_uid")); !d.UniqueIndex {
+		t.Errorf("audit_log.entry_uid = %+v, want UniqueIndex set", d)
+	}
+}
+
+// TestATypeIsFoundThroughItsSchemaQualification is ARCHITECTURE.md §11.1 item
+// 2's "CREATE EXTENSION ... SCHEMA <schema>" reaching the classifier:
+// pg_catalog.format_type qualifies any type that is not visible in the
+// connection's search_path, so citext, public.citext and extensions.citext are
+// three spellings of one type. Reading only the first as citext would classify
+// an email column of the other two as famOther, which no category accepts.
+func TestATypeIsFoundThroughItsSchemaQualification(t *testing.T) {
+	t.Parallel()
+	for _, spelling := range []string{"citext", "public.citext", "extensions.citext"} {
+		tbl := ref.TableRef{Schema: "public", Name: "account"}
+		schema := &pipeline.Schema{Tables: []pipeline.Table{
+			tt("public", "account", nil, tc("email", spelling), tc("props", strings.Replace(spelling, "citext", "hstore", 1))),
+		}}
+		cls, err := New().Classify(schema, nil, nil)
+		if err != nil {
+			t.Fatalf("Classify: %v", err)
+		}
+		email := cls.Decisions[ref.ColumnRef{Table: tbl, Column: "email"}]
+		if !email.Masked || email.Category != pipeline.CatEmail {
+			t.Errorf("an email column of type %q = %+v, want a masked email column", spelling, email)
+		}
+		props := cls.Decisions[ref.ColumnRef{Table: tbl, Column: "props"}]
+		if !props.Masked || props.Category != pipeline.CatSemiStruct {
+			t.Errorf("an hstore column spelled like %q = %+v, want a masked semi_structured column", spelling, props)
+		}
+	}
+	// An enum is resolved by both spellings too: Schema.Enums is keyed
+	// "nspname.typname" and format_type writes an in-search_path enum bare.
+	tbl := ref.TableRef{Schema: "public", Name: "account"}
+	schema := &pipeline.Schema{
+		Enums: map[string][]string{"public.mood": {"ok", "bad"}},
+		Tables: []pipeline.Table{
+			tt("public", "account", nil, tc("marital_status", "mood")),
+		},
+	}
+	cls, err := New().Classify(schema, nil, nil)
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+	if d := cls.Decisions[ref.ColumnRef{Table: tbl, Column: "marital_status"}]; !d.Masked {
+		t.Errorf("an enum column spelled bare = %+v, want it masked as a special category", d)
+	}
+}
+
+// TestByteaIsNotReadAsText is ARCHITECTURE.md §4's separate rule for bytea:
+// "bytea in a person-shaped column is binary_personal and set to NULL". A bytea
+// sample is arbitrary binary, and running it through the text validators makes a
+// PNG read as an address — a decision the rule pack itself contradicts, since
+// address accepts no bytea column.
+func TestByteaIsNotReadAsText(t *testing.T) {
+	t.Parallel()
+	tbl := ref.TableRef{Schema: "public", Name: "uploads"}
+	schema := &pipeline.Schema{Tables: []pipeline.Table{
+		tt("public", "uploads", nil, tc("blob", "bytea")),
+	}}
+	png := func(n byte) any {
+		return []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, n, 'I', 'H', 'D', 'R', ' ', '1', '2', ' ', 'a', 'b'}
+	}
+	samples := mapSampler{
+		ref.ColumnRef{Table: tbl, Column: "blob"}: anyOf(png(1), png(2), png(3), png(4)),
+	}
+	cls, err := New().Classify(schema, samples, nil)
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+	d := cls.Decisions[ref.ColumnRef{Table: tbl, Column: "blob"}]
+	if d.Category != pipeline.CatNone {
+		t.Errorf("uploads.blob = %+v, want no category: a text validator may not decide a bytea column", d)
+	}
+}
+
+// TestReasonGrammarQuotesOddIdentifiers is ARCHITECTURE.md §10's "every reason:
+// string parses against the template set", held against the identifiers
+// PostgreSQL actually allows. A hyphen in a schema name is ordinary, and a
+// reason this package renders must parse back whatever the database is called.
+func TestReasonGrammarQuotesOddIdentifiers(t *testing.T) {
+	t.Parallel()
+	parent := ref.TableRef{Schema: "my-app", Name: "user events"}
+	child := ref.TableRef{Schema: "my-app", Name: "child; rows"}
+	p := tt("my-app", "user events", []string{"main id"},
+		tc("main id", "text"), tc("email", "text"), tc("half done", "text"))
+	c := tt("my-app", "child; rows", nil, tc("main id", "text"))
+	schema := &pipeline.Schema{
+		Tables: []pipeline.Table{p, c},
+		FKs: []pipeline.ForeignKey{
+			fk(`fk with "space"`, child, []string{"main id"}, parent, []string{"main id"}),
+		},
+	}
+	samples := mapSampler{
+		ref.ColumnRef{Table: parent, Column: "main id"}:   anyOf("a@b.com", "c@d.com", "e@f.com", "g@h.com"),
+		ref.ColumnRef{Table: parent, Column: "email"}:     anyOf("a@b.com", "c@d.com", "e@f.com", "g@h.com"),
+		ref.ColumnRef{Table: parent, Column: "half done"}: anyOf("a@b.com", "c@d.com", "nope", "nah"),
+	}
+	cls, err := New().Classify(schema, samples, nil)
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+	saw := map[string]bool{}
+	for cc, d := range cls.Decisions {
+		if bad, ok := ParseReason(d.Reason); !ok {
+			t.Errorf("%s reason %q holds a fragment no template produced: %q", cc, d.Reason, bad)
+		}
+		for _, frag := range []string{"neighbouring-column rule", "foreign key"} {
+			if strings.Contains(d.Reason, frag) {
+				saw[frag] = true
+			}
+		}
+	}
+	if len(saw) != 2 {
+		t.Errorf("the fixture rendered %d of the two fragments that interpolate a table name; it proves nothing about the rest", len(saw))
+	}
+}
