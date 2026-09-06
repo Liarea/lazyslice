@@ -6,7 +6,7 @@
 | E1 Research | 1 | 0 | 0 | 10 | 0 | 0 |
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 1 | 0 | 9 | 0 | 0 |
-| E4 Vertical slice | 4 | 2 | 1 | 14 | 0 | 0 |
+| E4 Vertical slice | 4 | 2 | 1 | 15 | 0 | 0 |
 | E5 Hardening | 5 | 7 | 0 | 0 | 0 | 0 |
 | E9 Later | later | 4 | 0 | 0 | 0 | 0 |
 
@@ -24,9 +24,9 @@
 - T-0050 [open] E5 · Extract and transform hand-offs from T-EXTRACT review (see T-0041 log): shape-template identifier escaping, KeySet chunk iterator, pgbouncer testcontainer, text-keyed big fixture (opus)
 - T-0052 [open] E5 · Flake: TestKillNineLeavesEveryTableEmptyOrComplete races container teardown (port 5432/tcp not found) (sonnet)
 - T-0053 [open] E5 · pg gate follow-ups from T-FPR: regression test pinning the fingerprinter transaction (SAVEPOINT must not 25P01), rollback failure routed through endTx discipline, comment corrections; schema-only Introspector variant so the gate skips sampling (opus)
-- T-0054 [in_progress] E4 · Classify decides text categories on timestamp and tsvector columns (pagila last_update credential, film.fulltext address); transform then refuses at exit 7 mid-run (opus)
 - T-0055 [open] E5 · Shared leaf package for value validators including the name dictionary; register person_name and free_text in verify's second net with a verify-side false-positive threshold decision (opus)
 - T-0056 [open] E5 · Second net: weak threshold (0.5) plus neighbouring-column raise; the faithful reading is decorative, the alternative is a different control and needs a T1 review first (opus)
+- T-0057 [in_progress] E4 · Before core: move CatDerivedText into pipeline's category block; delete verify's dead --unmask prior workaround and assert film.fulltext masked as derived_text (sonnet)
 
 ## Recently closed
 
@@ -41,6 +41,7 @@
 - T-0043 [done] E4 · T-VERIFY: verify stage, includes T-0035 negative control → done: a57f584; FK validation, residual scan with capped confirmation, second net, sequences, row counts, sample compare, negative control (T-0035) exit 9 naming table and column; package suite green
 - T-0047 [done] E4 · T-PGSHAPES: statement-shape grammar placeholders for plan and extract; plan exports Shapes() → done: grammar gains select-list item, variable-arity cast list, --where predicate with exclusions; plan exports Shapes() and its suite runs through pg.Source; extract shapes staged
 - T-0051 [done] E4 · T-FPR: apply ADR-009, delete introspect fingerprint, core-side Schema.Fingerprint, pg gate runs fingerprinter in its own transaction → done: e85be26; introspect fingerprint deleted, pg gate runs the injected fingerprinter inside its own BEGIN/ROLLBACK, load's test workaround removed, marker binds end to end
+- T-0054 [done] E4 · Classify decides text categories on timestamp and tsvector columns (pagila last_update credential, film.fulltext address); transform then refuses at exit 7 mid-run → done: classify silences value signals on non-accepting families, derived_text for tsvector, plan-time write-back refusal, cross-stage integration test over both fixtures; ADR-010 records the rule
 - T-0002 [done] E1 · COMPETITORS.md teardown → done: 636-line teardown of 23 tools, 156 sources, critiqued and revised
 - T-0003 [done] E1 · POSTMORTEMS.md Snaplet and Neosync → done: Snaplet and Neosync post-mortems with founder quotes, pricing history, five do-not-copy and three must-copy
 - T-0004 [done] E1 · HARD_PROBLEMS.md technical survey → done: four hard problems surveyed with simplest-correct, refinement, and trap for each
@@ -54,4 +55,3 @@
 - T-0013 [done] E0 · ADR-007 tool not company; OPEN_QUESTIONS.md; rename to lazyslice → done
 - T-0014 [cancelled] E2 · Language throughput benchmark, Go vs Python → cancelled
 - T-0015 [done] E2 · Three architecture proposals: mvp-first, risk-first, user-first → done: three proposals, each under 2000 words with verified library versions
-- T-0016 [done] E2 · Judge panel scoring → done: judges split (user-first 33, risk-first 36, three-way tie 31/30/30); fatal flaws found in every proposal
