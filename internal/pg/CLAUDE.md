@@ -112,12 +112,12 @@ for the privilege.
   and not the tracer is what bounds those, and the bounded-count bullet needs
   the same qualification about its own scope. **Two:** the `INTO evil`
   near-miss above belongs in T9 as a recorded near-miss and not only as a fixed
-  regex, because the layer that caught it is not present on every path:
-  `Connect` sets no `default_transaction_read_only` on the source pool and
-  `Source.SystemID` already sends its statement outside any `BEGIN`, so on an
-  autocommit path the allowlist is the only defence. THREAT_MODEL.md is not a
-  path this package's tasks may write; the amendment is reported to the
-  orchestrator as an open task.
+  regex, because at the time the layer that caught it was not present on every
+  path: `Connect` set no `default_transaction_read_only` on the source pool and
+  `Source.SystemID` sends its statement outside any `BEGIN`, so an autocommit
+  path had the allowlist and nothing else. **Both amendments have since landed
+  in T9, and `Connect` now sets `default_transaction_read_only=on`** (see the
+  entry below), so the autocommit path is covered by the server as well.
 - **A predicate that breaks the rule is refused at `--where`, not only here.**
   `internal/plan/where.go` checks the same characters and the same balance when
   the request arrives and returns exit 2 naming the character and its position.
@@ -129,27 +129,17 @@ for the privilege.
   `TestWherePredicatesThatWouldEscapeTheSeedAreRefused` and
   `TestTheWhereCheckAndTheShapeAgree`, in `internal/plan` because that is where
   the seed statement is built and where `--where` is read.
-- **`ExtractShapes()` (`shapes_extract.go`) is a review, not this package's
-  own statements, and it is in the wrong package on purpose.** Every other
-  stage declares the statements it sends (`introspect.Shapes()`,
-  `plan.Shapes()`); `internal/extract` is a no-op scaffold and was not a path
-  the task that reviewed these could write. It is here because the wall it
-  avoids was this package's — the planner could not be registered at all until
-  the grammar grew — and extract's statements are the same chunk joins. The
-  task that implements `Extract` moves them into an `extract.Shapes()` over the
-  statements it really builds and deletes the file.
-- **`extract.lookup` carries a `LIMIT` in the template.** The allowlist is one
-  per-`Source` union that every stage registers into additively
-  (`Tracer.Register`: nothing removes a shape), so a table-agnostic
-  `SELECT {selectlist} FROM {ident} t ORDER BY {idents}` is `plan.seed` with
-  its bound removed, for every relation, from the moment the two sets sit on
-  one tracer — including `pg_catalog.pg_authid`. The planner proving a lookup
-  under 1,000 rows is not the second layer; the allowlist is what has to hold
-  when the planner is the thing that is wrong. Extract issues the lookup
-  ceiling (`internal/plan`'s `countProbeLimit`, 1001) as the bound, so it costs
-  a real lookup read nothing. `internal/plan`'s
-  `TestTheComposedAllowlistStillRefusesAnUnboundedRead` compiles the union and
-  pins it; a stage that registers a shape wide enough to make another stage's
+- **`ExtractShapes()` and `shapes_extract.go` are gone** (T-EXTRACT). They were
+  a review of extract's statement forms, held here because the task that
+  reviewed them could write `internal/pg` and not `internal/extract`, which was
+  then a no-op scaffold. `internal/extract.Shapes(plan)` now declares the
+  statements that package really builds, as every other stage does
+  (`introspect.Shapes()`, `plan.Shapes()`), and it is narrower than the review
+  was: the lookup read names its table and writes its bound as a literal.
+  `internal/plan`'s `TestTheComposedAllowlistStillRefusesAnUnboundedRead`
+  compiles the union of the planner's shapes, this package's and
+  `extract.Shapes(nil)`, and pins that the union still refuses an unbounded
+  read; a stage that registers a shape wide enough to make another stage's
   bound optional fails there.
 - A refused statement is recorded with its string and numeric **literals
   elided**, so the trace of a statement a bug interpolated a value into cannot
@@ -190,6 +180,38 @@ for the privilege.
   rows for the rest — with the exit codes §9 assigns each — before any renderer
   can print these refusals. `catalogue.yml` is not a file this package's task
   may write; the missing rows are reported to the orchestrator as an open task.
+- **The source pool sets `default_transaction_read_only=on` at connect time**
+  (T-EXTRACT), as a session `SET` in `AfterConnect`, so it is on before the
+  first query of the run. ARCHITECTURE.md §2 makes every
+  source transaction `REPEATABLE READ READ ONLY`, and until this setting existed
+  that covered only statements *inside* one: `Source.SystemID` queries outside
+  any `BEGIN`, so on that autocommit path the allowlist was the whole defence —
+  which is the near-miss THREAT_MODEL.md T9 records (`SELECT t."a"::int INTO
+  evil FROM ...` matched a shape while a cast's type name could absorb any
+  word, and `SELECT ... INTO` is `CREATE TABLE AS`). With it, the implicit
+  transaction around such a statement is read-only too and the server refuses
+  the write with SQLSTATE 25006. T9 already carries the amendment. It is a
+  default and not a lock — an explicit `BEGIN ... READ WRITE` would override it
+  — and nothing here writes one; the tracer would refuse it.
+  `TestAWriteOutsideATransactionIsRefusedByTheServer` registers a write shape on
+  purpose, so that what refuses the write can only be the server.
+  **It is a `SET` and not a startup parameter, and that is a topology decision.**
+  It was written into `ConnConfig.RuntimeParams` first, which puts it in the
+  PostgreSQL startup packet; PgBouncer, Odyssey and Supavisor accept only
+  `client_encoding`, `DateStyle`, `TimeZone`, `standard_conforming_strings` and
+  `application_name` there and **refuse the connection** for anything else
+  unless it is listed in `ignore_startup_parameters`. A pooled endpoint is a
+  supported v1 topology (ADR-005 "Pooled endpoints", ARCHITECTURE.md §2
+  `Source.Reader`, §8's `--single-connection`), so that made `OpenSource` unable
+  to open any connection at all through one — and because `pgxpool` connects
+  lazily, as an opaque acquire failure rather than at `Connect`, with the
+  serialised-extract fallback in `Source.Reader` unreachable behind it.
+  `Connect` therefore registers `source.read_only` (a literal template, narrower
+  than any shape with a placeholder) and execs the `SET` in `AfterConnect`.
+  `TestConnectAddsNoStartupParameterAPoolerWouldRefuse` and
+  `TestTheReadOnlySettingIsASessionStatementOnTheAllowlist` are the guard; a
+  real pooler is not in the test suite, so the guard is over what we send, not
+  over what PgBouncer answers.
 - `uuidV4` is local rather than a dependency: `go.mod` has no direct one, and
   this is the only UUID lazyslice makes.
 - **`Eligibility.Local` records whether the target is local, never whether the
@@ -235,9 +257,10 @@ for the privilege.
   T8); the failure is now at least printable (see the withheld-error entry
   above). This is a recorded debt, not an oversight.
 
-**Test.** `go test ./internal/pg/...`; the gate, tracer and identity behaviour
-need `go test -tags integration ./internal/pg/...` (the `TestGate*` suite in
-THREAT_MODEL.md T2). Every branch of the gate has a case there: the three
+**Test.** `go test ./internal/pg/...`; the gate, tracer, identity and
+read-only-pool behaviour need `go test -tags integration ./internal/pg/...`
+(the `TestGate*` suite in THREAT_MODEL.md T2, plus
+`TestAWriteOutsideATransactionIsRefusedByTheServer` for T9). Every branch of the gate has a case there: the three
 ARCHITECTURE.md §9 names them — `TestGateRefusesRLSTable`,
 `TestGateRefusesTargetAboveTableCap`, `TestGateRefusesRemoteTargetWithoutFlag` —
 plus `TestGateRefusesTheSourceUnderAnotherName` for the half of rule 1 that
