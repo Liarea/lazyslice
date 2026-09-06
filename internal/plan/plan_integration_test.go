@@ -15,7 +15,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/Liarea/lazyslice/internal/dsn"
 	"github.com/Liarea/lazyslice/internal/introspect"
+	"github.com/Liarea/lazyslice/internal/pg"
 	"github.com/Liarea/lazyslice/internal/pipeline"
 	"github.com/Liarea/lazyslice/internal/ref"
 	"github.com/Liarea/lazyslice/internal/testutil"
@@ -30,22 +32,25 @@ import (
 // trap 12's table has no row identity at all and §3.4 ends in exit 12 for it.
 // The refusal itself is asserted in Trap12.
 
-// txReader is a pipeline.Reader over one REPEATABLE READ READ ONLY transaction.
-// It is not internal/pg.Source: the planner's statements are built per table and
-// per key arity, which the source's shape allowlist grammar cannot express
-// today (internal/plan/CLAUDE.md, "Decisions made during implementation"), so
-// wiring the two together is the core task's business and not this suite's.
-type txReader struct{ tx pgx.Tx }
+// The reader every test here plans through is a real internal/pg.Source with
+// this package's shapes and introspect's registered on its allowlist, so the
+// suite also proves that every statement the walk sends matches a registered
+// shape: Source.Violation is checked when the test ends (THREAT_MODEL.md T9).
+// A statement no shape covers does not merely get logged — the tracer hands the
+// call a cancelled context and the plan fails.
 
-func (r txReader) Query(ctx context.Context, sql string, args ...any) (pipeline.Rows, error) {
-	rows, err := r.tx.Query(ctx, sql, args...)
-	if err != nil {
-		return nil, err
+// allowlist is the shapes the planner and the introspection it runs first send.
+func allowlist(t *testing.T) []pg.Shape {
+	t.Helper()
+	shapes := make([]pg.Shape, 0, len(introspect.Shapes())+len(Shapes()))
+	for _, s := range introspect.Shapes() {
+		shapes = append(shapes, pg.Shape{Name: s.Name, SQL: s.SQL})
 	}
-	return rows, nil
+	for _, s := range Shapes() {
+		shapes = append(shapes, pg.Shape{Name: s.Name, SQL: s.SQL})
+	}
+	return shapes
 }
-
-func (txReader) Close(context.Context) error { return nil }
 
 // fixture loads a fixture, opens one snapshot over it and introspects it.
 func fixture(ctx context.Context, t *testing.T, load func(context.Context, string) error) (pipeline.Reader, *pipeline.Schema) {
@@ -56,30 +61,54 @@ func fixture(ctx context.Context, t *testing.T, load func(context.Context, strin
 	if err := load(ctx, url); err != nil {
 		t.Fatalf("loading the fixture: %v", err)
 	}
+	analyse(ctx, t, url)
 
-	conn, err := pgx.Connect(ctx, url)
+	src, err := pg.OpenSource(ctx, dsn.DSN(url), allowlist(t)...)
 	if err != nil {
-		t.Fatalf("connecting: %v", err)
+		t.Fatalf("opening the source: %v", err)
 	}
-	t.Cleanup(func() { _ = conn.Close(context.WithoutCancel(ctx)) })
-	// reltuples is -1 until something analyses, and both the root default and
-	// the lookup probe read it.
-	if _, aerr := conn.Exec(ctx, "ANALYZE"); aerr != nil {
-		t.Fatalf("analysing the fixture: %v", aerr)
-	}
+	t.Cleanup(src.Close)
 
-	tx, err := conn.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	id, err := src.Snapshot(ctx)
 	if err != nil {
-		t.Fatalf("opening the snapshot: %v", err)
+		t.Fatalf("exporting the snapshot: %v", err)
 	}
-	t.Cleanup(func() { _ = tx.Rollback(context.WithoutCancel(ctx)) })
+	t.Cleanup(func() { _ = src.Release(context.WithoutCancel(ctx)) })
 
-	r := txReader{tx}
+	r, err := src.Reader(ctx, id)
+	if err != nil {
+		t.Fatalf("opening a reader on the snapshot: %v", err)
+	}
+	t.Cleanup(func() { _ = r.Close(context.WithoutCancel(ctx)) })
+	// Cleanups run last-registered first, so this one runs while the reader and
+	// the snapshot are still open, which is where a refusal would have happened.
+	t.Cleanup(func() {
+		if refused := src.Violation(); refused != nil {
+			t.Errorf("the source allowlist refused a statement the planner sent: %v", refused)
+		}
+	})
+
 	schema, err := introspect.New().Introspect(ctx, r)
 	if err != nil {
 		t.Fatalf("introspecting: %v", err)
 	}
 	return r, schema
+}
+
+// analyse fills pg_class.reltuples, which is -1 until something analyses: both
+// the root default and the lookup probe read it. It runs on a connection of its
+// own, because ANALYZE is not a statement the source's allowlist carries and
+// not one a READ ONLY transaction would take.
+func analyse(ctx context.Context, t *testing.T, url string) {
+	t.Helper()
+	conn, err := pgx.Connect(ctx, url)
+	if err != nil {
+		t.Fatalf("connecting to analyse the fixture: %v", err)
+	}
+	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
+	if _, err := conn.Exec(ctx, "ANALYZE"); err != nil {
+		t.Fatalf("analysing the fixture: %v", err)
+	}
 }
 
 func tref(schema, name string) ref.TableRef { return ref.TableRef{Schema: schema, Name: name} }

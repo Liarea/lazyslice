@@ -52,9 +52,105 @@ for the privilege.
   `TracePrepareStart` refuse unconditionally.
 - **The allowlist is a template match, not a text match.** `Shape.SQL` is
   matched with whitespace collapsed and case ignored, and admits `{ident}`,
-  `{idents}`, `{int}` and `{snapshot}` and nothing else. A stage needing a
-  shape this grammar cannot express adds a placeholder in `tracer.go`, where it
-  is reviewed once; it does not register a looser template.
+  `{idents}`, `{int}`, `{snapshot}`, `{selectlist}`, `{casts}`, `{keypred}`
+  and `{where}` and nothing else. A stage needing a shape this grammar cannot
+  express adds a placeholder in `tracer.go`, where it is reviewed once; it does
+  not register a looser template.
+- **The four join placeholders are structures, not escape hatches.**
+  `{selectlist}`, `{casts}` and `{keypred}` were added for the planner and
+  extract, whose statements are built per table and per key arity
+  (ARCHITECTURE.md §3 and §2 "extract"). Each admits identifiers, casts and
+  equality and nothing else — no literal, no call, no subquery, no statement
+  separator — so a write cannot be spelled in any of them: a select-list item
+  has no place for `lo_import(...)`, a cast argument list is `$n::type[]` and
+  cannot be `ARRAY[...]`, and a key predicate is column-to-column equality and
+  `IS NOT NULL`. A cast's type name admits the multi-word spellings
+  `format_type` writes (`timestamp(3) without time zone`) as a **closed list**
+  of continuation words (`reTypeWord`), not as "a word". The earlier
+  `[a-z]+` continuation was wrong and the claim above was false with it:
+  `INTO evil` is two letters-only words, so
+  `SELECT t."a"::int INTO evil FROM "public"."orders" t ORDER BY t."id" LIMIT
+  500` matched `plan.seed`, and `SELECT ... INTO` is `CREATE TABLE AS` — a
+  write on the source, refused only by the `READ ONLY` transaction. T9 makes
+  the tracer a control in its own right, so a run of words after a cast is not
+  admitted; a type spelling that needs another word is added to the list, once.
+  Pinned by `TestKeyJoinPlaceholders` and
+  `internal/plan`'s `TestStatementsOutsideTheGrammarAreStillRefused`.
+- **`{where}` is the one placeholder holding text this program did not write,
+  and it is the one with an exclusion list**: no `;`, no `--`, no `/*`, no `\`,
+  no `$`, and parentheses that balance within the predicate to `whereMaxDepth`
+  (6) levels. `--where "id > 0) --"` matches the seed shape and comments the
+  template's own `ORDER BY ... LIMIT n` away, turning §3's bounded root read
+  into an unbounded one inside the holder transaction (THREAT_MODEL.md T11,
+  then T9); `;` ends the statement and starts another; and an unbalanced `)`
+  closes the template's own `WHERE (` and appends whole clauses —
+  `id > 0) UNION ALL SELECT c."pan" AS o1 FROM "public"."cards" c WHERE (true`
+  matched `plan.seed_where` with every parenthesis in the statement paired,
+  until balance was required. A `;`, `(` or `)` inside a string literal in a
+  predicate is refused with the rest: telling a literal from structure costs a
+  SQL lexer, and the refusal costs an operator a rephrasing.
+- **Be exact about what that buys.** It buys one statement, no commented-out
+  tail, no clause appended to the template's own, and a trace that is a
+  statement rather than a leading keyword and `<elided>` (the `\` and `$`
+  exclusions are the two forms `elideLiterals` cannot close over). It does
+  **not** make a predicate safe: a balanced predicate is still arbitrary
+  operator SQL and can carry a function call (`id = lo_import('/etc/passwd')`,
+  and a `dblink(...)` that opens a connection of its own, which `READ ONLY`
+  does not reach) or a subquery with an unbounded aggregate. What bounds those
+  is the `READ ONLY` transaction and nothing here. The admitted cases are
+  pinned by name in `internal/plan`'s `TestWhatTheWhereExclusionsDoNotStop`, so
+  the guarantee a reader inherits is the one the code makes. THREAT_MODEL.md
+  T9 is the v1-blocking control and still words the tracer as refusing anything
+  outside "the fixed set lazyslice generates", and still offers the bounded
+  count (`LIMIT 1001`) as the control against an unbounded count inside the
+  holder transaction — which a balanced `--where` subquery walks straight past.
+  Two amendments are owed there. **One:** `--where` is operator SQL and the
+  allowlist bounds only its *form* (no `;`, `--`, `/*`, `\`, `$`, and
+  parentheses balanced to depth 6); a balanced predicate may still carry a
+  function call, including one that opens a connection of its own (`dblink`,
+  `postgres_fdw`), and a subquery with an unbounded aggregate — so `READ ONLY`
+  and not the tracer is what bounds those, and the bounded-count bullet needs
+  the same qualification about its own scope. **Two:** the `INTO evil`
+  near-miss above belongs in T9 as a recorded near-miss and not only as a fixed
+  regex, because the layer that caught it is not present on every path:
+  `Connect` sets no `default_transaction_read_only` on the source pool and
+  `Source.SystemID` already sends its statement outside any `BEGIN`, so on an
+  autocommit path the allowlist is the only defence. THREAT_MODEL.md is not a
+  path this package's tasks may write; the amendment is reported to the
+  orchestrator as an open task.
+- **A predicate that breaks the rule is refused at `--where`, not only here.**
+  `internal/plan/where.go` checks the same characters and the same balance when
+  the request arrives and returns exit 2 naming the character and its position.
+  Without it an ordinary regex predicate (`email ~ '^\w+@example\.com$'`, both
+  a backslash and a dollar sign) reached the operator as "the source refused a
+  statement: statement does not match any registered shape", and incremented
+  `Violations()`. A recorded violation now always means a bug in our own SQL
+  generation. The guards are
+  `TestWherePredicatesThatWouldEscapeTheSeedAreRefused` and
+  `TestTheWhereCheckAndTheShapeAgree`, in `internal/plan` because that is where
+  the seed statement is built and where `--where` is read.
+- **`ExtractShapes()` (`shapes_extract.go`) is a review, not this package's
+  own statements, and it is in the wrong package on purpose.** Every other
+  stage declares the statements it sends (`introspect.Shapes()`,
+  `plan.Shapes()`); `internal/extract` is a no-op scaffold and was not a path
+  the task that reviewed these could write. It is here because the wall it
+  avoids was this package's — the planner could not be registered at all until
+  the grammar grew — and extract's statements are the same chunk joins. The
+  task that implements `Extract` moves them into an `extract.Shapes()` over the
+  statements it really builds and deletes the file.
+- **`extract.lookup` carries a `LIMIT` in the template.** The allowlist is one
+  per-`Source` union that every stage registers into additively
+  (`Tracer.Register`: nothing removes a shape), so a table-agnostic
+  `SELECT {selectlist} FROM {ident} t ORDER BY {idents}` is `plan.seed` with
+  its bound removed, for every relation, from the moment the two sets sit on
+  one tracer — including `pg_catalog.pg_authid`. The planner proving a lookup
+  under 1,000 rows is not the second layer; the allowlist is what has to hold
+  when the planner is the thing that is wrong. Extract issues the lookup
+  ceiling (`internal/plan`'s `countProbeLimit`, 1001) as the bound, so it costs
+  a real lookup read nothing. `internal/plan`'s
+  `TestTheComposedAllowlistStillRefusesAnUnboundedRead` compiles the union and
+  pins it; a stage that registers a shape wide enough to make another stage's
+  bound optional fails there.
 - A refused statement is recorded with its string and numeric **literals
   elided**, so the trace of a statement a bug interpolated a value into cannot
   carry that value (THREAT_MODEL.md T4).
