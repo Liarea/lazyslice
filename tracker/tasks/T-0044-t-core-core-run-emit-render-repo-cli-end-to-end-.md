@@ -27,6 +27,8 @@ outcome: ""
 
 - 2026-09-06 started
 
+- 2026-09-06 Gareth 2026-09-06: pause at end of phase 4; phase 5 waits for his go-ahead (weekly usage).
+
 ## Post-mortem
 
 _(filled on close: what went well, what went badly, what we change next time)_
