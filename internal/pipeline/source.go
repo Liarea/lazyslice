@@ -25,8 +25,10 @@ type RolePrivileges struct {
 	// Writable lists tables where the role has INSERT, UPDATE or DELETE.
 	Writable []TableRef
 	// Unreadable lists tables where has_table_privilege(..., 'SELECT') is false.
-	// The planner consumes it (ARCHITECTURE.md section 3.6); extract never does,
-	// because by then the question is already settled.
+	// internal/core reads these privileges once, before the snapshot is opened,
+	// and hands them to the planner on PlanRequest.Priv; the planner applies
+	// section 3.6 to them and asks the catalog nothing of its own. Extract never
+	// consumes them, because by then the question is already settled.
 	Unreadable []TableRef
 }
 
@@ -108,6 +110,13 @@ type Eligibility struct {
 	MarkerBound bool               // marker present, readable, and bound to this source and this catalog
 	PrevKeyFP   string             // from the marker, "" when unbound
 	PrevClassFP string             // from the marker, "" when unbound
+	// PrevToolVersion is the marker's tool_version, "" when unbound or when the
+	// gate did not read it. ARCHITECTURE.md section 11.2 requires three warnings
+	// on a bound marker written by another run — secret changed, classification
+	// changed, tool version changed — and this is the third one's input;
+	// internal/core compares it and emits target.marker.tool_changed. It stays
+	// empty until internal/pg fills it, and an empty one prints nothing.
+	PrevToolVersion string
 	// SameCluster reports that system_identifier equals the source's. It is a
 	// printed warning, never a refusal: app and app_test in one container is the
 	// common compose setup.

@@ -75,7 +75,13 @@ func TestShapesAreNamedAndDistinct(t *testing.T) {
 		}
 		seen[s.Name] = true
 	}
-	if got, want := len(Shapes()), 12; got != want {
+	// Eleven, since T-CORE: the whole-catalog unreadable-relation read and the
+	// current-role read are gone, because internal/core reads privileges once
+	// through Source.Privileges and hands them to the planner on
+	// PlanRequest.Priv — and one narrow read came back,
+	// plan.unreadable_partition_leaves, because that query excludes partition
+	// leaves and §3.3 makes an unreadable leaf the root's refusal (sql.go).
+	if got, want := len(Shapes()), 11; got != want {
 		t.Errorf("Shapes() has %d entries, want %d; a new statement needs a shape", got, want)
 	}
 }
@@ -156,16 +162,6 @@ func TestEveryPlannerStatementMatchesItsShape(t *testing.T) {
 			name: "pseudo-key probe over a bounded prefix",
 			sql:  pseudoKeyProbeSQL(items, []string{"a"}, true, 0, 0),
 			want: "plan.pseudo_key_probe_bounded",
-		},
-		{
-			name: "the unreadable-relation read",
-			sql:  sqlUnreadableTables,
-			want: "plan.unreadable_tables",
-		},
-		{
-			name: "the current role",
-			sql:  sqlCurrentRole,
-			want: "plan.current_role",
 		},
 	}
 

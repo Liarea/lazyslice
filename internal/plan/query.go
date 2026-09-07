@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -129,40 +130,54 @@ type unreadableRelation struct {
 	relation ref.TableRef
 }
 
-// readUnreadable is the relations the source role cannot SELECT, in (schema,
-// name) order, each attributed to the planned table it belongs to.
-func (p *run) readUnreadable(ctx context.Context) ([]unreadableRelation, error) {
-	rows, err := p.r.Query(ctx, sqlUnreadableTables)
+// unreadableRelations is PlanRequest.Priv.Unreadable plus the unreadable
+// partition leaves, each entry attributed to the planned table it belongs to and
+// in (schema, name) order.
+//
+// The leaves are read here because internal/pg's privileges query excludes them
+// and §3.3 makes them the root's problem (sqlUnreadablePartitionLeaves says why
+// at length). Everything else comes from the one Source.Privileges call, so the
+// role a refusal names and the role the decision header prints are still one
+// read.
+//
+// The order is the caller's for the tables — Source.Privileges sorts what it
+// returns — and this query's own ORDER BY for the leaves; the two lists are
+// merged and re-sorted, because §3.6's refusal names the first table it meets and
+// an unsorted list would refuse a different table on two runs over one snapshot.
+func (p *run) unreadableRelations(ctx context.Context) ([]unreadableRelation, error) {
+	rels := append([]ref.TableRef(nil), p.req.Priv.Unreadable...)
+
+	rows, err := p.r.Query(ctx, sqlUnreadablePartitionLeaves)
 	if err != nil {
-		return nil, fmt.Errorf("plan: reading table privileges: %w", err)
+		return nil, fmt.Errorf("plan: reading partition privileges: %w", err)
 	}
 	defer rows.Close()
-	var out []unreadableRelation
 	for rows.Next() {
 		var schema, name string
 		if err := rows.Scan(&schema, &name); err != nil {
-			return nil, fmt.Errorf("plan: reading table privileges: %w", err)
+			return nil, fmt.Errorf("plan: reading partition privileges: %w", err)
 		}
-		rel := ref.TableRef{Schema: schema, Name: name}
+		rels = append(rels, ref.TableRef{Schema: schema, Name: name})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("plan: reading partition privileges: %w", err)
+	}
+
+	sort.Slice(rels, func(a, b int) bool { return tableRefLess(rels[a], rels[b]) })
+	out := make([]unreadableRelation, 0, len(rels))
+	seen := map[ref.TableRef]bool{}
+	for _, rel := range rels {
+		if seen[rel] {
+			continue
+		}
+		seen[rel] = true
 		tbl := rel
 		if root, ok := p.rootOf[rel]; ok {
 			tbl = root
 		}
 		out = append(out, unreadableRelation{table: tbl, relation: rel})
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("plan: reading table privileges: %w", err)
-	}
 	return out, nil
-}
-
-// readRole is the role name the GRANT statement in a refusal names.
-func (p *run) readRole(ctx context.Context) (string, error) {
-	var role string
-	if err := p.scalar(ctx, sqlCurrentRole, &role); err != nil {
-		return "", fmt.Errorf("plan: reading the source role: %w", err)
-	}
-	return role, nil
 }
 
 // The per-type widths the byte estimate uses. There is no width in

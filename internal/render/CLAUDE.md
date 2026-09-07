@@ -28,3 +28,31 @@ from.
 **Never:** format a message inline instead of through the catalogue; drop or
 reorder fields in `NDJSON` output; let a renderer reach a stage or a database
 connection.
+
+## Decisions made during implementation
+
+- **The catalogue is embedded as a copy.** `internal/event/catalogue.yml` is its
+  home (ARCHITECTURE.md §12) and where a code is added; Go's `//go:embed` cannot
+  reach outside a package directory, and `internal/event` has no Go file this
+  package could add the embed to. So `internal/render/catalogue.yml` is a
+  byte-identical copy and `TestCatalogueIsTheEventCatalogue` compares the two: a
+  row added there and not copied here fails `make test`. The proper fix is a
+  `//go:embed` and a `Catalogue()` accessor in `internal/event`, owed to the
+  next task whose paths include that package; the copy goes when it lands.
+- **`Lines` prints nothing for `StageStart` and `StageDone`.** They are the
+  pipeline's own brackets and carry no fact the transcript needs — CONCEPT.md's
+  transcript is a list of decisions and results — and `--json` still carries
+  both. Skipping is a rendering decision, which is this package's job; the text
+  of every line that *is* printed still comes from the catalogue.
+- **A code with no catalogue row renders as a line naming the code.** That is a
+  bug in the tree and not something a user did, and a renderer that printed
+  nothing would silence a stage exactly where it had something to say.
+- **A placeholder with no argument is left in the text.** A message with a hole
+  in it names the missing argument; a message with a gap hides it.
+- **`Event.Table`, `Event.Column` and `Event.Done` fill in for the `{table}`,
+  `{column}` and `{count}` keys** when `Args` does not carry them, because they
+  are typed fields and `Args` is a map of strings.
+- Three tests here hold the catalogue itself: every row is complete, every error
+  row carries an exit code, and no template references an argument key outside
+  the `event.ArgKey` enum (THREAT_MODEL.md T4). The last one is the check
+  ARCHITECTURE.md §7 asks for and it now exists.

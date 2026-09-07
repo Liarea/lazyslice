@@ -284,27 +284,31 @@ func samplePercent(approx int64) (num, den int64) {
 	return num, den100
 }
 
-// sqlUnreadableTables is the relations the source role cannot read. §3.6
-// consults RolePrivileges.Unreadable, which Planner.Plan is not given (§2's
-// signature has no privileges argument), so the planner asks the catalog the
-// same question before it fetches a key.
+// sqlUnreadablePartitionLeaves is the partition leaves the source role cannot
+// read.
 //
-// Partition leaves are included, and the planner attributes one to its root.
-// §3.3 fetches a partitioned table's keys from the root and lets Postgres route
-// to the leaves, so a leaf the role cannot SELECT fails the root's own read —
-// and a query that skipped leaves would let that surface as a raw pgx error
-// mid-plan or mid-extract, when §3.6 says there is no mid-extract permission
-// failure by design.
-const sqlUnreadableTables = `SELECT n.nspname, c.relname
+// §3.6 consults RolePrivileges.Unreadable, which now arrives on
+// PlanRequest.Priv from one Source.Privileges call — and that query excludes
+// partition leaves (`NOT c.relispartition`, internal/pg/source.go), because a
+// leaf is not a table anything else in the tree plans, loads or counts. §3.3
+// makes the leaves a privilege question all the same: a partitioned table's keys
+// are fetched from the *root* and Postgres routes the query to the leaves, so a
+// leaf the role cannot SELECT fails the root's own read. Without this query that
+// surfaces as a raw 42501 from pgx partway through extract — with the target
+// already dropped and partly loaded — where §3.6 says "there is no mid-extract
+// permission failure by design" and promises exit 12 with a GRANT naming the
+// leaf.
+//
+// It is deliberately leaves *only*: everything else comes from the one
+// privileges read, so the two queries cannot disagree about the same relation.
+// Merging it into internal/pg's read is the better shape and is owed there;
+// internal/plan/CLAUDE.md records it.
+const sqlUnreadablePartitionLeaves = `SELECT n.nspname, c.relname
 FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
-WHERE c.relkind IN ('r', 'p')
+WHERE c.relkind IN ('r', 'p') AND c.relispartition
   AND left(n.nspname, 3) <> 'pg_' AND n.nspname <> 'information_schema'
   AND NOT has_table_privilege(c.oid, 'SELECT')
 ORDER BY n.nspname, c.relname`
-
-// sqlCurrentRole is the role name the GRANT statement in an unreadable-table
-// refusal names.
-const sqlCurrentRole = `SELECT current_user`
 
 // grantStatement is the remedy §3.6 prints. It is rendered here, from
 // identifiers, and never carries a statement the run executed.

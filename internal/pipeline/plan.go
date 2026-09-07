@@ -112,6 +112,18 @@ type PlanRequest struct {
 	MemoryBudget int64
 	Keys         map[TableRef][]string // --key table=col,col, or the yml's keys: block
 	Skip         []TableRef            // --skip-table, or the yml's skipped: block
+	// Priv is what the source role can do, read once by internal/core through
+	// Source.Privileges before the snapshot is opened. Section 3.6 is decided
+	// from it: the planner consults Priv.Unreadable before the snapshot is used
+	// for a key, and names Priv.Role in the GRANT statement a refusal carries.
+	// The planner does not read privileges itself — one run, one answer, and
+	// the header prints the same role the refusal names.
+	Priv RolePrivileges
+
+	// Take, Cap and Depth are taken as given: an int cannot tell an unset field
+	// from an explicit zero, so internal/core substitutes section 3's defaults
+	// before it calls Plan and cmd/lazyslice refuses --take 0, --cap 0 and
+	// --depth 0 with exit 2 (T-CORE, 2026-09-06).
 }
 
 // Plan is what will happen, in enough detail to say why every row is present.
@@ -123,7 +135,16 @@ type Plan struct {
 	Steps      []Step       // in load order (SCC condensation, topologically sorted, ties by (schema, name))
 	SCCs       [][]TableRef // every SCC with more than one table, or a self-cycle
 	Virtual    []ForeignKey // inferred polymorphic edges followed
-	Unmapped   []string     // "_type values that map to no table"
+	// Polymorphic names the <x>_type/<x>_id pairs detected but not followed
+	// (section 3.2), as "schema.table (type_col, id_col)". It is separate from
+	// Unmapped because the two are different findings and a renderer that
+	// printed one under the other's heading would say a pair is a value: v1
+	// detects pairs and follows none of them, so this list is normally
+	// populated and Unmapped is normally empty.
+	Polymorphic []string
+	// Unmapped names the sampled _type values that map to no table (section
+	// 3.2). It stays empty until the mapping half of section 3.2 ships.
+	Unmapped   []string
 	Unindexed  []ForeignKey
 	Skipped    []TableRef // dropped to SchemaOnly by --skip-table
 	Unreadable []TableRef // unreachable tables the role cannot read, dropped to SchemaOnly

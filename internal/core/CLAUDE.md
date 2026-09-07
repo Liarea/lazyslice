@@ -30,3 +30,130 @@ one from flags, `internal/tui` builds the same struct from keystrokes.
 **Never:** reach into a stage's internals instead of its `pipeline` interface;
 change stage order without an ARCHITECTURE.md §1 update first; let `Report` or
 `Request` carry a value-bearing field (THREAT_MODEL.md T4).
+
+## Decisions made during implementation
+
+Recorded here because ARCHITECTURE.md is silent on them (root CLAUDE.md), and
+each one is a deviation a reviewer should see rather than discover.
+
+- **`Request.Mode`.** §8 lists five stage subcommands and §2's `Request` has no
+  field that tells them apart; `Mode` is that field, and `Mode.needsTarget()`
+  is why `lazyslice classify --source URL` needs no second database
+  (T-0020's log).
+- **`Request.Explicit`.** §10 makes the yml "a default the flag overrides,
+  never a way to widen", and an int flag bound to its own default is
+  indistinguishable from one the operator typed. `cmd/lazyslice` records which
+  flags were passed and `planRequest` reads it; without it the file could never
+  supply a take without also overriding one.
+- **Defaults live here.** §3's `--take 500`, `--cap 100` and `--depth 3` are
+  substituted by `normalise` before `Plan` is called. The planner takes the
+  request as given and the CLI refuses `--take 0`, `--cap 0` and `--depth 0`
+  with exit 2, because an int cannot mean both "unset" and "none" (T-CORE).
+- **Privileges are read once.** `Source.Privileges` is called in `discover` and
+  passed to the planner on `PlanRequest.Priv`; `internal/plan` no longer asks
+  the catalog itself. The role the header prints and the role a refusal names
+  are one read. **Narrowing:** `internal/pg`'s privilege query excludes
+  partition leaves (`NOT c.relispartition`), and the planner's own query did
+  not, so an unreadable *leaf* of a readable partitioned root is no longer
+  attributed to its root. Owed to `internal/pg`.
+- **`Schema.Fingerprint` is filled here** from `load.SchemaFingerprint`, after
+  introspection, which is ADR-009's placement: the caller that holds both ends
+  of §11.2's binding.
+- **`dropMarkerTable`.** `lazyslice_meta` is removed from the catalog before
+  any stage sees it. `internal/load/ddl` already refuses to recreate or
+  fingerprint a source table of that name; leaving it in the catalog makes the
+  classifier score `secret_fingerprint` as a credential (so `lazyslice classify`
+  pointed at a target lazyslice wrote reports lazyslice's own table as personal
+  data), gives the planner a step for it, and makes the row-count check compare
+  a table nothing loaded. Refusing such a source at the gate is the better home
+  and `internal/load/CLAUDE.md` already records it as owed.
+- **`markSmallDomains` (domain.go).** §5's small-domain rule — `d < 2 ×
+  distinct(samples)` — is not applied anywhere in the tree: `Decision.Domain`
+  and `Decision.SmallDomain` were dead fields. `internal/emit` writes
+  `small_domain:` from them and `internal/invariants` I2 exempts exactly those
+  columns from its value-overlap check, so testdata trap 24's
+  `people.marital_status` cannot pass without it. Computed here from the column
+  half of `d` only (an enum's labels, a boolean, `char(n)`/`varchar(n)` at n ≤
+  2); the generator half needs `mask.Constraints`, which `internal/transform`
+  builds and does not export. Its proper home is `internal/classify` (which has
+  the samples) or `internal/plan` (which has the row count the unique half of
+  the same rule needs).
+- **`smallDomainAware` (run.go).** The residual filter is wrapped so that a
+  small-domain column's cells are never added to it. §5 collapses a
+  small-domain `special_category` to one fixed label, so every value in the
+  target equals a real source value by construction, every one is a filter hit
+  and every one confirms: the run would refuse itself with exit 9 for doing
+  what §5 tells it to do. The same holds for any masked enum, because §5
+  requires a masked enum value to be a valid label. §6 item 6 already names
+  those columns as a stated false negative, and `internal/transform` made the
+  same argument when it kept boolean and number JSON leaves out of the filter.
+  Its proper home is `internal/transform`, which builds the filter.
+  **The exemption is bounded** (`smallDomainCeiling`, 128, domain.go): §5's
+  ratio has no upper bound on `d`, so a three-hundred-label enum with two
+  hundred distinct labels in the sample satisfied it and dropped out of both
+  the residual filter and I2 — three hundred clinic or city names checked by
+  nothing. 128 covers every domain the ratio can reach for a reason (boolean,
+  a human-written enum, `character(1)` at 95). The cost is stated in
+  `domain.go` and is a *false exit 9*, not a silent gap: a masked enum with
+  more than 128 labels reaches exit 9 on a true statement about its domain.
+  ARCHITECTURE.md §6 item 6 should carry the ceiling; that file is outside
+  T-CORE's paths.
+- **`readableWriter` (run.go).** §2's `pipeline.Writer` has no read method and
+  every check `internal/verify` makes is a read of the target, so core opens a
+  second pool on the target through `pg.Connect` and hands verify a writer with
+  `Query` on it. A `Query` method on `internal/pg`'s writer is the proper home
+  and is owed there (`internal/verify/CLAUDE.md` records the same deviation).
+- **Discovery is not wired.** `internal/discover` is a scaffold (T-0045), so a
+  run that names neither database stops at exit 3 naming `--source`. A run that
+  names both needs no ladder, which is every run in CI and in
+  `internal/invariants`.
+- **The plan print is partial.** §3.5 lists eleven things the plan prints; this
+  build emits one line per step, the polymorphic pairs, the unmapped values and
+  the estimate. The SCCs, the unindexed edges, the not-recreated counts and the
+  small-domain list are in the yml and not yet on the transcript.
+- **`ModeVerify` runs the whole pipeline.** A standalone `lazyslice verify`
+  needs the run's residual filter, which is random per run and never leaves the
+  process (§6 item 1), so it cannot be reconstructed from a target. Until §6
+  says how, `verify` re-runs everything rather than reporting a green tick over
+  a residual scan that tested nothing. The subcommand's own `Short` text now
+  says so — "Re-run the whole slice into the target and re-check it (drops and
+  reloads the target)" — because the argument belongs where a user reads it and
+  not only here. §8's row still describes it as a re-check and is owed the same
+  correction.
+
+## Decisions made during the T-CORE review round (2026-09-06)
+
+- **The bounded channel is wired** (`channel.go`). §7 requires `core.Run` to
+  send into a channel of 256 with `Progress` dropped when full and the drop
+  counted; `run.send` called the sink synchronously, so a slow renderer
+  back-pressured the pipeline and nothing counted anything. `eventChannel` is
+  that channel: one drain goroutine, `Progress` dropped on a full buffer,
+  everything else blocking, and `run.progress.dropped` printed once at the end
+  of a run that dropped anything. Every event still reaches the sink from one
+  goroutine, so a sink needs no locking of its own.
+- **`markerWarnings` moved from `openTarget` to `move`.** All three of §11.2's
+  bound-marker warnings were guarded on `r.keyFP` and `r.cls`, and neither is
+  filled until `resolveKey` and `classifyStage`, which run *after* discover: the
+  warnings could never print. The gate's `Eligibility` is kept on the run
+  (`r.gate`) and the comparison happens in `move`, after the key and the
+  classification exist and before the loader's first write.
+  `target.marker.tool_changed` is emitted from the same place now, from
+  `pipeline.Eligibility.PrevToolVersion` — a field this change adds and
+  `internal/pg` still has to fill from the marker row. Until it does, the third
+  warning has nothing to compare and stays silent; that is owed to `internal/pg`
+  and is the last of §11.2's three.
+- **`repo.Protect` runs on the read path too** (`resolveKey`). §9 protects the
+  secret "before writing or using it", and the check was inside the
+  `fs.ErrNotExist` branch, so a `lazyslice.secret` already in the worktree — the
+  state of a clone whose key was committed — was read and used with no tracked
+  check and no `.gitignore` entry. The check now runs before the file is read;
+  `$LAZYSLICE_SECRET` is still exempt, because that branch has no file.
+- **A masking refusal is no longer reported as an interrupt.** `transform`
+  cancels `extract` when a masker refuses a value, and extract then returned a
+  bare `context.Canceled` that the failure switch preferred over the refusal:
+  the run printed "interrupted" and exited 130 for a `*transform.Refusal`.
+  `context.WithCancelCause` records that the cancellation was this code's own,
+  and `move` drops `extractErr` when the cause is the refusal. `asStop` also
+  gains a `CodeInterrupted`/130 case, so a genuine Ctrl-C makes the Error event
+  and the process exit carry the same number — `cmd/lazyslice` used to print
+  exit 1 into the stream and return 130 from the process.

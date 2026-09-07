@@ -10,14 +10,16 @@
 // anything: the TUI is a thin layer, and every action it offers is a flag here
 // first (ADR-002).
 //
-// Scaffold status: every flag below is registered and parsed, and every stage
-// behind them is a documented no-op. A run therefore announces the nine stages
-// and exits with ExitInternal. Nothing connects to a database, and nothing is
-// written.
+// A run connects to both databases, drops and recreates the target's schema,
+// loads the masked slice, and writes ./lazyslice.yml and (on a first run)
+// ./lazyslice.secret. `introspect`, `classify`, `plan` and `doctor` stop before
+// the target is touched; `verify` does not — it re-runs the whole slice (see
+// its Short text).
 package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -35,6 +37,7 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/Liarea/lazyslice/internal/core"
+	"github.com/Liarea/lazyslice/internal/emit"
 	"github.com/Liarea/lazyslice/internal/event"
 	"github.com/Liarea/lazyslice/internal/pg"
 	"github.com/Liarea/lazyslice/internal/pipeline"
@@ -88,6 +91,11 @@ func main1() int {
 }
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	// The build's own version is what the yml records as `tool:` and what the
+	// marker table records as tool_version (ARCHITECTURE.md section 11.2). It
+	// is set here, once, because -ldflags reaches main and nothing else.
+	core.Version = version
+
 	req := core.NewRequest()
 	root := newCommandTree(ctx, &req, stdout)
 
@@ -135,11 +143,25 @@ func newCommandTree(ctx context.Context, req *core.Request, stdout io.Writer) *c
 	root.SilenceErrors = true
 
 	root.AddCommand(
-		subcommand(ctx, "introspect", "Read the source catalog and print it", req, raw, stdout),
-		subcommand(ctx, "classify", "Classify every column and print the reasons", req, raw, stdout),
-		subcommand(ctx, "plan", "Print the subset plan and stop", req, raw, stdout),
-		subcommand(ctx, "verify", "Re-run the checks against an existing target", req, raw, stdout),
-		subcommand(ctx, "doctor", "Print what lazyslice can see and what it cannot prove", req, raw, stdout),
+		subcommand(ctx, "introspect", core.ModeIntrospect,
+			"Read the source catalog and print it", req, raw, stdout),
+		subcommand(ctx, "classify", core.ModeClassify,
+			"Classify every column and print the reasons", req, raw, stdout),
+		subcommand(ctx, "plan", core.ModePlan,
+			"Print the subset plan and stop", req, raw, stdout),
+		// The Short text says "re-run the slice" and not "re-run the checks",
+		// because that is what it does: §6 item 1's residual filter is random
+		// per run and never leaves the process, so it cannot be rebuilt from a
+		// target, and a verify that skipped the residual scan would print a
+		// green tick over the one check the tool exists for. Until §6 says how a
+		// standalone verify reconstructs the filter, ModeVerify runs the whole
+		// pipeline — which truncates the target and takes a fresh snapshot hold
+		// on the source — and the help text has to say so (internal/core).
+		subcommand(ctx, "verify", core.ModeVerify,
+			"Re-run the whole slice into the target and re-check it (drops and reloads the target)",
+			req, raw, stdout),
+		subcommand(ctx, "doctor", core.ModeDoctor,
+			"Print what lazyslice can see and what it cannot prove", req, raw, stdout),
 		newVersionCmd(stdout),
 	)
 
@@ -151,17 +173,37 @@ func newCommandTree(ctx context.Context, req *core.Request, stdout io.Writer) *c
 // means "something went wrong" must not be confused with one a CI job branches
 // on.
 func report(stderr io.Writer, err error, showValues bool) int {
+	var stop *core.Stop
 	switch {
+	case errors.As(err, &stop):
+		// Every stage refusal arrives as one of these, carrying the event code
+		// and the ADR-005 exit that go with it (internal/core). The line the
+		// user reads was already rendered from the catalogue by the sink; this
+		// is the developer-facing half and the exit code.
+		//
+		// It is tested *before* context.Canceled on purpose. A stage refusal
+		// often cancels something on its way out — a masker that refuses a value
+		// cancels extract — so a Stop can carry a cancellation underneath it,
+		// and errors.Is would reach it through Unwrap. Matching that first would
+		// print "interrupted" and return 130 for a masking refusal, while the
+		// Error event the sink already printed carried a different code and a
+		// different exit. core.asStop maps a genuine cancellation to
+		// CodeInterrupted with exit 130, so this branch answers that case too
+		// and the two can no longer disagree.
+		fmt.Fprintf(stderr, "lazyslice: %s\n", renderSafe(err, showValues))
+		return stop.Exit
 	case errors.Is(err, context.Canceled):
+		// A cancellation that never reached core: cobra's own context, or a
+		// signal during flag parsing.
 		fmt.Fprintln(stderr, "lazyslice: interrupted")
 		return ExitInterrupted
-	case errors.Is(err, pipeline.ErrNotImplemented):
-		fmt.Fprintf(stderr, "lazyslice: %s\n", renderSafe(err, showValues))
-		fmt.Fprintln(stderr, "  this build is the phase 3 scaffold: the flag surface is real, the stages are not")
-		return ExitInternal
 	case errors.Is(err, errUsage):
 		fmt.Fprintf(stderr, "lazyslice: %s\n", renderSafe(err, showValues))
 		return ExitUsage
+	case errors.Is(err, pipeline.ErrNotImplemented):
+		fmt.Fprintf(stderr, "lazyslice: %s\n", renderSafe(err, showValues))
+		fmt.Fprintln(stderr, "  that stage is not in this build")
+		return ExitInternal
 	default:
 		fmt.Fprintf(stderr, "lazyslice: %s\n", renderSafe(err, showValues))
 		return ExitInternal
@@ -238,7 +280,9 @@ func newRootCmd(ctx context.Context, req *core.Request, raw *rawFlags, stdout io
 // at its own stage and prints what it found; each accepts --json.
 func subcommand(
 	ctx context.Context,
-	name, short string,
+	name string,
+	mode core.Mode,
+	short string,
 	req *core.Request,
 	raw *rawFlags,
 	stdout io.Writer,
@@ -252,16 +296,58 @@ func subcommand(
 			if len(args) == 1 {
 				req.Source = args[0]
 			}
-			if name == "plan" {
+			// The mode is what tells the five subcommands apart inside
+			// core.Run; without it introspect, classify, verify and doctor
+			// build the same Request (T-0020's log, closed by T-CORE).
+			req.Mode = mode
+			if mode == core.ModePlan {
 				req.PlanOnly = true
 			}
 			if err := finish(cmd, req, raw); err != nil {
 				return err
 			}
+			if mode == core.ModeIntrospect {
+				return introspect(ctx, *req, stdout)
+			}
 			_, err := core.Run(ctx, *req, sinkFor(*req, stdout))
 			return err
 		},
 	}
+}
+
+// introspect runs `lazyslice introspect`. With --json it prints the
+// pipeline.SchemaSummary of ARCHITECTURE.md section 2 on stdout; without it the
+// event stream has already said what was found.
+//
+// The summary's fingerprint is ADR-009's, computed by internal/core through
+// load.SchemaFingerprint like every other use of that hash. There is no second
+// definition anywhere, and an empty one is printed as an empty key rather than
+// as a value computed here.
+//
+// It is written unindented, on one line, because --json is "NDJSON events on
+// stdout" (ARCHITECTURE.md section 8) and the NDJSON sink is writing to the
+// same stream: an indented object contributes fifteen lines that are not JSON
+// on their own, and every consumer doing line-by-line json.Unmarshal breaks on
+// the first of them. TestIntrospectJSONIsOneObjectPerLine holds it.
+func introspect(ctx context.Context, req core.Request, stdout io.Writer) error {
+	sink := sinkFor(req, stdout)
+	summary, err := core.Introspect(ctx, req, sink)
+	if err != nil {
+		return err
+	}
+	if !req.JSON {
+		return nil
+	}
+	return writeSummary(stdout, summary)
+}
+
+// writeSummary writes the schema summary as one JSON object on one line.
+//
+// It is a function of its own so that the rule can be tested without a
+// database: --json means NDJSON, the event sink is writing to the same stream,
+// and an indented object would put fifteen lines that are not JSON into it.
+func writeSummary(w io.Writer, summary *pipeline.SchemaSummary) error {
+	return json.NewEncoder(w).Encode(summary)
 }
 
 func newVersionCmd(stdout io.Writer) *cobra.Command {
@@ -417,52 +503,159 @@ func bindFlags(groups []flagGroup, req *core.Request, raw *rawFlags) {
 		"Stack traces and the statement trace on error")
 }
 
-// finish parses the TABLE=VALUE flags into the request and fills in what the
-// process knows: the working directory.
-func finish(_ *cobra.Command, req *core.Request, raw *rawFlags) error {
+// finish parses the TABLE=VALUE flags into the request, records which flags the
+// operator actually passed, and refuses the values that cannot mean what they
+// say.
+//
+// cmd may be nil, which is how the flag-shape tests drive it; the only thing it
+// is used for is Changed, and a request with no Explicit set behaves as though
+// every value came from a default.
+func finish(cmd *cobra.Command, req *core.Request, raw *rawFlags) error {
 	wd, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("%w: cannot read the working directory: %w", errUsage, err)
 	}
 	req.Workdir = wd
 
+	// Which flags were typed. lazyslice.yml supplies a default for a value the
+	// operator did not pass and never overrides one they did (ARCHITECTURE.md
+	// section 10), and an int flag bound to its own default is otherwise
+	// indistinguishable from one that was typed.
+	if req.Explicit == nil {
+		req.Explicit = map[string]bool{}
+	}
+	if cmd != nil {
+		cmd.Flags().VisitAll(func(f *pflag.Flag) {
+			if f.Changed {
+				req.Explicit[f.Name] = true
+			}
+		})
+	}
+	// --cap is two flags wearing one name: a bare N that sets the global cap and
+	// a TABLE=N that sets one table's. pflag knows only that the flag was
+	// changed, so `--cap public.payment=10` would record Explicit["cap"] and
+	// internal/core would then ignore the committed yml's global `cap:` —
+	// silently reverting every other table to the built-in default. The
+	// VisitAll answer is dropped here and parseCaps sets the key only for the
+	// bare form, which is the only form that means "the global cap".
+	delete(req.Explicit, "cap")
+
+	if err := parseCaps(req, raw); err != nil {
+		return err
+	}
+	if err := parseKeys(req, raw); err != nil {
+		return err
+	}
+	if err := parseUnmask(req, raw); err != nil {
+		return err
+	}
+	if err := checkCounts(req); err != nil {
+		return err
+	}
+
+	for _, t := range raw.skipTables {
+		if strings.TrimSpace(t) == "" {
+			return fmt.Errorf("%w: --skip-table wants a table name", errUsage)
+		}
+		req.SkipTables = append(req.SkipTables, t)
+	}
+	return nil
+}
+
+// checkCounts refuses the counts that have no meaning.
+//
+// A zero take, cap or depth is a usage error rather than a silent default,
+// because pipeline.PlanRequest cannot carry the difference: an int field where
+// zero means both "unset" and "none" would make `--take 0` slice 500 rows, and
+// a flag that does the opposite of what it says is worse than one that refuses
+// (T-CORE, 2026-09-06). A negative one is refused for the same reason.
+func checkCounts(req *core.Request) error {
+	for _, c := range []struct {
+		flag  string
+		value int64
+		what  string
+	}{
+		{"take", int64(req.Take), "root rows"},
+		{"cap", int64(req.Cap), "children per parent key"},
+		{"depth", int64(req.Depth), "child depth"},
+		{"row-budget", req.RowBudget, "rows"},
+	} {
+		if req.Explicit[c.flag] && c.value < 1 {
+			return fmt.Errorf("%w: --%s wants a count of 1 or more (%s), got %d",
+				errUsage, c.flag, c.what, c.value)
+		}
+	}
+	if _, err := emit.ParseSize(req.MemoryBudget); err != nil {
+		return fmt.Errorf("%w: --memory-budget wants a size such as 256MiB, got %q",
+			errUsage, req.MemoryBudget)
+	}
+	return nil
+}
+
+// parseCaps reads --cap, which is either a bare N or TABLE=N, repeatable.
+//
+// An empty table name and a cap below 1 are both refused: `--cap =10` and
+// `--cap public.payment=0` would each be stored and then match nothing, which is
+// a flag that appears to have worked.
+func parseCaps(req *core.Request, raw *rawFlags) error {
+	const shape = "--cap wants N or TABLE=N, with N at least 1"
 	for _, c := range raw.caps {
 		table, value, found := strings.Cut(c, "=")
 		if !found {
-			n, err := strconv.Atoi(c)
-			if err != nil {
-				return fmt.Errorf("%w: --cap wants N or TABLE=N, got %q", errUsage, c)
+			n, err := strconv.Atoi(strings.TrimSpace(c))
+			if err != nil || n < 1 {
+				return fmt.Errorf("%w: %s, got %q", errUsage, shape, c)
 			}
 			req.Cap = n
+			req.Explicit["cap"] = true
 			continue
 		}
-		n, err := strconv.Atoi(value)
-		if err != nil {
-			return fmt.Errorf("%w: --cap wants N or TABLE=N, got %q", errUsage, c)
+		n, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil || n < 1 || strings.TrimSpace(table) == "" {
+			return fmt.Errorf("%w: %s, got %q", errUsage, shape, c)
 		}
 		req.TableCaps[table] = n
 	}
+	return nil
+}
 
+// parseKeys reads --key TABLE=COL,COL.
+func parseKeys(req *core.Request, raw *rawFlags) error {
 	for _, k := range raw.keys {
 		table, cols, found := strings.Cut(k, "=")
-		if !found || table == "" || cols == "" {
+		if !found || strings.TrimSpace(table) == "" || strings.TrimSpace(cols) == "" {
 			return fmt.Errorf("%w: --key wants TABLE=COL,COL, got %q", errUsage, k)
 		}
-		req.Keys[table] = strings.Split(cols, ",")
+		parts := strings.Split(cols, ",")
+		for _, col := range parts {
+			if strings.TrimSpace(col) == "" {
+				return fmt.Errorf("%w: --key wants TABLE=COL,COL and one of the columns is empty, got %q",
+					errUsage, k)
+			}
+		}
+		req.Keys[table] = parts
 	}
+	return nil
+}
 
+// parseUnmask reads --unmask TABLE.COL=REASON.
+//
+// --unmask is the one safety rail the operator can pull, so a spelling that
+// could never match a column is refused rather than stored: an opt-out that
+// silently never applied looks exactly like one that did. The column is
+// resolved against the source catalog later, in internal/core, which refuses a
+// qualified name that names nothing; this is the half that can be checked
+// without a database.
+func parseUnmask(req *core.Request, raw *rawFlags) error {
 	for _, u := range raw.unmask {
 		col, reason, found := strings.Cut(u, "=")
-		if !found || col == "" || reason == "" {
+		if !found || col == "" || strings.TrimSpace(reason) == "" {
 			// The bare form is refused on purpose: an opt-out with no reason is
 			// an opt-out nobody can review later (ARCHITECTURE.md section 8).
 			return fmt.Errorf("%w: --unmask wants TABLE.COL=REASON, got %q", errUsage, u)
 		}
-		// An unqualified name can never match a column reference, so it would
-		// be an opt-out that silently never applied: indistinguishable, in the
-		// output, from one that did. Masking is the one rail the operator can
-		// pull, so the shape is checked here rather than shrugged at.
-		if table, column, qualified := strings.Cut(col, "."); !qualified || table == "" || column == "" {
+		table, column, qualified := strings.Cut(col, ".")
+		if !qualified || strings.TrimSpace(table) == "" || strings.TrimSpace(column) == "" {
 			return fmt.Errorf(
 				"%w: --unmask wants TABLE.COL=REASON, and the column must be qualified, got %q",
 				errUsage, u)
@@ -474,8 +667,6 @@ func finish(_ *cobra.Command, req *core.Request, raw *rawFlags) error {
 		}
 		req.Unmask[col] = reason
 	}
-
-	req.SkipTables = append(req.SkipTables, raw.skipTables...)
 	return nil
 }
 

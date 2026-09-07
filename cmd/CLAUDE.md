@@ -37,3 +37,35 @@ Full check: `make check`.
 **Never:** call an `internal/<stage>` package directly (only `core.Run`); print
 a value-bearing field; add a flag absent from ARCHITECTURE.md §8 without also
 updating that table.
+
+## Decisions made during implementation
+
+- **`req.Mode`.** Each subcommand sets the `core.Mode` its name means before
+  anything connects; `plan` also sets `PlanOnly`, so `lazyslice plan` and
+  `lazyslice --plan` are one path. Without it `introspect`, `classify`, `verify`
+  and `doctor` built the same request (T-0020's log).
+- **`req.Explicit`.** `finish` records every flag `pflag` says was `Changed`, so
+  `internal/core` can let `lazyslice.yml` supply a value the operator did not
+  pass and never override one they did (ARCHITECTURE.md §10). `finish` tolerates
+  a nil command, which is how the flag-shape tests drive it.
+- **`--take 0`, `--cap 0` and `--depth 0` are exit 2.** `pipeline.PlanRequest`
+  cannot tell an unset count from an explicit zero, so a zero that meant "the
+  default" would make `--take 0` slice 500 rows. A flag that does the opposite
+  of what it says is worse than one that refuses (T-CORE).
+- **`--cap` refuses an empty table name and a count below 1**, and `--key`
+  refuses an empty column: each would be stored and then match nothing, which is
+  a flag that appears to have worked. `--memory-budget` is parsed at the flag
+  rather than at the planner, for the same reason.
+- **`--unmask` is checked twice.** Here for the shape that can be checked
+  without a database — qualified, one reason, not repeated — and again in
+  `internal/core` against the source catalog, which refuses a name that matches
+  no column. An opt-out that silently never applied looks exactly like one that
+  did.
+- **`introspect` has its own entry point.** `core.Introspect` returns the
+  `pipeline.SchemaSummary` that `--json` prints, because a summary is a document
+  and events are all `core.Run` returns. Its `fingerprint` is ADR-009's, computed
+  in `internal/core` by `load.SchemaFingerprint`; nothing here computes one.
+- **`report` maps a `*core.Stop` to its own exit code.** Every stage refusal
+  arrives as one, carrying the ADR-005 exit the catalogue gives its code, so
+  this file needs no per-stage knowledge and an unmapped error is still
+  `ExitInternal`.

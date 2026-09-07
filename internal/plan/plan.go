@@ -328,6 +328,11 @@ func (p *run) chooseRoot() (ref.TableRef, string, error) {
 
 // applySkipAndPrivileges resolves --skip-table and the unreadable tables of
 // §3.6, before the snapshot is used for a key.
+//
+// The privileges arrive on the request: internal/core calls Source.Privileges
+// once, before the snapshot is opened, and hands the answer to every stage that
+// needs it (PlanRequest.Priv). The planner asks the catalog nothing of its own,
+// so the role the header prints and the role a refusal names are one read.
 func (p *run) applySkipAndPrivileges(ctx context.Context, root ref.TableRef) error {
 	asParent := p.staticReach(root)
 
@@ -351,17 +356,14 @@ func (p *run) applySkipAndPrivileges(ctx context.Context, root ref.TableRef) err
 		p.why[t] = "skipped"
 	}
 
-	unreadable, err := p.readUnreadable(ctx)
+	unreadable, err := p.unreadableRelations(ctx)
 	if err != nil {
 		return err
 	}
 	if len(unreadable) == 0 {
 		return nil
 	}
-	role, err := p.readRole(ctx)
-	if err != nil {
-		return err
-	}
+	role := p.req.Priv.Role
 	seen := map[ref.TableRef]bool{}
 	for _, u := range unreadable {
 		if !p.inScope[u.table] || seen[u.table] {
@@ -853,21 +855,26 @@ func (p *run) assemble(root ref.TableRef, rootReason string) *pipeline.Plan {
 			unindexed = append(unindexed, fk)
 		}
 	}
-	var unmapped []string
+	// §3.2's two findings are two lists. A detected pair goes under
+	// Polymorphic; Unmapped is for the sampled _type values that map to no
+	// table, which v1 never produces because it never samples them. Printing a
+	// pair name under "not mapped" would say a column pair is a value
+	// (T-CORE, 2026-09-06).
+	var polymorphic []string
 	for _, pair := range polymorphicPairs(p.tables, p.outgoing) {
-		unmapped = append(unmapped, pair.String())
+		polymorphic = append(polymorphic, pair.String())
 	}
 
 	return &pipeline.Plan{
-		Root:       root,
-		RootReason: rootReason,
-		Take:       p.req.Take,
-		Steps:      ordered,
-		SCCs:       components,
-		Unmapped:   unmapped,
-		Unindexed:  unindexed,
-		Skipped:    p.skipped,
-		Unreadable: p.unreadable,
+		Root:        root,
+		RootReason:  rootReason,
+		Take:        p.req.Take,
+		Steps:       ordered,
+		SCCs:        components,
+		Polymorphic: polymorphic,
+		Unindexed:   unindexed,
+		Skipped:     p.skipped,
+		Unreadable:  p.unreadable,
 		Estimate: pipeline.Estimate{
 			Rows:         rows,
 			Bytes:        estBytes,
