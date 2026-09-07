@@ -3,12 +3,12 @@ id: T-0044
 title: "T-CORE: core run, emit, render, repo, CLI end to end; integration job blocking again"
 epic: E4
 phase: 4
-status: blocked
+status: done
 owner: opus
 created: 2026-09-05
 started: 2026-09-06
-closed: ""
-outcome: ""
+closed: 2026-09-07
+outcome: "done: core merged at 9bd9e24, blockers closed by T-0058"
 ---
 
 # T-0044 · T-CORE: core run, emit, render, repo, CLI end to end; integration job blocking again
@@ -33,6 +33,8 @@ outcome: ""
 
 - 2026-09-07 Gareth 2026-09-06: continue; pause after phase 5 is fully complete.
 
+- 2026-09-07 closed: done: core merged at 9bd9e24, blockers closed by T-0058
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+Went well: core wired ten packages into one run on the first attempt and the invariant suite immediately earned its keep. Went badly: two invariants and a leak surfaced only at this stage; five findings sat outside the developer's paths. Change: none beyond what T-0058 recorded.
