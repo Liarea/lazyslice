@@ -3,10 +3,10 @@ id: T-0058
 title: "T-CORE-FIX: fail closed on low-cardinality columns (verify minValues, introspect full-read below the TABLESAMPLE floor), I6 pagila counted root, I2 derived_text exemption, event.go embeds the catalogue, drop the ci allowlist; then make integration must be fully green"
 epic: E4
 phase: 4
-status: open
+status: in_progress
 owner: opus
 created: 2026-09-06
-started: ""
+started: 2026-09-07
 closed: ""
 outcome: ""
 ---
@@ -24,6 +24,8 @@ make integration exits 0 with no allowlist; a 3-row table with an email column i
 ## Log
 
 - 2026-09-06 created
+
+- 2026-09-07 started
 
 ## Post-mortem
 
