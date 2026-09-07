@@ -6,6 +6,8 @@ Source of truth for phase sequencing: docs/BUILD_PLAN.md, phases 4 to 8. Where a
 
 ## Current phase: 4, Vertical slice
 
+**Status 2026-09-06 (paused at Gareth's request to conserve usage):** ten of eleven packages merged; core is committed and runs end to end on both fixtures with four of six invariants green. Remaining before gate 4: tracker T-0058 (the I2 low-cardinality leak the suite caught, the I6 pagila root choice, the derived_text exemption, the catalogue embed, and removing CI's temporary allowlist), then T-DISCOVER (T-0045). Resume with `.claude/workflows/implement.js` for T-0058, then `slice.js` with `{from: 10}`.
+
 Phase 3 closed 2026-09-06: scaffold, fixtures, invariants I1 to I6, per-directory CLAUDE.md files, ADR-008, review fixes and SPDX headers all merged; `make check` green; integration fails for the right reason. The one unticked phase 3 item, `brew install` from the tap, waits for the first pre-release tag (tracker T-0028). Phase 4's gate is the "Phase 4" section below; the ten package tasks run through .claude/workflows/slice.js.
 
 ### Phase 3 gate, for the record
