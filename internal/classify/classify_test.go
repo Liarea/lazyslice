@@ -199,6 +199,29 @@ func TestNastyOtherColumns(t *testing.T) {
 		}
 	})
 
+	t.Run("TwoValuesBelowMinSamplesStillDecide", func(t *testing.T) {
+		// devices.owned_by is two email addresses and a NULL in a three-row
+		// table, under a name no rule matches (fixture_test.go). Returning
+		// before the validators ran because the column holds fewer than
+		// minSamples non-NULL values decided it `none`, internal/transform
+		// copied it, and a production email address reached the target in
+		// cleartext under exit 0 (THREAT_MODEL.md T1, tracker T-0058).
+		// TestI2NothingFlaggedSurvives/nasty is what found that, and it is
+		// behind a build tag and a Docker daemon; this is the same claim in
+		// `make test`, so restoring the early return fails here first.
+		d := decision(t, cls, col(tDevices, "owned_by"))
+		if !d.Masked || d.Category != pipeline.CatEmail {
+			t.Fatalf("devices.owned_by = %+v, want a masked email column; below minSamples a "+
+				"strong ratio still decides", d)
+		}
+		if !strings.Contains(d.Reason, "2/2 samples parse as addresses") {
+			t.Errorf("devices.owned_by reason = %q, want the two-of-two ratio named", d.Reason)
+		}
+		if !strings.Contains(d.Reason, "no name signal") {
+			t.Errorf("devices.owned_by reason = %q, want it to say the values decided", d.Reason)
+		}
+	})
+
 	t.Run("EveryMaskedColumnHasAMasker", func(t *testing.T) {
 		// Over the prior-bearing classifications as well as the plain one:
 		// Masker is chosen from the category, and a yml raise is the one input

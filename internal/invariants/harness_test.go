@@ -113,8 +113,13 @@ type fixture struct {
 	// countedRoot and countedTake are I6's slice.
 	//
 	// I6 says the root holds exactly --take rows, which is only true of a root
-	// that no selected row reaches as a parent. public.customer is such a root.
-	// public.people is not: manager_id is a self-reference and parents are
+	// that no selected row reaches as a parent: §3 lets a PARENT_ONLY push
+	// widen a step's key set, and the root is a step like any other, so a root
+	// with an incoming edge legitimately ends up holding rows --take never
+	// asked for. The assertion is an equality and stays one; what each fixture
+	// chooses here is a root nothing can push into.
+	//
+	// public.people is not one: manager_id is a self-reference and parents are
 	// pulled uncapped, so a slice of three people legitimately ends up holding
 	// their managers too (testdata/README.md trap 1). I6 therefore roots the
 	// nasty run at public.tenant_users, which nothing reaches as a parent: its
@@ -122,6 +127,19 @@ type fixture struct {
 	// and those are reached only as its own children. Its own outgoing edge
 	// (owner_person_id, the one that connects the component to public.people)
 	// pushes people, never itself.
+	//
+	// public.customer is not one either, which is what this field is for on
+	// pagila as well. Seven foreign keys reference it, and one of them is
+	// reached from customer itself: a selected customer's rentals are pulled as
+	// children, each rental's payments are pulled as its children, and
+	// payment.customer_id is then a PARENT_ONLY push back onto customer for a
+	// customer --take never selected — 101 rows in the target for --take 100,
+	// on a run that did exactly what §3 says. I6 therefore roots the pagila run
+	// at public.film_actor, which no foreign key in the fixture references
+	// (only film_category and the partitioned payment share that, and payment's
+	// rows live in leaves §3.3 addresses through the root). Its own outgoing
+	// edges push actor and film, never itself, and its 5,462 rows leave --take
+	// 100 a real subset.
 	countedRoot string
 	countedTake int
 }
@@ -132,7 +150,7 @@ var fixtures = []fixture{
 		load:        testutil.LoadPagila,
 		root:        "public.customer",
 		take:        100,
-		countedRoot: "public.customer",
+		countedRoot: "public.film_actor",
 		countedTake: 100,
 		// rental and payment are children of customer; payment is also a child
 		// of rental, so it is the grandchild case as well. address is the

@@ -357,9 +357,22 @@ func bestSignal(dict *nameDict, values []string, p *compiledPack, family string)
 		// change anything.
 		return sig
 	}
-	if sig.total < minSamples {
-		return sig
-	}
+	// Below minSamples the column is *unproven*, not clean, and returning here
+	// is a fail-open: a three-row table yields two non-NULL values, and
+	// public.devices.owned_by in testdata/nasty.sql is two email addresses and
+	// a NULL under a column name that says nothing. An early return decided it
+	// `none`, internal/transform copied it, and the target held a production
+	// email address in cleartext under exit 0 (THREAT_MODEL.md T1) — found by
+	// TestI2NothingFlaggedSurvives/nasty, tracker T-0058.
+	//
+	// So the validators run over whatever there is, and only the *strong*
+	// branch may decide: at two values a strong ratio is both of them, which is
+	// the fail-closed reading of "when in doubt, mask it" (CLAUDE.md). The weak
+	// branch stays silent below minSamples, because `low` is what the
+	// neighbouring-column rule raises to `possible`, and one of two values
+	// matching is the noise minSamples was written about — raising it would
+	// mask a column on the strength of a single row.
+	proven := sig.total >= minSamples
 	for _, v := range validators {
 		matched := 0
 		for _, s := range values {
@@ -385,7 +398,7 @@ func bestSignal(dict *nameDict, values []string, p *compiledPack, family string)
 			sig.strong = hit
 			return sig
 		}
-		if sig.weak == nil && ratio >= weakThreshold {
+		if proven && sig.weak == nil && ratio >= weakThreshold {
 			sig.weak = hit
 		}
 	}

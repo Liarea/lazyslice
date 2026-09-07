@@ -161,35 +161,54 @@ jobs:
   # against containers on a runner with a Docker daemon, on the oldest and the
   # newest supported majors (ADR-003, ARCHITECTURE.md section 14).
   #
-  # This job does not block a merge *yet*, and the expectation is asserted
-  # rather than waved through. It was allowed to fail while the pipeline was a
-  # phase 3 scaffold; T-CORE landed the pipeline, and three invariants still
-  # fail for reasons that live outside T-CORE's paths:
+  # This job blocks a merge: `make integration` decides it, and any failing
+  # test fails it. It once carried a wrapper that allowed
+  # TestI2NothingFlaggedSurvives and TestI6RootHoldsTakeRows to fail while
+  # T-CORE's findings were open (the low-cardinality leak, the derived_text
+  # exemption and pagila's counted root); T-0058 closed all three and the
+  # allowlist is gone. A test that fails here is a failure, not an expectation.
+  # `continue-on-error` is not used either, because it makes every step's
+  # outcome irrelevant to the job's conclusion — a run that failed to compile,
+  # or that found no Docker daemon and skipped everything, reported the same
+  # green as a correct one.
   #
-  #   TestI2NothingFlaggedSurvives/nasty/grep  public.devices.owned_by holds
-  #     two source values, one of them a real email address. The classifier
-  #     never sees a value signal (the table has 3 rows, so introspect's
-  #     TABLESAMPLE yields none) and §6 item 4's second net skips the column
-  #     because it holds fewer than minValues non-NULL values
-  #     (internal/verify/secondnet.go). THREAT_MODEL.md T1, and v1-blocking.
-  #   TestI2NothingFlaggedSurvives/pagila     public.film.fulltext is masked to
-  #     empty by ADR-010's derived_text, and I2 reads "no value in the target"
-  #     as "the masker's output was never loaded" (internal/invariants).
-  #   TestI6RootHoldsTakeRows/pagila          public.customer holds 101 rows for
-  #     --take 100. §3's walk lets a PARENT_ONLY push widen the root's key set —
-  #     the §3 diagram has exactly that edge — so the fixture's premise that
-  #     "public.customer is a root nothing reaches as a parent" is false for
-  #     pagila (internal/invariants/harness_test.go).
+  # Known flake, recorded here rather than allowed for, because an allowance is
+  # what this job just stopped having: TestI2NothingFlaggedSurvives/nasty/values
+  # can fail by coincidence on either of nasty's two masked inet columns —
+  # public.tenant_user_sessions.origin and public.audit_log.client_ip. I2
+  # asserts that no distinct value of a masked column in the target is a value
+  # of that column in the source; the masking key is random per run
+  # (mask/key.go), the IPv4 generator draws from the three RFC 5737
+  # documentation blocks (mask/words.go docPrefixes, a 768-address space), and
+  # both columns' own values sit inside those same blocks — origin holds
+  # 203.0.113.7/.8 and 198.51.100.22/.23, client_ip holds 203.0.113.7/.8 and
+  # 198.51.100.44, both in testdata/nasty.sql — so a masked
+  # address can equal a source address without anything being wrong. Four source
+  # values against four generated ones on origin, three against three on
+  # client_ip: the two together are a few percent per run of the fixture, twice
+  # per push across the matrix. The two columns' IPv6 values (2001:db8::…) are
+  # not part of this — the v6 generator fills 96 random bits — and neither is
+  # pagila, which has no inet column.
   #
-  # Until those land, the wrapper is narrowed to exactly those two test names:
-  # a failure anywhere else fails the job, and so does a run in which both of
-  # them pass, which is the signal to delete the wrapper and run
-  # `make integration` directly. `continue-on-error` is not used, because it
-  # makes every step's outcome irrelevant to the job's conclusion — a run that
-  # failed to compile, or that found no Docker daemon and skipped everything,
-  # reported the same green as a correct one.
+  # The measurements, so nobody has to redo them: T-0058's first reviewer saw it
+  # once in eight runs of the invariants package; twenty consecutive runs of
+  # TestI2NothingFlaggedSurvives over both fixtures while that review was being
+  # answered were green; the second reviewer's own full `make integration` (469
+  # tests) and fifteen further consecutive runs were green too, as was the full
+  # run that answered that second review. One red in that many green runs is
+  # what a low single-digit rate looks like from either side, and is not
+  # evidence that it is gone. It is not what T-0058
+  # changed — both columns are above every threshold either net moved — and it
+  # was invisible while the allowlist named this test as an expected failure.
+  # The fix is in testdata/nasty.sql and mask/gen_net.go (move the fixture's
+  # inet values out of the generator's output space, or give the generator a
+  # block the fixtures never use), both outside T-0058's paths; it is reported
+  # to the orchestrator and owed a tracker task. Until that lands, a red on this
+  # line naming *either* of those two columns is to be checked against this
+  # paragraph before it is called a regression — and nothing here should be read
+  # as a claim that the job is deterministic today.
   #
-  # The three guards that outlive all of this need `-v`, because `go test`
+  # The three guards that survive the wrapper need `-v`, because `go test`
   # prints one `ok` line per package and no per-test line without it: a run that
   # executed nothing, and a run whose every test skipped for want of a Docker
   # daemon (internal/testutil.SkipWithoutDocker), both exit 0. That is the
@@ -210,7 +229,7 @@ jobs:
           cache: true
       - name: docker is available
         run: docker version
-      - name: integration fails, and fails only where it is known to
+      - name: integration
         env:
           LAZYSLICE_TEST_POSTGRES_IMAGE: postgres:${{ matrix.postgres }}
         run: |
@@ -218,10 +237,16 @@ jobs:
           # -v, because `go test` prints no per-test line and no t.Skipf reason
           # at all without it: the output of a package whose tests all pass or
           # all skip is one `ok` line, so neither the skip-reason grep nor the
-          # per-test failure list below could ever match.
-          make integration GOTESTFLAGS=-v 2>&1 | tee integration.log || true
-
+          # "executed nothing" guard below could ever match.
+          #
+          # The suite's own exit code is the job's. `pipefail` is what makes the
+          # pipe into tee report make's status rather than tee's, and the
+          # `|| status=$?` is what keeps the runner's own `set -e` from ending
+          # the step there — the guards below have to run on a failing run too,
+          # because "no Docker daemon" and "did not compile" are the two ways a
+          # green exit means nothing. They can only turn a green run red.
           status=0
+          make integration GOTESTFLAGS=-v 2>&1 | tee integration.log || status=$?
           # The positive signal, and the one that outlives every expectation: a
           # run that executed nothing at all cannot satisfy it.
           ran=$(grep -cE '^\s*--- (PASS|FAIL): ' integration.log || true)
@@ -256,24 +281,7 @@ jobs:
             status=1
           fi
 
-          # The narrowed expectation. Top-level failures only (`--- FAIL:` at
-          # column 0); a subtest failure always fails its parent, so the two
-          # names below cover every subtest of theirs and nothing else.
-          failed=$(grep -E '^--- FAIL: ' integration.log | sed -E 's/^--- FAIL: ([^ ]+).*/\1/' | sort -u || true)
-          known=$(printf '%s\n' TestI2NothingFlaggedSurvives TestI6RootHoldsTakeRows | sort)
-          unexpected=$(comm -23 <(printf '%s\n' $failed) <(printf '%s\n' $known))
-          if [ -n "$unexpected" ]; then
-            echo "::error::the integration suite failed outside the two known blockers:"
-            for t in $unexpected; do echo "::error::  $t"; done
-            status=1
-          fi
-          if [ -z "$failed" ]; then
-            echo "::error::both known blockers passed. Delete this wrapper: run \`make integration\`"
-            echo "::error::directly with \`status=\${PIPESTATUS[0]}\`, so the job blocks a merge."
-            status=1
-          fi
           if [ "$status" -eq 0 ]; then
-            echo "integration: failed at the two recorded blockers and nowhere else"
-            printf '%s\n' $failed | sed 's/^/  /'
+            echo "integration: $ran test(s) ran and every one of them passed"
           fi
           exit "$status"

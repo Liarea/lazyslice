@@ -73,8 +73,43 @@ was chosen and is recorded here rather than only in a comment.
   on its own and is what the neighbouring-column rule then raises. Without it
   that rule has almost nothing left to raise, because T-0033 excluded the
   type-conflicting decisions that were its other source of `low`.
-- **Three or more non-NULL samples before a value signal counts.** One row that
-  parses as an address is evidence about a row, not a column.
+- **Three or more non-NULL samples before a *weak* value signal counts, and a
+  strong one decides at any number above zero.** One row that parses as an
+  address is evidence about a row, not a column — so `low`, which the
+  neighbouring-column rule raises, needs `minSamples` values under it. A column
+  below that number is *unproven*, not clean, and an early return before the
+  validators ran was a fail-open with only `internal/verify`'s second net above
+  it, which had a floor of its own at the same number: `public.devices.owned_by`
+  in `testdata/nasty.sql` is two email addresses and a NULL in a three-row table
+  under a column name that says nothing, and it reached the target in cleartext
+  under exit 0 (THREAT_MODEL.md T1). `TestI2NothingFlaggedSurvives/nasty` is
+  what found it and tracker T-0058 is the fix: below `minSamples` the validators
+  still run and a strong ratio — both of two values, or the only one — decides
+  the column, which is "when in doubt, mask it" (CLAUDE.md). Nothing about the
+  sample changed: `TABLESAMPLE SYSTEM` at 100% already returns every row of a
+  small relation, and `internal/introspect`'s own integration suite asserts the
+  three sample rows of `public."LegacyCustomer"`.
+  `TestNastyOtherColumns/TwoValuesBelowMinSamplesStillDecide` is the unit pin,
+  so restoring the early return fails `make test` and not only the Docker-gated
+  invariant.
+  - **The two thresholds are deliberately asymmetric, and the gap is a
+    refusal.** Below its own `minValues`, `internal/verify`'s second net fails
+    on *any* hit; below `minSamples`, this package masks only on a strong ratio.
+    So a column with two non-NULL values of which one parses as an email is
+    `none` here, copied by `internal/transform`, loaded, and then refused at
+    exit 9 by verify — a run with no green path short of `--unmask`, over a
+    column masking would have handled. That is the safe direction (before
+    T-0058 the same run exited 0 with the address in the target) and it is not
+    the same question asked twice: this package decides what to do to a column
+    from a 200-row sample, and a minority hit in two samples is the noise
+    `minSamples` was written about — raising it to `low` puts the
+    neighbouring-column rule one hop from masking a column on the strength of a
+    single row. The net decides whether a value that is *in the target* may
+    stay there, where one address is one address. Closing the gap by masking on
+    any hit below `minSamples` is a recall widening that needs a T1 review and a
+    measurement against `TestPagilaPrecisionAndRecall`, not a quiet threshold
+    change; until then the asymmetry is the record and verify's exit 9 is the
+    answer to a minority hit.
 - **`Decision.Domain`, `SmallDomain` and `Refused` are left at their zero
   values.** They are §5 quantities: `Domain` is `min(column domain,
   generator.Domain())` and no generator is registered in `mask` yet, and the
