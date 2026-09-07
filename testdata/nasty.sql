@@ -597,12 +597,17 @@ INSERT INTO public.tenant_users (tenant_id, user_id, owner_person_id, email, joi
 -- Session 5044 has a tenant and no user. Under MATCH SIMPLE that row references
 -- no tenant_users row at all, so following its parent edge must select nothing
 -- for it -- not tenant 2's other users, and not an error.
+--
+-- origin's IPv4 values are RFC 1918 private addresses, deliberately outside
+-- the RFC 5737 blocks network_id emits into (ARCHITECTURE.md §5, trap 18):
+-- a documentation-range source value here would make the residual scan
+-- report a false hit. Keep new IPv4 fixture values out of those blocks.
 INSERT INTO public.tenant_user_sessions (session_id, tenant_id, user_id, started_at, origin, adapter) VALUES
-    (5000, 1, 1,    '2024-05-01 12:00:00+00', '203.0.113.7',   '08:00:2b:01:02:03'),
-    (5011, 1, 2,    '2024-05-01 12:05:00+00', '203.0.113.8',   '08:00:2b:01:02:04'),
-    (5022, 2, 1,    '2024-05-02 08:30:00+00', '198.51.100.22', '08:00:2b:01:02:05'),
+    (5000, 1, 1,    '2024-05-01 12:00:00+00', '10.20.30.40',   '08:00:2b:01:02:03'),
+    (5011, 1, 2,    '2024-05-01 12:05:00+00', '10.20.30.41',   '08:00:2b:01:02:04'),
+    (5022, 2, 1,    '2024-05-02 08:30:00+00', '172.16.5.6',    '08:00:2b:01:02:05'),
     (5033, 2, 7,    '2024-05-02 08:31:00+00', '2001:db8::1',   NULL),
-    (5044, 2, NULL, '2024-05-03 07:00:00+00', '198.51.100.23', '08:00:2b:01:02:06');
+    (5044, 2, NULL, '2024-05-03 07:00:00+00', '172.16.5.7',    '08:00:2b:01:02:06');
 
 ALTER TABLE public.tenant_user_sessions ALTER COLUMN session_id RESTART WITH 5055;
 
@@ -708,11 +713,16 @@ INSERT INTO public.device_readings (device_id, taken_at, celsius) VALUES
 -- Two of the four rows are in the window the partial unique index covers, with
 -- different actions, and lower(entry_uid) is unique too: all three indexes are
 -- satisfied, and only audit_log_entry_uid_key is a legal identity.
+--
+-- client_ip's IPv4 values are RFC 1918 private addresses, deliberately
+-- outside the RFC 5737 blocks network_id emits into (ARCHITECTURE.md §5,
+-- trap 18): a documentation-range source value here would make the residual
+-- scan report a false hit. Keep new IPv4 fixture values out of those blocks.
 INSERT INTO public.audit_log (entry_uid, person_id, action, client_ip, occurred_at) VALUES
-    ('AE-0001', 90000, 'login',           '203.0.113.7',   '2024-05-01 12:00:00+00'),
-    ('AE-0002', 90007, 'login',           '203.0.113.8',   '2024-05-01 12:05:00+00'),
+    ('AE-0001', 90000, 'login',           '10.20.30.40',   '2024-05-01 12:00:00+00'),
+    ('AE-0002', 90007, 'login',           '10.20.30.41',   '2024-05-01 12:05:00+00'),
     ('AE-0003', 90014, 'password.reset',  '2001:db8::7',   '2025-02-01 09:00:00+00'),
-    ('AE-0004', 90021, 'account.review',  '198.51.100.44', '2025-02-02 09:00:00+00');
+    ('AE-0004', 90021, 'account.review',  '192.168.9.10',  '2025-02-02 09:00:00+00');
 
 -- The first two rows are identical in every column. No subset of columns is
 -- unique, so the pseudo-key probe has nothing to find and the run must stop.

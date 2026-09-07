@@ -492,6 +492,13 @@ to isolate had no fixture at all.
 `2001:db8::1` is in `origin` and `2001:db8::7` in `client_ip`, so a masker that
 only understands dotted quads fails visibly on either.
 
+The IPv4 values in `origin` and `client_ip` are RFC 1918 private addresses
+(`10.x`, `172.16.x`, `192.168.x`), chosen deliberately to stay outside the
+three RFC 5737 documentation blocks `network_id` emits into (ARCHITECTURE.md
+§5). A documentation-range IPv4 source value here would make the residual
+scan report a false hit — see the invariant in
+`internal/invariants/CLAUDE.md` and the CI check that pins it.
+
 **`citext` is deliberately absent**, and this line is here so that its absence
 is a decision rather than an oversight. §4 names it as a v1 type signal, but it
 needs `CREATE EXTENSION citext`, and `nasty.sql` takes no extensions so that it

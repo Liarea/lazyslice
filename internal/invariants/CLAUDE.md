@@ -143,29 +143,10 @@ is output under test and not one of our types.
   `derived_text` exemption was added, which left a run whose whole masked set
   was `null` columns passing I2 having examined nothing; counting it is the
   fix.
-- **I2's third half has one known coincidental failure, it can land on either
-  of two columns, and the fix is not in this package.** nasty has two masked
-  inet columns: `public.tenant_user_sessions.origin`
-  (`203.0.113.7`, `203.0.113.8`, `198.51.100.22`, `198.51.100.23`) and
-  `public.audit_log.client_ip` (`203.0.113.7`, `203.0.113.8`,
-  `198.51.100.44`). `mask`'s IPv4 generator draws from those same three RFC
-  5737 blocks (`mask/words.go` `docPrefixes`, 768 addresses) under a key that is
-  random per run. So a masked address can equal a source address with nothing
-  wrong, disjointness fails, and the run is red — four source values against
-  four generated ones on `origin` and three against three on `client_ip`, a few
-  percent of runs of this fixture for the two together. Their `2001:db8::`
-  values are not in it: the v6 generator fills 96 random bits. Seen once in
-  eight runs by T-0058's first reviewer; not seen in the twenty consecutive runs
-  that answered that review, nor in the second reviewer's full `make
-  integration` and fifteen further runs, nor in the full run that answered the
-  second review. The assertion is right and stays as it
-  is: the fix is to move the fixture's values out of the generator's output
-  space or to give the generator a block the fixtures never use, in
-  `testdata/nasty.sql` and `mask/gen_net.go`, which T-0058's paths did not
-  include. It is recorded here, in `.github/workflows/ci.yml` beside the removed
-  allowlist, and returned to the orchestrator; a red on `nasty/values` naming
-  only `origin`, only `client_ip`, or only those two is this, not a masking
-  regression.
+- **I2's third half would false-positive on a source column already inside
+  network_id's documentation-range output space.** See ARCHITECTURE.md
+  section 5's note: fixtures avoid documentation-range IPv4 source values for
+  exactly this reason (T-0059).
 - **What I2's third half excludes is exactly what §5 says must reuse an
   admissible value, and nothing else.** `NULL` and `''` (§5 preserves both;
   `scanCells` drops them). An empty array and an empty JSON document, which are

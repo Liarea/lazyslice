@@ -353,13 +353,13 @@ func nastySamples() mapSampler {
 		"alan.turing@example.com", "katherine.johnson@example.com")
 	s[col(tTenantU, "joined_on")] = anyOf("2024-01-05", "2024-01-06", "2024-02-11", "2024-02-12")
 
-	s[col(tSessions, "origin")] = anyOf("203.0.113.7", "203.0.113.8", "198.51.100.22", "2001:db8::1", "198.51.100.23")
+	s[col(tSessions, "origin")] = anyOf("10.20.30.40", "10.20.30.41", "172.16.5.6", "2001:db8::1", "172.16.5.7")
 	s[col(tSessions, "adapter")] = anyOf(
 		"08:00:2b:01:02:03", "08:00:2b:01:02:04", "08:00:2b:01:02:05", nil, "08:00:2b:01:02:06")
 
 	s[col(tAudit, "entry_uid")] = anyOf("AE-0001", "AE-0002", "AE-0003", "AE-0004")
 	s[col(tAudit, "action")] = anyOf("login", "login", "password.reset", "account.review")
-	s[col(tAudit, "client_ip")] = anyOf("203.0.113.7", "203.0.113.8", "2001:db8::7", "198.51.100.44")
+	s[col(tAudit, "client_ip")] = anyOf("10.20.30.40", "10.20.30.41", "2001:db8::7", "192.168.9.10")
 
 	s[col(tAttach, "filename")] = anyOf("signature.png", "id-scan.pdf", "spec-v3.pdf", "orphan.txt")
 	s[col(tAttach, "uploaded_by")] = anyOf(
