@@ -5,15 +5,19 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/spf13/pflag"
 
 	"github.com/Liarea/lazyslice/internal/core"
+	"github.com/Liarea/lazyslice/internal/event"
+	"github.com/Liarea/lazyslice/internal/pipeline"
 )
 
 // The flag surface is a promise, not an implementation detail: docs/FLAGS.md is
@@ -127,10 +131,17 @@ func TestExitCodes(t *testing.T) {
 		{"version", []string{"version"}, ExitOK},
 		{"--version", []string{"--version"}, ExitOK},
 		{"help", []string{"--help"}, ExitOK},
-		// The scaffold itself: every stage is a no-op, so a run that parses
-		// cleanly still fails, and it fails as an internal error rather than a
-		// usage one.
-		{"a clean run in the scaffold", []string{"--unmask", "public.users.email=ticket 42"}, ExitInternal},
+		{"--take 0", []string{"--take", "0"}, ExitUsage},
+		{"--cap 0", []string{"--cap", "0"}, ExitUsage},
+		{"--cap TABLE=0", []string{"--cap", "public.payment=0"}, ExitUsage},
+		{"--cap with no table", []string{"--cap", "=10"}, ExitUsage},
+		{"--depth 0", []string{"--depth", "0"}, ExitUsage},
+		{"--memory-budget nonsense", []string{"--memory-budget", "lots"}, ExitUsage},
+		// A run that parses cleanly and names no source stops at exit 3 with
+		// the ladder's own message: discovery is not in this build, so
+		// --source is how a source is named (ADR-005's exit table, 3 "no
+		// source").
+		{"a clean run with no source", []string{"--unmask", "public.users.email=ticket 42"}, ExitNoSource},
 	}
 
 	for _, c := range cases {
@@ -196,5 +207,248 @@ func TestUnmaskShapes(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// The flag surface is more than a list of names: a default that changes
+// silently changes what every run does, and a type that changes turns a
+// documented flag into a parse error. ARCHITECTURE.md section 8's table gives
+// both for every flag, and this is that column of it (T-0020's log: "main_test
+// checks flag names only, not defaults or types").
+func TestV1FlagDefaultsAndTypes(t *testing.T) {
+	req := core.NewRequest()
+	root := newCommandTree(context.Background(), &req, io.Discard)
+
+	cases := []struct {
+		name     string
+		typeName string
+		value    string
+	}{
+		{"source", "string", ""},
+		{"target", "string", ""},
+		{"docker-host", "string", ""},
+		{"password-command", "string", ""},
+		{"create-target", "bool", "false"},
+		{"allow-remote-target", "string", ""},
+		{"require-read-only-role", "bool", "false"},
+		{"reconfigure", "bool", "false"},
+		{"root", "string", ""},
+		{"take", "int", strconv.Itoa(core.DefaultTake)},
+		{"where", "string", ""},
+		{"cap", "stringArray", "[]"},
+		{"depth", "int", strconv.Itoa(core.DefaultDepth)},
+		{"row-budget", "int64", strconv.FormatInt(core.DefaultRowBudget, 10)},
+		{"memory-budget", "string", core.DefaultMemoryBudget},
+		{"key", "stringArray", "[]"},
+		{"skip-table", "stringArray", "[]"},
+		{"plan", "bool", "false"},
+		{"unmask", "stringArray", "[]"},
+		{"strict-schema", "bool", "false"},
+		{"residual-probe-cap", "int", strconv.Itoa(core.DefaultResidualProbeCap)},
+		{"secret-file", "string", core.DefaultSecretFile},
+		{"require-key", "bool", "false"},
+		{"single-connection", "bool", "false"},
+		{"show-row-values-in-errors", "bool", "false"},
+		{"config", "string", core.DefaultConfigPath},
+		{"no-config", "bool", "false"},
+		{"yes", "bool", "false"},
+		{"json", "bool", "false"},
+		{"tui", "bool", "false"},
+		{"debug", "bool", "false"},
+	}
+
+	for _, c := range cases {
+		f := root.PersistentFlags().Lookup(c.name)
+		if f == nil {
+			t.Errorf("--%s is not registered", c.name)
+			continue
+		}
+		if got := f.Value.Type(); got != c.typeName {
+			t.Errorf("--%s is a %s, and ARCHITECTURE.md section 8 makes it a %s", c.name, got, c.typeName)
+		}
+		if f.DefValue != c.value {
+			t.Errorf("--%s defaults to %q, and ARCHITECTURE.md section 8 gives it %q",
+				c.name, f.DefValue, c.value)
+		}
+	}
+
+	// The cap, key, skip-table and unmask flags are repeatable and land in
+	// core.Request through a parser, so the default they *mean* is the one on
+	// the request rather than the one pflag prints.
+	if req.Cap != core.DefaultCap {
+		t.Errorf("Request.Cap = %d, want the section 8 default %d", req.Cap, core.DefaultCap)
+	}
+}
+
+// Each subcommand carries the mode core.Run branches on. Without it introspect,
+// classify, verify and doctor are the same request (T-0020's log).
+func TestSubcommandsCarryTheirMode(t *testing.T) {
+	want := map[string]core.Mode{
+		"introspect": core.ModeIntrospect,
+		"classify":   core.ModeClassify,
+		"plan":       core.ModePlan,
+		"verify":     core.ModeVerify,
+		"doctor":     core.ModeDoctor,
+	}
+
+	for name, mode := range want {
+		t.Run(name, func(t *testing.T) {
+			req := core.NewRequest()
+			root := newCommandTree(context.Background(), &req, io.Discard)
+			root.SetArgs([]string{name, "--source", "postgres://nobody@127.0.0.1:1/none"})
+			root.SetOut(io.Discard)
+			root.SetErr(io.Discard)
+			// The run fails: there is no database at that address. The mode is
+			// set before anything connects, which is what this asserts.
+			_ = root.ExecuteContext(context.Background())
+
+			if req.Mode != mode {
+				t.Errorf("%s built Mode %v, want %v", name, req.Mode, mode)
+			}
+			if name == "plan" && !req.PlanOnly {
+				t.Error("the plan subcommand must set PlanOnly, like --plan")
+			}
+		})
+	}
+}
+
+// A flag the operator typed and a flag holding its own default are different
+// facts: lazyslice.yml supplies a value for the second and never for the first
+// (ARCHITECTURE.md section 10).
+func TestExplicitFlagsAreRecorded(t *testing.T) {
+	req := core.NewRequest()
+	root := newCommandTree(context.Background(), &req, io.Discard)
+	root.SetArgs([]string{"--take", "7", "--source", "postgres://nobody@127.0.0.1:1/none"})
+	root.SetOut(io.Discard)
+	root.SetErr(io.Discard)
+	_ = root.ExecuteContext(context.Background())
+
+	if !req.Explicit["take"] {
+		t.Error("--take was passed and Explicit does not record it, so the yml would override it")
+	}
+	if req.Explicit["depth"] {
+		t.Error("--depth was not passed and Explicit records it, so the yml could not supply a depth")
+	}
+}
+
+// --cap has two shapes and three ways to be wrong. Each of them is a value that
+// would be stored and then match nothing.
+func TestCapShapes(t *testing.T) {
+	cases := []struct {
+		name     string
+		args     []string
+		wantErr  bool
+		wantCap  int
+		wantMore map[string]int
+	}{
+		{name: "a bare count", args: []string{"25"}, wantCap: 25},
+		{
+			name:     "one table",
+			args:     []string{"public.payment=10"},
+			wantCap:  core.DefaultCap,
+			wantMore: map[string]int{"public.payment": 10},
+		},
+		{name: "zero", args: []string{"0"}, wantErr: true},
+		{name: "zero for a table", args: []string{"public.payment=0"}, wantErr: true},
+		{name: "negative", args: []string{"-1"}, wantErr: true},
+		{name: "no table", args: []string{"=10"}, wantErr: true},
+		{name: "not a number", args: []string{"public.payment=lots"}, wantErr: true},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			req := core.NewRequest()
+			err := finish(nil, &req, &rawFlags{caps: c.args})
+			if c.wantErr {
+				if err == nil {
+					t.Fatalf("finish(--cap %q) = nil, want a usage error", c.args)
+				}
+				if !strings.Contains(err.Error(), "usage") {
+					t.Errorf("finish(--cap %q) = %v, want it to wrap errUsage", c.args, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("finish(--cap %q) = %v, want nil", c.args, err)
+			}
+			if req.Cap != c.wantCap {
+				t.Errorf("Cap = %d, want %d", req.Cap, c.wantCap)
+			}
+			for table, n := range c.wantMore {
+				if req.TableCaps[table] != n {
+					t.Errorf("TableCaps[%q] = %d, want %d", table, req.TableCaps[table], n)
+				}
+			}
+		})
+	}
+}
+
+// `lazyslice introspect --json` writes its summary onto the same stdout the
+// NDJSON sink is writing events to, so the whole stream has to stay NDJSON:
+// ARCHITECTURE.md section 8 calls --json "NDJSON events on stdout", and any
+// consumer of it does line-by-line json.Unmarshal. An indented summary put
+// fifteen lines into that stream that are not JSON on their own.
+func TestIntrospectJSONIsOneObjectPerLine(t *testing.T) {
+	var buf bytes.Buffer
+
+	// The events first, as a run would write them, then the summary.
+	sink := sinkFor(core.Request{JSON: true}, &buf)
+	sink.Send(event.Event{Stage: event.Introspect, Kind: event.Info, Code: "introspect.schema.read"})
+
+	summary := &pipeline.SchemaSummary{
+		ServerVersion: 160000,
+		Schemas:       []string{"public"},
+		Tables:        3,
+		Columns:       9,
+		ForeignKeys:   2,
+		NotRecreated:  map[string]int{"view": 1},
+		Fingerprint:   "abc123",
+	}
+	if err := writeSummary(&buf, summary); err != nil {
+		t.Fatalf("writeSummary: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimRight(buf.String(), "\n"), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("the stream has %d line(s), want an event line and a summary line", len(lines))
+	}
+	for i, line := range lines {
+		var obj map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(line), &obj); err != nil {
+			t.Errorf("line %d of --json output is not a JSON object: %v\n  %s", i+1, err, line)
+		}
+	}
+}
+
+// `--cap TABLE=N` is a per-table cap and must not read as "the operator set the
+// global cap". pflag knows only that --cap was Changed, so recording that
+// verbatim made a per-table cap silently discard the committed yml's global
+// `cap:` and revert every other table to the built-in default
+// (internal/core/run.go's planRequest reads Explicit["cap"]).
+func TestPerTableCapIsNotAGlobalCap(t *testing.T) {
+	perTable := core.NewRequest()
+	root := newCommandTree(context.Background(), &perTable, io.Discard)
+	root.SetArgs([]string{"--cap", "public.payment=10", "--source", "postgres://nobody@127.0.0.1:1/none"})
+	root.SetOut(io.Discard)
+	root.SetErr(io.Discard)
+	_ = root.ExecuteContext(context.Background())
+
+	if perTable.Explicit["cap"] {
+		t.Error("--cap public.payment=10 recorded an explicit global cap, so the yml's cap: would be ignored")
+	}
+	if perTable.TableCaps["public.payment"] != 10 {
+		t.Errorf("TableCaps = %v, want public.payment=10", perTable.TableCaps)
+	}
+
+	// The bare form is the one that means the global cap, and it still does.
+	bare := core.NewRequest()
+	root = newCommandTree(context.Background(), &bare, io.Discard)
+	root.SetArgs([]string{"--cap", "25", "--source", "postgres://nobody@127.0.0.1:1/none"})
+	root.SetOut(io.Discard)
+	root.SetErr(io.Discard)
+	_ = root.ExecuteContext(context.Background())
+
+	if !bare.Explicit["cap"] || bare.Cap != 25 {
+		t.Errorf("--cap 25 gave Cap %d, explicit %v; want 25 and true", bare.Cap, bare.Explicit["cap"])
 	}
 }

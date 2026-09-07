@@ -92,7 +92,15 @@ type Decision struct {
 type Classification struct {
 	Decisions map[ColumnRef]Decision
 	Drift     []ColumnRef // columns the committed yml had never seen
-	Expired   []ColumnRef // opt-outs ignored because TypeFP changed
+	// Expired lists the columns whose opt-out was not honoured: its TypeFP no
+	// longer matches the column's, or it records no TypeFP and no reason at
+	// all. THREAT_MODEL.md T3's control is that an opt-out records the
+	// column's type fingerprint and is ignored when it changes, so one that
+	// records nothing is the fail-open version of it and expires the same way
+	// (internal/classify's honourOptOut). The --unmask flag's own opt-out is
+	// the single exception: it carries no fingerprint because it is made for
+	// this run and dies with it.
+	Expired []ColumnRef
 	// Fingerprint is sha256 over (rule-pack version, and per column: category,
 	// masker)[:16]. A change is printed as "classification changed - masked
 	// values will differ", because the mapping depends on the category.

@@ -335,3 +335,36 @@ reason for each.
   snapshot reader: "twenty rows of whatever this table holds" is not a shape the
   planner sends, and the source's allowlist would refuse it (THREAT_MODEL.md
   T9).
+
+## Decisions made during implementation (T-CORE, 2026-09-06)
+
+- **Privileges arrive on the request.** `PlanRequest.Priv` is filled by
+  `internal/core` from one `Source.Privileges` call, and `sqlUnreadableTables`,
+  `sqlCurrentRole`, `readUnreadable` and `readRole` are gone with the two
+  allowlist shapes that carried them (`plan.unreadable_tables`,
+  `plan.current_role`). One read, one answer: the role the decision header
+  prints and the role a §3.6 refusal names cannot now differ.
+- **Partition leaves are read here, and only they**
+  (`sqlUnreadablePartitionLeaves`, shape `plan.unreadable_partition_leaves`).
+  `internal/pg`'s privileges query excludes partition leaves
+  (`NOT c.relispartition`), because a leaf is not a table anything else plans,
+  loads or counts — and §3.3 makes it a privilege question all the same: a
+  partitioned table's keys are fetched from the root and Postgres routes to the
+  leaves, so a leaf the role cannot SELECT fails the *root's* read. Dropping the
+  planner's own query without this left that as a raw 42501 from pgx partway
+  through extract, with the target already dropped and partly loaded, where §3.6
+  promises exit 12 and a `GRANT` before any row moves and says "there is no
+  mid-extract permission failure by design". The query is deliberately
+  leaves-only, so it and `Priv.Unreadable` can never disagree about the same
+  relation; `unreadableRelations` merges the two, re-sorts, dedupes and keeps
+  the root attribution. Folding it into `internal/pg`'s read is the better shape
+  and is owed there.
+- **`Plan.Polymorphic` and `Plan.Unmapped` are two lists.** A detected
+  `<x>_type`/`<x>_id` pair goes under `Polymorphic`; `Unmapped` is for the
+  sampled `_type` values that map to no table, which v1 never produces because
+  it never samples them. They were one list, so a renderer printed a pair name
+  under a heading that says it is a value.
+- **`withDefaults` stays** even though `internal/core` now substitutes §3's
+  defaults before calling `Plan`. It is a defensive net for a direct caller —
+  `plan_integration_test.go` builds a `PlanRequest` with no `Take` — and a zero
+  reaching the walk would mean "select no rows" rather than "select 500".

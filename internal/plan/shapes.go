@@ -116,7 +116,6 @@ func Shapes() []Statement {
 		{Name: "plan.explicit_key_probe_bounded", SQL: explicitKeyProbeBoundedShape},
 		{Name: "plan.pseudo_key_probe", SQL: pseudoKeyProbeShape},
 		{Name: "plan.pseudo_key_probe_bounded", SQL: pseudoKeyProbeBoundedShape},
-		{Name: "plan.unreadable_tables", SQL: sqlUnreadableTables},
-		{Name: "plan.current_role", SQL: sqlCurrentRole},
+		{Name: "plan.unreadable_partition_leaves", SQL: sqlUnreadablePartitionLeaves},
 	}
 }

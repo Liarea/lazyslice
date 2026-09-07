@@ -24,11 +24,18 @@ type Config struct {
 	PlanOnly  bool
 	Source    Provenance
 	SourceRef dsn.Ref
+	// SourceLabel and TargetLabel are Candidate.Label: the compose service, the
+	// container name or the environment variable a candidate came from. They
+	// are section 10's `service:` key, and they are identifiers — a developer
+	// reading the committed file has to be able to see which database of their
+	// project this run was against without a DSN in it.
 	// PasswordCommand is the --password-command string, a reference. Never its
 	// output.
 	PasswordCommand string
+	SourceLabel     string
 	Target          Provenance
 	TargetRef       dsn.Ref
+	TargetLabel     string
 	Root            TableRef
 	Take            int
 	// Where is empty when the predicate held a literal; see WhereFingerprint.
@@ -94,10 +101,16 @@ type Unmask struct {
 
 // PlanSummary is the plan block of the yml: counts and identifiers only.
 type PlanSummary struct {
-	Tables       int
-	Rows         int64
-	Lookups      []TableRef
-	Unreachable  []TableRef
+	Tables      int
+	Rows        int64
+	Lookups     []TableRef
+	Unreachable []TableRef
+	// Unreadable is section 3.6's list: tables the source role cannot read that
+	// were dropped to SchemaOnly and the run continued past. Section 10's plan
+	// block carries it beside `unreachable:`; ARCHITECTURE.md section 2's own
+	// PlanSummary does not name it, and internal/emit/CLAUDE.md records the
+	// addition.
+	Unreadable   []TableRef
 	SCCs         [][]TableRef
 	VirtualFKs   []ForeignKey
 	NotRecreated map[string]int // Object.Kind to count

@@ -30,3 +30,35 @@ package or `internal/discover` also enforces the two-subprocess allowlist.
 
 **Never:** create `lazyslice.secret` when `.gitignore` cannot be written; pass
 git anything but a path; spawn a subprocess other than `git`.
+
+## Decisions made during implementation
+
+- **`Protect` decides and never writes the secret.** It reports a `State` and
+  the caller acts on it: a package that both decided and wrote would have no way
+  to print the decision before acting on it, and §9 requires every branch to say
+  what it did. `State.MayWriteSecret` is the one question the caller has.
+- **An absent `.gitignore` is not created.** §9 step 3 puts "absent" and
+  "unwritable" in one branch and gives both an ephemeral key. Creating one would
+  be lazyslice writing a file in the operator's repository, on the first run,
+  that they did not ask for.
+- **Entries are written anchored** (`/lazyslice.secret`), and an existing
+  unanchored `lazyslice.secret` counts as present: an operator who already
+  ignored the file gets no noise in their diff.
+- **A path outside the repository yields no entry.** `.gitignore` cannot reach
+  it, and `--secret-file` outside the tree is the remedy §9 already prints.
+- **`git ls-files` runs under a 10 s timeout** and receives `-C <root>`,
+  `--error-unmatch` and a `--`-separated path, so a path beginning with a dash
+  is a path. Exit 0 is tracked, 1 is untracked, 128 is "not a repository"; any
+  other exit is an error, because a git that answered something we do not
+  understand has not said the file is untracked.
+- **`RemoveFromIndex`** renders the `git rm --cached` command the refusal names,
+  so the message and the check cannot drift apart.
+- **The tracked check makes the path absolute first** (T-CORE review,
+  2026-09-06). `git -C <root>` resolves a *relative* pathspec against the
+  repository root, while every path this package is given is relative to the
+  process working directory — `core.DefaultSecretFile` is literally
+  `./lazyslice.secret`. From a subdirectory the check therefore asked about
+  `<root>/lazyslice.secret`, got exit 1, and reported a committed key as
+  untracked: a fail-open on THREAT_MODEL.md T6. Every test here passed an
+  absolute path, so none of them could see it;
+  `TestTrackedSecretIsFoundThroughARelativePath` is the one that can.

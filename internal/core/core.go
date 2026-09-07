@@ -11,19 +11,14 @@
 // Request mirrors the CLI flag surface (ARCHITECTURE.md section 8) field for
 // field. cmd/lazyslice builds one from flags; internal/tui builds the same
 // struct from keystrokes. Neither of them talks to a stage.
-//
-// Scaffold status: Run walks the nine stages, announcing each one and reporting
-// that it is not implemented, then returns pipeline.ErrNotImplemented. It moves
-// no data, opens no connection and touches no database.
 package core
 
 import (
-	"context"
+	"errors"
 	"fmt"
-	"time"
 
 	"github.com/Liarea/lazyslice/internal/event"
-	"github.com/Liarea/lazyslice/internal/pipeline"
+	"github.com/Liarea/lazyslice/internal/ref"
 )
 
 // Defaults are the v1 flag defaults from ARCHITECTURE.md section 8. They are
@@ -41,12 +36,63 @@ const (
 	DefaultSecretFile = "./lazyslice.secret" //nolint:gosec // G101: a filename, not a credential
 )
 
+// Mode is which of ARCHITECTURE.md section 8's entry points this request is.
+//
+// It exists because the five stage subcommands stop the pipeline at five
+// different places and Request had no field that told them apart: without it,
+// `lazyslice introspect` and `lazyslice doctor` build the same Request and Run
+// has nothing to branch on (T-0020's log, carried into T-CORE).
+type Mode int
+
+// The six entry points. ModeRun is the zero value, so a Request built by hand
+// runs the whole pipeline, which is what `lazyslice` with no subcommand does.
+const (
+	ModeRun        Mode = iota // lazyslice [DSN]
+	ModeIntrospect             // lazyslice introspect
+	ModeClassify               // lazyslice classify
+	ModePlan                   // lazyslice plan, and --plan
+	ModeVerify                 // lazyslice verify
+	ModeDoctor                 // lazyslice doctor
+)
+
+var modeNames = [...]string{
+	ModeRun:        "run",
+	ModeIntrospect: "introspect",
+	ModeClassify:   "classify",
+	ModePlan:       "plan",
+	ModeVerify:     "verify",
+	ModeDoctor:     "doctor",
+}
+
+// String names the mode, for an error message and for the --json stream.
+func (m Mode) String() string {
+	if m < 0 || int(m) >= len(modeNames) {
+		return "unknown"
+	}
+	return modeNames[m]
+}
+
+// needsTarget reports whether the mode writes to, or reads, a target. The four
+// read-only modes never open one, which is what lets `lazyslice classify
+// --source URL` answer without a second database to point at.
+func (m Mode) needsTarget() bool { return m == ModeRun || m == ModeVerify }
+
 // Request is one run, as the flags describe it. Every field is a flag in
 // ARCHITECTURE.md section 8; nothing here is a value from either database.
 type Request struct {
+	// Mode is which entry point this is (section 8's subcommand list).
+	Mode Mode
+
 	// Workdir is where discovery looks for lazyslice.yml, .env files and the
 	// compose project. It is the process working directory unless a test sets it.
 	Workdir string
+
+	// Explicit names the flags the operator actually passed, by their long
+	// name. It is how the yml can supply a default without overriding a flag:
+	// an int flag bound to its own default is indistinguishable from one the
+	// operator typed, and "the file wins over the flag" is the wrong way round
+	// for every value in section 10.
+	Explicit map[string]bool
 
 	// discover
 	Source              string // positional DSN or --source
@@ -112,45 +158,59 @@ func NewRequest() Request {
 		TableCaps:        map[string]int{},
 		Keys:             map[string][]string{},
 		Unmask:           map[string]string{},
+		Explicit:         map[string]bool{},
 	}
 }
 
-// stages is the pipeline order (ADR-005). Run walks it; nothing else defines it.
-var stages = []event.Stage{
-	event.Discover,
-	event.Introspect,
-	event.Classify,
-	event.Plan,
-	event.Extract,
-	event.Transform,
-	event.Load,
-	event.Verify,
-	event.Emit,
+// set reports whether the operator passed a flag by that name.
+func (r Request) set(flag string) bool { return r.Explicit[flag] }
+
+// Stop is a refusal with the event code and the process exit it carries.
+//
+// Every stage that can refuse returns its own refusal type — plan.Refusal,
+// load.Refusal, verify.Refusal — because a stage takes no event.Sink and core
+// is the only producer of events (ARCHITECTURE.md section 7). Run converts each
+// into one of these, sends the Error event for it, and returns it, so that
+// cmd/lazyslice has one type to map to an exit code and no stage-specific
+// knowledge at all.
+type Stop struct {
+	Code event.Code
+	Exit int
+	// Table, Column and Args are what the catalogue's template for Code
+	// substitutes. They carry identifiers and counts only: a refusal is an
+	// error message leaving the process, which is the last place a row value
+	// could hide (THREAT_MODEL.md T4).
+	Table  ref.TableRef
+	Column string
+	Args   event.Args
+	// Message is developer-facing. What a user sees is rendered from
+	// internal/event/catalogue.yml by Code.
+	Message string
+	err     error
 }
 
-// Run drives the pipeline and returns the report the exit code is computed from.
-//
-// A run holds the source snapshot from the start of introspect to the end of
-// extract, releases it, loads, verifies, then emits. Stage transitions are
-// events, so the transcript in CONCEPT.md is the event stream rendered as lines.
-//
-// Scaffold status: no stage is implemented. Run announces each one and returns
-// pipeline.ErrNotImplemented, so that a scaffold build is loud rather than
-// silently successful.
-func Run(ctx context.Context, _ Request, sink event.Sink) (*pipeline.Report, error) {
-	for _, s := range stages {
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-		sink.Send(event.Event{At: time.Now(), Stage: s, Kind: event.StageStart, Code: event.CodeStageStart})
-		sink.Send(event.Event{
-			At:    time.Now(),
-			Stage: s,
-			Kind:  event.Info,
-			Code:  event.CodeNotImplemented,
-			Args:  event.Args{event.ArgStage: s.String()},
-		})
-		sink.Send(event.Event{At: time.Now(), Stage: s, Kind: event.StageDone, Code: event.CodeStageDone})
+func (s *Stop) Error() string {
+	if s.Message == "" {
+		return string(s.Code)
 	}
-	return nil, fmt.Errorf("core: %w", pipeline.ErrNotImplemented)
+	return string(s.Code) + ": " + s.Message
 }
+
+// Unwrap reaches the underlying error, where there was one.
+func (s *Stop) Unwrap() error { return s.err }
+
+// stop builds a Stop.
+func stop(code event.Code, exit int, format string, a ...any) *Stop {
+	return &Stop{Code: code, Exit: exit, Message: fmt.Sprintf(format, a...)}
+}
+
+// wrap builds a Stop around an existing error, keeping it reachable so that
+// --debug and --show-row-values-in-errors can still get at the driver's words.
+func wrap(code event.Code, exit int, err error, format string, a ...any) *Stop {
+	return &Stop{Code: code, Exit: exit, Message: fmt.Sprintf(format, a...), err: err}
+}
+
+// ErrNoSource is the exit-3 case: nothing to read from. It is its own error
+// because discovery is a scaffold, so "no --source and nothing found" is the
+// common path today and must say what to do rather than what failed.
+var ErrNoSource = errors.New("core: no source")

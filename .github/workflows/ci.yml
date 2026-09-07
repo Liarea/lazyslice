@@ -161,25 +161,41 @@ jobs:
   # against containers on a runner with a Docker daemon, on the oldest and the
   # newest supported majors (ADR-003, ARCHITECTURE.md section 14).
   #
-  # Until T-CORE lands the pipeline (gate 4) `make integration` is *expected*
-  # to fail, because the invariant suite runs a scaffold that implements no
-  # stage. `continue-on-error: true` was how that was expressed, and it made
-  # every step's outcome irrelevant to the job's conclusion: a run that failed
-  # to compile, or found no Docker daemon and turned every test into a skip
-  # (internal/testutil.SkipWithoutDocker), reported the same green as a correct
-  # one. That is the failure internal/invariants/harness_test.go warns about in
-  # its own comment — "a suite that skips when the thing it tests does not
-  # exist reports green on an empty repository" — reintroduced one layer up.
+  # This job does not block a merge *yet*, and the expectation is asserted
+  # rather than waved through. It was allowed to fail while the pipeline was a
+  # phase 3 scaffold; T-CORE landed the pipeline, and three invariants still
+  # fail for reasons that live outside T-CORE's paths:
   #
-  # So the expectation is inverted and asserted instead. The job fails if the
-  # suite executed no test, if it skipped anything, if it failed to build, or
-  # if it did not fail with the scaffold's own error. The first two need the
-  # run to be verbose — `go test` without -v prints one `ok` line per package
-  # and no per-test line, so a grep for `--- SKIP` over the default output
-  # matches nothing however many tests skipped — which is what
-  # `GOTESTFLAGS=-v` is for. When T-CORE lands, the scaffold check is deleted
-  # and the first two stay: they are what says a Docker-less runner is not
-  # green.
+  #   TestI2NothingFlaggedSurvives/nasty/grep  public.devices.owned_by holds
+  #     two source values, one of them a real email address. The classifier
+  #     never sees a value signal (the table has 3 rows, so introspect's
+  #     TABLESAMPLE yields none) and §6 item 4's second net skips the column
+  #     because it holds fewer than minValues non-NULL values
+  #     (internal/verify/secondnet.go). THREAT_MODEL.md T1, and v1-blocking.
+  #   TestI2NothingFlaggedSurvives/pagila     public.film.fulltext is masked to
+  #     empty by ADR-010's derived_text, and I2 reads "no value in the target"
+  #     as "the masker's output was never loaded" (internal/invariants).
+  #   TestI6RootHoldsTakeRows/pagila          public.customer holds 101 rows for
+  #     --take 100. §3's walk lets a PARENT_ONLY push widen the root's key set —
+  #     the §3 diagram has exactly that edge — so the fixture's premise that
+  #     "public.customer is a root nothing reaches as a parent" is false for
+  #     pagila (internal/invariants/harness_test.go).
+  #
+  # Until those land, the wrapper is narrowed to exactly those two test names:
+  # a failure anywhere else fails the job, and so does a run in which both of
+  # them pass, which is the signal to delete the wrapper and run
+  # `make integration` directly. `continue-on-error` is not used, because it
+  # makes every step's outcome irrelevant to the job's conclusion — a run that
+  # failed to compile, or that found no Docker daemon and skipped everything,
+  # reported the same green as a correct one.
+  #
+  # The three guards that outlive all of this need `-v`, because `go test`
+  # prints one `ok` line per package and no per-test line without it: a run that
+  # executed nothing, and a run whose every test skipped for want of a Docker
+  # daemon (internal/testutil.SkipWithoutDocker), both exit 0. That is the
+  # failure internal/invariants/harness_test.go warns about in its own comment —
+  # "a suite that skips when the thing it tests does not exist reports green on
+  # an empty repository" — one layer up.
   integration:
     runs-on: ubuntu-latest
     strategy:
@@ -194,47 +210,70 @@ jobs:
           cache: true
       - name: docker is available
         run: docker version
-      - name: integration fails, and fails for the right reason
+      - name: integration fails, and fails only where it is known to
         env:
           LAZYSLICE_TEST_POSTGRES_IMAGE: postgres:${{ matrix.postgres }}
         run: |
           set -uo pipefail
-          # -v, because `go test` prints no per-test line at all without it:
-          # the output of a package whose tests all pass or all skip is one
-          # `ok` line, so the `--- SKIP` grep below — the guard that replaced
-          # `continue-on-error` for the no-Docker case — could never match.
+          # -v, because `go test` prints no per-test line and no t.Skipf reason
+          # at all without it: the output of a package whose tests all pass or
+          # all skip is one `ok` line, so neither the skip-reason grep nor the
+          # per-test failure list below could ever match.
           make integration GOTESTFLAGS=-v 2>&1 | tee integration.log || true
 
           status=0
-          # The positive signal, and the one that outlives the scaffold: a run
-          # that executed nothing at all cannot satisfy it, whatever the
-          # pipeline does later.
+          # The positive signal, and the one that outlives every expectation: a
+          # run that executed nothing at all cannot satisfy it.
           ran=$(grep -cE '^\s*--- (PASS|FAIL): ' integration.log || true)
           if [ "$ran" -eq 0 ]; then
             echo "::error::the integration suite executed no test: no '--- PASS' or '--- FAIL' line in"
             echo "::error::$(wc -l < integration.log) line(s) of -v output. Nothing was asserted."
             status=1
           fi
-          if grep -q -- '--- SKIP' integration.log; then
-            echo "::error::the integration suite skipped a test. The only skip in internal/invariants is"
-            echo "::error::testutil.SkipWithoutDocker, so this run had no reachable Docker daemon and"
-            echo "::error::asserted nothing."
+          # Not a bare `--- SKIP` grep: `make integration` runs ./... and
+          # several tests over the whole tree skip by design on an ordinary
+          # run. internal/load's TestChildLoadsUntilKilled skips on every one
+          # of them — it is the re-exec child half of the kill -9 test and is a
+          # test only so the parent can run this binary again — so a bare grep
+          # fails the job on every PR while printing "no reachable Docker
+          # daemon" about a run that asserted 400-odd tests.
+          #
+          # The thing worth catching has one spelling: testutil.SkipWithoutDocker
+          # (internal/testutil/postgres.go), the gate every docker-dependent
+          # package calls. Matching its two skip reasons is narrower than the
+          # invariants package and also wider in the way that matters — it
+          # catches the same silent green in internal/load, internal/extract,
+          # internal/pg, internal/plan, internal/verify and internal/introspect.
+          if grep -qE 'testutil: (no container provider|docker is not reachable)' integration.log; then
+            echo "::error::testutil.SkipWithoutDocker skipped at least one test, so this run had no"
+            echo "::error::reachable Docker daemon and asserted nothing:"
+            grep -E 'testutil: (no container provider|docker is not reachable)' integration.log |
+              head -n 3 | sed 's/^/::error::  /'
             status=1
           fi
-          if grep -qE 'build failed|\[build failed\]|cannot find package' integration.log; then
+          if grep -qE 'build failed|cannot find package' integration.log; then
             echo "::error::the integration suite did not compile, so nothing was asserted."
             status=1
           fi
-          # The phase 3 scaffold's own line. Every invariant stops at it today,
-          # which is the gate 3 statement: the suite fails because the pipeline
-          # is a no-op, not because the suite is broken.
-          if ! grep -q 'this build is the phase 3 scaffold' integration.log; then
-            echo "::error::the integration suite did not fail with the phase 3 scaffold's error. Either"
-            echo "::error::the pipeline has landed — in which case delete this wrapper and run"
-            echo "::error::\`make integration\` directly — or the suite is failing for some other reason."
+
+          # The narrowed expectation. Top-level failures only (`--- FAIL:` at
+          # column 0); a subtest failure always fails its parent, so the two
+          # names below cover every subtest of theirs and nothing else.
+          failed=$(grep -E '^--- FAIL: ' integration.log | sed -E 's/^--- FAIL: ([^ ]+).*/\1/' | sort -u || true)
+          known=$(printf '%s\n' TestI2NothingFlaggedSurvives TestI6RootHoldsTakeRows | sort)
+          unexpected=$(comm -23 <(printf '%s\n' $failed) <(printf '%s\n' $known))
+          if [ -n "$unexpected" ]; then
+            echo "::error::the integration suite failed outside the two known blockers:"
+            for t in $unexpected; do echo "::error::  $t"; done
+            status=1
+          fi
+          if [ -z "$failed" ]; then
+            echo "::error::both known blockers passed. Delete this wrapper: run \`make integration\`"
+            echo "::error::directly with \`status=\${PIPESTATUS[0]}\`, so the job blocks a merge."
             status=1
           fi
           if [ "$status" -eq 0 ]; then
-            echo "integration: failed at the scaffold, as gate 3 says it must"
+            echo "integration: failed at the two recorded blockers and nowhere else"
+            printf '%s\n' $failed | sed 's/^/  /'
           fi
           exit "$status"

@@ -217,6 +217,9 @@ func digest(p *pipeline.Plan) string {
 	for _, c := range p.SCCs {
 		fmt.Fprintf(&b, "scc %v\n", c)
 	}
+	for _, u := range p.Polymorphic {
+		fmt.Fprintf(&b, "polymorphic %s\n", u)
+	}
 	for _, u := range p.Unmapped {
 		fmt.Fprintf(&b, "unmapped %s\n", u)
 	}
@@ -329,13 +332,19 @@ func TestPlanNasty(t *testing.T) {
 	t.Run("Trap6_PolymorphicPairIsReportedNotFollowed", func(t *testing.T) {
 		want := "public.attachments (owner_type, owner_id)"
 		found := false
-		for _, u := range p.Unmapped {
+		for _, u := range p.Polymorphic {
 			if u == want {
 				found = true
 			}
 		}
 		if !found {
-			t.Errorf("Unmapped = %v, want it to name %s", p.Unmapped, want)
+			t.Errorf("Polymorphic = %v, want it to name %s", p.Polymorphic, want)
+		}
+		// Unmapped is the other list: the sampled _type values that map to no
+		// table. v1 never samples them, so a pair name appearing there would be
+		// a pair printed under a heading that says it is a value.
+		if len(p.Unmapped) != 0 {
+			t.Errorf("Unmapped = %v, want none: v1 maps no _type value", p.Unmapped)
 		}
 		if len(p.Virtual) != 0 {
 			t.Errorf("Virtual = %v, want none: v1 detects the pair and does not follow it", p.Virtual)
