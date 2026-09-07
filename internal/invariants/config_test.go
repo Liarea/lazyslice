@@ -193,3 +193,22 @@ func (s columnScope) maskedColumns() []columnRef {
 func (s columnScope) producesNoValue(ref columnRef) bool {
 	return s.masked[ref].masker == "null"
 }
+
+// producesEmptyValue reports the other masker whose correct output holds
+// nothing to examine: `derived_text` (ADR-010) masks a tsvector to the *empty*
+// tsvector, because the column is derived from text the run may have masked
+// and a re-derivation would leak the source's own words. §10's pagila run
+// records `public.film.fulltext` with `masker: derived_text`, and the value
+// value that arrives is the empty tsvector — which scanCells drops, exactly as
+// it drops NULL and the empty string, so the column reads as one the target
+// never loaded.
+//
+// It is kept apart from producesNoValue because the two say different things:
+// `null` writes NULL and this writes a value that is empty. Both are read out
+// of the run's own `masker:` name, which is the same place the `small_domain:`
+// exemption in assertMaskedValuesAreNew is read from — a run cannot escape a
+// guard by declaring one of these without also declaring the masker whose
+// output every other assertion in this file then holds it to.
+func (s columnScope) producesEmptyValue(ref columnRef) bool {
+	return s.masked[ref].masker == "derived_text"
+}

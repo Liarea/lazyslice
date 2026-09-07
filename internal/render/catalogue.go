@@ -3,7 +3,6 @@
 package render
 
 import (
-	_ "embed"
 	"fmt"
 	"strconv"
 	"strings"
@@ -14,29 +13,17 @@ import (
 	"github.com/Liarea/lazyslice/internal/event"
 )
 
-// catalogueYML is the code catalogue (ARCHITECTURE.md §7): the one place a
-// message a user reads is written, and the source docs/ERRORS.md is generated
-// from.
+// The code catalogue (ARCHITECTURE.md §7) is the one place a message a user
+// reads is written, and the source docs/ERRORS.md is generated from. It lives
+// at internal/event/catalogue.yml, which ARCHITECTURE.md §12 names as its home
+// and which is where a new code is added.
 //
-// # Why there are two copies of this file
-//
-// The catalogue lives at internal/event/catalogue.yml, which ARCHITECTURE.md
-// §12 names as its home and which is where a new code is added. Go's embed
-// directive cannot reach outside its own package directory — a path with ".."
-// is rejected by the compiler — and internal/event holds no Go file this
-// renderer could add an embed to. So the file is embedded here as a copy, and
-// TestCatalogueIsTheEventCatalogue compares the two byte for byte: a row added
-// to internal/event/catalogue.yml and not copied here fails `make test` rather
-// than shipping a renderer that cannot render it.
-//
-// The alternative was to transcribe the messages into Go, which is the same
-// duplication with the drift check removed. The proper fix is an exported
-// accessor in internal/event (a //go:embed there and a Catalogue() function),
-// and it is owed to the next task whose paths include that package;
-// internal/render/CLAUDE.md records it.
-//
-//go:embed catalogue.yml
-var catalogueYML []byte
+// This package used to embed a byte-for-byte copy of that file, because Go's
+// embed directive cannot reach outside its own package directory and
+// internal/event held no Go file to put the embed in. It has one now:
+// event.Catalogue() returns the bytes, the copy under internal/render is gone,
+// and so is the test that compared the two (tracker T-0058). A row added to the
+// catalogue is rendered by this package with nothing to copy.
 
 // row is one catalogue entry.
 type row struct {
@@ -66,7 +53,7 @@ var (
 func codes() (catalogue, error) {
 	loadOnce.Do(func() {
 		var rows []row
-		if err := yaml.Unmarshal(catalogueYML, &rows); err != nil {
+		if err := yaml.Unmarshal(event.Catalogue(), &rows); err != nil {
 			loadErr = fmt.Errorf("render: parsing the code catalogue: %w", err)
 			return
 		}

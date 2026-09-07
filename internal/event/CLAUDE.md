@@ -22,6 +22,13 @@ transitive field types must never reach `dsn.DSN`, `pipeline.RowBatch` or
   ADR-005 exit code there.
 - A `Code`'s template may only reference `Args` keys inside the `ArgKey` enum;
   a test parses every template against every enum key.
+- **`catalogue.yml` is embedded here and handed out by `Catalogue()`.** Go's
+  `//go:embed` cannot reach outside a package directory, so `internal/render`
+  used to carry a byte-identical copy of the file with a test comparing the two;
+  the embed lives with the file it belongs to instead (tracker T-0058) and the
+  copy is gone. `Catalogue()` returns the raw bytes and a fresh slice per call —
+  parsing them is a renderer's job, and this package stays free of anything but
+  the event model.
 
 **Test.** `go test ./internal/event/...`.
 

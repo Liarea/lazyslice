@@ -31,14 +31,14 @@ connection.
 
 ## Decisions made during implementation
 
-- **The catalogue is embedded as a copy.** `internal/event/catalogue.yml` is its
-  home (ARCHITECTURE.md §12) and where a code is added; Go's `//go:embed` cannot
-  reach outside a package directory, and `internal/event` has no Go file this
-  package could add the embed to. So `internal/render/catalogue.yml` is a
-  byte-identical copy and `TestCatalogueIsTheEventCatalogue` compares the two: a
-  row added there and not copied here fails `make test`. The proper fix is a
-  `//go:embed` and a `Catalogue()` accessor in `internal/event`, owed to the
-  next task whose paths include that package; the copy goes when it lands.
+- **The catalogue is read through `event.Catalogue()`, and this package holds no
+  copy of it.** `internal/event/catalogue.yml` is its home (ARCHITECTURE.md §12)
+  and where a code is added; Go's `//go:embed` cannot reach outside a package
+  directory, so this package once carried a byte-identical copy with
+  `TestCatalogueIsTheEventCatalogue` comparing the two. `internal/event` now
+  holds the `//go:embed` and exports the bytes (tracker T-0058): the copy, the
+  second embed and that test are gone, and a row added to the catalogue is
+  rendered here with nothing to keep in step.
 - **`Lines` prints nothing for `StageStart` and `StageDone`.** They are the
   pipeline's own brackets and carry no fact the transcript needs — CONCEPT.md's
   transcript is a list of decisions and results — and `--json` still carries

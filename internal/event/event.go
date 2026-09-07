@@ -11,17 +11,41 @@
 // pipeline.RowBatch and pipeline.Table, and therefore Table.Samples
 // (THREAT_MODEL.md T4). The import graph in ARCHITECTURE.md section 2 is what
 // makes that checkable — event imports only ref, never pipeline.
-//
-// Scaffold status: the types are final; the code catalogue
-// (internal/event/catalogue.yml, the source of docs/ERRORS.md) is not written
-// yet, so Code values here are the handful the scaffold needs.
 package event
 
 import (
+	_ "embed"
 	"time"
 
 	"github.com/Liarea/lazyslice/internal/ref"
 )
+
+// catalogueYML is internal/event/catalogue.yml, the code catalogue
+// (ARCHITECTURE.md §7 and §12): the one place a message a user reads is
+// written, and the source docs/ERRORS.md is generated from.
+//
+// The embed lives here because this is the package the file belongs to, and
+// Go's embed directive cannot reach outside its own directory — a path with
+// ".." is rejected by the compiler. internal/render used to carry a byte-for-
+// byte copy of the file for that reason, with a test comparing the two; the
+// copy and the test are gone and Catalogue() is what a renderer reads
+// (tracker T-0058).
+//
+//go:embed catalogue.yml
+var catalogueYML []byte
+
+// Catalogue returns the raw bytes of the code catalogue.
+//
+// It is the bytes rather than a parsed structure because the row type is a
+// renderer's concern — internal/render unmarshals it, and docs/ERRORS.md is
+// generated from the same file — while this package must stay free of anything
+// but the event model. It returns a fresh slice per call so that no caller can
+// write through the embedded one.
+func Catalogue() []byte {
+	out := make([]byte, len(catalogueYML))
+	copy(out, catalogueYML)
+	return out
+}
 
 // Stage is one of the nine pipeline stages (ADR-005).
 type Stage int

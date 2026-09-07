@@ -17,9 +17,11 @@ import (
 // every column of the loaded target that is not fully masked by a category
 // masker: every unmasked, non-opted-out column of a family this package can
 // name and render, and the string leaves of every JSON column, masked or not. A
-// column reaching the strong ratio is exit 9. The target is small, so this is a
-// scan and not a sample, which is what makes it catch a column the 200-row
-// sample under-represented.
+// column reaching the strong ratio is exit 9, and so is any hit at all on a
+// column holding fewer than minValues non-NULL values, which has no ratio to
+// reach it with (netColumn). The target is small, so this is a scan and not a
+// sample, which is what makes it catch a column the 200-row sample
+// under-represented.
 //
 // Three things it does not catch, stated here and in internal/verify/CLAUDE.md
 // rather than implied:
@@ -121,14 +123,34 @@ func (s *state) netColumn(ctx context.Context, col ref.ColumnRef, mode netMode) 
 	if err != nil {
 		return err
 	}
-	if nonNull < minValues {
+	if nonNull == 0 {
 		return nil
 	}
+	// A column with fewer than minValues non-NULL values is *unproven*, not
+	// clean. Returning nil here was a fail-open with nothing above it: a
+	// three-row table yields two values, the ratio over them means nothing, and
+	// public.devices.owned_by in testdata/nasty.sql — two email addresses and a
+	// NULL — reached the target in cleartext under exit 0, with the classifier
+	// silent for the same reason and this net silent after it (THREAT_MODEL.md
+	// T1, tracker T-0058). So the validators run over
+	// whatever there is and *any* hit fails: the threshold is what a ratio
+	// buys, and below minValues there is no ratio to buy it with. One value
+	// that parses as an email is still a production email address in the
+	// target, which is the thing this net exists to refuse.
+	//
+	// nonNull is counted over the *target*, so this branch is slice-size
+	// dependent: a table --take reduces to two rows is unproven here and the
+	// same table at --take 500 is not, which makes the verdict non-monotone in
+	// the slice size for the two validators that carry no parse (addressShape,
+	// looksSecret). That cost is weighed against the leak above in
+	// internal/verify/CLAUDE.md, which also records the narrowing to revisit if
+	// the refusal proves noisy.
+	proven := nonNull >= minValues
 	for i, val := range validators {
 		if !applies(val, mode) || hits[i] == 0 {
 			continue
 		}
-		if float64(hits[i])/float64(nonNull) < validatorThreshold {
+		if proven && float64(hits[i])/float64(nonNull) < validatorThreshold {
 			continue
 		}
 		s.fail(&Refusal{

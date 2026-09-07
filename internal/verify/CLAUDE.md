@@ -98,6 +98,43 @@ was chosen and is recorded here rather than only in a comment.
   `Writer` that satisfies it is the one in `verify_integration_test.go`, so
   **verify cannot run against a real target today**. Verify refuses rather than
   reporting a green tick over checks that did not run.
+- **A column below `minValues` non-NULL values is unproven, not clean.** §4's
+  threshold is a *ratio*, and a ratio over two values means nothing, so the
+  first version of this net returned before the validators ran. That is a
+  fail-open, and the classifier had a floor at the same number for the same
+  reason, so nothing was above it: `public.devices.owned_by` in
+  `testdata/nasty.sql` — two email addresses and a NULL in a three-row table —
+  reached the target in cleartext under exit 0, which
+  `TestI2NothingFlaggedSurvives/nasty` caught and tracker T-0058 fixed. The
+  validators now run over whatever the column holds and *any* hit below
+  `minValues` is exit 9: the threshold is what a ratio buys, and there is no
+  ratio to buy it with. One value that parses as an email address is still a
+  production email address in the target. `TestAColumnBelowMinValuesFailsOnAnyHit`
+  pins both halves — one hit in two values fails, and the same 0.5 ratio over
+  four values does not.
+  - **That branch is slice-size dependent, and it is the one refusal here that
+    is.** `nonNull` is counted over the *target*, so whether a column is below
+    `minValues` is a function of `--take` and `--cap` rather than a property of
+    the source column: a table the subsetter reduces to one or two rows is
+    unproven at `--take 10` and proven at `--take 500`. The two loosest
+    validators are what makes that visible, because they carry no parse —
+    `addressShape` wants a digit and two lettered words (`Room 12 Building A`,
+    `iPhone 15 Pro`) and `looksSecret` wants 16 characters, two classes and
+    Shannon ≥ 3.2, which an ordinary slug reaches. So the same database can
+    verify clean at one `--take` and exit 9 at a smaller one, after the target
+    is already loaded, with `--unmask` the only way past it. That is
+    non-monotone and it is a real cost; it is kept because the alternative is
+    the T1 leak above, and because the failure direction is a refusal rather
+    than a cleartext value in the target (CLAUDE.md: "when in doubt, mask it").
+    Two narrowings were considered and not taken: gating on the *source*
+    column's cardinality, which this stage does not have (it reads the loaded
+    target, §6 item 4), and restricting "any hit" below `minValues` to the four
+    validators that carry a real parse — email, phone, network_id,
+    financial_account — leaving address and credential on the ratio. The second
+    is the one to revisit if the refusal proves noisy in practice: it would cost
+    exactly the two-row address column, which is the case this branch exists
+    for. Whoever revisits it owes a tracker task and this note updated, not a
+    quiet threshold change.
 - **The exit code is the first failure in §6's order and the failing check is
   also returned as an error.** Every check runs whatever the ones before it
   found, so one report names everything wrong with the target; the report's

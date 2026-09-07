@@ -473,3 +473,121 @@ func TestANumberLeafIsNotAResidualHit(t *testing.T) {
 		t.Errorf("leaf hits are %v; only the string leaf carries residual signal", leafValues)
 	}
 }
+
+// fakeRows is a target result set of one column.
+type fakeRows struct {
+	vals []any
+	i    int
+}
+
+func (r *fakeRows) Next() bool { r.i++; return r.i <= len(r.vals) }
+func (r *fakeRows) Scan(dest ...any) error {
+	if len(dest) != 1 {
+		return errors.New("fakeRows: one column")
+	}
+	p, ok := dest[0].(*any)
+	if !ok {
+		return errors.New("fakeRows: want *any")
+	}
+	*p = r.vals[r.i-1]
+	return nil
+}
+func (r *fakeRows) Err() error { return nil }
+func (r *fakeRows) Close()     {}
+
+// oneColumn is a target that answers every scan with the same values.
+type oneColumn struct{ vals []any }
+
+func (c oneColumn) Query(context.Context, string, ...any) (pipeline.Rows, error) {
+	return &fakeRows{vals: c.vals}, nil
+}
+
+// A column holding fewer than minValues non-NULL values is unproven, not clean,
+// and the second net fails on any hit in it.
+//
+// The threshold in ARCHITECTURE.md §4 is a ratio, and a ratio over two values
+// says nothing; the first version of this net read that as "say nothing" and
+// returned before the validators ran. That is a fail-open with nothing above
+// it, and it is not hypothetical: public.devices.owned_by in testdata/nasty.sql
+// is two email addresses and a NULL in a three-row table, the classifier's own
+// value signal was silent for the same reason, and the address reached the
+// target in cleartext under exit 0 (THREAT_MODEL.md T1, tracker T-0058).
+//
+// So the two halves are pinned together here. Two values, one of them an email
+// address: 1/2 is below validatorThreshold and the column still fails, naming
+// the table, the column and the category. And the same 0.5 ratio over
+// minValues values does not fail, because there the ratio is the answer and
+// this net is not a per-row scanner.
+func TestAColumnBelowMinValuesFailsOnAnyHit(t *testing.T) {
+	table := customers()
+	col := ref.ColumnRef{Table: table, Column: "note"}
+
+	cases := []struct {
+		name     string
+		vals     []any
+		wantFail bool
+	}{
+		{
+			name:     "two values, one an email address",
+			vals:     []any{"ada.lovelace@example.com", "nothing to see"},
+			wantFail: true,
+		},
+		{
+			name:     "one value, an email address",
+			vals:     []any{"ada.lovelace@example.com", nil},
+			wantFail: true,
+		},
+		{
+			name:     "two values, neither an email address",
+			vals:     []any{"nothing to see", "still nothing"},
+			wantFail: false,
+		},
+		{
+			// minValues values at the same 0.5 ratio: the threshold is what
+			// decides once there are enough values for a ratio to mean
+			// anything, and half of four is below it.
+			name:     "four values, two email addresses",
+			vals:     []any{"ada.lovelace@example.com", "grace.hopper@example.com", "nothing to see", "still nothing"},
+			wantFail: false,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s := &state{
+				schema: &pipeline.Schema{},
+				target: oneColumn{vals: c.vals},
+				steps:  []pipeline.Step{{Table: table, Mode: pipeline.ChildOK}},
+				tables: map[ref.TableRef]*pipeline.Table{
+					table: {Ref: table, Columns: []pipeline.Column{{Name: col.Column, TypeName: "text"}}},
+				},
+				cls: &pipeline.Classification{Decisions: map[ref.ColumnRef]pipeline.Decision{
+					col: {Col: col, Category: pipeline.CatNone, Source: pipeline.ByClassifier},
+				}},
+			}
+			if err := s.secondNet(context.Background()); err != nil {
+				t.Fatalf("secondNet: %v", err)
+			}
+			if !c.wantFail {
+				if len(s.failures) != 0 {
+					t.Fatalf("the net failed %s on %v: %s", col, c.vals, s.failures[0].Reason)
+				}
+				return
+			}
+			if len(s.failures) != 1 {
+				t.Fatalf("the net recorded %d failures on %v, want one; a value nobody masked "+
+					"is in the target and both nets said yes", len(s.failures), c.vals)
+			}
+			got := s.failures[0]
+			if got.Table != table || got.Column != col.Column {
+				t.Errorf("the refusal names %s.%s, want %s", got.Table, got.Column, col)
+			}
+			if got.Reason != "email" {
+				t.Errorf("the refusal names the category %q, want %q", got.Reason, "email")
+			}
+			if got.Exit != exitResidual {
+				t.Errorf("the refusal exits %d, want %d", got.Exit, exitResidual)
+			}
+		})
+	}
+}

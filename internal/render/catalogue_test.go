@@ -3,31 +3,11 @@
 package render
 
 import (
-	"bytes"
-	"os"
 	"strings"
 	"testing"
 
 	"github.com/Liarea/lazyslice/internal/event"
 )
-
-// The catalogue this package embeds is a copy of internal/event/catalogue.yml,
-// because go:embed cannot reach outside a package directory and internal/event
-// has no Go file to hold the embed (catalogue.go says so at length). This test
-// is the whole of what makes the copy safe: a row added to the real catalogue
-// and not copied here fails `make test`.
-func TestCatalogueIsTheEventCatalogue(t *testing.T) {
-	want, err := os.ReadFile("../event/catalogue.yml")
-	if err != nil {
-		t.Fatalf("reading the code catalogue: %v", err)
-	}
-	if !bytes.Equal(want, catalogueYML) {
-		t.Errorf("internal/render/catalogue.yml differs from internal/event/catalogue.yml, which is "+
-			"the one place a code is added (ARCHITECTURE.md section 12). Copy it:\n"+
-			"  cp internal/event/catalogue.yml internal/render/catalogue.yml\n"+
-			"(%d bytes here, %d bytes there)", len(catalogueYML), len(want))
-	}
-}
 
 // Every row has to parse, and every row has to say the four things a renderer
 // and docs/ERRORS.md need of it. A row with no message renders as an empty

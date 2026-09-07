@@ -133,7 +133,39 @@ is output under test and not one of our types.
   recorded as masked, the distinct values in the target and in the source must
   not overlap. Widening the masked set only adds assertions. `masker: "null"`
   is excluded from the "must hold a value" guard, because its correct output is
-  NULL.
+  NULL, and so is `masker: derived_text`, because ADR-010's correct output is
+  the *empty* tsvector — pagila's `public.film.fulltext` arrives holding
+  nothing, and reading that as "the masker's output was never loaded" fails a
+  run that did exactly what the ADR says (T-0058). All three exemptions — the
+  two maskers and a source column that is NULL or `''` everywhere — count as
+  skipped, so the guard's own vacuity check still fires when every masked
+  column is one of them. `masker: "null"` was not counted when the
+  `derived_text` exemption was added, which left a run whose whole masked set
+  was `null` columns passing I2 having examined nothing; counting it is the
+  fix.
+- **I2's third half has one known coincidental failure, it can land on either
+  of two columns, and the fix is not in this package.** nasty has two masked
+  inet columns: `public.tenant_user_sessions.origin`
+  (`203.0.113.7`, `203.0.113.8`, `198.51.100.22`, `198.51.100.23`) and
+  `public.audit_log.client_ip` (`203.0.113.7`, `203.0.113.8`,
+  `198.51.100.44`). `mask`'s IPv4 generator draws from those same three RFC
+  5737 blocks (`mask/words.go` `docPrefixes`, 768 addresses) under a key that is
+  random per run. So a masked address can equal a source address with nothing
+  wrong, disjointness fails, and the run is red — four source values against
+  four generated ones on `origin` and three against three on `client_ip`, a few
+  percent of runs of this fixture for the two together. Their `2001:db8::`
+  values are not in it: the v6 generator fills 96 random bits. Seen once in
+  eight runs by T-0058's first reviewer; not seen in the twenty consecutive runs
+  that answered that review, nor in the second reviewer's full `make
+  integration` and fifteen further runs, nor in the full run that answered the
+  second review. The assertion is right and stays as it
+  is: the fix is to move the fixture's values out of the generator's output
+  space or to give the generator a block the fixtures never use, in
+  `testdata/nasty.sql` and `mask/gen_net.go`, which T-0058's paths did not
+  include. It is recorded here, in `.github/workflows/ci.yml` beside the removed
+  allowlist, and returned to the orchestrator; a red on `nasty/values` naming
+  only `origin`, only `client_ip`, or only those two is this, not a masking
+  regression.
 - **What I2's third half excludes is exactly what §5 says must reuse an
   admissible value, and nothing else.** `NULL` and `''` (§5 preserves both;
   `scanCells` drops them). An empty array and an empty JSON document, which are
@@ -201,10 +233,22 @@ is output under test and not one of our types.
   place, keeping line numbers; any *other* backslash line outside a COPY block
   is a hard failure, so the next meta-command pg_dump invents is loud rather
   than a mystifying permanent diff.
-- I6 uses `fixture.countedRoot`, which is not always `fixture.root`: the
-  invariant only holds for a root no selected row reaches as a parent, and
-  `public.people` is reached through its own `manager_id`
-  (`testdata/README.md` trap 1).
+- I6 uses `fixture.countedRoot`, which is neither fixture's `fixture.root`: the
+  invariant only holds for a root no selected row reaches as a parent, because
+  §3 lets a `PARENT_ONLY` push widen any step's key set and the root is a step.
+  `public.people` is reached through its own `manager_id` (`testdata/README.md`
+  trap 1). `public.customer` is reached the long way round — a selected
+  customer's rentals pull their payments, and `payment.customer_id` then pushes
+  a customer `--take` never selected, which is the 101 rows for `--take 100`
+  T-0058 answered. The two counted roots are `public.tenant_users` and
+  `public.film_actor`, and the criterion they meet is the one above — a root no
+  selected row reaches *as a parent* — not the stricter "no incoming foreign
+  key". `public.film_actor` does meet the stricter one; `public.tenant_users`
+  does not, and does not have to: two foreign keys reference it, from
+  `tenant_user_sessions` and `tenant_user_flags`, and both of those tables are
+  reached only as its own children, so neither can push a key back onto it. The
+  reasoning for both is in `harness_test.go` beside the field, which is where a
+  third fixture's choice should be read from rather than from this line.
 - A connection URL carries a password. It goes to the binary as a flag and to
   `pgx`; it never goes into a test name, a `t.Log` or a failure message, and
   `result.String()` redacts it. `pg_dump` gets the password through

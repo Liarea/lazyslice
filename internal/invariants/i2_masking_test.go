@@ -152,12 +152,27 @@ func assertMaskedColumnsExist(
 // that copied the root's --take rows and stopped satisfies every other
 // invariant in this package too, so this is where that is caught.
 //
-// Two exemptions, both of them things §5 and §10 say are correct rather than
-// things that make the test easier. A column whose masker is `null` has no
-// value to arrive with, by definition. And a column whose source holds no
-// non-empty value anywhere cannot produce one in the target either: NULL
-// stays NULL and the empty string stays the empty string (§5), so demanding
-// a value there would fail a correct run. Everything else has to be there.
+// Three exemptions, all of them things §5, §10 and ADR-010 say are correct
+// rather than things that make the test easier. A column whose masker is
+// `null` has no value to arrive with, by definition. A column whose masker is
+// `derived_text` has none either: ADR-010 masks a tsvector to the *empty*
+// tsvector — the column is derived from text this run may have masked, so
+// re-deriving it would carry the source's own words into the target — and
+// pagila's public.film.fulltext arrives empty, which scanCells drops with
+// every other empty value. Reading that as "the masker's output was never
+// loaded" fails a run that did exactly what the ADR says. And a column whose
+// source holds no non-empty value anywhere cannot produce one in the target
+// either: NULL stays NULL and the empty string stays the empty string (§5), so
+// demanding a value there would fail a correct run. Everything else has to be
+// there.
+//
+// All three are counted as skipped rather than waved through, so the vacuity
+// guard at the end still fires on a run whose every masked column is one of
+// them. `null` is counted for the same reason as the other two and not for a
+// weaker one: a run whose entire masked set is `masker: "null"` has given the
+// three halves below nothing to examine, and letting it fall through the switch
+// silently would leave `skipped` short of `len(scope.masked)`, the guard quiet,
+// and I2 green over a target nobody looked at.
 func assertTargetHoldsMaskedRows(t *testing.T, fixture string, sourceCells, targetCells []cell, scope columnScope) {
 	t.Helper()
 
@@ -178,7 +193,13 @@ func assertTargetHoldsMaskedRows(t *testing.T, fixture string, sourceCells, targ
 		switch {
 		case targetHasValue[ref]:
 		case scope.producesNoValue(ref):
-			// masker: "null" — nothing to look for.
+			// masker: "null" — nothing to look for, and nothing the halves
+			// below can examine either, so it is counted.
+			skipped = append(skipped, ref.String())
+		case scope.producesEmptyValue(ref):
+			// masker: derived_text — the correct output is the empty tsvector
+			// (ADR-010), which scanCells drops like every other empty value.
+			skipped = append(skipped, ref.String())
 		case !sourceHasValue[ref]:
 			// The source column is NULL or '' everywhere, and §5 keeps both.
 			skipped = append(skipped, ref.String())
@@ -200,7 +221,8 @@ func assertTargetHoldsMaskedRows(t *testing.T, fixture string, sourceCells, targ
 	}
 	if len(skipped) == len(scope.masked) {
 		t.Fatalf("I2: not one of the %s target's %d masked column(s) carries a value that could be "+
-			"examined (all of them are NULL or '' in the source, or in a table the target does not hold), "+
+			"examined (all of them are NULL or '' in the source, set to NULL by masker \"null\", "+
+			"masked to the empty tsvector by derived_text, or in a table the target does not hold), "+
 			"so every assertion below is about nothing", fixture, len(scope.masked))
 	}
 }

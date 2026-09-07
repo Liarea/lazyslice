@@ -40,8 +40,13 @@ import (
 // the target is small, so this is a scan (section 6 item 4).
 const validatorThreshold = 0.8
 
-// minValues is how many non-NULL values a column needs before a ratio over it
+// minValues is how many non-NULL values a column needs before a *ratio* over it
 // means anything. One row that parses as an address is evidence about a row.
+//
+// It is not a floor on the net: a column below it is unproven, not clean, so
+// secondnet.go runs the validators over what there is and fails on any hit
+// (tracker T-0058). The number bounds what the threshold below is applied to,
+// and nothing else.
 const minValues = 3
 
 // validator is one category's value signal.
