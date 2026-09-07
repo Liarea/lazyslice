@@ -6,7 +6,7 @@
 | E1 Research | 1 | 0 | 0 | 10 | 0 | 0 |
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 1 | 0 | 9 | 0 | 0 |
-| E4 Vertical slice | 4 | 1 | 1 | 18 | 0 | 0 |
+| E4 Vertical slice | 4 | 0 | 1 | 19 | 0 | 0 |
 | E5 Hardening | 5 | 7 | 0 | 0 | 0 | 0 |
 | E9 Later | later | 4 | 0 | 0 | 0 | 0 |
 
@@ -16,7 +16,7 @@
 - T-0028 [open] E3 · Create GitHub repository Liarea/lazyslice and homebrew-tap, push main, add HOMEBREW_TAP_TOKEN secret (human)
 - T-0029 [open] E9 · Before going public: git-crypt the AI-specific paths and rewrite pre-encryption history (fable)
 - T-0031 [open] E9 · Licence for the lazyslice.yml schema and docs; confirm copyright holder statement (fable)
-- T-0045 [open] E4 · T-DISCOVER: discovery rungs 0-3 and the first-run ladder (opus)
+- T-0045 [in_progress] E4 · T-DISCOVER: discovery rungs 0-3 and the first-run ladder (opus)
 - T-0046 [open] E5 · Fixture: deferrable unique on a partitioned root, leaf-local key, and an edge referencing the leaf (sonnet)
 - T-0048 [open] E9 · Explicit --key on an uncomparable column type surfaces a raw pgx error instead of a refusal (opus)
 - T-0049 [open] E5 · Mask module low findings from T-MASK review (see T-0040 log) and a registry test that every rules.yml masker id resolves (sonnet)
@@ -25,12 +25,12 @@
 - T-0053 [open] E5 · pg gate follow-ups from T-FPR: regression test pinning the fingerprinter transaction (SAVEPOINT must not 25P01), rollback failure routed through endTx discipline, comment corrections; schema-only Introspector variant so the gate skips sampling (opus)
 - T-0055 [open] E5 · Shared leaf package for value validators including the name dictionary; register person_name and free_text in verify's second net with a verify-side false-positive threshold decision (opus)
 - T-0056 [open] E5 · Second net: weak threshold (0.5) plus neighbouring-column raise; the faithful reading is decorative, the alternative is a different control and needs a T1 review first (opus)
-- T-0059 [in_progress] E4 · Fixture inet values out of RFC 5737 so masked IPs cannot equal source values; remove the flake paragraphs; mask test pins the output space (sonnet)
 
 ## Recently closed
 
 - T-0044 [done] E4 · T-CORE: core run, emit, render, repo, CLI end to end; integration job blocking again → done: core merged at 9bd9e24, blockers closed by T-0058
 - T-0058 [done] E4 · T-CORE-FIX: fail closed on low-cardinality columns (verify minValues, introspect full-read below the TABLESAMPLE floor), I6 pagila counted root, I2 derived_text exemption, event.go embeds the catalogue, drop the ci allowlist; then make integration must be fully green → done: tiny tables sampled by bounded read, verify fails closed below minValues, I6 counts a parent-free root, derived_text exempt from the loaded guard, event.go embeds the catalogue, CI allowlist and continue-on-error removed; make integration green end to end
+- T-0059 [done] E4 · Fixture inet values out of RFC 5737 so masked IPs cannot equal source values; remove the flake paragraphs; mask test pins the output space → done: 65ab0a3; fixture inet values are RFC 1918, flake paragraphs replaced by a pointer to §5, mask range test added
 - T-0035 [done] E4 · Verify negative control: a source email planted in a masked target column makes lazyslice verify exit 9 naming table and column → done: implemented inside T-VERIFY's integration suite
 - T-0036 [done] E4 · T-PG: source and target connections, target gate, statement-shape allowlist, dsn → done: connections, marker, target gate, statement-shape tracer, dsn; package integration tests green
 - T-0037 [done] E4 · T-INTROSPECT: introspect stage → done: 2dd2102 (stage) after fix2; PG18 contype filter, tolerant sampling, bounded TABLESAMPLE, FK end filters, extension walk narrowed, partition edges re-pointed only when the root can carry them
@@ -53,4 +53,3 @@
 - T-0008 [done] E1 · AI_PROJECT_PRACTICES.md → done: practices to adopt and avoid from AI-assisted OSS projects, each sourced
 - T-0009 [done] E1 · NAME.md collision check → done: lazysnap rejected (Go module, npm, GitHub account, DBSnapper adjacency, wrong semantics); renamed to lazyslice per ADR-000
 - T-0010 [done] E1 · Prompting cheat sheets, five models plus index → done: five cheat sheets and a README with role templates
-- T-0011 [done] E1 · SYNTHESIS.md and CONCEPT.md revision → done: ten facts, three risks, CONCEPT.md rewritten (pseudonymised, fail closed, 14 non-goals), 23 questions for architecture
