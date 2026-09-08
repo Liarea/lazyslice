@@ -155,6 +155,41 @@ func TestALookupShapeExistsOnlyForALookupStep(t *testing.T) {
 	}
 }
 
+// lookupShapeFor quotes a table name into a shape template, and a table name is
+// arbitrary text: `CREATE TABLE public."{ident}" (...)` is a table a person can
+// make, and Postgres hands the name back exactly as written. Until
+// internal/pg's compiler stopped looking for placeholders inside a quoted
+// identifier, this shape compiled into `SELECT {selectlist} FROM {ident} t
+// ORDER BY {idents} LIMIT 1001` — an ordered read of *every* relation, which is
+// the widening naming the table exists to prevent — and a table called
+// `{table}` failed to compile at all and took the run with it.
+func TestALookupShapeForATableNamedWithBracesNamesThatTableAlone(t *testing.T) {
+	braced := ref.TableRef{Schema: "public", Name: "{ident}"}
+	unknown := ref.TableRef{Schema: "public", Name: "{table}"}
+	tr := tracerFor(t, &pipeline.Plan{Steps: []pipeline.Step{
+		{Table: braced, Mode: pipeline.Lookup},
+		{Table: unknown, Mode: pipeline.Lookup},
+	}})
+
+	for _, table := range []ref.TableRef{braced, unknown} {
+		sql := lookupSQL(table, []string{"id", "name"}, []string{"id"})
+		want := "extract.lookup." + table.String()
+		if got := admits(t, tr, sql); got != want {
+			t.Errorf("admits(%q) = %q, want %q", sql, got, want)
+		}
+	}
+
+	for _, sql := range []string{
+		// The tables the plan never named, which the widened shape admitted.
+		`SELECT t."id", t."name" FROM "public"."categories" t ORDER BY t."id" LIMIT 1001`,
+		`SELECT t."rolname", t."rolpassword" FROM "pg_catalog"."pg_authid" t ORDER BY t."rolname" LIMIT 1001`,
+	} {
+		if got := admits(t, tr, sql); got != "" {
+			t.Errorf("the allowlist matched %q for a read of a table no step named:\n%s", got, sql)
+		}
+	}
+}
+
 // internal/plan's TestTheComposedAllowlistStillRefusesAnUnboundedRead compiles
 // the union of every stage's shapes and pins that the union still refuses an
 // unbounded read. It cannot call Shapes(): internal/CLAUDE.md forbids a stage

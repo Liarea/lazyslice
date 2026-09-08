@@ -6,8 +6,8 @@ lives here — loaders are `internal/testutil`; this directory is data plus
 `README.md`.
 
 **Contract.** `README.md` in this directory is the spec: it names every table,
-every row count, and every one of the 25 numbered traps in `nasty.sql` (1 to
-25, with 16 split into 16a and 16b because §4 prescribes two different
+every row count, and every one of the 26 numbered traps in `nasty.sql` (1 to
+26, with 16 split into 16a and 16b because §4 prescribes two different
 behaviours for the two JSON columns) with the exact required behaviour.
 `internal/testutil/fixtures_test.go` (behind `integration`) is what checks the
 loaded databases against it. There is no type in ARCHITECTURE.md this directory
@@ -45,9 +45,19 @@ proven against.
   `pagila-schema.sql` or `pagila-data.sql` — re-pin to a different upstream
   commit instead, and update the checksums and the "why this tag" note
   together.
-- `nasty.sql`'s `stream_rows` gate (`\if :{?big}`) is part of the fixture's
-  contract with `internal/testutil.LoadNasty`; changing one without the other
-  breaks that package's own rule. The same file has a second gate,
+- `nasty.sql`'s `\if :{?big}` gate is part of the fixture's contract with
+  `internal/testutil.LoadNasty`; changing one without the other breaks that
+  package's own rule. It fills **two** tables — `stream_rows` (trap 22, one
+  `bigint` key) and `stream_docs` (trap 26, one 36-character `text` key) —
+  because the two key encodings cost different amounts to hold and only the
+  second is expensive enough to catch a stage that copies a whole key set;
+  `splitNastyGate` checks both fills are still called with the row counts
+  `StreamRows` and `StreamDocs` name. `stream_docs` is the one table whose
+  **`CREATE TABLE` is inside the gate** rather than only its rows, so a default
+  load has 25 tables and a `big` load 26; `README.md` trap 26 says why, and
+  moving it above the gate means updating
+  `internal/introspect/introspect_integration_test.go`'s table list in the same
+  commit. The same file has a second gate,
   `\if :{?notrecreatable}`, around trap 25's foreign key: that edge is
   `ForeignKey.NotRecreatable` and `internal/plan`'s `checkRecreatable` refuses
   any `Plan` call over a schema carrying it, unconditionally, before a root is

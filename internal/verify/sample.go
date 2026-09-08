@@ -72,8 +72,14 @@ func (s *state) sampleStep(ctx context.Context, step pipeline.Step) (int64, erro
 		return 0, nil
 	}
 
-	chunk, ok := firstChunk(step.Keys, sampleRows)
-	if !ok {
+	// FirstChunk and not Chunks(sampleRows)[0]: Chunks builds every chunk before
+	// it returns any, and a chunk holds its own copy of the keys it carries, so
+	// asking a step at the --row-budget ceiling for chunks of sampleRows in
+	// order to read the first sampleRows allocated a second copy of that step's
+	// key set, per table, at verify time — after --memory-budget (section 8,
+	// exit 11) has been checked at plan and can no longer refuse anything.
+	chunk := step.Keys.FirstChunk(sampleRows)
+	if chunk == nil || chunk.Len() == 0 {
 		return 0, nil
 	}
 	idCols := step.Identity.Columns
@@ -130,38 +136,6 @@ func (s *state) sampleStep(ctx context.Context, step pipeline.Step) (int64, erro
 		s.report(checkUnmaskedSameAs, CodeSampleDiffers, step.Table, "", differing)
 	}
 	return int64(len(targetRows)), nil
-}
-
-// boundedKeys is the accessor a pipeline.KeySet may offer for the first chunk
-// alone. ARCHITECTURE.md section 2's KeySet has Len, Bytes and Chunks, and
-// Chunks materialises the *whole* set as typed arrays: internal/plan's
-// implementation allocates fresh arrays per chunk and copies every tuple into
-// them, so asking a step at the --row-budget ceiling for chunks of 100 in order
-// to read the first 100 allocates a second copy of that step's key set, per
-// table, at verify time — after --memory-budget (section 8, exit 11) has been
-// checked at plan and can no longer refuse anything.
-//
-// **Owed: pipeline.KeySet needs `FirstChunk(n int) Chunk` beside `Chunks`, and
-// internal/plan's two key sets need to implement it.** Until then the fallback
-// is Chunks, which is what every KeySet does today — a bounded sample is worth
-// less than the sample compare it would otherwise skip on the largest tables.
-// This is the same shape of deviation as verify.go's targetReader and it is
-// recorded in internal/verify/CLAUDE.md with it.
-type boundedKeys interface {
-	FirstChunk(n int) pipeline.Chunk
-}
-
-// firstChunk is one chunk's worth of a step's keys, and whether there was one.
-func firstChunk(keys pipeline.KeySet, n int) (pipeline.Chunk, bool) {
-	if b, ok := keys.(boundedKeys); ok {
-		c := b.FirstChunk(n)
-		return c, c != nil && c.Len() > 0
-	}
-	chunks := keys.Chunks(n)
-	if len(chunks) == 0 {
-		return nil, false
-	}
-	return chunks[0], true
 }
 
 // sourceSample fetches one sample from the source through the short

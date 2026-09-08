@@ -53,9 +53,15 @@ func planAndClassification() (*pipeline.Plan, *pipeline.Classification) {
 // keys is the smallest pipeline.KeySet that answers Len.
 type keys struct{ n int }
 
+var _ pipeline.KeySet = keys{}
+
 func (k keys) Len() int                    { return k.n }
 func (k keys) Bytes() int64                { return int64(k.n) * 8 }
 func (k keys) Chunks(int) []pipeline.Chunk { return nil }
+func (k keys) FirstChunk(int) pipeline.Chunk {
+	return nil
+}
+func (k keys) EachChunk(int, func(pipeline.Chunk) error) error { return nil }
 
 func tracerFor(t *testing.T, p *pipeline.Plan, cls *pipeline.Classification) *pg.Tracer {
 	t.Helper()

@@ -27,6 +27,16 @@ error)`.
   the two `Bytes()` formulas do not describe. A key set holds a `[]int64` or a
   slab and a span index, and nothing else (`keyset.go`); a dedup map beside
   them would make the budget's number smaller than the process's.
+- **Both key sets implement `Chunks(n)`, `EachChunk(n, f)` and
+  `FirstChunk(n)`** (T-0050), and the difference between them is memory, not
+  taste: a `Chunk` holds its *own* copy of the keys it carries (a fresh typed
+  array per identity column), so `Chunks` materialises a second copy of the
+  whole set and the other two do not. `EachChunk` is what `internal/extract`
+  walks a keyed step with and `FirstChunk` is what `internal/verify`'s sample
+  compare takes; this package's own walk still uses `Chunks`, where the chunks
+  are consumed inside one function and the set is being built rather than
+  streamed. A third method that materialises the set is not the way to add a
+  new caller.
 - Every statement is bounded. No count, no aggregate and no sample reads a
   whole table inside the holder transaction (THREAT_MODEL.md T9): the lookup
   count stops at 1,001 rows, the pseudo-key probe takes a `TABLESAMPLE` or a

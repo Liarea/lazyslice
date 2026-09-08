@@ -69,6 +69,15 @@ const (
 // a driver, and do not put it in an event, a config or a test name.
 func Postgres(ctx context.Context, t *testing.T, image string) string {
 	t.Helper()
+	return postgresContainer(ctx, t, image)
+}
+
+// postgresContainer is Postgres with room for extra container options. The one
+// caller that needs them is PgBouncer (pgbouncer.go), which puts the server on
+// a Docker network under an alias so the pooler container can reach it; every
+// other caller wants Postgres and nothing else.
+func postgresContainer(ctx context.Context, t *testing.T, image string, extra ...testcontainers.ContainerCustomizer) string {
+	t.Helper()
 
 	if image == "" {
 		image = os.Getenv(ImageEnv)
@@ -96,6 +105,7 @@ func Postgres(ctx context.Context, t *testing.T, image string) string {
 				WithStartupTimeout(startupTimeout),
 		),
 	}
+	opts = append(opts, extra...)
 
 	ctr, err, termErr := runWithReaperRetry(ctx,
 		func(ctx context.Context) (testcontainers.Container, error) {

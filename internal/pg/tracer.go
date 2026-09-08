@@ -87,12 +87,22 @@ import (
 // internal/plan/where.go, so a violation recorded here always means a bug in
 // our own SQL generation.
 //
-// Case is ignored because lazyslice generates every one of these statements and
+// Case is ignored outside a quoted identifier (see the paragraph below for
+// inside one) because lazyslice generates every one of these statements and
 // the templates fix their structure; ignoring case widens what our own SQL may
 // look like, and widens nothing else — no case of `SELECT ... FROM {ident}`
 // spells a `DELETE`. A later stage that needs a shape this grammar cannot
 // express adds a placeholder here, where it is reviewed once, rather than
 // registering a looser template.
+//
+// A quoted identifier inside a template is fixed text and is never scanned for
+// placeholders (templateSegments): the per-table shapes internal/extract and
+// internal/verify build carry a quoted table name, an identifier is arbitrary
+// text, and a table called `{ident}` must not turn the shape that names one
+// table into the shape that admits every relation. It is also the one part of a
+// template matched case-sensitively and space-for-space, because that is how
+// Postgres reads a quoted name: `"LegacyCustomer"` and `"legacycustomer"` are
+// two tables, and `"my table"` is not `"mytable"` (compileShape).
 type Shape struct {
 	Name string
 	// SQL is the statement template with parameters as placeholders. It is what
@@ -418,24 +428,67 @@ func compileShape(template string) (*regexp.Regexp, error) {
 	if norm == "" {
 		return nil, errors.New("the template is empty")
 	}
+
+	var b strings.Builder
+	b.WriteString(`(?is)\A`)
+	for _, seg := range templateSegments(norm) {
+		if seg.quoted {
+			// A quoted identifier is a name, and a name is arbitrary text: it is
+			// matched as itself, placeholder-shaped or not (see
+			// templateSegments).
+			//
+			// As *itself* and not with quoteLiteral: that function is for the
+			// template's fixed SQL text, where a space stands for a run of
+			// layout and case is the writer's whim, and a name has neither.
+			// `"my table"` through quoteLiteral matches `"mytable"` — ` *` is
+			// zero or more spaces — and under the surrounding (?i) a shape
+			// naming `"LegacyCustomer"` matched a read of `"legacycustomer"`,
+			// which Postgres treats as a different table (nasty.sql ships both
+			// spellings). Either is the widening a per-table shape exists to
+			// close: a read of a table the plan never named. So the name is
+			// regexp-quoted whole and matched case-sensitively, inside (?-i:),
+			// while the SQL around it keeps the (?is) the template is compiled
+			// with — an unquoted identifier is folded by the server and must
+			// stay case-insensitive here.
+			//
+			// One widening this does not close: normaliseSQL collapses runs of
+			// whitespace on both sides before either is matched, so a name
+			// carrying two spaces is compared as if it carried one and a shape
+			// naming `"my table"` still admits a read of `"my  table"`. Closing
+			// it means normalising around quotes rather than through them,
+			// which changes how every statement — including one carrying an
+			// operator's --where predicate — is normalised, and is reported
+			// rather than done here.
+			b.WriteString(`(?-i:` + regexp.QuoteMeta(seg.text) + `)`)
+			continue
+		}
+		if err := expandInto(&b, seg.text); err != nil {
+			return nil, err
+		}
+	}
+	b.WriteString(`\z`)
+	return regexp.Compile(b.String())
+}
+
+// expandInto writes one run of template text — everything outside a quoted
+// identifier — to b, with each placeholder replaced by its expansion.
+func expandInto(b *strings.Builder, text string) error {
 	// Every placeholder-shaped token is checked, not just whether the template
 	// holds one good placeholder somewhere: `SELECT {ident} FROM {table}` would
 	// otherwise compile with {table} regex-quoted as literal text, producing a
 	// shape that can never match and turning a stage's typo into a refusal storm
 	// at run time. This function exists so that such a typo fails the build's
 	// tests instead.
-	for _, tok := range placeholderToken.FindAllString(norm, -1) {
+	for _, tok := range placeholderToken.FindAllString(text, -1) {
 		if !placeholder.MatchString(tok) {
-			return nil, fmt.Errorf("the template carries %s, which is not one of {ident}, {idents}, {int}, {snapshot}, {selectlist}, {casts}, {keypred}, {where}", tok)
+			return fmt.Errorf("the template carries %s, which is not one of {ident}, {idents}, {int}, {snapshot}, {selectlist}, {casts}, {keypred}, {where}", tok)
 		}
 	}
 
-	var b strings.Builder
-	b.WriteString(`(?is)\A`)
 	last := 0
-	for _, m := range placeholder.FindAllStringSubmatchIndex(norm, -1) {
-		b.WriteString(quoteLiteral(norm[last:m[0]]))
-		switch norm[m[2]:m[3]] {
+	for _, m := range placeholder.FindAllStringSubmatchIndex(text, -1) {
+		b.WriteString(quoteLiteral(text[last:m[0]]))
+		switch text[m[2]:m[3]] {
 		case "ident":
 			b.WriteString(reIdent)
 		case "idents":
@@ -455,9 +508,72 @@ func compileShape(template string) (*regexp.Regexp, error) {
 		}
 		last = m[1]
 	}
-	b.WriteString(quoteLiteral(norm[last:]))
-	b.WriteString(`\z`)
-	return regexp.Compile(b.String())
+	b.WriteString(quoteLiteral(text[last:]))
+	return nil
+}
+
+// segment is one run of a template: either template text, in which a
+// placeholder is a placeholder, or a quoted identifier, in which nothing is.
+type segment struct {
+	text   string
+	quoted bool
+}
+
+// templateSegments splits a normalised template into those runs, in order. A
+// quoted run carries its own delimiting quotes.
+//
+// It exists because a template's fixed text may carry an identifier the caller
+// quoted into it: internal/extract names its per-table lookup shape that way
+// (`SELECT {selectlist} FROM "public"."categories" t ORDER BY {idents} LIMIT
+// 1001`) and internal/verify names its per-table sample shape and its per-column
+// probe shapes the same way. An identifier is arbitrary text — Postgres will
+// quote anything — so a table actually called `{ident}` used to be read as a
+// placeholder, and the shape that names one table compiled into the shape that
+// admits an ordered read of *every* relation, which is precisely the widening
+// naming the table exists to prevent (internal/extract/shapes.go). A table
+// called `{table}` was the other half: the token is not one of the eight, so
+// compiling the shape failed and took the run with it.
+//
+// Both are fixed by never looking for a placeholder inside a quoted identifier.
+// No template lazyslice writes carries a placeholder there — every placeholder
+// stands for a whole identifier, quotes included — so nothing legitimate is
+// lost, and the only direction this can move a shape is narrower.
+//
+// An unterminated quote takes the rest of the template as one quoted run, for
+// the same reason: a shape that matches nothing refuses, and refusing is the
+// direction a malformed template should fail in.
+func templateSegments(s string) []segment {
+	var out []segment
+	start := 0
+	for i := 0; i < len(s); {
+		if s[i] != '"' {
+			i++
+			continue
+		}
+		if start < i {
+			out = append(out, segment{text: s[start:i]})
+		}
+		j := i + 1
+		for j < len(s) {
+			if s[j] != '"' {
+				j++
+				continue
+			}
+			// "" is an embedded quote and not the end of the identifier.
+			if j+1 < len(s) && s[j+1] == '"' {
+				j += 2
+				continue
+			}
+			j++
+			break
+		}
+		out = append(out, segment{text: s[i:j], quoted: true})
+		i, start = j, j
+	}
+	if start < len(s) {
+		out = append(out, segment{text: s[start:]})
+	}
+	return out
 }
 
 // quoteLiteral escapes the fixed text of a template and lets a single space in

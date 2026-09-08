@@ -133,9 +133,11 @@ func (s *Source) Trace() []pipeline.TracedStatement { return s.tr.Trace() }
 // core.Run fails the run on it, so that a swallowed error cannot hide a refusal.
 func (s *Source) Violation() error { return s.tr.Violation() }
 
-// Serialised reports that the endpoint could not import the exported snapshot —
-// a pooler — so every reader is the holder connection and extract runs
-// serialised (ADR-005 "Pooled endpoints").
+// Serialised reports that the endpoint could not give a reader of its own —
+// a pooler that would not import the exported snapshot, or would not hand out a
+// second connection while the holder's transaction pins the only one — so every
+// reader is the holder connection and extract runs serialised (ADR-005 "Pooled
+// endpoints").
 func (s *Source) Serialised() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -266,9 +268,16 @@ func (s *Source) Snapshot(ctx context.Context) (pipeline.SnapshotID, error) {
 }
 
 // Reader opens a connection that imports the run's snapshot. An endpoint that
-// cannot import one — a pooler — gets the holder connection itself and the run
-// is serialised (ADR-005 "Pooled endpoints"), which is slower and still one
+// cannot give one — a pooler that will not import the snapshot, or one that
+// will not hand out a second server connection while the holder's transaction
+// pins the only one — gets the holder connection itself and the run is
+// serialised (ADR-005 "Pooled endpoints"), which is slower and still one
 // consistent database; extracting without a snapshot is not an option.
+//
+// Both halves of that condition are the fallback because both are the same
+// answer from the endpoint. Until they were, a pooler configured with one
+// server connection failed the run with its own query_wait_timeout instead of
+// serialising, which is the topology --single-connection exists for.
 //
 // On that fallback the reader holds the source's one serialisation token, and a
 // second Reader blocks until the first is closed. A caller that opens a reader
@@ -290,30 +299,59 @@ func (s *Source) Reader(ctx context.Context, id pipeline.SnapshotID) (pipeline.R
 
 	conn, err := s.pool.Acquire(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("pg: acquiring a source reader: %w", err)
+		// No second connection at all is the same answer as a snapshot the
+		// endpoint will not import, and it is what a restrictive pooler actually
+		// says: PgBouncer with one server connection holds the acquire (or the
+		// BEGIN below) until query_wait_timeout and then errors, because the
+		// holder's transaction has that connection pinned. Reading only the
+		// import failure as "this endpoint cannot give a reader" left
+		// --single-connection's automatic half (ADR-005 "Pooled endpoints")
+		// unreachable on exactly the topology it exists for, so the fallback
+		// covers this too. The reader that comes back is the holder, inside the
+		// run's own snapshot, so the slice is the same one either way.
+		return s.serialisedReader(ctx, holder, err, "acquiring a source reader")
 	}
-	if _, err := conn.Exec(ctx, sqlBeginReadOnly); err != nil {
+	if _, beginErr := conn.Exec(ctx, sqlBeginReadOnly); beginErr != nil {
 		conn.Release()
-		return nil, fmt.Errorf("pg: opening a read-only transaction on the source: %w", err)
+		return s.serialisedReader(ctx, holder, beginErr, "opening a read-only transaction on the source")
 	}
 	if _, importErr := conn.Exec(ctx, `SET TRANSACTION SNAPSHOT '`+string(id)+`'`); importErr != nil {
 		endTx(context.WithoutCancel(ctx), conn)
-		if errors.Is(importErr, context.Canceled) || errors.Is(importErr, context.DeadlineExceeded) {
-			// The allowlist refused the statement, or the caller went away.
-			// Neither is a pooler, and neither may be read as one.
-			return nil, fmt.Errorf("pg: importing the snapshot: %w", importErr)
-		}
-		s.mu.Lock()
-		s.serialised = true
-		s.mu.Unlock()
-		select {
-		case s.serial <- struct{}{}:
-		case <-ctx.Done():
-			return nil, fmt.Errorf("pg: waiting for the serialised source reader: %w", ctx.Err())
-		}
-		return &reader{conn: holder, tr: s.tr, own: false, serial: s.serial}, nil
+		return s.serialisedReader(ctx, holder, importErr, "importing the snapshot")
 	}
 	return &reader{conn: conn, tr: s.tr, own: true}, nil
+}
+
+// serialisedReader is the fallback: cause is why a reader of its own could not
+// be opened, and what is handed back instead is the holder connection, one
+// caller at a time.
+//
+// A cancelled or expired context is never a pooler. The allowlist refuses a
+// statement by cancelling the context (Tracer), and a caller that went away
+// cancels its own, so either would otherwise be read as "this endpoint cannot
+// give a reader" and turn a refused statement into a silently serialised run.
+// Those two are returned as themselves, wrapped in what was being attempted.
+//
+// Every other cause is a fallback and not an error, and the cause is not
+// reported any further: on this path the run continues against the holder, in
+// the run's own snapshot, and Serialised() is what says so (§8's
+// --single-connection, ADR-005 "Pooled endpoints"). A cause that is really the
+// source going away rather than a pooler refusing a second connection is not
+// hidden by that — the holder is on the same endpoint, so the first read
+// through it fails with the server's own error.
+func (s *Source) serialisedReader(ctx context.Context, holder *pgxpool.Conn, cause error, doing string) (pipeline.Reader, error) {
+	if errors.Is(cause, context.Canceled) || errors.Is(cause, context.DeadlineExceeded) {
+		return nil, fmt.Errorf("pg: %s: %w", doing, cause)
+	}
+	s.mu.Lock()
+	s.serialised = true
+	s.mu.Unlock()
+	select {
+	case s.serial <- struct{}{}:
+	case <-ctx.Done():
+		return nil, fmt.Errorf("pg: waiting for the serialised source reader: %w", ctx.Err())
+	}
+	return &reader{conn: holder, tr: s.tr, own: false, serial: s.serial}, nil
 }
 
 // Short opens a fresh, short REPEATABLE READ READ ONLY transaction on a new

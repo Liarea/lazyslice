@@ -196,6 +196,159 @@ func TestCompileShapeRejectsAnUnknownPlaceholder(t *testing.T) {
 	}
 }
 
+// A table's name is arbitrary text, and the per-table shapes internal/extract
+// and internal/verify build quote one into the template. A table called
+// `{ident}` used to compile into the shape that admits an ordered read of every
+// relation — the exact widening naming the table exists to prevent — and one
+// called `{table}` used to fail compilation and take the run with it. A quoted
+// identifier is fixed text now, so both are shapes about one table.
+func TestAPlaceholderShapedTableNameIsAName(t *testing.T) {
+	// Names a psql user can create and Postgres will hand back quoted:
+	// CREATE TABLE public."{ident}" (...).
+	const (
+		braced  = `SELECT {selectlist} FROM "public"."{ident}" t ORDER BY {idents} LIMIT 1001`
+		unknown = `SELECT {selectlist} FROM "public"."{table}" t ORDER BY {idents} LIMIT 1001`
+	)
+	tr, err := NewTracer(
+		Shape{Name: "extract.lookup.public.{ident}", SQL: braced},
+		Shape{Name: "extract.lookup.public.{table}", SQL: unknown},
+	)
+	if err != nil {
+		// The {table} half: an unknown placeholder inside a quoted identifier is
+		// a table name, not a typo, so compiling it must not fail.
+		t.Fatalf("NewTracer refused a shape naming a table called {ident} or {table}: %v", err)
+	}
+
+	// The read of the table the shape actually names still matches.
+	for name, sql := range map[string]string{
+		"extract.lookup.public.{ident}": `SELECT t."id" FROM "public"."{ident}" t ORDER BY t."id" LIMIT 1001`,
+		"extract.lookup.public.{table}": `SELECT t."id" FROM "public"."{table}" t ORDER BY t."id" LIMIT 1001`,
+	} {
+		if got := tr.match(normaliseSQL(sql)); got != name {
+			t.Errorf("match(%q) = %q, want %q", sql, got, name)
+		}
+	}
+
+	// And the reads it does not name are still refused — which is the whole
+	// point of naming the table in the template. The last two are the near
+	// misses, and they are the ones a test using wholly different names cannot
+	// catch: a table whose name differs from the one the shape names only by
+	// case, or only by a space.
+	for _, sql := range []string{
+		`SELECT t."id" FROM "public"."orders" t ORDER BY t."id" LIMIT 1001`,
+		`SELECT t."rolname", t."rolpassword" FROM "pg_catalog"."pg_authid" t ORDER BY t."rolname" LIMIT 1001`,
+		`SELECT t."id" FROM public.people t ORDER BY t."id" LIMIT 1001`,
+		`SELECT t."id" FROM "public"."{IDENT}" t ORDER BY t."id" LIMIT 1001`,
+		`SELECT t."id" FROM "public"."{ ident }" t ORDER BY t."id" LIMIT 1001`,
+	} {
+		if got := tr.match(normaliseSQL(sql)); got != "" {
+			t.Errorf("match(%q) = %q; a shape naming one table admitted another", sql, got)
+		}
+	}
+}
+
+// A quoted name is matched the way Postgres reads one: case-sensitively, and
+// space for space. The rest of the template is not — the server folds an
+// unquoted identifier and nobody's SQL keyword case is load-bearing — so the
+// two halves are asserted together, in both directions.
+//
+// Both near misses were real. The whole pattern is compiled with (?i), so a
+// shape naming `"LegacyCustomer"` (testdata/nasty.sql ships that table)
+// admitted a read of `"legacycustomer"`, which on the server is a different
+// table; and quoteLiteral lets a space in the template stand for a run of zero
+// or more spaces in the statement, so a shape naming `"my table"` admitted a
+// read of `"mytable"`. Each is the widening a per-table shape exists to close:
+// a read of a table the plan never named.
+func TestAQuotedNameInAShapeIsMatchedAsPostgresReadsOne(t *testing.T) {
+	const (
+		mixedCase = `SELECT {selectlist} FROM "public"."LegacyCustomer" t ORDER BY {idents} LIMIT 1001`
+		spaced    = `SELECT {selectlist} FROM "public"."my table" t ORDER BY {idents} LIMIT 1001`
+	)
+	tr, err := NewTracer(
+		Shape{Name: "extract.lookup.public.LegacyCustomer", SQL: mixedCase},
+		Shape{Name: "extract.lookup.public.my table", SQL: spaced},
+	)
+	if err != nil {
+		t.Fatalf("NewTracer: %v", err)
+	}
+
+	// The table the shape names, read as the statement builders spell it — and
+	// with the keywords in another case, because case outside the name is still
+	// ignored.
+	for name, sql := range map[string]string{
+		"extract.lookup.public.LegacyCustomer": `SELECT t."id" FROM "public"."LegacyCustomer" t ORDER BY t."id" LIMIT 1001`,
+		"extract.lookup.public.my table":       `select t."id" from "public"."my table" t order by t."id" limit 1001`,
+	} {
+		if got := tr.match(normaliseSQL(sql)); got != name {
+			t.Errorf("match(%q) = %q, want %q", sql, got, name)
+		}
+	}
+
+	// The tables it does not name, each one character from the one it does.
+	for _, sql := range []string{
+		`SELECT t."id" FROM "public"."legacycustomer" t ORDER BY t."id" LIMIT 1001`,
+		`SELECT t."id" FROM "public"."LEGACYCUSTOMER" t ORDER BY t."id" LIMIT 1001`,
+		`SELECT t."id" FROM "public"."Legacycustomer" t ORDER BY t."id" LIMIT 1001`,
+		`SELECT t."id" FROM "public"."mytable" t ORDER BY t."id" LIMIT 1001`,
+		`SELECT t."id" FROM "public"."MY TABLE" t ORDER BY t."id" LIMIT 1001`,
+	} {
+		if got := tr.match(normaliseSQL(sql)); got != "" {
+			t.Errorf("match(%q) = %q; a shape naming one table admitted another whose name differs "+
+				"only by case or by a space", sql, got)
+		}
+	}
+}
+
+// The other half of the same rule: a placeholder-shaped token outside a quoted
+// identifier is still checked, so a stage's typo still fails the build.
+func TestTemplateSegmentsSplitsOnQuotedIdentifiers(t *testing.T) {
+	cases := []struct {
+		in   string
+		want []segment
+	}{
+		{in: `SELECT {ident}`, want: []segment{{text: `SELECT {ident}`}}},
+		{
+			in: `SELECT {selectlist} FROM "a"."{ident}" t`,
+			want: []segment{
+				{text: `SELECT {selectlist} FROM `},
+				{text: `"a"`, quoted: true},
+				{text: `.`},
+				{text: `"{ident}"`, quoted: true},
+				{text: ` t`},
+			},
+		},
+		// An embedded quote is written "" and does not end the identifier.
+		{
+			in: `FROM "a""{int}b" t`,
+			want: []segment{
+				{text: `FROM `},
+				{text: `"a""{int}b"`, quoted: true},
+				{text: ` t`},
+			},
+		},
+		// An unterminated quote takes the rest, so the shape matches nothing.
+		{
+			in: `FROM "a`,
+			want: []segment{
+				{text: `FROM `},
+				{text: `"a`, quoted: true},
+			},
+		},
+	}
+	for _, c := range cases {
+		got := templateSegments(c.in)
+		if len(got) != len(c.want) {
+			t.Errorf("templateSegments(%q) = %v, want %v", c.in, got, c.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != c.want[i] {
+				t.Errorf("templateSegments(%q)[%d] = %v, want %v", c.in, i, got[i], c.want[i])
+			}
+		}
+	}
+}
+
 // Every statement this package sends to the source has to be on the allowlist
 // this package registers, or the first real run refuses itself.
 func TestSourceShapesCoverThisPackagesOwnStatements(t *testing.T) {

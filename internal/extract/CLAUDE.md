@@ -63,6 +63,17 @@ no writing to a target — this package only reads.
   under, so it costs a real lookup read nothing. This replaces the wider
   `pg.ExtractShapes()` the hand-off note asked for narrowing
   (internal/pg/CLAUDE.md, now deleted with the file).
+  **A table name is arbitrary text and quoting it is not enough on its own**
+  (T-0050): `CREATE TABLE public."{ident}"` is a table a person can make, and
+  the template compiler used to read the placeholder inside the quoted name —
+  turning the shape that names one table into `SELECT {selectlist} FROM {ident}
+  t ORDER BY {idents} LIMIT 1001`, an ordered read of every relation, which is
+  the exact widening the per-table name exists to prevent. A table called
+  `{table}` was the other half: an unknown token, so the shape failed to
+  compile and took the run with it. `internal/pg`'s `templateSegments` now
+  treats a quoted identifier in a template as fixed text and never scans it for
+  placeholders; the guard at this end is
+  `TestALookupShapeForATableNamedWithBracesNamesThatTableAlone`.
 - **A `SchemaOnly` step sends no batch at all.** It has no key set and §11.1
   recreates its DDL and nothing else, so there is no data phase to bound; verify
   reports it rather than counting rows for it (§6 item 5). Every other step
@@ -93,18 +104,21 @@ no writing to a target — this package only reads.
   read either at the call or from `Rows.Err()` depending on when the server said
   so, so both paths are recognised and both are tested
   (`TestAStandbyCancellationIsACodedExitSeven`).
-- **The keys are the one thing not bounded by construction.**
-  `pipeline.KeySet.Chunks` materialises every chunk in one call and each chunk
+- **The keys are bounded by construction too, since T-0050.** `step` walks a
+  keyed step with `pipeline.KeySet.EachChunk(2000, f)`, the chunk-at-a-time
+  iterator `internal/pipeline`'s `KeySet` carries beside `Chunks` and
+  `FirstChunk`. `Chunks` builds every chunk before it returns any and each chunk
   holds its *own copy* of the keys (`internal/plan/keyset.go` allocates a fresh
-  typed array per chunk), so at the top of a keyed step this package briefly
-  holds a second copy of that step's key set — 16 MiB for the 2,000,000-row int8
-  identity `TestMemoryStaysBoundedOnTwoMillionRows` uses, proportionally more for
-  a composite text or uuid identity. `step` drops each chunk as it consumes it
-  (`chunks[i] = nil`), so the *sustained* cost is one chunk; the *peak* is one
-  key set. Bounding the peak needs a chunk-at-a-time iterator on
-  `pipeline.KeySet`, which is an ARCHITECTURE.md §2 change and is reported
-  rather than made here. The package doc says exactly this; it used to claim
-  "one chunk of keys ... live at a time", which the code did not hold.
+  typed array per identity column per chunk), so ranging over that call held a
+  second copy of the whole key set for the length of the table; `EachChunk`
+  builds one, hands it over and drops it.
+  `TestAChunkIsReleasedAsItIsConsumed` holds the release,
+  `TestMemoryStaysBoundedOnATextKeyedTable` holds the size: on `stream_docs`
+  (`testdata/README.md` trap 26, a million 36-character text keys) the growth is
+  0 to 5 MiB with `EachChunk` and 63 MiB with the `Chunks` call it replaced,
+  against a 32 MiB ceiling. `TestMemoryStaysBoundedOnTwoMillionRows` cannot say
+  that: its identity is one `bigint`, so a second copy is 16 MiB and fits inside
+  its own ceiling either way.
 - **Rows are scanned into `*any`**, which is the plan pgx uses for `Rows.Values`:
   each column comes back as its own Go type (`int64`, `time.Time`,
   `netip.Prefix`, `pgtype.Numeric`, `map[string]any` for `jsonb`) rather than as
@@ -118,11 +132,20 @@ shapes and the refusal a cancelled read raises (a fake `Reader` returning a
 `*pgconn.PgError` from `Query` and from `Rows.Err()`, asserting the code, the
 exit, the table, the SQLSTATE and that no `Detail`/`Where`/`Hint` text reaches
 the error string); `go test -tags integration ./internal/extract/...` for the reads
-themselves against `nasty.sql`, including
-`TestMemoryStaysBoundedOnTwoMillionRows`, which extracts **and masks**
-`stream_rows` (2M rows, `-v big=1`) under a `runtime.MemStats` ceiling of
-64 MiB above the post-plan baseline. Observed growth is about 20 MiB; a run
-that buffered a table would need hundreds.
+themselves against `nasty.sql`, including the two memory tests, which extract
+**and mask** a gated table under a `runtime.MemStats` ceiling above the
+post-plan baseline: `TestMemoryStaysBoundedOnTwoMillionRows` over `stream_rows`
+(2M `bigint`-keyed rows, ceiling 64 MiB, observed ~5 MiB) and
+`TestMemoryStaysBoundedOnATextKeyedTable` over `stream_docs` (1M text-keyed
+rows, ceiling 32 MiB, observed ~1 MiB against 63 MiB for the buffering
+version). Each skips the other's table **in the plan**, so each measures one key
+encoding — but not in the fixture: `LoadNasty(big)` runs the whole gate, so both
+tables are filled for either test and each pays for the other's fill (about 37s
+for the text-keyed one). A selective fill means a second gate variable in
+`testdata/nasty.sql`, which `psql -v big=1` and `splitNastyGate` both have to
+agree with, and is reported rather than done here.
+`stream_docs` exists only under `-v big=1` — the gate creates the table as well
+as filling it — so no other test in the tree sees a 26th table.
 
 **Never:** buffer a whole table in memory; interleave batches from two tables
 on one channel; infer a table boundary from anything but `Last`; issue
