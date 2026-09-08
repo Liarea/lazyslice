@@ -405,3 +405,81 @@ func TestATableWithNoCopiedColumnsOpensNoTransaction(t *testing.T) {
 		t.Errorf("the table is missing from the row counts: %v", res.Rows)
 	}
 }
+
+// The gate's fingerprinter asks for the schema-only read when the introspector
+// offers one, and that choice is a runtime type assertion with a silent
+// fall-back: an introspector that arrives wrapped satisfies
+// pipeline.Introspector and not pipeline.SchemaOnlyIntrospector, so the gate
+// would go back to taking a TABLESAMPLE per table out of a database it has not
+// yet agreed to touch (THREAT_MODEL.md T4) with nothing failing. These two
+// tests are what fails instead.
+
+// recordingIntrospector answers both reads with the same schema and records
+// which one was asked for. It implements Introspect only; schemaOnlyIntrospector
+// below adds the second method, so the two fakes differ in exactly the interface
+// the assertion tests for.
+type recordingIntrospector struct {
+	schema *pipeline.Schema
+	calls  []string
+}
+
+func (r *recordingIntrospector) Introspect(context.Context, pipeline.Reader) (*pipeline.Schema, error) {
+	r.calls = append(r.calls, "Introspect")
+	return r.schema, nil
+}
+
+type schemaOnlyIntrospector struct{ *recordingIntrospector }
+
+func (r schemaOnlyIntrospector) IntrospectSchema(context.Context, pipeline.Reader) (*pipeline.Schema, error) {
+	r.calls = append(r.calls, "IntrospectSchema")
+	return r.schema, nil
+}
+
+func TestGateFingerprintAsksForTheSchemaOnlyRead(t *testing.T) {
+	rec := &recordingIntrospector{schema: testSchema()}
+	got, err := gateFingerprint(schemaOnlyIntrospector{rec})(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("the gate's fingerprinter: %v", err)
+	}
+	if want := []string{"IntrospectSchema"}; !slices.Equal(rec.calls, want) {
+		t.Fatalf("the gate called %v, want %v: an introspector that offers the schema-only read must not be sampled", rec.calls, want)
+	}
+	want, err := SchemaFingerprint(rec.schema)
+	if err != nil {
+		t.Fatalf("SchemaFingerprint: %v", err)
+	}
+	if got != want {
+		t.Errorf("the gate's fingerprint = %q, want %q", got, want)
+	}
+}
+
+// The fall-back is correct and only slower: the fields the full read adds are
+// fields SchemaFingerprint does not hash, so both spellings give the marker's
+// end and this one the same value. What it is not is free, which is why the
+// test above exists.
+func TestGateFingerprintFallsBackToTheFullRead(t *testing.T) {
+	rec := &recordingIntrospector{schema: testSchema()}
+	got, err := gateFingerprint(rec)(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("the gate's fingerprinter: %v", err)
+	}
+	if want := []string{"Introspect"}; !slices.Equal(rec.calls, want) {
+		t.Fatalf("the gate called %v, want %v", rec.calls, want)
+	}
+	viaSchemaOnly := &recordingIntrospector{schema: testSchema()}
+	same, err := gateFingerprint(schemaOnlyIntrospector{viaSchemaOnly})(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("the gate's fingerprinter: %v", err)
+	}
+	if got != same {
+		t.Errorf("the full read hashed to %q and the schema-only read to %q; §11.2's binding needs one value", got, same)
+	}
+}
+
+// A Target with no fingerprinter can never find a marker bound; an introspector
+// that is nil is the same refusal one layer up.
+func TestGateFingerprintWithNoIntrospectorFailsClosed(t *testing.T) {
+	if _, err := gateFingerprint(nil)(context.Background(), nil); err == nil {
+		t.Fatal("the gate's fingerprinter returned a fingerprint with no introspector to read the catalog")
+	}
+}

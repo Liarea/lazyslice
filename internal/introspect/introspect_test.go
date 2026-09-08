@@ -5,6 +5,9 @@ package introspect
 import (
 	"context"
 	"errors"
+	"fmt"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -541,5 +544,157 @@ func TestSampleRetryIsBoundedInPages(t *testing.T) {
 	// second read to make: sampleTable compares the two and stops.
 	if num, den := sampleRetryPercent(0, 0); num != 100 || den != 1 {
 		t.Errorf("sampleRetryPercent(0, 0) = %d/%d, want 100/1", num, den)
+	}
+}
+
+// catalogReader answers the catalog read with one table of one column and
+// records every statement it is handed. Every other statement returns no rows,
+// which is a database holding that one table and nothing else.
+type catalogReader struct{ sent []string }
+
+func (c *catalogReader) Query(_ context.Context, sql string, _ ...any) (pipeline.Rows, error) {
+	c.sent = append(c.sent, sql)
+	switch {
+	case sql == sqlTables:
+		return &fixedRows{rows: [][]any{{
+			"public", "people", "r", false, false, false, int64(0), int64(0), "", 0, true,
+		}}}, nil
+	case sql == sqlColumns:
+		return &fixedRows{rows: [][]any{{
+			"public", "people", "person_id", "integer", int64(23), int32(-1), "", false, "", "", "", "",
+		}}}, nil
+	case strings.Contains(sql, "TABLESAMPLE"):
+		return &fixedRows{rows: [][]any{{"a production value"}}}, nil
+	}
+	return &fixedRows{}, nil
+}
+
+func (c *catalogReader) Close(context.Context) error { return nil }
+
+// sampled reports the statements only the sampler sends: the TABLESAMPLE
+// statements themselves and the savepoint it takes around them.
+func (c *catalogReader) sampled() []string {
+	var out []string
+	for _, sql := range c.sent {
+		if strings.Contains(sql, "TABLESAMPLE") || strings.Contains(sql, "SAVEPOINT") {
+			out = append(out, sql)
+		}
+	}
+	return out
+}
+
+func (c *catalogReader) unsampled() []string {
+	var out []string
+	for _, sql := range c.sent {
+		if !strings.Contains(sql, "TABLESAMPLE") && !strings.Contains(sql, "SAVEPOINT") {
+			out = append(out, sql)
+		}
+	}
+	return out
+}
+
+// fixedRows scans a fixed table of values into whatever destinations the caller
+// passes, the way a driver converts a column to the field it is scanned into.
+type fixedRows struct {
+	rows [][]any
+	cur  int
+	err  error
+}
+
+func (r *fixedRows) Next() bool {
+	if r.cur >= len(r.rows) {
+		return false
+	}
+	r.cur++
+	return true
+}
+
+func (r *fixedRows) Scan(dest ...any) error {
+	row := r.rows[r.cur-1]
+	if len(dest) != len(row) {
+		return fmt.Errorf("the statement scanned %d values into %d destinations", len(row), len(dest))
+	}
+	for i := range dest {
+		d := reflect.ValueOf(dest[i]).Elem()
+		v := reflect.ValueOf(row[i])
+		switch {
+		case v.Type().AssignableTo(d.Type()):
+			d.Set(v)
+		case d.Kind() != reflect.String && v.Type().ConvertibleTo(d.Type()):
+			d.Set(v.Convert(d.Type()))
+		default:
+			return fmt.Errorf("value %d is a %s and the destination is a %s", i, v.Type(), d.Type())
+		}
+	}
+	return nil
+}
+
+func (r *fixedRows) Err() error { return r.err }
+func (r *fixedRows) Close()     {}
+
+// IntrospectSchema is Introspect with the sampler left out and nothing else
+// changed. It is the read the gate's end of §11.2's binding takes
+// (load.GateFingerprint), and what it buys is that no production value of a
+// database the gate has not yet agreed to touch is read into memory
+// (THREAT_MODEL.md T4). The gate reaches it through a type assertion on
+// pipeline.SchemaOnlyIntrospector that falls back silently, so this is the test
+// that fails when the sampler comes back.
+func TestIntrospectSchemaIsTheSameReadWithoutTheSampler(t *testing.T) {
+	t.Parallel()
+
+	in, ok := New().(pipeline.SchemaOnlyIntrospector)
+	if !ok {
+		t.Fatal("New() does not satisfy pipeline.SchemaOnlyIntrospector, so the gate falls back to the sampling read")
+	}
+
+	fullReader := &catalogReader{}
+	full, err := in.Introspect(context.Background(), fullReader)
+	if err != nil {
+		t.Fatalf("Introspect: %v", err)
+	}
+	schemaOnlyReader := &catalogReader{}
+	schemaOnly, err := in.IntrospectSchema(context.Background(), schemaOnlyReader)
+	if err != nil {
+		t.Fatalf("IntrospectSchema: %v", err)
+	}
+
+	// Without this the rest is vacuous: a read that sampled nothing either way
+	// would pass every assertion below.
+	if len(fullReader.sampled()) == 0 {
+		t.Fatal("the full read sent no sample statement, so this test asserts nothing")
+	}
+	if got := schemaOnlyReader.sampled(); len(got) != 0 {
+		t.Errorf("the schema-only read sent %d sample statements, want none: %v", len(got), got)
+	}
+	if got, want := schemaOnlyReader.unsampled(), fullReader.unsampled(); !slices.Equal(got, want) {
+		t.Errorf("the schema-only read sent %d catalog statements and the full read %d; the two must be the same read", len(got), len(want))
+	}
+
+	if len(full.Tables) != 1 || len(schemaOnly.Tables) != 1 {
+		t.Fatalf("the full read describes %d tables and the schema-only read %d, want 1 each", len(full.Tables), len(schemaOnly.Tables))
+	}
+	if len(full.Tables[0].Samples) == 0 {
+		t.Fatal("the full read took no samples, so this test asserts nothing")
+	}
+	for i := range schemaOnly.Tables {
+		if got := schemaOnly.Tables[i].Samples; got != nil {
+			t.Errorf("%s came back with %d sample rows from the schema-only read", schemaOnly.Tables[i].Ref, len(got))
+		}
+		if got := schemaOnly.Tables[i].SampledFrom; got != nil {
+			t.Errorf("%s came back with SampledFrom = %v from the schema-only read", schemaOnly.Tables[i].Ref, got)
+		}
+	}
+
+	// Every other field is what Introspect returns, which is what lets the two
+	// ends of §11.2's binding hash the same catalog to the same value.
+	for i := range full.Tables {
+		full.Tables[i].Samples = nil
+		full.Tables[i].SampledFrom = nil
+	}
+	if !reflect.DeepEqual(full, schemaOnly) {
+		t.Errorf("the two reads describe the catalog differently:\n full: %+v\n only: %+v", full, schemaOnly)
+	}
+	if schemaOnly.Fingerprint != "" {
+		t.Errorf("IntrospectSchema filled Schema.Fingerprint with %q; internal/core fills it from load.SchemaFingerprint (ADR-009)", schemaOnly.Fingerprint)
 	}
 }

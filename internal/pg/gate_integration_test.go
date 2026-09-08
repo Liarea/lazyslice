@@ -430,6 +430,89 @@ func TestGateAcceptsABoundMarkerAndIgnoresAnUnboundOne(t *testing.T) {
 	}
 }
 
+// The gate opens the transaction the fingerprinter runs in, and that BEGIN is
+// pinned here — in this package's own suite, on this package's connection —
+// rather than left to internal/load's, where it was found.
+//
+// The fingerprinter below takes a SAVEPOINT through the reader it is handed,
+// which is what internal/introspect's sampler does to survive a table the role
+// cannot read. Outside a transaction block a SAVEPOINT is 25P01, so on a pooled
+// connection in autocommit the fingerprinter failed every time, ARCHITECTURE.md
+// §11.2's binding could never be confirmed, and a target lazyslice itself wrote
+// was refused with exit 4. Deleting the BEGIN from Target.catalogFingerprint
+// fails this test with that SQLSTATE and nothing else here.
+func TestGateRunsTheFingerprinterInsideATransaction(t *testing.T) {
+	ctx := context.Background()
+	f := newGateFixture(ctx, t)
+
+	const catalogFP = "9c1d7b4e2a05f386"
+	var (
+		called       bool
+		savepointErr error
+	)
+	fingerprinter := WithCatalogFingerprint(func(ctx context.Context, r pipeline.Reader) (string, error) {
+		called = true
+		// Reader has only Query (ARCHITECTURE.md §2), and a server error can
+		// surface on Rows.Err rather than on Query, so both are consulted —
+		// which is how internal/introspect runs the same statement.
+		rows, err := r.Query(ctx, `SAVEPOINT lazyslice_gate_probe`)
+		if err == nil {
+			for rows.Next() {
+			}
+			rows.Close()
+			err = rows.Err()
+		}
+		if err != nil {
+			savepointErr = err
+			return "", err
+		}
+		return catalogFP, nil
+	})
+
+	marked := f.database(ctx, t, "gate_fingerprint_tx",
+		MarkerDDL,
+		`CREATE TABLE customers (id bigint PRIMARY KEY, email text)`,
+		`INSERT INTO customers VALUES (1, 'alice@example.com')`,
+	)
+	f.exec(ctx, t, marked, fmt.Sprintf(
+		`INSERT INTO %s (run_id, tool_version, schema_version, started_at, status,
+		    source_fingerprint, source_system_id, schema_fingerprint,
+		    classification_fingerprint, root_table, take, secret_fingerprint)
+		 VALUES ('%s', '0.1.0', %d, now(), '%s', '%s', '%s', '%s', 'c1a55', 'public.customers', 500, '5ecec7')`,
+		MarkerTable, mustUUID(t), MarkerSchemaVersion, StatusComplete,
+		f.sourceRef.Fingerprint(), f.sourceSystemID, catalogFP))
+
+	// Opened here rather than through the fixture's gate helper so that the
+	// SAVEPOINT's own error is what this test reports when it fails.
+	target, err := OpenTarget(ctx, dsn.DSN(marked), fingerprinter)
+	if err != nil {
+		t.Fatalf("opening the target: %v", err)
+	}
+	defer target.Close()
+
+	e, gateErr := target.Gate(ctx, f.sourceRef, f.sourceSystemID, "")
+
+	var pgErr *pgconn.PgError
+	if errors.As(savepointErr, &pgErr) && pgErr.Code == "25P01" {
+		t.Fatalf("the fingerprinter's SAVEPOINT came back 25P01 (%s): the gate ran it outside a "+
+			"transaction block, so no marker can ever bind and a target lazyslice wrote is refused",
+			pgErr.Message)
+	}
+	if savepointErr != nil {
+		t.Fatalf("the fingerprinter's SAVEPOINT failed: %v", savepointErr)
+	}
+	if !called {
+		t.Fatal("the fingerprinter never ran, so this test proved nothing about the transaction around it")
+	}
+	if gateErr != nil {
+		t.Fatalf("Gate: %v", gateErr)
+	}
+	if e.Verdict != pipeline.Eligible || !e.MarkerBound {
+		t.Errorf("Verdict = %v (%s), MarkerBound = %v; want Eligible and bound, which is what a "+
+			"fingerprinter that could take its SAVEPOINT returns", e.Verdict, e.Reason, e.MarkerBound)
+	}
+}
+
 // The allowlist, not the READ ONLY transaction, is what has to refuse this: a
 // read-only transaction returns SQLSTATE 25006 from the server, which means the
 // statement reached production (THREAT_MODEL.md T9).

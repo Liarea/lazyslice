@@ -420,14 +420,24 @@ func (r *reader) Close(ctx context.Context) error {
 // pgxpool discards a closed connection on release.
 func endTx(ctx context.Context, conn *pgxpool.Conn) {
 	if _, err := conn.Exec(ctx, sqlRollback); err != nil {
-		if c := conn.Conn(); c != nil && !c.IsClosed() {
-			if closeErr := c.Close(ctx); closeErr != nil {
-				conn.Release()
-				return
-			}
-		}
+		discard(ctx, conn)
 	}
 	conn.Release()
+}
+
+// discard closes the connection under conn so that pgxpool throws it away when
+// it is released, instead of handing it to the next caller.
+//
+// It is the second half of the rollback discipline above, split out because the
+// gate's fingerprint transaction ends on a connection it does not own the
+// release of (Target.catalogFingerprint): the caller there releases, so this
+// closes and nothing else. A close that itself fails leaves the connection in
+// whatever state it was already in and is not worth reporting over the error
+// that got here; the release still happens.
+func discard(ctx context.Context, conn *pgxpool.Conn) {
+	if c := conn.Conn(); c != nil && !c.IsClosed() {
+		_ = c.Close(ctx)
+	}
 }
 
 // pgx.Rows already has exactly the four methods pipeline.Rows names, so the
