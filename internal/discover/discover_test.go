@@ -138,9 +138,10 @@ func TestCandidatesCollapseAcrossRungs(t *testing.T) {
 // The ladder asks nothing at all in this build — Q1 and the controlling
 // terminal are phase 5 (ARCHITECTURE.md §14) — and stops with the
 // ARCHITECTURE.md §8 exit code for the state it is in: 3 with no source, 4 with
-// a source and no target. There is no --yes in Options because there is no
-// question for it to answer; when Q1 lands, ADR-008 §7's headless path lands
-// with it.
+// a source and no target. Every case sets Yes, which is one half of ADR-008 §7's
+// single headless path — the other half is a process with no controlling
+// terminal — so no case here can reach a prompt and block a test run started
+// from a terminal.
 func TestHeadlessQuestionLadderAsksNothingAndExits(t *testing.T) {
 	quietEnvironment(t)
 	dir := t.TempDir()
@@ -154,14 +155,14 @@ func TestHeadlessQuestionLadderAsksNothingAndExits(t *testing.T) {
 	}{
 		{
 			name:     "no source is exit 3 with the ladder printed",
-			opts:     Options{Workdir: dir, NeedTarget: true},
+			opts:     Options{Workdir: dir, NeedTarget: true, Yes: true},
 			wantExit: 3,
 			wantCode: CodeSourceNone,
 		},
 		{
 			name: "a source and no target, with provisioning not in this build, is exit 4 naming --target",
 			opts: Options{
-				Workdir: dir, NeedTarget: true,
+				Workdir: dir, NeedTarget: true, Yes: true,
 				Source: "postgres://app@127.0.0.1:1/shop",
 			},
 			wantExit: 4,
@@ -169,18 +170,34 @@ func TestHeadlessQuestionLadderAsksNothingAndExits(t *testing.T) {
 			wantFlag: "--target",
 		},
 		{
-			// The flag named is --target, the flag that names a database to
-			// load into. Naming --create-target here would tell the operator to
-			// pass the flag they just passed.
-			name: "--create-target on a local endpoint says it is not in this build, and names --target",
+			// Q1's headless failure (ADR-008 §6): the endpoint is local and
+			// answering, so a container could be created, and the flag named
+			// is the one that would create it.
+			name: "a source and no target on a usable endpoint is exit 4 naming --create-target",
 			opts: Options{
-				Workdir: dir, NeedTarget: true, CreateTarget: true,
+				Workdir: dir, NeedTarget: true, Yes: true,
 				DockerHost: localDockerHost,
 				dial:       fakeDial(&fakeDocker{}),
 				Source:     "postgres://app@127.0.0.1:1/shop",
 			},
 			wantExit: 4,
-			wantCode: CodeTargetNotImplemented,
+			wantCode: CodeTargetNone,
+			wantFlag: "--create-target",
+		},
+		{
+			// --create-target with a source that never answered cannot choose
+			// postgres:<major>, so the run stops rather than guessing a version
+			// to run.
+			name: "--create-target with an unreachable source is exit 4 naming --target",
+			opts: Options{
+				Workdir: dir, NeedTarget: true, CreateTarget: true, Yes: true,
+				DockerHost:  localDockerHost,
+				dial:        fakeDial(&fakeDocker{}),
+				provisioner: refuseToProvision(t),
+				Source:      "postgres://app@127.0.0.1:1/shop",
+			},
+			wantExit: 4,
+			wantCode: CodeTargetNone,
 			wantFlag: "--target",
 		},
 		{
@@ -190,8 +207,9 @@ func TestHeadlessQuestionLadderAsksNothingAndExits(t *testing.T) {
 			// has pointed DOCKER_HOST at a non-local daemon.
 			name: "--create-target against a non-local docker endpoint is refused, naming --docker-host",
 			opts: Options{
-				Workdir: dir, NeedTarget: true, CreateTarget: true,
-				Source: "postgres://app@127.0.0.1:1/shop",
+				Workdir: dir, NeedTarget: true, CreateTarget: true, Yes: true,
+				provisioner: refuseToProvision(t),
+				Source:      "postgres://app@127.0.0.1:1/shop",
 			},
 			wantExit: 4,
 			wantCode: CodeTargetDockerNotLocal,
@@ -200,8 +218,8 @@ func TestHeadlessQuestionLadderAsksNothingAndExits(t *testing.T) {
 		{
 			name: "a read-only mode needs no target and stops for nothing",
 			opts: Options{
-				Workdir: dir,
-				Source:  "postgres://app@127.0.0.1:1/shop",
+				Workdir: dir, Yes: true,
+				Source: "postgres://app@127.0.0.1:1/shop",
 			},
 		},
 	} {
@@ -562,6 +580,10 @@ type fakeDocker struct {
 	// env is a container ID's Config.Env, which is where POSTGRES_USER,
 	// POSTGRES_DB and POSTGRES_PASSWORD come from.
 	env map[string][]string
+	// host is a container ID's HostConfig, which is where a stopped
+	// container's port binding comes from: a container that is not running
+	// publishes nothing, so rung 4 reads what it is configured to publish.
+	host map[string]*container.HostConfig
 }
 
 func (f *fakeDocker) Ping(context.Context, client.PingOptions) (client.PingResult, error) {
@@ -574,7 +596,10 @@ func (f *fakeDocker) ContainerList(context.Context, client.ContainerListOptions)
 
 func (f *fakeDocker) ContainerInspect(_ context.Context, id string, _ client.ContainerInspectOptions) (client.ContainerInspectResult, error) {
 	return client.ContainerInspectResult{
-		Container: container.InspectResponse{Config: &container.Config{Env: f.env[id]}},
+		Container: container.InspectResponse{
+			Config:     &container.Config{Env: f.env[id]},
+			HostConfig: f.host[id],
+		},
 	}, nil
 }
 

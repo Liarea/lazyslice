@@ -43,11 +43,6 @@ const (
 	// assembles a DSN from .env fragments (ADR-008 §2).
 	CodeEnvUnusable event.Code = "discover.env.unusable"
 
-	// CodeRungNotImplemented is rung 4 and rung 5 (ARCHITECTURE.md §14 puts
-	// them in phase 5). It is an Info and not an Error because the ladder still
-	// answers from the rungs that are in this build.
-	CodeRungNotImplemented event.Code = "discover.rung.not_implemented"
-
 	// CodeSourceChosen and CodeTargetChosen carry the provenance of each side.
 	// They are not the decision header, which internal/core prints; they are
 	// how the ladder says which candidate it handed over and under which rung.
@@ -60,15 +55,21 @@ const (
 	CodeSourceNone event.Code = "source.refused.none"
 
 	// CodeTargetNone is exit 4: a source was found and nothing target-shaped
-	// was. It is Q1's headless failure and, while provisioning is not in this
-	// build, its answer on a terminal too (ARCHITECTURE.md §14).
+	// was, and neither question could be honoured or was answered yes. It is
+	// Q1's headless failure (ADR-008 §6), and the flag it names is
+	// --create-target where a container could be created and --target where
+	// one could not.
 	CodeTargetNone event.Code = "target.refused.none"
 
-	// CodeTargetNotImplemented is the not-implemented path ARCHITECTURE.md §14
-	// leaves for provisioning: --create-target lands here rather than on a
-	// silent no-op or a connection string that does not connect. It is exit 4
-	// and it names --target, the flag that does work today.
-	CodeTargetNotImplemented event.Code = "target.refused.not_implemented"
+	// CodeTargetStartTimeout is ADR-008 §6 step 3: the container was started
+	// and did not accept a connection inside the 60 s budget. Exit 4. The
+	// container is left running, because lazyslice never removes one.
+	//
+	// The catalogue row for this code cannot yet name the container or
+	// `docker logs <name>`, which ADR-008 §6 asks for: there is no event.ArgKey
+	// for a container name, and internal/event was outside the paths of the
+	// task that wired Q1' (see this package's CLAUDE.md).
+	CodeTargetStartTimeout event.Code = "target.refused.start_timeout"
 
 	// CodeTargetDockerNotLocal is ADR-008 §3's refusal: --create-target against
 	// a docker endpoint that is not local, or that does not answer. It is exit
