@@ -99,9 +99,9 @@ func probeValue(family string) any {
 	case famJSON, famJSONB:
 		return map[string]any{"contact": map[string]any{"email": "ada.lovelace@example.com"}}
 	case famInet:
-		return netip.MustParsePrefix("203.0.113.7/32")
+		return netip.MustParsePrefix("10.1.2.7/32")
 	case famCIDR:
-		return netip.MustParsePrefix("203.0.113.0/24")
+		return netip.MustParsePrefix("10.1.2.0/24")
 	case famMacaddr:
 		return net.HardwareAddr{0x08, 0x00, 0x2b, 0x01, 0x02, 0x03}
 	case famTime:

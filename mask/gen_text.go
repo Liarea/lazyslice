@@ -179,7 +179,17 @@ func (geoMasker) Mask(h [32]byte, _ Value, c Constraints) (Value, error) {
 // information at all (ARCHITECTURE.md section 5).
 const freeTextCap = 4096
 
-func freeTextExact(c Constraints) int { return checkLength(c) }
+// freeTextExact is the exact length a CHECK requires, or 0 when there is
+// none or it does not fit the column: a char_length CHECK wider than the
+// column's own varchar(n) is a contradiction no row could ever satisfy, and
+// treating it as the target length would make Mask emit a value longer than
+// the column can hold instead of falling back to the ranged filler below.
+func freeTextExact(c Constraints) int {
+	if l := checkLength(c); l > 0 && (c.MaxLen <= 0 || l <= c.MaxLen) {
+		return l
+	}
+	return 0
+}
 
 func freeTextMax(c Constraints) int {
 	n := freeTextCap
