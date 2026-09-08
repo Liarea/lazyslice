@@ -20,7 +20,7 @@ cat tracker/BOARD.md                                    # the board
 | 2 Architecture | `.claude/workflows/architecture.js` | benchmark, 3 proposals, 3 judges, ADRs, review | no |
 | 3 Foundations | `.claude/workflows/foundations.js` with `{step}` | `scaffold`, `fixtures` (fixtures, ADR-008), `docs` (CLAUDE.md files, roadmap, ADR-008 sync), `invariants`, `review`; one step per window | no |
 | 4 Vertical slice | `.claude/workflows/slice.js` | ten packages in dependency order through implement.js, stops at first block; resume by run id | no |
-| 5 Hardening | `.claude/workflows/hardening.js` with `{step}` | `features` (TUI, provisioning, polymorphic, CI matrix), `harden` (torture, failure UX, perf), `redteam` | no |
+| 5 Hardening | `.claude/workflows/hardening.js` with `{step}` | `features` (TUI, provisioning, polymorphic, CI matrix), `backlog` (review follow-ups), `harden` (torture, failure UX, perf), `redteam` | no |
 | 6 Launch | drafts only | README, GIF, posts | yes: create GitHub repo, post |
 | 7 Breadth | implement.js per adapter, worktrees | MySQL, SQLite, SQL Server | no |
 | 8 Client-facing | research only | interviews, hosted design, pricing | yes: everything commercial |
