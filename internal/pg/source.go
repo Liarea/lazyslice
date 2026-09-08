@@ -157,6 +157,17 @@ func (s *Source) Close() { s.pool.Close() }
 //
 // It is a statement on the source, so it needs a shape; it is registered here
 // rather than in SourceShapes because a run that never asks never sends it.
+//
+// It runs inside a REPEATABLE READ READ ONLY transaction like every other
+// statement this package sends, and this is the one that used to be the
+// exception: it was the only statement this package issued on an autocommit
+// path, which is part of why Connect once set default_transaction_read_only on
+// the session to cover it. The other part was internal/discover's dial, which
+// is outside this package and still sends three catalog reads with no BEGIN
+// (T-0081). That session GUC leaked through a transaction-pooling PgBouncer onto the
+// shared server connection and left other applications read-only after
+// lazyslice exited (T-0076, pg.go). Scoping it here costs a BEGIN and a
+// ROLLBACK on one statement and leaves nothing behind.
 func (s *Source) SystemID(ctx context.Context) (string, error) {
 	if err := s.tr.Register(Shape{Name: "source.system_id", SQL: sqlSystemID}); err != nil {
 		return "", err
@@ -165,7 +176,11 @@ func (s *Source) SystemID(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("pg: acquiring a source connection: %w", err)
 	}
-	defer conn.Release()
+	if _, beginErr := conn.Exec(ctx, sqlBeginReadOnly); beginErr != nil {
+		conn.Release()
+		return "", fmt.Errorf("pg: opening a read-only transaction on the source: %w", beginErr)
+	}
+	defer endTx(context.WithoutCancel(ctx), conn)
 
 	var id string
 	if err := conn.QueryRow(ctx, sqlSystemID).Scan(&id); err != nil {

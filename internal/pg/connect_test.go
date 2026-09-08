@@ -19,9 +19,12 @@ import (
 // standard_conforming_strings, application_name — unless it is named in
 // ignore_startup_parameters. So a startup parameter of ours is not a setting
 // that fails to apply: it is a source that cannot be opened at all, surfacing
-// as an opaque acquire failure because pgxpool connects lazily. These two tests
-// are the guard: read-only is a session statement on the allowlist, and Connect
-// adds no startup parameter of its own.
+// as an opaque acquire failure because pgxpool connects lazily.
+//
+// The other side of the same topology is that a session GUC does not fail — it
+// persists, on a server connection lazyslice does not own. These two tests are
+// the guard for both: Connect adds no startup parameter of its own, and it
+// leaves no session state on a connection either.
 
 // poolerStartupParams is what a pooler accepts in the startup packet.
 var poolerStartupParams = map[string]bool{
@@ -59,10 +62,21 @@ func TestConnectAddsNoStartupParameterAPoolerWouldRefuse(t *testing.T) {
 	}
 }
 
-// The other half: the setting is still there, as a statement the allowlist
-// admits and nothing wider. Without the shape the first acquire would be
-// refused by our own tracer rather than by the server.
-func TestTheReadOnlySettingIsASessionStatementOnTheAllowlist(t *testing.T) {
+// The other half: Connect leaves no session state behind on a connection
+// either. It once set default_transaction_read_only=on in an AfterConnect exec,
+// as a second layer under the READ ONLY transactions. Through a
+// transaction-pooling PgBouncer that GUC is set on the shared *server*
+// connection, and PgBouncer does not reset it by default, so it outlived the
+// run and made other applications on the same pooler read-only for up to
+// server_lifetime — measured in pooler_integration_test.go, which is where the
+// end-to-end proof lives. This is the unit half: nothing is sent at connect
+// time, and the read-only setting is per transaction (source.go's
+// sqlBeginReadOnly, under every statement this package sends, SystemID
+// included; internal/discover's dial is the caller outside it, T-0081).
+//
+// Restoring the AfterConnect exec fails here, and so does re-registering a
+// shape wide enough to admit the SET it sent.
+func TestConnectSetsNoSessionStateOnASourceConnection(t *testing.T) {
 	tr, err := NewTracer(SourceShapes()...)
 	if err != nil {
 		t.Fatalf("compiling the source shapes: %v", err)
@@ -73,21 +87,16 @@ func TestTheReadOnlySettingIsASessionStatementOnTheAllowlist(t *testing.T) {
 	}
 	defer pool.Close()
 
-	if pool.Config().AfterConnect == nil {
-		t.Fatal("the source pool sets nothing on a new connection; default_transaction_read_only would never be on")
+	if pool.Config().AfterConnect != nil {
+		t.Error("the source pool runs an AfterConnect hook; anything it sets is session state on a " +
+			"server connection a pooler shares with other applications after this run ends (T-0076). " +
+			"The read-only setting belongs in the transaction, not the session")
 	}
 
-	ctx := tr.TraceQueryStart(context.Background(), nil, pgx.TraceQueryStartData{SQL: sqlSetReadOnly})
-	if ctx.Err() != nil {
-		t.Errorf("the allowlist refused %q, which Connect sends on every connection", sqlSetReadOnly)
-	}
-	trace := tr.Trace()
-	if len(trace) != 1 || trace[0].Shape != shapeReadOnly {
-		t.Errorf("the read-only statement matched %+v, want shape %q", trace, shapeReadOnly)
-	}
-
-	// It is a literal template, so it is not a licence to set anything else.
+	// The allowlist is the other layer, and it is not a licence to set session
+	// state: no SET but SET TRANSACTION SNAPSHOT is on it.
 	for _, sql := range []string{
+		`SET default_transaction_read_only = on`,
 		`SET default_transaction_read_only = off`,
 		`SET session_replication_role = replica`,
 		`SET default_transaction_read_only = on; DROP TABLE t`,
@@ -95,5 +104,11 @@ func TestTheReadOnlySettingIsASessionStatementOnTheAllowlist(t *testing.T) {
 		if c := tr.TraceQueryStart(context.Background(), nil, pgx.TraceQueryStartData{SQL: sql}); c.Err() == nil {
 			t.Errorf("the allowlist admitted %q", sql)
 		}
+	}
+
+	// And the transaction that carries READ ONLY is admitted, because it is what
+	// enforces it now.
+	if c := tr.TraceQueryStart(context.Background(), nil, pgx.TraceQueryStartData{SQL: sqlBeginReadOnly}); c.Err() != nil {
+		t.Errorf("the allowlist refused %q, which every source statement now runs inside", sqlBeginReadOnly)
 	}
 }

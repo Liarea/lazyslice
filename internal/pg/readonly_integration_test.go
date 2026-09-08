@@ -16,21 +16,25 @@ import (
 )
 
 // ARCHITECTURE.md §2 makes every source transaction REPEATABLE READ READ ONLY,
-// and until default_transaction_read_only=on was set at connect time that
-// covered only statements inside one. Source.SystemID queries outside any
-// BEGIN, so on that path the shape allowlist was the whole defence — which is
-// the near-miss THREAT_MODEL.md T9 records: while a cast's type name could
-// absorb any word, `SELECT t."a"::int INTO evil FROM ...` matched a registered
-// shape, and `SELECT ... INTO` is CREATE TABLE AS.
+// and that transaction is the enforcement THREAT_MODEL.md T9 names — the tracer
+// is the evidence. The near-miss T9 records is what happens when the evidence is
+// the only layer: while a cast's type-name continuation was `[a-z]+`,
+// `SELECT t."a"::int INTO evil FROM ...` matched a registered shape, and
+// `SELECT ... INTO` is CREATE TABLE AS.
 //
-// This is the test for the layer that closes it. It asks the server, not the
-// tracer: the write below is registered on the allowlist on purpose, so that
-// what refuses it can only be the connection's own read-only default.
+// Source.SystemID was the one statement issued outside any BEGIN, so that path
+// had the allowlist and nothing else, and it was covered for a while by
+// default_transaction_read_only on the session. That session GUC leaked through
+// a transaction-pooling PgBouncer onto a shared server connection and outlived
+// the run (T-0076, pooler_integration_test.go), so it is gone and SystemID runs
+// inside a transaction instead. These two tests are what says so: the server
+// refuses a write inside the transaction this package opens, and SystemID opens
+// one.
 
 // readOnlyErrCode is SQLSTATE 25006, read_only_sql_transaction.
 const readOnlyErrCode = "25006"
 
-func TestAWriteOutsideATransactionIsRefusedByTheServer(t *testing.T) {
+func TestAWriteInsideASourceTransactionIsRefusedByTheServer(t *testing.T) {
 	ctx := context.Background()
 	testutil.SkipWithoutDocker(ctx, t)
 
@@ -52,13 +56,19 @@ func TestAWriteOutsideATransactionIsRefusedByTheServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("acquiring a source connection: %v", err)
 	}
-	defer conn.Release()
+	// The transaction every statement on the source runs inside, opened with the
+	// one string Snapshot, Privileges, Short and SystemID all open theirs with.
+	if _, beginErr := conn.Exec(ctx, sqlBeginReadOnly); beginErr != nil {
+		conn.Release()
+		t.Fatalf("opening a read-only transaction on the source: %v", beginErr)
+	}
+	defer endTx(context.WithoutCancel(ctx), conn)
 
-	// A read outside a transaction still works: the setting makes the implicit
-	// transaction read-only, not the connection useless.
+	// A read inside it works: READ ONLY makes the transaction read-only, not
+	// the connection useless.
 	var one int
 	if scanErr := conn.QueryRow(ctx, `SELECT 1`).Scan(&one); scanErr != nil {
-		t.Fatalf("a read outside a transaction failed: %v", scanErr)
+		t.Fatalf("a read inside the transaction failed: %v", scanErr)
 	}
 	if one != 1 {
 		t.Fatalf("SELECT 1 returned %d", one)
@@ -66,7 +76,7 @@ func TestAWriteOutsideATransactionIsRefusedByTheServer(t *testing.T) {
 
 	_, err = conn.Exec(ctx, `CREATE TABLE evil (a int)`)
 	if err == nil {
-		t.Fatal("a write outside a transaction succeeded on the source pool")
+		t.Fatal("a write inside a REPEATABLE READ READ ONLY transaction succeeded on the source")
 	}
 	if refused := src.Violation(); refused != nil {
 		t.Fatalf("the allowlist refused the write, so this test proved nothing about the server: %v", refused)
@@ -78,5 +88,49 @@ func TestAWriteOutsideATransactionIsRefusedByTheServer(t *testing.T) {
 	if pgErr.Code != readOnlyErrCode {
 		t.Errorf("the server refused the write with SQLSTATE %s, want %s (read_only_sql_transaction)",
 			pgErr.Code, readOnlyErrCode)
+	}
+}
+
+// And the statement that used to run outside one now runs inside one. Asserted
+// over the trace rather than over a setting, because the setting is what was
+// removed: what the run has instead is a BEGIN before the read and a ROLLBACK
+// after it, on the same connection.
+func TestSystemIDRunsInsideAReadOnlyTransaction(t *testing.T) {
+	ctx := context.Background()
+	testutil.SkipWithoutDocker(ctx, t)
+
+	url := testutil.Postgres(ctx, t, "")
+
+	src, err := OpenSource(ctx, dsn.DSN(url))
+	if err != nil {
+		t.Fatalf("opening the source: %v", err)
+	}
+	defer src.Close()
+
+	if _, err := src.SystemID(ctx); err != nil {
+		t.Fatalf("reading the system identifier: %v", err)
+	}
+	if refused := src.Violation(); refused != nil {
+		t.Fatalf("the allowlist refused a statement: %v", refused)
+	}
+
+	// source.connect is the ConnectTracer's record of the connection itself, not
+	// a statement; what this test is about is the statements.
+	var shapes []string
+	for _, s := range src.Trace() {
+		if s.Shape == "source.connect" {
+			continue
+		}
+		shapes = append(shapes, s.Shape)
+	}
+	want := []string{"source.begin", "source.system_id", "source.rollback"}
+	if len(shapes) != len(want) {
+		t.Fatalf("SystemID sent the shapes %v, want %v: the identity read is the statement that used "+
+			"to be on an autocommit path, and nothing this package sends may be", shapes, want)
+	}
+	for i := range want {
+		if shapes[i] != want[i] {
+			t.Fatalf("SystemID sent the shapes %v, want %v", shapes, want)
+		}
 	}
 }
