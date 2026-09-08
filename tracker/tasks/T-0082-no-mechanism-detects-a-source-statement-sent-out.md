@@ -1,8 +1,8 @@
 ---
 id: T-0082
 title: "No mechanism detects a source statement sent outside a transaction"
-epic: E9
-phase: ""
+epic: E5
+phase: 5
 status: open
 owner: ""
 created: 2026-09-08
@@ -26,6 +26,8 @@ T-0076 removed the AfterConnect exec that set default_transaction_read_only=on o
 - 2026-09-08 created
 
 - 2026-09-08 T-0076 review round 2: reviewers ask the orchestrator to re-home this from E9 to E5 phase 5 with T-0081. This is the structural check that would have caught the internal/discover regression T-0076 introduced; leaving it in Later means the phase-5 gap outlives phase 5. Sequencing is unchanged: it fails the dial the moment it is armed, so it lands after T-0081 or with it. A developer can only file into E9, which is why it is there.
+
+- 2026-09-08 moved to E5 phase 5
 
 ## Post-mortem
 

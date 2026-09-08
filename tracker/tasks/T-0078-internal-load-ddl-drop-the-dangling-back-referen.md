@@ -1,8 +1,8 @@
 ---
 id: T-0078
 title: "internal/load/ddl: drop the dangling back-reference to target.refused.start_timeout's deleted comment"
-epic: E9
-phase: ""
+epic: E5
+phase: 5
 status: open
 owner: ""
 created: 2026-09-08
@@ -24,6 +24,8 @@ internal/load/ddl/recreatable.go:53 ends 'exactly as target.refused.start_timeou
 ## Log
 
 - 2026-09-08 created
+
+- 2026-09-08 moved to E5 phase 5
 
 ## Post-mortem
 

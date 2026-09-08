@@ -46,3 +46,4 @@ docs/BUILD_PLAN.md's phase 2 prompts numbered the ADRs differently (003 classifi
 ## Errata (frozen ADRs are not edited; corrections live here)
 
 - ADR-008 names `pipeline.Provisioner`. The interface was never implemented; the type that exists is `provision.Provisioner` in internal/discover/provision (T-0071, 2026-09-08). Behaviour as described is unchanged.
+- ADR-005's exit-code table lists four exit-12 causes; T-PIN (2026-09-08) added a fifth, `core.refused.reviewed_changed`: the writing run's snapshot or endpoints differ from the ones the operator reviewed in `--tui`.

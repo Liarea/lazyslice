@@ -12,6 +12,7 @@ Usage:
   tools/tracker.py list      [--status open|in_progress|done|cancelled|blocked] [--epic E1]
   tools/tracker.py board                     # rewrites tracker/BOARD.md
   tools/tracker.py validate                  # exit 1 on malformed files
+  tools/tracker.py move      T-0001 --epic E5 --phase 5   # re-home a task
   tools/tracker.py close-json FILE.json      # bulk close from a workflow result
 
 Only the orchestrator writes here. Agents return structured results; the orchestrator records them.
@@ -87,6 +88,10 @@ def cancel(a):
     body = re.sub(r"## Post-mortem\n\n.*$", f"## Post-mortem\n\nCancelled. Reason: {a.reason}\n", body, flags=re.S)
     dump(path, fm, body); print(path)
 
+def move(a):
+    path, fm, body = set_status(a.id, parse(find(a.id))[0]["status"], f"moved to {a.epic} phase {a.phase or ''}", {"epic": a.epic, "phase": a.phase or ""})
+    print(path)
+
 def close_json(a):
     data = json.load(open(a.file))
     for item in data:
@@ -146,6 +151,7 @@ b = sub.add_parser("block"); b.add_argument("id"); b.add_argument("--reason", re
 li = sub.add_parser("list"); li.add_argument("--status"); li.add_argument("--epic"); li.set_defaults(f=list_)
 sub.add_parser("board").set_defaults(f=board)
 sub.add_parser("validate").set_defaults(f=validate)
+mv = sub.add_parser("move"); mv.add_argument("id"); mv.add_argument("--epic", required=True); mv.add_argument("--phase"); mv.set_defaults(f=move)
 cj = sub.add_parser("close-json"); cj.add_argument("file"); cj.set_defaults(f=close_json)
 a = p.parse_args(); a.f(a)
 if a.cmd not in ("board", "validate", "list"): board()

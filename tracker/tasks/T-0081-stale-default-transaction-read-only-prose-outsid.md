@@ -1,8 +1,8 @@
 ---
 id: T-0081
 title: "Stale default_transaction_read_only prose outside internal/pg after T-0076"
-epic: E9
-phase: ""
+epic: E5
+phase: 5
 status: open
 owner: ""
 created: 2026-09-08
@@ -26,6 +26,8 @@ T-0076 removed the AfterConnect exec that set default_transaction_read_only=on o
 - 2026-09-08 created
 
 - 2026-09-08 T-0076 review round 2: reviewers ask that this be priced as a rail restoration, not a prose cleanup. The substantive half is internal/discover/probe.go:99-121 — three catalog reads on a source-mode pool with no BEGIN, on the path that dials production candidates. Nothing in internal/pg blocks it: pg.SourceShapes() already exports source.begin and source.rollback carrying the same two literals Source sends, so probe can register them alongside dialShapes() and wrap the three reads in that pair (do not re-write the BEGIN text). The three stale comments (probe.go:67, internal/discover/CLAUDE.md:217, internal/load/CLAUDE.md:170) are the cheap half and can be split off. Reviewers also ask the orchestrator to re-home this from E9 to E5 phase 5, since the gap was opened in phase 5; a developer can only file into E9.
+
+- 2026-09-08 moved to E5 phase 5
 
 ## Post-mortem
 
