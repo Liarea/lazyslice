@@ -9,9 +9,9 @@ package's 1s dial budget does not allow for.
 
 **Contract.** ARCHITECTURE.md §2 "discover" and §9: implements
 `pipeline.Discoverer.Discover(ctx, workdir, sink) ([]Candidate, error)`.
-`provision/` implements `provision.Provisioner`, which is the widened
-`pipeline.Provisioner` — see that package's CLAUDE.md for why it is declared
-there.
+`provision/` implements `provision.Provisioner`, a stage seam declared in that
+package rather than in `internal/pipeline` — see that package's CLAUDE.md for
+why. `pipeline.Provisioner` is removed: it was dead, nothing implemented it.
 
 **Rules.**
 - 2s total listing budget, 1s per-candidate dial (ARCHITECTURE.md §9) — do not
@@ -112,22 +112,16 @@ candidate.
   - `pipeline.Provisioner` was **not** widened: `internal/pipeline` was outside
     T-PROVISION's paths, so the widened contract is
     `provision.Provisioner`/`provision.Result`, carrying the `Candidate` and
-    the `DSN` the generated `POSTGRES_PASSWORD` lives in. `internal/pipeline`
-    now declares an interface nothing implements; see
-    `provision/CLAUDE.md`, "Owed".
-  - **`Options.Yes` is read here and not set by `internal/core`. This is a
-    merge blocker, not a debt.** `core.Request.Yes` exists and
-    `resolveEndpoints` does not copy it into `Options` (`internal/core/run.go`,
-    the literal ending `CreateTarget: r.req.CreateTarget` — it needs
-    `Yes: r.req.Yes,`); `internal/core` is outside T-PROVISION's writable paths
-    and the fix is that one line. Until it lands, `lazyslice --yes` on a machine
-    that *has* a controlling terminal opens `/dev/tty` and blocks in
-    `prompt.Confirm` with no timeout at all — the 60 s budget covers the
-    container start, not the question — so automation under an allocated TTY
-    (`docker run -t`, `script(1)`, `tmux`) hangs instead of taking ADR-008 §7's
-    headless path. Without a controlling terminal — CI, cron — the headless
-    path is taken anyway, which is the case ADR-004 relies on. This is the only
-    piece of T-0063's acceptance this task could not finish.
+    the `DSN` the generated `POSTGRES_PASSWORD` lives in. `pipeline.Provisioner`
+    itself is gone — T-0071 deleted the dead interface once
+    `provision.Provisioner` was confirmed to be the type nothing else needed to
+    share; see `provision/CLAUDE.md`.
+  - **`Options.Yes` is set by `internal/core`'s `resolveEndpoints`, as of
+    T-0071.** `core.Request.Yes` is copied into `Options` alongside
+    `CreateTarget` (`internal/core/run.go`), which is what lets ADR-008 §7's
+    headless path fire under an allocated TTY with no controlling terminal
+    answer available — `docker run -t`, `script(1)`, `tmux` — instead of
+    `prompt.Confirm` opening `/dev/tty` and blocking with no timeout.
   - **Whether there is anybody to ask is settled before the question is
     built.** Q1 names `postgres:<major>` and a free port, both of which cost a
     dial and a bind; a headless run takes the hard failure without paying for
@@ -195,8 +189,9 @@ candidate.
   "no row in internal/event/catalogue.yml". So those lines go to the channel
   ADR-008 §7 already puts the prompt on — stderr, through
   `provision.Request.Progress`. `target.refused.start_timeout` is emitted, and
-  its existing row still cannot name the container or `docker logs <name>` for
-  want of an `ArgKey`; the catalogue's own comment already records that debt.
+  its row now names the container and the `docker logs` command through
+  `event.ArgContainer` (T-0071): `target container {container} did not become
+  ready after {seconds}s: docker logs {container}`.
 
 - **`--create-target` against a non-local or unreachable Docker endpoint is a
   refusal, and that guard is not phase 5.** ADR-008 §3 requires it "before any

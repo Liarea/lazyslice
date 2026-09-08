@@ -59,16 +59,3 @@ type Discoverer interface {
 	// answers.
 	Discover(ctx context.Context, workdir string, sink event.Sink) ([]Candidate, error)
 }
-
-// Provisioner is the --create-target path (ARCHITECTURE.md section 9
-// "Provisioning"), implemented in internal/discover/provision. It is the only
-// code in lazyslice that creates or starts a container, and it is never called
-// without --create-target or a "yes" to Q1.
-type Provisioner interface {
-	// Provision pulls or finds postgres:<major>, creates
-	// lazyslice-target-<project> bound to a free loopback port, starts it, waits
-	// for pg_isready (60 s), and returns the candidate. A container of that name
-	// that already exists is started if stopped and reused if running; it is
-	// never recreated or removed.
-	Provision(ctx context.Context, project string, major int, sink event.Sink) (Candidate, error)
-}

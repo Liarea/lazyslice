@@ -285,7 +285,8 @@ func provisionRefusal(err error, sink event.Sink) error {
 		r := &Refusal{
 			Code: CodeTargetStartTimeout, Exit: exitTarget,
 			Args: event.Args{
-				event.ArgSeconds: strconv.Itoa(int(notReady.Waited.Round(time.Second).Seconds())),
+				event.ArgContainer: notReady.Container,
+				event.ArgSeconds:   strconv.Itoa(int(notReady.Waited.Round(time.Second).Seconds())),
 			},
 			Message: notReady.Error(),
 		}

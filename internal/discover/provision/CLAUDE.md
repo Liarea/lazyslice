@@ -56,10 +56,9 @@ read a compose file for a host, port, user, password or database name.
   connect with it. `internal/pipeline` was outside T-PROVISION's writable
   paths, so the widened contract is declared here instead: `Result` carries
   the `Candidate` **and** the `DSN`, and this package no longer implements
-  `pipeline.Provisioner` at all. **Owed:** `internal/pipeline/discover.go`
-  still declares a `Provisioner` interface nothing implements; it should
-  either be deleted or restated as this one, in a task whose paths include
-  `internal/pipeline`.
+  `pipeline.Provisioner` at all. `internal/pipeline/discover.go`'s
+  `Provisioner` interface — the one nothing implemented — is deleted (T-0071):
+  this package's `Provisioner` is the only one in the tree.
 - **No `event.Sink` anywhere in this package.** It emits no event of its own:
   the provisioned container reaches the candidate list through
   `internal/discover`, which probes it and prints it with
@@ -74,10 +73,9 @@ read a compose file for a host, port, user, password or database name.
   already puts prompt text on this channel — stderr — so the two waits that
   can outlast a developer's patience go there too. **Owed:** rows for
   `discover.provision.pulling`, `.created` and `.waiting`, plus an `ArgKey`
-  for a container name and one for an image, after which `Progress` is deleted
-  and these become sink sends. The same catalogue note already records that
-  `target.refused.start_timeout` cannot name its container or `docker logs
-  <name>` for want of that `ArgKey`.
+  for an image, after which `Progress` is deleted and these become sink
+  sends. `event.ArgContainer` already exists and `target.refused.start_timeout`
+  names its container and `docker logs <name>` with it (T-0071).
 - **`Request.Port` is chosen by the caller.** Q1's prompt names the port it is
   about to use (`... on port <free>`), so the port has to exist before the
   question is asked; `FreePort` is exported for that and the chosen value is
