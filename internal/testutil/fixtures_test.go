@@ -56,9 +56,11 @@ var pagilaTables = map[string]int{
 	"public.store":            2,
 }
 
-// nastyTables is every table in nasty.sql with the rows the fixture inserts.
-// public.stream_rows is empty unless LoadNasty is called with big=true, which
-// is the whole point of the gate.
+// nastyTables is every table a default load of nasty.sql creates, with the rows
+// the fixture inserts. public.stream_rows is empty unless LoadNasty is called
+// with big=true, which is the whole point of the gate; public.stream_docs is
+// not in this map at all, because the gate creates the table as well as its
+// rows (testdata/README.md trap 26).
 var nastyTables = map[string]int{
 	"billing.invoices":            3,
 	"public.LegacyCustomer":       3,
@@ -155,15 +157,15 @@ func TestLoadNasty(t *testing.T) {
 }
 
 // TestLoadNastyBig is the other half of the gate. Without it a gate stuck off
-// looks exactly like a gate that works: TestLoadNasty asserts stream_rows is
-// empty either way, and every streaming test downstream would then measure an
-// empty table.
+// looks exactly like a gate that works: TestLoadNasty asserts stream_rows and
+// stream_docs are empty either way, and every streaming test downstream would
+// then measure an empty table.
 //
-// It costs about six seconds and a couple of hundred megabytes on top of the
-// container, so -short skips it.
+// It costs some seconds and a few hundred megabytes on top of the container, so
+// -short skips it.
 func TestLoadNastyBig(t *testing.T) {
 	if testing.Short() {
-		t.Skip("the 2,000,000-row fill costs about six seconds and 200MB")
+		t.Skip("the 2,000,000-row and 1,000,000-row fills cost seconds and hundreds of MB")
 	}
 	ctx := context.Background()
 	SkipWithoutDocker(ctx, t)
@@ -188,6 +190,18 @@ func TestLoadNastyBig(t *testing.T) {
 	last, called := sequenceState(ctx, t, conn, "public", "stream_rows", "stream_row_id")
 	if last != StreamRows || !called {
 		t.Errorf("stream_rows_stream_row_id_seq is at (%d, is_called=%v), want (%d, true)", last, called, StreamRows)
+	}
+
+	// The text-keyed half (README trap 26), whose table the gate creates as well
+	// as fills. Its keys have to be distinct as well as numerous: the primary key
+	// would refuse a collision, so a count that matches is also the proof that
+	// 'doc-' || md5(g::text) is injective over this range.
+	if n := scanInt(ctx, t, conn, `SELECT count(*) FROM public.stream_docs`); n != StreamDocs {
+		t.Errorf("public.stream_docs has %d rows, want %d", n, StreamDocs)
+	}
+	if n := scanInt(ctx, t, conn, `
+		SELECT count(DISTINCT person_id) FROM public.stream_docs`); n != 1 {
+		t.Errorf("public.stream_docs references %d people, want 1", n)
 	}
 }
 
@@ -606,6 +620,14 @@ func assertNastyGateOff(ctx context.Context, t *testing.T, conn *pgx.Conn) {
 		SELECT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
 		               WHERE n.nspname = 'public' AND p.proname = 'fill_stream_rows')`) {
 		t.Error("public.fill_stream_rows is missing; the 2,000,000-row gate has nothing to call")
+	}
+	// The other half of the gate creates its own table and its own function
+	// (trap 26), so a default load must show neither. A stream_docs here would
+	// mean the gate has leaked above the \if.
+	if scanBool(ctx, t, conn, `
+		SELECT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+		               WHERE n.nspname = 'public' AND c.relname = 'stream_docs')`) {
+		t.Error("public.stream_docs exists after a default load; trap 26's table is gated behind big")
 	}
 }
 

@@ -13,19 +13,17 @@
 // and nothing else does. The plan printed the hold estimate before this started
 // (THREAT_MODEL.md T9).
 //
-// Memory is bounded by construction and not by hope, with one stated exception.
-// No table's rows are ever accumulated: one batch is filled, handed to the
-// channel and replaced, whatever the table's row count.
-//
-// The exception is the keys. pipeline.KeySet.Chunks materialises every chunk in
-// one call, and a chunk holds its own copy of the keys, so at the top of a
-// keyed step this package briefly holds a second copy of that step's key set
-// alongside the planner's. It is released chunk by chunk as the step runs
-// (step below), so the sustained cost is one chunk; the peak is one key set.
-// Bounding the peak too needs a chunk-at-a-time iterator on pipeline.KeySet,
-// which is an ARCHITECTURE.md §2 change. TestMemoryStaysBoundedOnTwoMillionRows
-// runs the whole of nasty.sql's 2,000,000-row stream_rows table through it —
-// keys included — under a runtime.MemStats ceiling.
+// Memory is bounded by construction and not by hope. No table's rows are ever
+// accumulated: one batch is filled, handed to the channel and replaced,
+// whatever the table's row count. Neither are its keys: a keyed step is walked
+// with pipeline.KeySet.EachChunk, which builds one chunk at a time, so this
+// package's peak over a step is one chunk of keys and one batch of rows and not
+// a second copy of the step's key set. (It was that second copy until
+// EachChunk existed; the Chunks call it replaced materialised every chunk
+// before the first read.) TestMemoryStaysBoundedOnTwoMillionRows and
+// TestMemoryStaysBoundedOnATextKeyedTable run the whole of nasty.sql's
+// 2,000,000-row stream_rows and its text-keyed stream_docs through it — keys
+// included — under a runtime.MemStats ceiling.
 package extract
 
 import (
@@ -154,26 +152,22 @@ func (e extractor) step(
 	if err != nil {
 		return err
 	}
-	// pipeline.KeySet.Chunks builds every chunk up front and each chunk holds
-	// its own copy of the keys (internal/plan's keyset.go allocates a fresh
-	// typed array per chunk), so ranging over the call would keep a second copy
-	// of the whole key set alive for the length of the table — 16 MiB for a
-	// 2,000,000-row int8 identity, more for text or uuid. Each chunk is dropped
-	// as it is consumed instead, so what is live is one chunk and one batch.
-	// Removing the up-front copy needs a chunk-at-a-time iterator on
-	// pipeline.KeySet, which is an ARCHITECTURE.md §2 change and is reported
-	// rather than made here.
-	chunks := step.Keys.Chunks(chunkSize)
-	for i := range chunks {
+	// EachChunk and not Chunks. Chunks builds every chunk before it returns any,
+	// and a chunk holds its own copy of the keys it carries (internal/plan's
+	// keyset.go allocates a fresh typed array per identity column per chunk), so
+	// ranging over that call held a second copy of the whole key set — 16 MiB
+	// for the 2,000,000-row int8 identity below, proportionally more for a text
+	// or uuid one — for the length of the table. The iterator builds one chunk,
+	// reads it and drops it, so this package's peak over a keyed step is one
+	// chunk and one batch whatever the step's key count.
+	if err := step.Keys.EachChunk(chunkSize, func(ch pipeline.Chunk) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		ch := chunks[i]
-		chunks[i] = nil
 		sql := rowsSQL(step.Table, cols, idCols, casts, ch)
-		if err := e.read(ctx, r, step.Table, sql, b, chunkArgs(ch, len(idCols))...); err != nil {
-			return err
-		}
+		return e.read(ctx, r, step.Table, sql, b, chunkArgs(ch, len(idCols))...)
+	}); err != nil {
+		return err
 	}
 	return b.finish(ctx)
 }

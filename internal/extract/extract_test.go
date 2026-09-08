@@ -49,17 +49,36 @@ var _ pipeline.KeySet = fakeKeys{}
 func (k fakeKeys) Len() int     { return k.n }
 func (k fakeKeys) Bytes() int64 { return int64(k.n) * 8 * 2 }
 
+func (k fakeKeys) chunk(start, end int) pipeline.Chunk {
+	ids := make([]int64, 0, end-start)
+	for i := start; i < end; i++ {
+		ids = append(ids, int64(i))
+	}
+	return fakeChunk{casts: []string{"::int8[]"}, cols: []any{ids}, n: len(ids)}
+}
+
 func (k fakeKeys) Chunks(n int) []pipeline.Chunk {
 	var out []pipeline.Chunk
 	for start := 0; start < k.n; start += n {
-		end := min(start+n, k.n)
-		ids := make([]int64, 0, end-start)
-		for i := start; i < end; i++ {
-			ids = append(ids, int64(i))
-		}
-		out = append(out, fakeChunk{casts: []string{"::int8[]"}, cols: []any{ids}, n: len(ids)})
+		out = append(out, k.chunk(start, min(start+n, k.n)))
 	}
 	return out
+}
+
+func (k fakeKeys) EachChunk(n int, f func(pipeline.Chunk) error) error {
+	for start := 0; start < k.n; start += n {
+		if err := f(k.chunk(start, min(start+n, k.n))); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (k fakeKeys) FirstChunk(n int) pipeline.Chunk {
+	if k.n == 0 {
+		return nil
+	}
+	return k.chunk(0, min(n, k.n))
 }
 
 // fakeRows returns rowsPerCall rows of ncols values each. err is what Err()
@@ -455,8 +474,11 @@ func TestAnyOtherReadFailureIsNotARefusal(t *testing.T) {
 // pipeline.KeySet.Chunks builds every chunk in one call and each holds its own
 // copy of the keys (internal/plan's keyset.go), so ranging over the call
 // directly keeps a second copy of the whole key set alive for the length of the
-// table. That is invisible to the 2,000,000-row integration test, which is
-// int8-keyed and passes on margin; this is the part of it a unit test can hold.
+// table. Chunks is still what this fake's Chunks does; EachChunk builds one
+// chunk at a time, which is what extract takes, and this test is what says the
+// consumed ones then go. That is invisible to the 2,000,000-row integration
+// test, which is int8-keyed and passes on margin; this is the part of it a unit
+// test can hold.
 type releasingKeys struct {
 	n        int
 	released *atomic.Int64
@@ -470,18 +492,37 @@ func (k releasingKeys) Bytes() int64 { return int64(k.n) * 16 }
 // payload stands for the typed array a real chunk copies its keys into.
 type payload struct{ ids []int64 }
 
+func (k releasingKeys) chunk(start, end int) pipeline.Chunk {
+	p := &payload{ids: make([]int64, 0, end-start)}
+	for i := start; i < end; i++ {
+		p.ids = append(p.ids, int64(i))
+	}
+	runtime.AddCleanup(p, func(c *atomic.Int64) { c.Add(1) }, k.released)
+	return releasingChunk{p: p}
+}
+
 func (k releasingKeys) Chunks(n int) []pipeline.Chunk {
 	var out []pipeline.Chunk
 	for start := 0; start < k.n; start += n {
-		end := min(start+n, k.n)
-		p := &payload{ids: make([]int64, 0, end-start)}
-		for i := start; i < end; i++ {
-			p.ids = append(p.ids, int64(i))
-		}
-		runtime.AddCleanup(p, func(c *atomic.Int64) { c.Add(1) }, k.released)
-		out = append(out, releasingChunk{p: p})
+		out = append(out, k.chunk(start, min(start+n, k.n)))
 	}
 	return out
+}
+
+func (k releasingKeys) EachChunk(n int, f func(pipeline.Chunk) error) error {
+	for start := 0; start < k.n; start += n {
+		if err := f(k.chunk(start, min(start+n, k.n))); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (k releasingKeys) FirstChunk(n int) pipeline.Chunk {
+	if k.n == 0 {
+		return nil
+	}
+	return k.chunk(0, min(n, k.n))
 }
 
 type releasingChunk struct{ p *payload }
@@ -510,8 +551,8 @@ func TestAChunkIsReleasedAsItIsConsumed(t *testing.T) {
 		seen++
 		if seen == chunks {
 			// On the last read, every chunk but this one has been consumed.
-			// Without the release they are all still reachable through the
-			// slice Chunks returned.
+			// Under Chunks they would all still be reachable through the slice
+			// that call returned; under EachChunk nothing holds them.
 			for range 20 {
 				runtime.GC()
 				if released.Load() > 0 {

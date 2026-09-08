@@ -11,8 +11,10 @@ being interesting should be deleted from both files in the same commit.
 
 ```
 psql -f testdata/pagila/pagila-schema.sql -f testdata/pagila/pagila-data.sql
-psql -f testdata/nasty.sql              # fast: public.stream_rows stays empty
-psql -v big=1 -f testdata/nasty.sql     # also fills stream_rows with 2,000,000 rows
+psql -f testdata/nasty.sql              # fast: stream_rows stays empty and
+                                        # stream_docs is not created at all
+psql -v big=1 -f testdata/nasty.sql     # also fills stream_rows (2,000,000 rows)
+                                        # and creates and fills stream_docs (1,000,000)
 ```
 
 From Go, `internal/testutil.LoadPagila(ctx, url)` and
@@ -117,7 +119,8 @@ the partitioned root, so its count is the sum of its seven leaves.
 
 ## nasty.sql
 
-25 tables, 5 people, and one trap per thing that goes wrong. It needs no
+25 tables on a default load (26 with `big`), 5 people, and one trap per thing
+that goes wrong. It needs no
 extension and no superuser, and it loads unchanged on PostgreSQL 14, 16 and 18.
 
 **Every table has a foreign-key path to `public.people`, and that is a
@@ -154,6 +157,10 @@ file can run without the flag.
 | `public.order_items` | 7 | | `public.tenant_user_sessions` | 5 |
 | `public.orders` | 5 | | `public.tenant_users` | 4 |
 | `public.organisations` | 2 | | | |
+
+`public.stream_docs` is not in that table because a default load does not create
+it: trap 26 gates the `CREATE TABLE` as well as the rows. With `big` it is a
+26th table holding 1,000,000 rows.
 
 ### The traps
 
@@ -626,27 +633,83 @@ every other test over this fixture cheap. A budget refusal here is the correct
 behaviour for the defaults and a bug for the run above; the entry has to name
 which one it is talking about, and this one is talking about the run above.
 
-The gate is a psql conditional at the very end of the file:
+The gate is a psql conditional at the very end of the file, and it carries
+trap 26's table, function and fill as well:
 
 ```sql
 \if :{?big}
 SELECT public.fill_stream_rows(2000000);
 ANALYZE public.stream_rows;
+
+CREATE TABLE public.stream_docs (...);
+CREATE FUNCTION public.fill_stream_docs(n bigint) ...;
+SELECT public.fill_stream_docs(1000000);
+ANALYZE public.stream_docs;
 \endif
 ```
 
 `internal/testutil` interprets none of that. It cuts the gate off the end of the
-file and, when `big` is set, issues the two statements inside it directly; it
+file and, when `big` is set, issues the statements inside it directly; it
 refuses to load `nasty.sql` at all if the gate is missing or no longer fills
-`StreamRows` rows, so the psql path and the Go path cannot drift apart in
-silence. The only psql construct it does implement is `COPY ... FROM stdin`,
+`StreamRows` and `StreamDocs` rows, so the psql path and the Go path cannot
+drift apart in silence. The only psql construct it does implement is `COPY ... FROM stdin`,
 which the wire protocol cannot carry as ordinary SQL and which is how
 `pagila-data.sql` is written. Every other backslash command is an error, so a
 fixture that grows a `\connect` fails loudly instead of loading half of itself.
 
-`TestLoadNastyBig` runs the `big` path and asserts both the 2,000,000 rows and
-the sequence position, because a gate stuck off is indistinguishable from a
-working one if only the off state is ever tested.
+`TestLoadNastyBig` runs the `big` path and asserts both fills' row counts and
+`stream_rows`'s sequence position, because a gate stuck off is indistinguishable
+from a working one if only the off state is ever tested.
+
+**26. A million rows behind a text key, on demand** — `public.stream_docs`,
+created and filled by the same gate as trap 22.
+
+Shaped like `stream_rows`: same four columns, same single owning person
+(`person_id bigint NOT NULL REFERENCES public.people`, so the path to the root
+is there), absent unless the file is loaded with `-v big=1`. The identity is
+what differs, and it is the whole trap. `stream_rows` is keyed on one `bigint`, which
+ARCHITECTURE.md §2 stores as a `[]int64` and hands to the server as a `[]int64`:
+eight bytes a key on both sides, 16 MiB for two million of them. `stream_docs`
+is keyed on `doc_key text` — `'doc-' || md5(g::text)`, 36 characters,
+deterministic so two loads produce the same keys in the same order — which is
+stored as a slab of encoded tuples with an eight-byte span index and handed to
+the server as a `[]string` of separately allocated strings: about 64 bytes a key
+in a chunk, ~64 MiB for one copy of a million-key set.
+
+That difference is what the table exists for. A stage that materialises a whole
+key set alongside the planner's passes a 64 MiB ceiling on `stream_rows` with
+room to spare and fails it on `stream_docs`, which is exactly what
+`internal/extract`'s `TestMemoryStaysBoundedOnATextKeyedTable` measured before
+`pipeline.KeySet.EachChunk` existed: 63 MiB of growth with `Chunks`, 0 to 5 MiB
+with the chunk-at-a-time iterator. The ceiling there is 32 MiB, between the two.
+
+A run over it is trap 22's run with the table name changed, and the same warning
+applies: under §3's defaults `stream_docs` is a capped child of `people` and a
+default run pulls 100 rows, not a million.
+
+**The gate creates the table, not only its rows, and that is unlike trap 22.**
+`stream_rows` is declared above the gate so that every load sees its shape;
+`stream_docs` is declared inside it, so a default load has 25 tables and only a
+`big` load has 26. The reason is mechanical: the table list of a default load is
+asserted table by table in
+`internal/introspect/introspect_integration_test.go`, and the task that added
+this trap (T-0050) was authorised to write `testdata/` and not
+`internal/introspect`, so a 26th table on every load would have failed that
+assertion for every caller of `LoadNasty`. Nothing outside the two
+`internal/extract` memory tests wants this table. A later task that wants it
+present on every load moves the `CREATE TABLE` and `CREATE FUNCTION` above the
+gate and updates that table list in the same commit — and, because it would then
+be a table every run plans over, checks what `--skip-table`-free invariant runs
+do with it first. It would also remove the `nastyTables` hole and the
+`assertNastyGateOff` special case in `internal/testutil/fixtures_test.go`, and
+the paragraphs this one is referenced from in `nasty.sql`, `testdata/CLAUDE.md`,
+`internal/testutil/CLAUDE.md` and `internal/extract/CLAUDE.md`.
+
+**This is a workaround with no tracker task and no owner.** A fixture whose
+table list changes with a load flag is not a shape to keep; it is here because
+one task's write boundary stopped at `testdata/`, and T-0050 could not file the
+follow-up (`tracker/` is orchestrator-only, root CLAUDE.md). This paragraph is
+the only marker in the tree, so it survives until the move above happens.
 
 #### Masking domains
 

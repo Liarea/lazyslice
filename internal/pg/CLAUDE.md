@@ -56,6 +56,52 @@ for the privilege.
   and `{where}` and nothing else. A stage needing a shape this grammar cannot
   express adds a placeholder in `tracer.go`, where it is reviewed once; it does
   not register a looser template.
+- **A quoted identifier inside a template is fixed text, never a placeholder**
+  (`templateSegments`, T-0050). `internal/extract` and `internal/verify` build
+  per-table shapes by quoting a table name into the template, precisely so that
+  the shape names one relation instead of admitting every relation — and an
+  identifier is arbitrary text: `CREATE TABLE public."{ident}"` is a table a
+  person can make. Compiling the placeholder inside that quoted name turned
+  extract's `extract.lookup.public.{ident}` into `SELECT {selectlist} FROM
+  {ident} t ORDER BY {idents} LIMIT 1001`, an ordered read of anything including
+  `pg_catalog.pg_authid`, which is the exact widening the per-table name exists
+  to prevent; and a table called `{table}` made `NewTracer` fail on an unknown
+  placeholder and took the run with it. The scan skips quoted runs (`""` is an
+  embedded quote, and an unterminated quote takes the rest of the template, so a
+  malformed template matches nothing rather than everything). Nothing lazyslice
+  writes puts a placeholder inside quotes — every placeholder stands for a whole
+  identifier, quotes included — so this can only ever narrow a shape.
+  **A quoted name is matched the way Postgres reads one**: `regexp.QuoteMeta`
+  inside `(?-i:...)`, so case-sensitively and space for space, while the SQL
+  around it keeps the `(?is)` an unquoted (server-folded) identifier needs.
+  Matching it with `quoteLiteral` under the outer `(?i)`, as the first version
+  did, was the same widening in a smaller size: a space in the template stands
+  for a run of *zero or more* spaces, so a shape naming `"my table"` admitted a
+  read of `"mytable"`, and the case fold let a shape naming
+  `"LegacyCustomer"` — `testdata/nasty.sql` ships that table — admit a read of
+  `"legacycustomer"`, which on the server is a different table.
+  `TestAQuotedNameInAShapeIsMatchedAsPostgresReadsOne` holds both, in both
+  directions. One residual, recorded rather than closed: `normaliseSQL` collapses
+  whitespace runs on both sides before either is matched, so a shape naming
+  `"my table"` still admits a read of `"my  table"`. Closing it means
+  normalising around quotes instead of through them, which changes how every
+  statement — an operator's `--where` predicate included — is normalised.
+  **A typo is the cost of this rule**: a stage that writes `FROM "{ident}"`
+  meaning the placeholder now compiles a shape that matches only a table
+  actually called `{ident}`, and `expandInto`'s build-time refusal cannot see
+  inside quotes to say so. The two are not separable from the template string —
+  a name and a typo look identical — and the widening is the one that fails
+  silently, so this is the direction the ambiguity is resolved in. What catches
+  the typo instead is each stage's own shapes test, which builds a statement
+  with the real builder and runs it through a real `Tracer`
+  (`internal/extract/shapes_test.go`, `internal/plan/shapes_test.go`,
+  `TestSourceShapesCoverThisPackagesOwnStatements` here): a template that can
+  never match fails there, at build time, as it did before.
+  `TestAPlaceholderShapedTableNameIsAName` and
+  `TestTemplateSegmentsSplitsOnQuotedIdentifiers` are the guards here;
+  `internal/extract`'s
+  `TestALookupShapeForATableNamedWithBracesNamesThatTableAlone` is the guard at
+  the other end.
 - **The four join placeholders are structures, not escape hatches.**
   `{selectlist}`, `{casts}` and `{keypred}` were added for the planner and
   extract, whose statements are built per table and per key arity
@@ -244,9 +290,52 @@ for the privilege.
   `Connect` therefore registers `source.read_only` (a literal template, narrower
   than any shape with a placeholder) and execs the `SET` in `AfterConnect`.
   `TestConnectAddsNoStartupParameterAPoolerWouldRefuse` and
-  `TestTheReadOnlySettingIsASessionStatementOnTheAllowlist` are the guard; a
-  real pooler is not in the test suite, so the guard is over what we send, not
-  over what PgBouncer answers.
+  `TestTheReadOnlySettingIsASessionStatementOnTheAllowlist` are the unit guard,
+  and it is over what we send rather than over what a pooler answers: it
+  compares `ConnConfig.RuntimeParams` against a hand-written list of what
+  PgBouncer documents it accepts, so it cannot fail on a list that has gone
+  stale. **`pooler_integration_test.go` is the half where PgBouncer answers**
+  (T-0050): `internal/testutil.PgBouncer` starts a real pooler in transaction
+  mode in front of a real server, `TestASourceOpensAndReadsThroughAPooler` opens
+  a `Source` through it and runs export/import/read, and
+  `TestAStartupParameterOutsideThePoolersListRefusesTheConnection` is the
+  negative control — the same parameter moved into the startup packet and no
+  connection can be opened at all, which is what makes the decision above a
+  test rather than a comment. That control now has a positive control in front
+  of it (the same pooled URL, the same pool, without the parameter) and asserts
+  the *wording* of the refusal, so it can no longer pass on a pooler that was
+  never reachable.
+  **What the pooled test does not certify, and a defect it uncovered** (T-0050
+  fix round): the `SET` is a session setting on the *server* connection the
+  pooler assigned, and PgBouncer in transaction mode does not run
+  `server_reset_query` by default (`server_reset_query_always = 0`), so it stays
+  on that server connection after lazyslice is done with it and every later
+  client of that pooler inherits it — measured, not inferred: a second,
+  unrelated client through the same pooler read `on` back without issuing a
+  `SET`, and its `CREATE TABLE` failed with "cannot execute CREATE TABLE in a
+  read-only transaction". So a run against a pooled source can leave other
+  applications sharing that pooler read-only for up to `server_lifetime`
+  (3600s by default) after lazyslice exits. `TestASourceOpensAndReadsThroughAPooler`
+  is worded for what it can say — the `SET` reached this client's own server
+  connection — and says in its comment that it is not a certificate about the
+  pooler as a whole; `internal/invariants`'s I4 cannot see this either, because
+  it compares catalogs and row checksums and not server session state.
+  **This is an open defect, not a discharged one.** It has no tracker task and
+  no owner: the task that found it could write `internal/pg` but not `tracker/`
+  (orchestrator-only, root CLAUDE.md) and not THREAT_MODEL.md, and the fix needs
+  both. Until that changes this paragraph is the defect's only marker in the
+  tree, so do not delete it as stale prose — delete it with the fix.
+  The fix, for whoever takes it: every source transaction is already `BEGIN
+  ISOLATION LEVEL REPEATABLE READ READ ONLY`, so the session-wide default is
+  defence in depth for the autocommit path alone (`Source.SystemID`,
+  `source.go:160`, which queries outside any `BEGIN`). Either scope it per
+  transaction — put `SystemID` inside a read-only transaction and drop the
+  `AfterConnect` exec, which also retires the `source.read_only` shape and
+  `TestTheReadOnlySettingIsASessionStatementOnTheAllowlist` — or issue `RESET
+  default_transaction_read_only` before a connection goes back to the pooler.
+  Scoping it per transaction changes what THREAT_MODEL.md T9 claims (it lists
+  the session setting among T9's rails), so the fix carries that wording with
+  it; that is why it is a task of its own and not a test round's.
 - `uuidV4` is local rather than a dependency: `go.mod` has no direct one, and
   this is the only UUID lazyslice makes.
 - **`Eligibility.Local` records whether the target is local, never whether the
@@ -262,6 +351,30 @@ for the privilege.
   `Serialised()` still cannot be consulted *before* the first fallback — an
   endpoint says nothing about whether it can import a snapshot until one is
   offered to it — so the waiting is the guarantee and the flag is the report.
+  **The condition is "this endpoint cannot give a reader", not "this endpoint
+  refused the snapshot"** (T-0050 fix round). Three answers reach it — the
+  acquire failing, the `BEGIN` failing, `SET TRANSACTION SNAPSHOT` failing — and
+  a cancelled or expired context reaches none of them, because the tracer
+  refuses a statement *by* cancelling the context and a caller that walked away
+  cancels its own; reading either as a pooler would turn a refused statement
+  into a silently serialised run. The first two were added because they are what
+  a restrictive pooler actually says. **What a real PgBouncer does is worth
+  knowing** (measured against `edoburu/pgbouncer:v1.25.2-p0` in transaction
+  mode): given a second server connection it pins one for the length of the
+  holder's transaction, so the exporting transaction is still open when the
+  second client connects and `SET TRANSACTION SNAPSHOT` **succeeds** — with room
+  to spare, a pooled run is a normal parallel-reader run
+  (`TestASourceOpensAndReadsThroughAPooler`). Given `max_db_connections=1`, the
+  holder's transaction is holding the only one and the reader's acquire comes
+  back `FATAL: query_wait_timeout` (SQLSTATE 08P01) after the pooler's own wait
+  — which `Source.Reader` used to return as a run-ending error, leaving §8's
+  `--single-connection` automatic half unreachable on the exact topology it
+  exists for. It now serialises, and
+  `TestAPoolerWithOneServerConnectionSerialisesTheExtract` is the proof: it fails
+  with `query_wait_timeout` against the old condition.
+  `TestTheSerialisedFallbackWorksThroughAPooler` drives the third answer with a
+  snapshot identifier the server will not import, which is a **synthetic**
+  trigger and is labelled as one in the test — no pooler produces it.
 - **A driver error from the write side is withheld, not wrapped.** pgtype
   formats a value it cannot encode with `%#v`, pgx returns that text unchanged
   through `CopyFrom`, and `cmd/lazyslice` prints a non-`*pgconn.PgError` as
@@ -292,10 +405,11 @@ for the privilege.
   T8); the failure is now at least printable (see the withheld-error entry
   above). This is a recorded debt, not an oversight.
 
-**Test.** `go test ./internal/pg/...`; the gate, tracer, identity and
-read-only-pool behaviour need `go test -tags integration ./internal/pg/...`
-(the `TestGate*` suite in THREAT_MODEL.md T2, plus
-`TestAWriteOutsideATransactionIsRefusedByTheServer` for T9). Every branch of the gate has a case there: the three
+**Test.** `go test ./internal/pg/...`; the gate, tracer, identity,
+read-only-pool and pooler behaviour need
+`go test -tags integration ./internal/pg/...` (the `TestGate*` suite in
+THREAT_MODEL.md T2, `TestAWriteOutsideATransactionIsRefusedByTheServer` for T9,
+and `pooler_integration_test.go` for ADR-005's pooled endpoints). Every branch of the gate has a case there: the three
 ARCHITECTURE.md §9 names them — `TestGateRefusesRLSTable`,
 `TestGateRefusesTargetAboveTableCap`, `TestGateRefusesRemoteTargetWithoutFlag` —
 plus `TestGateRefusesTheSourceUnderAnotherName` for the half of rule 1 that

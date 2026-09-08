@@ -114,8 +114,21 @@ func requireSuperuser(ctx context.Context, conn *pgconn.PgConn) error {
 
 // StreamRows is the number of rows LoadNasty(..., big=true) puts in
 // public.stream_rows. It is the number written into nasty.sql's own gate, and
-// loadNastyGate checks the two have not drifted apart.
+// splitNastyGate checks the two have not drifted apart.
 const StreamRows = 2_000_000
+
+// StreamDocs is the same for public.stream_docs, the text-keyed half of the
+// gate (testdata/README.md trap 26). It is smaller than StreamRows and costs
+// more per row to hold: a text key set is a slab of encoded tuples with an
+// index rather than a []int64, and a chunk of one is a []string of separately
+// allocated strings, so a stage that copies a whole key set is caught here at
+// a million rows where stream_rows lets it pass at two.
+//
+// The gate creates that table as well as filling it, which stream_rows' half
+// does not: a default load has 25 tables and a big one 26. README trap 26 gives
+// the reason and names what a later task moving it above the gate has to update
+// with it.
+const StreamDocs = 1_000_000
 
 // nastyGate is the first line of the psql conditional at the end of nasty.sql.
 // Everything from here to the end of the file is the psql spelling of what
@@ -138,15 +151,16 @@ const nastyNotRecreatableGate = `\if :{?notrecreatable}`
 // connURL. Every object in that file is a trap and testdata/README.md states
 // the behaviour lazyslice must show for each one.
 //
-// big fills public.stream_rows with StreamRows rows. That costs a few seconds
-// and a couple of hundred megabytes of table, and only the streaming tests want
-// it, so every other caller passes false and gets an empty stream_rows with the
-// function and the constraints still in place.
+// big fills public.stream_rows with StreamRows rows, and creates and fills
+// public.stream_docs with StreamDocs rows. That costs some seconds and a few
+// hundred megabytes of table, and only the streaming tests want it, so every
+// other caller passes false and gets an empty stream_rows -- its fill function
+// and its constraints still in place -- and no stream_docs at all.
 //
-// The fill is the tail of nasty.sql, gated there behind `\if :{?big}` so that
+// The fills are the tail of nasty.sql, gated there behind `\if :{?big}` so that
 // `psql -v big=1 -f testdata/nasty.sql` does the same thing. Nothing here
 // interprets psql conditionals: the gate is cut off the script and, when big is
-// set, its two statements are issued directly.
+// set, the statements inside it are issued directly.
 //
 // LoadNasty also cuts out trap 25's foreign key (nastyNotRecreatableGate),
 // unconditionally, so that every caller here -- and everything downstream that
@@ -179,7 +193,7 @@ func LoadNasty(ctx context.Context, connURL string, big bool) error {
 		return nil
 	}
 	if err := execScript(ctx, conn, fill); err != nil {
-		return fmt.Errorf("testutil: filling public.stream_rows: %w", err)
+		return fmt.Errorf("testutil: filling public.stream_rows and public.stream_docs: %w", err)
 	}
 	return nil
 }
@@ -243,19 +257,25 @@ func cutGate(script, gate string) (rest, inside string, err error) {
 // already removed an earlier gate) without its trailing `\if :{?big}` gate,
 // and the SQL that gate contains.
 //
-// The gate is required to be there and to fill StreamRows rows: a fixture edit
-// that renames it, removes it or changes the row count would otherwise leave
-// LoadNasty(big=true) quietly doing something other than what
+// The gate is required to be there and to fill StreamRows and StreamDocs rows:
+// a fixture edit that renames it, removes it or changes a row count would
+// otherwise leave LoadNasty(big=true) quietly doing something other than what
 // `psql -v big=1` does, and every streaming test downstream would be measuring
-// the wrong table.
+// the wrong table. Both fills are checked, not only the first: adding the
+// second one to this file and not to the gate, or the other way round, is
+// exactly the drift this function exists to refuse.
 func splitNastyGate(script string) (body, fill string, err error) {
 	body, fill, err = cutGate(script, nastyGate)
 	if err != nil {
 		return "", "", err
 	}
-	want := "fill_stream_rows(" + strconv.Itoa(StreamRows) + ")"
-	if !strings.Contains(fill, want) {
-		return "", "", fmt.Errorf("testutil: nasty.sql's gate does not call %s; StreamRows and the fixture have drifted apart", want)
+	for _, want := range []string{
+		"fill_stream_rows(" + strconv.Itoa(StreamRows) + ")",
+		"fill_stream_docs(" + strconv.Itoa(StreamDocs) + ")",
+	} {
+		if !strings.Contains(fill, want) {
+			return "", "", fmt.Errorf("testutil: nasty.sql's gate does not call %s; the row-count constants and the fixture have drifted apart", want)
+		}
 	}
 	return body, fill, nil
 }

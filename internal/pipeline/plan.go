@@ -44,10 +44,29 @@ type Identity struct {
 // implementation returns len x 8 x 2 (the slice, doubled for overhead, which is
 // the figure ADR-005 quotes); the slab implementation returns its slab size x 2.
 // Iteration order is key order, never Go map order.
+//
+// There are three ways to read a set, and which one a caller picks is a memory
+// decision rather than a matter of taste, because a Chunk holds its own copy of
+// the keys it carries:
+//
+//	Chunks(n)      every chunk at once — a second copy of the whole set
+//	EachChunk(n,f) one chunk at a time — the set's peak cost is one chunk
+//	FirstChunk(n)  the first chunk alone, nil when the set is empty
+//
+// Chunks is what a caller that wants the whole set materialised takes;
+// internal/extract takes EachChunk, so a table of any size costs it one chunk
+// and one batch, and internal/verify takes FirstChunk, because a bounded sample
+// of a step at the --row-budget ceiling must not allocate a second copy of that
+// step's key set at verify time — after --memory-budget (section 8, exit 11)
+// has been checked at plan and can no longer refuse anything.
+//
+// EachChunk stops at the first error f returns and returns it.
 type KeySet interface {
 	Len() int
 	Bytes() int64
 	Chunks(n int) []Chunk // consecutive runs of at most n tuples, in key order
+	FirstChunk(n int) Chunk
+	EachChunk(n int, f func(Chunk) error) error
 }
 
 // Chunk is one unnest argument list: one typed array per identity column, so a

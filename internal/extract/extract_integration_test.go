@@ -303,6 +303,13 @@ func TestMemoryStaysBoundedOnTwoMillionRows(t *testing.T) {
 	req.Depth = 1
 	req.RowBudget = 5_000_000
 	req.MemoryBudget = 1 << 30
+	// stream_docs is the other half of the same gate and the subject of
+	// TestMemoryStaysBoundedOnATextKeyedTable; skipped here so this test
+	// measures the key encoding it is about and nothing else. The skip is a
+	// plan-time one and not a saving: a big load runs the whole gate, so both
+	// tables are filled for either test and this one carries stream_docs'
+	// million rows on disk whether it reads them or not.
+	req.Skip = append(req.Skip, tref("public", "stream_docs"))
 	f := newFixture(ctx, t, true, req)
 
 	streamRows := tref("public", "stream_rows")
@@ -385,6 +392,113 @@ func TestMemoryStaysBoundedOnTwoMillionRows(t *testing.T) {
 		base.HeapAlloc>>20, peak>>20, growth>>20, total)
 	if growth > ceiling {
 		t.Errorf("the heap grew %d MiB while extracting %d rows, past the %d MiB ceiling: extract is buffering",
+			growth>>20, total, ceiling>>20)
+	}
+}
+
+// The same claim where the keys cost what keys usually cost.
+//
+// stream_rows above is keyed on one bigint, which internal/plan stores as a
+// []int64 and a chunk carries as a []int64: eight bytes a key on both sides,
+// 16 MiB for the whole set, so a second copy of it fits inside the ceiling and
+// that test passes whether or not extract makes one. stream_docs is the same
+// shape of table keyed on a 36-character text primary key (testdata/README.md
+// trap 26), which is stored as a slab of encoded tuples with an eight-byte span
+// index and handed to the server as a []string of separately allocated
+// strings — about 64 bytes a key in a chunk. At StreamDocs keys that is ~64 MiB
+// for one copy of the set, so the difference between "one chunk at a time" and
+// "every chunk up front" is the difference between passing and failing the same
+// ceiling. This is the test that can fail on the thing the other one asserts.
+func TestMemoryStaysBoundedOnATextKeyedTable(t *testing.T) {
+	ctx := context.Background()
+	req := nastyRequest()
+	req.Cap = 3_000_000
+	req.Depth = 1
+	req.RowBudget = 5_000_000
+	req.MemoryBudget = 1 << 30
+	// The int8-keyed table is the subject of the test above. Skipped in the plan,
+	// not in the fixture: LoadNasty(big) fills both tables whichever of the two
+	// tests asks for it (see the note in the other one).
+	req.Skip = append(req.Skip, tref("public", "stream_rows"))
+	f := newFixture(ctx, t, true, req)
+
+	streamDocs := tref("public", "stream_docs")
+	step, ok := stepFor(f.plan, streamDocs)
+	if !ok || step.Keys == nil {
+		t.Fatal("public.stream_docs is not a keyed step of the plan")
+	}
+	if step.Keys.Len() < testutil.StreamDocs {
+		t.Fatalf("the plan selected %d stream_docs, want the whole %d-row table",
+			step.Keys.Len(), testutil.StreamDocs)
+	}
+	if got := step.Identity.Columns; len(got) != 1 || got[0] != "doc_key" {
+		t.Fatalf("stream_docs identity is %v, want the text key [doc_key]: this test is about "+
+			"what a text key set costs, and an integer identity would not measure it", got)
+	}
+
+	cls := &pipeline.Classification{Decisions: map[ref.ColumnRef]pipeline.Decision{
+		{Table: streamDocs, Column: "email"}: {
+			Col:      ref.ColumnRef{Table: streamDocs, Column: "email"},
+			Category: pipeline.CatEmail,
+			Masker:   mask.MaskerEmail,
+			Masked:   true,
+		},
+	}}
+	var runKey mask.Key
+	for i := range runKey {
+		runKey[i] = byte(i)
+	}
+	res := transform.NewResidual(int64(step.Keys.Len()))
+	masker := transform.New(f.schema)
+
+	runtime.GC()
+	var base runtime.MemStats
+	runtime.ReadMemStats(&base)
+
+	out := make(chan pipeline.RowBatch, 8)
+	peak := base.HeapAlloc
+	total := 0
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		n := 0
+		for b := range out {
+			if _, err := masker.Transform(b, cls, &runKey, res); err != nil {
+				t.Errorf("Transform: %v", err)
+				continue
+			}
+			total += len(b.Rows)
+			n++
+			if n%100 == 0 {
+				runtime.GC()
+				var m runtime.MemStats
+				runtime.ReadMemStats(&m)
+				peak = max(peak, m.HeapAlloc)
+			}
+		}
+	}()
+	if err := New(f.schema).Extract(ctx, f.reader, f.plan, out); err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+	<-done
+
+	if total < testutil.StreamDocs {
+		t.Fatalf("extracted %d rows in total, want at least the %d of stream_docs",
+			total, testutil.StreamDocs)
+	}
+
+	// The ceiling is half the int8 test's, because the margin here is measured
+	// rather than assumed: with EachChunk the growth is 0 to 5 MiB, and with the
+	// Chunks call it replaced — reintroduced on purpose to check this test can
+	// fail — it is 63 MiB. 32 MiB sits between them with room on both sides,
+	// where 64 MiB would have let the buffering version pass by one megabyte.
+	const ceiling = 32 << 20
+	growth := int64(peak) - int64(base.HeapAlloc)
+	t.Logf("heap: baseline %d MiB, peak %d MiB, growth %d MiB over %d text-keyed rows",
+		base.HeapAlloc>>20, peak>>20, growth>>20, total)
+	if growth > ceiling {
+		t.Errorf("the heap grew %d MiB while extracting %d text-keyed rows, past the %d MiB "+
+			"ceiling: extract is holding more than one chunk of keys",
 			growth>>20, total, ceiling>>20)
 	}
 }

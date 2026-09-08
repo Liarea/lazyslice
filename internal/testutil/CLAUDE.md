@@ -1,21 +1,47 @@
 # internal/testutil
 
 Fixture loaders for `testdata/`: `LoadPagila(ctx, url)`, `LoadNasty(ctx, url,
-big)`, `LoadNastyNotRecreatable(ctx, url)`, and the Postgres container helpers
-other integration tests build on. Test support code only — nothing here is
-imported by non-test code.
+big)`, `LoadNastyNotRecreatable(ctx, url)`, and the container helpers other
+integration tests build on — `Postgres(ctx, t, image)` and
+`PgBouncer(ctx, t, image, settings...)`. Test support code only — nothing here
+is imported by non-test code.
 
 **Contract.** `testdata/README.md` is the spec this package implements: table
-lists, row counts, and every one of the 22 `nasty.sql` traps it must be
+lists, row counts, and every one of the 26 `nasty.sql` traps it must be
 possible to assert against after loading. `fixtures_test.go` (behind
 `integration`) is the enforcement.
 
 **Rules.**
 - `LoadNasty`'s `big` handling must track `nasty.sql`'s own `\if :{?big}` gate
-  exactly — cut the gate text off the file, run its two statements directly
-  when `big` is set, and **refuse to load at all** if the gate is missing or
-  no longer fills `stream_rows` (`testdata/README.md` trap 22) — the psql path
-  and the Go path must never be able to drift apart silently.
+  exactly — cut the gate text off the file, run the statements inside it
+  directly when `big` is set, and **refuse to load at all** if the gate is
+  missing or no longer fills `stream_rows` (`testdata/README.md` trap 22) and
+  `stream_docs` (trap 26) with `StreamRows` and `StreamDocs` rows — the psql
+  path and the Go path must never be able to drift apart silently. Both fills
+  are checked, not only the first: the two tables exist to measure two key
+  encodings (`bigint` and 36-character `text`), and a gate that quietly stopped
+  filling one would leave the test that needs it measuring an empty table.
+  `stream_docs` is *created* by the gate as well as filled, so `nastyTables`
+  does not list it and `assertNastyGateOff` asserts it is absent after a default
+  load; `README.md` trap 26 says why it is gated that far.
+- **`PgBouncer` starts its own server**, on a Docker network the two containers
+  share, and returns the pooled URL and the direct one. Load a fixture through
+  the direct URL — the loader speaks psql constructs a pooler has no reason to
+  survive — and open the source through the pooled one. It does not set
+  `IGNORE_STARTUP_PARAMETERS`: the image's default is `extra_float_digits` and
+  nothing else, which is the stock behaviour `internal/pg` has to meet, and
+  widening it here would quietly delete the assertion the container exists to
+  make.
+- **`PgBouncer`'s `settings` are merged over its defaults, `DATABASE_URL` last.**
+  The edoburu image writes each environment entry into the `pgbouncer.ini` it
+  generates, so a test asks for a restrictive pooler with
+  `MAX_DB_CONNECTIONS`/`DEFAULT_POOL_SIZE` and shortens the wait with
+  `QUERY_WAIT_TIMEOUT` (`internal/pg`'s
+  `TestAPoolerWithOneServerConnectionSerialisesTheExtract`, which is ADR-005's
+  serialised extract driven by the pooler rather than by a synthetic snapshot
+  id). A caller may override any default, `POOL_MODE` included; `DATABASE_URL`
+  is written after the merge, because the pooler's route to the server this
+  function started is not a test's to redirect.
 - `nasty.sql` also gates trap 25's foreign key
   (`public.price_list_notes.list_id REFERENCES public.price_lists_eu
   (list_id)`) behind `\if :{?notrecreatable}`, the same device. That edge is
@@ -68,7 +94,10 @@ possible to assert against after loading. `fixtures_test.go` (behind
 **Test.** `go test ./internal/testutil/...` for the loader's own lexing (no
 Docker), then `go test -tags integration ./internal/testutil/...` for the
 fixtures themselves (needs a Docker endpoint via
-`internal/testutil/postgres.go`).
+`internal/testutil/postgres.go`). `PgBouncer` has no test of its own here: its
+subject is `internal/pg`'s behaviour through a pooler, so
+`internal/pg/pooler_integration_test.go` is what exercises it, and a helper that
+started nothing would fail there.
 
 **Never:** let `LoadNasty`'s Go-side `big` handling diverge from the SQL
 file's own gate; grant the fixture's `postgres` role superuser; add a second

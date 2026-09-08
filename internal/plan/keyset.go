@@ -121,8 +121,8 @@ type keyValue struct {
 //
 // Tuples are appended unsorted and normalised lazily: normalize sorts the tail
 // and merges it into the sorted head, dropping duplicates. Every read (Len,
-// has, Chunks, Bytes, forEach) normalises first, so the set a caller sees is
-// always sorted and deduplicated.
+// has, Chunks, EachChunk, FirstChunk, Bytes, forEach) normalises first, so the
+// set a caller sees is always sorted and deduplicated.
 type keys struct {
 	types []keyType
 
@@ -410,6 +410,13 @@ func (k *keys) decode(b []byte, dst []keyValue) {
 }
 
 // Chunks cuts the set into consecutive runs of at most n tuples, in key order.
+//
+// Every chunk is built before any is returned, and a chunk holds its own copy
+// of the keys it carries (chunk below allocates a fresh typed array per identity
+// column), so the return value is a second copy of the whole set. A caller that
+// consumes chunks one at a time takes EachChunk instead, and one that wants a
+// bounded sample takes FirstChunk: on a step at the --row-budget ceiling the
+// difference is the whole key set against one chunk of it.
 func (k *keys) Chunks(n int) []pipeline.Chunk {
 	if n <= 0 {
 		n = 1
@@ -418,13 +425,45 @@ func (k *keys) Chunks(n int) []pipeline.Chunk {
 	total := k.count()
 	out := make([]pipeline.Chunk, 0, (total+n-1)/n)
 	for start := 0; start < total; start += n {
-		end := start + n
-		if end > total {
-			end = total
-		}
-		out = append(out, k.chunk(start, end))
+		out = append(out, k.chunk(start, min(start+n, total)))
 	}
 	return out
+}
+
+// EachChunk calls f with each consecutive run of at most n tuples, in key order,
+// building one chunk at a time. It is the chunk-at-a-time iterator of
+// ARCHITECTURE.md section 2's KeySet: what is live during the walk is one chunk
+// and whatever f kept, never a second copy of the set.
+//
+// It stops at the first error f returns and returns it. An empty set calls f no
+// times at all.
+func (k *keys) EachChunk(n int, f func(pipeline.Chunk) error) error {
+	if n <= 0 {
+		n = 1
+	}
+	k.normalize()
+	total := k.count()
+	for start := 0; start < total; start += n {
+		if err := f(k.chunk(start, min(start+n, total))); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// FirstChunk is the first at most n tuples in key order, and nil when the set is
+// empty. It is one chunk built and no more: a bounded sample of a step's keys
+// costs the size of the sample rather than the size of the step.
+func (k *keys) FirstChunk(n int) pipeline.Chunk {
+	if n <= 0 {
+		n = 1
+	}
+	k.normalize()
+	total := k.count()
+	if total == 0 {
+		return nil
+	}
+	return k.chunk(0, min(n, total))
 }
 
 // chunk builds one unnest argument list: one typed array per identity column.

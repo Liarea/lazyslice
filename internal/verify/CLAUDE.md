@@ -278,19 +278,28 @@ was chosen and is recorded here rather than only in a comment.
   value-only halves — the validators *and the name dictionary*, the `textOf` /
   `mask.Canonical` reproduction, the type-family table and the identifier
   quoter**, reported in T-0043's return value.
-- **The first chunk of a key set is asked for through an optional accessor.**
-  `pipeline.KeySet` has `Len`, `Bytes` and `Chunks`, and `Chunks` materialises
-  the *whole* set as typed arrays; the sample compare needs 100 keys, so calling
-  `Chunks(100)` on a step at the `--row-budget` ceiling allocates a second copy
-  of that step's key set, per table, at verify time — after `--memory-budget`
-  (§8, exit 11) has been checked at plan and can no longer refuse anything.
-  `sample.go` therefore type-asserts the key set for `FirstChunk(n) Chunk` and
-  falls back to `Chunks` when it has none, which is the same shape of deviation
-  as `Writer.Query` above: a bounded sample is worth less than the check it
-  would otherwise skip on exactly the largest tables. **Owed: `FirstChunk` on
-  §2's `KeySet` and on `internal/plan`'s two implementations** — tracker T-0050
-  already carries "KeySet chunk iterator" for `internal/extract`'s sake, and
-  this is the same accessor.
+- **The first chunk of a key set is asked for by name** (T-0050).
+  `Chunks(n)` materialises the *whole* set as typed arrays; the sample compare
+  needs 100 keys, so `Chunks(100)` on a step at the `--row-budget` ceiling
+  allocated a second copy of that step's key set, per table, at verify time —
+  after `--memory-budget` (§8, exit 11) has been checked at plan and can no
+  longer refuse anything. `internal/pipeline`'s `KeySet` now carries
+  `FirstChunk(n) Chunk` beside `Chunks` and `EachChunk`, `internal/plan`'s two
+  implementations have it, and `sample.go` calls it directly: the optional
+  accessor it used to type-assert for, and the `Chunks` fallback behind it, are
+  both gone. A `nil` chunk is an empty key set and the step is skipped, which is
+  the same answer the fallback gave for a set with no chunks.
+- **The per-table and per-column shapes name their table and column, and a name
+  is arbitrary text.** `sampleShapeFor` and `probeShapesFor` quote a table (and,
+  for the probes, a column) into the template precisely so the shape admits one
+  relation instead of every relation. A table called `{ident}` used to defeat
+  that — the template compiler read the placeholder inside the quoted name and
+  compiled the shape into a table-agnostic one — and one called `{table}` failed
+  to compile at all. The fix is in `internal/pg`'s `templateSegments` (T-0050),
+  which treats a quoted identifier in a template as fixed text and matches it as
+  Postgres reads a name — case-sensitively and space for space, where the rest
+  of the template is matched case-insensitively with elastic whitespace; nothing
+  in this package changed, and nothing in it should re-quote around the problem.
 - **The sample comparison skips a step with no keys and a step with a masked
   identity column.** §6 item 5 says "a sample of 100 rows per table fetched by
   identity"; a `Lookup` step carries no key set to fetch by, and a step whose
