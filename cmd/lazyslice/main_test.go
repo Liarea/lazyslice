@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
 	"github.com/Liarea/lazyslice/internal/core"
@@ -88,11 +89,58 @@ func TestV1FlagSurfaceIsRegistered(t *testing.T) {
 // disables masking wholesale, and a scaffold is exactly where one would be
 // added by accident.
 var forbidden = []*regexp.Regexp{
-	regexp.MustCompile(`no-mask|disable-mask|skip-mask|unsafe`),
-	regexp.MustCompile(`^allow-nonempty-target$`),
-	regexp.MustCompile(`^replace$`),
-	regexp.MustCompile(`^allow-ctid$`),
-	regexp.MustCompile(`^rules$`),
+	regexp.MustCompile(`(?i)no-mask|disable-mask|skip-mask|unsafe`),
+	regexp.MustCompile(`(?i)^allow-nonempty-target$`),
+	regexp.MustCompile(`(?i)^replace$`),
+	regexp.MustCompile(`(?i)^allow-ctid$`),
+	regexp.MustCompile(`(?i)^rules$`),
+}
+
+// forbiddenFlagName reports whether name is a spelling ARCHITECTURE.md
+// section 8 forbids, and if so, which rule it matched.
+//
+// unmask is checked separately from the forbidden regexps above rather than
+// folded into one of them: the exact name "unmask" is the legitimate
+// per-column --unmask TABLE.COL=REASON opt-out (ARCHITECTURE.md section 8),
+// so it must pass, while any other flag name that merely contains "unmask"
+// — --unmask-all, --global-unmask, a typo'd --unmask-table — would widen
+// that opt-out past the reason-per-column requirement and must fail. This is
+// the check T-CI5's review found missing: `make unsafe-flags` used to grep
+// cmd/lazyslice's *Var/*VarP call sites in source, which cannot see a
+// pointer-returning registration (fs.Bool("unmask-all", ...)), a Var(&v,
+// "unmask-all", ...) registration, or a flag name literal that wraps across
+// lines. Walking the registered pflag.FlagSet with VisitAll, as
+// TestForbiddenFlagsDoNotExist below already does for the other forbidden
+// names, sees every spelling and every hidden flag regardless of how it was
+// registered.
+func checkForbiddenFlagName(name string) (rule string, bad bool) {
+	n := strings.ToLower(name)
+	for _, re := range forbidden {
+		if re.MatchString(n) {
+			return re.String(), true
+		}
+	}
+	if n != "unmask" && strings.Contains(n, "unmask") {
+		return `unmask (exact) is the only permitted flag name containing "unmask"`, true
+	}
+	return "", false
+}
+
+// walkAllFlags visits every flag registered anywhere in the command tree
+// rooted at c: both c's own PersistentFlags() and Flags(), recursively into
+// every subcommand at every depth. cobra does not merge a command's
+// PersistentFlags() into its Flags() until ParseFlags/LocalFlags runs, so a
+// walk that only reads c.Flags() (as root.Commands() traversal without also
+// visiting PersistentFlags() would) misses every subcommand's own persistent
+// flags on an unparsed tree — exactly where a masking-disabling flag could be
+// hidden. Visiting both sets on every node, recursively, has no such blind
+// spot regardless of how deep a subcommand is nested.
+func walkAllFlags(c *cobra.Command, visit func(name string)) {
+	c.PersistentFlags().VisitAll(func(f *pflag.Flag) { visit(f.Name) })
+	c.Flags().VisitAll(func(f *pflag.Flag) { visit(f.Name) })
+	for _, sub := range c.Commands() {
+		walkAllFlags(sub, visit)
+	}
 }
 
 func TestForbiddenFlagsDoNotExist(t *testing.T) {
@@ -100,17 +148,79 @@ func TestForbiddenFlagsDoNotExist(t *testing.T) {
 	root := newCommandTree(context.Background(), &req, io.Discard)
 
 	check := func(name string) {
-		for _, re := range forbidden {
-			if re.MatchString(name) {
-				t.Errorf("flag --%s matches %q, which ARCHITECTURE.md section 8 forbids", name, re)
-			}
+		if rule, bad := checkForbiddenFlagName(name); bad {
+			t.Errorf("flag --%s matches %q, which ARCHITECTURE.md section 8 forbids", name, rule)
 		}
 	}
 
-	root.PersistentFlags().VisitAll(func(f *pflag.Flag) { check(f.Name) })
-	root.Flags().VisitAll(func(f *pflag.Flag) { check(f.Name) })
+	walkAllFlags(root, check)
+}
+
+// TestForbiddenFlagsDoNotExist_SelfTestUnmaskAll is the negative self-test:
+// a rail that has never been seen to fail on the case it exists for is not
+// proven to catch anything (T-CI5 review, carried over from the grep-based
+// `make unsafe-flags` recipe this replaces). It builds the real command tree
+// via newCommandTree, registers a fake --unmask-all flag on four different
+// flag sets within it — root persistent, root local, a subcommand's own
+// Flags(), and a subcommand's own PersistentFlags() — and walks the tree
+// with the same walkAllFlags helper TestForbiddenFlagsDoNotExist uses,
+// asserting that every one of the four registrations is caught. Exercising
+// the production traversal itself (rather than a detached scratch
+// pflag.FlagSet standing in for it) is what proves the walk, not just the
+// predicate, catches a subcommand's persistent flags — the exact blind spot
+// a prior version of this rail had.
+//
+// Named with the TestForbiddenFlagsDoNotExist prefix so that `go test -run
+// TestForbiddenFlagsDoNotExist` (an unanchored regexp match) picks up this
+// self-test alongside the positive one; `make unsafe-flags` relies on that.
+func TestForbiddenFlagsDoNotExist_SelfTestUnmaskAll(t *testing.T) {
+	req := core.NewRequest()
+	root := newCommandTree(context.Background(), &req, io.Discard)
+
+	var sub *cobra.Command
 	for _, c := range root.Commands() {
-		c.Flags().VisitAll(func(f *pflag.Flag) { check(f.Name) })
+		if c.Name() == "introspect" {
+			sub = c
+			break
+		}
+	}
+	if sub == nil {
+		t.Fatal("self-test setup failed: no \"introspect\" subcommand found to plant a fake flag on")
+	}
+
+	plant := func(fs *pflag.FlagSet, name string) {
+		var v bool
+		fs.BoolVar(&v, name, false, "T-0074 self-test: must be rejected")
+	}
+	plant(root.PersistentFlags(), "unmask-all-root-persistent")
+	plant(root.Flags(), "unmask-all-root-local")
+	plant(sub.Flags(), "unmask-all-sub-local")
+	plant(sub.PersistentFlags(), "unmask-all-sub-persistent")
+
+	// newCommandTree already registers the real --unmask (ARCHITECTURE.md
+	// section 8), so it is exercised without being re-registered here.
+	var caught []string
+	walkAllFlags(root, func(name string) {
+		if _, bad := checkForbiddenFlagName(name); bad {
+			caught = append(caught, name)
+		}
+	})
+
+	for _, want := range []string{
+		"unmask-all-root-persistent",
+		"unmask-all-root-local",
+		"unmask-all-sub-local",
+		"unmask-all-sub-persistent",
+	} {
+		if !slices.Contains(caught, want) {
+			t.Errorf("self-test failed: a planted --%s registration was not caught by "+
+				"walkAllFlags/checkForbiddenFlagName, so this rail is not proven to fail on "+
+				"the case it exists for", want)
+		}
+	}
+	if slices.Contains(caught, "unmask") {
+		t.Error("self-test failed: the exact, legitimate --unmask flag was rejected; " +
+			"only names that merely contain \"unmask\" may be")
 	}
 }
 
