@@ -3,10 +3,10 @@ id: T-0061
 title: "Move firstRun from cmd/lazyslice into internal/core's discover stage, so cmd/ calls only core.Run again; update cmd/CLAUDE.md in the same change"
 epic: E5
 phase: ""
-status: open
+status: in_progress
 owner: opus
 created: 2026-09-07
-started: ""
+started: 2026-09-07
 closed: ""
 outcome: ""
 ---
@@ -24,6 +24,8 @@ cmd/lazyslice no longer imports internal/discover. core.Run walks the ladder for
 ## Log
 
 - 2026-09-07 created
+
+- 2026-09-07 started
 
 ## Post-mortem
 

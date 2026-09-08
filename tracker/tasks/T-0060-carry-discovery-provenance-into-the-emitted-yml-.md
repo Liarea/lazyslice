@@ -3,10 +3,10 @@ id: T-0060
 title: "Carry discovery provenance into the emitted yml: discover.Result and core.Request keep the rung and label, so a committed source: compose / source_label: db is not rewritten as source: flag"
 epic: E5
 phase: ""
-status: open
+status: in_progress
 owner: opus
 created: 2026-09-07
-started: ""
+started: 2026-09-07
 closed: ""
 outcome: ""
 ---
@@ -24,6 +24,8 @@ A run in a directory whose lazyslice.yml records source: compose / source_label:
 ## Log
 
 - 2026-09-07 created
+
+- 2026-09-07 started
 
 ## Post-mortem
 
