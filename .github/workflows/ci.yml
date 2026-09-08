@@ -232,6 +232,17 @@ jobs:
       - name: integration
         env:
           LAZYSLICE_TEST_POSTGRES_IMAGE: postgres:${{ matrix.postgres }}
+          # internal/discover/provision's readiness budget (its ReadyBudgetEnv).
+          # The default is 60 s — the number ARCHITECTURE.md section 9 and
+          # ADR-008 section 6 both carry, which is a laptop with a warm cache; a
+          # runner here pulls the image cold and then runs several initdbs at
+          # once against a shared disk, and a budget that is tight enough to
+          # expire on a slow runner turns a flake into a red merge. It is a
+          # *timeout* and not a wait: a container that comes up in two seconds
+          # still takes two seconds, and one that dies during startup is now
+          # reported the moment it dies rather than at the end of the budget
+          # (tracker T-0075).
+          LAZYSLICE_PROVISION_READY_TIMEOUT: 3m
         run: |
           set -uo pipefail
           # -v, because `go test` prints no per-test line and no t.Skipf reason

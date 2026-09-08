@@ -66,7 +66,7 @@ func TestProvisionCreatesAndReusesARealContainer(t *testing.T) {
 	t.Cleanup(func() { removeEverything(t, api, project) })
 
 	p := New(api)
-	req := Request{Project: project, Workdir: t.TempDir(), Major: major(t)}
+	req := Request{Project: project, Workdir: t.TempDir(), Major: major(t), Progress: progress{t}}
 
 	res, err := p.Provision(ctx, req)
 	if err != nil {
@@ -145,7 +145,7 @@ func TestARecreatedContainerCanStillLogIntoItsSurvivingVolume(t *testing.T) {
 	t.Cleanup(func() { removeEverything(t, api, project) })
 
 	p := New(api)
-	req := Request{Project: project, Workdir: t.TempDir(), Major: major(t)}
+	req := Request{Project: project, Workdir: t.TempDir(), Major: major(t), Progress: progress{t}}
 	first, err := p.Provision(ctx, req)
 	if err != nil {
 		t.Fatalf("Provision: %v", err)
@@ -182,6 +182,18 @@ func TestARecreatedContainerCanStillLogIntoItsSurvivingVolume(t *testing.T) {
 	if second.DSN != first.DSN && second.Candidate.Ref.Port == first.Candidate.Ref.Port {
 		t.Error("the recreated container was given a different credential for the same cluster")
 	}
+}
+
+// progress is where a real run's pull and start lines go, pointed at t.Log so
+// that an integration run which spent two minutes on a cold image cache says so
+// in the output of the test that spent them. Without it the pull, the create
+// and the wait were one silent gap, and a container that had exited a second in
+// was indistinguishable from an image still downloading (tracker T-0075).
+type progress struct{ t *testing.T }
+
+func (p progress) Write(b []byte) (int, error) {
+	p.t.Log(strings.TrimRight(string(b), "\n"))
+	return len(b), nil
 }
 
 // removeEverything undoes what the test made. It is here and nowhere else:
