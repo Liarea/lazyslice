@@ -7,7 +7,7 @@
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 1 | 0 | 9 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
-| E5 Hardening | 5 | 9 | 0 | 3 | 0 | 0 |
+| E5 Hardening | 5 | 12 | 1 | 3 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
 | E9 Later | later | 4 | 0 | 0 | 0 | 0 |
 
@@ -28,6 +28,10 @@
 - T-0063 [open] E5 · Q1, the controlling terminal, and provisioning: widen pipeline.Provisioner to carry the generated POSTGRES_PASSWORD, then wire --create-target and the one blocking question (opus)
 - T-0064 [open] E5 · Dogfood: two sessions against a real project of Gareth's choosing, logged in docs/DOGFOOD_LOG.md (human)
 - T-0065 [open] E6 · 20-second VHS GIF of the first run on Pagila (sonnet)
+- T-0066 [in_progress] E5 · T-TUI: Bubble Tea reasons and plan screens (opus)
+- T-0067 [open] E5 · T-PROVISION: --create-target and rung 4 (T-0063) (opus)
+- T-0068 [open] E5 · T-POLY: polymorphic association inference (opus)
+- T-0069 [open] E5 · T-CI5: five-major CI matrix, govulncheck, SBOM, docs drift, unsafe-flag grep (sonnet)
 
 ## Recently closed
 
