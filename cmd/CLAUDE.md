@@ -65,7 +65,17 @@ updating that table.
   `pipeline.SchemaSummary` that `--json` prints, because a summary is a document
   and events are all `core.Run` returns. Its `fingerprint` is ADR-009's, computed
   in `internal/core` by `load.SchemaFingerprint`; nothing here computes one.
+- **The first-run ladder is not here.** `lazyslice` with no arguments walks
+  ARCHITECTURE.md §9's ladder inside `internal/core`'s discover stage. It ran
+  in this file for one task (`firstRun`, T-DISCOVER, which had no write access
+  to `internal/core`) and T-0061 moved it, so "no stage is reached directly"
+  above is true again. One stage call outlived that move and is gone now too:
+  `--memory-budget` was checked here with `emit.ParseSize`, and the same parse
+  is reached through `core.ParseMemoryBudget` instead, so this file imports no
+  `internal/<stage>` package and the `Never:` above is true of every line of it
+  (T-0060's review round).
 - **`report` maps a `*core.Stop` to its own exit code.** Every stage refusal
   arrives as one, carrying the ADR-005 exit the catalogue gives its code, so
   this file needs no per-stage knowledge and an unmapped error is still
-  `ExitInternal`.
+  `ExitInternal`. The ladder's exit 3 and exit 4 arrive the same way, converted
+  from `internal/discover`'s `Refusal` by `internal/core`.

@@ -46,21 +46,15 @@ rung 4 and provisioning are phase 5 (ARCHITECTURE.md §14).
   exit code have no carrier on that interface. `Resolve(ctx, Options, sink)
   (Result, error)` is that carrier, and `Discover` is implemented in terms of
   the same ladder walk.
-- **`cmd/lazyslice` calls `Resolve`, not `internal/core`.** `core.Run` already
-  calls `Discover` and then stops at exit 3 regardless of what it returns, and
-  `internal/core` was outside this task's paths. So the ladder runs in
-  `cmd/lazyslice`'s `firstRun`, which fills `core.Request.Source` and
-  `.Target` before `core.Run`. That is one more `internal/` package than
-  `cmd/CLAUDE.md`'s "call no `internal/<stage>` package directly" allows for.
-  **T-0061** moves it: the natural home is `core.discover`, moving it there
-  changes no behaviour in this package, and that task updates `cmd/CLAUDE.md`
-  in the same change. Until it lands, the deviation is written where a
-  developer in `cmd/` will meet it — `main.go`'s package comment and
-  `firstRun`'s own — and not only here. `firstRun` is
-  called from the root command only — the five stage subcommands reach
-  `internal/core`'s own discover stage, which walks the ladder to print it and
-  stops at exit 3 without choosing — because giving them a first run of their
-  own is a widening no task has asked for.
+- **`internal/core` calls `Resolve`; `cmd/lazyslice` calls neither.** The ladder
+  is walked by `core`'s discover stage (`resolveEndpoints`), which is what keeps
+  `cmd/CLAUDE.md`'s "call no `internal/<stage>` package directly" true. It ran
+  in `cmd/lazyslice`'s `firstRun` for one task, because `internal/core` was
+  outside T-DISCOVER's paths; **T-0061** moved it, and the move changed nothing
+  in this package. `Resolve` is called for `lazyslice` with no arguments only —
+  the five stage subcommands reach `Discover`, which walks the ladder to print
+  it and chooses nothing before `core` stops at exit 3 — because giving them a
+  first run of their own is a widening no task has asked for.
 - **`Refusal`, not `core.Stop`.** `core` imports this package, so the
   dependency cannot go the other way; `Refusal` carries the same three things
   (`Code`, `Exit`, `Args`) and `cmd/lazyslice`'s `report` maps it the same way.
@@ -82,10 +76,20 @@ rung 4 and provisioning are phase 5 (ARCHITECTURE.md §14).
   a dial cannot see. So `plausibleTarget` (marked *or* apparently empty) is one
   rank and the byte order of `(host, port, database)` settles ties inside it.
   Another project's marked, full target therefore cannot displace an unmarked
-  empty one. The remaining gap is that only the winner reaches `internal/core`:
-  when the gate refuses it, the run stops rather than trying the runner-up,
-  because `core.Request` carries one target and not a list. That is **T-0062**,
-  not fixed here.
+  empty one. Only the winner reaches `internal/core`, and **that is the
+  behaviour, not a gap** (**T-0062**): when the gate refuses it the run stops at
+  exit 4 with the gate's own refusal and the runner-up is never tried, because
+  `core.Request` carries one target and not a list. §5's ranking therefore runs
+  *before* the gate and one refusal ends the run — a fall-through would load
+  into a database the operator was never shown a decision line for.
+  `internal/core`'s `TestAGateRefusalEndsTheRunInsteadOfTryingTheRunnerUp` pins
+  it. The runner-up is still printed in the target decision's provenance, which
+  is what tells the operator what to pass to `--target`. **Owed:** ADR-008 §5
+  and ARCHITECTURE.md §9 still say the tie-break runs "among eligible targets",
+  and eligibility is `Target.Gate`'s verdict, so both still read as a ranking
+  over gate-eligible candidates. They need the amendment this paragraph
+  describes; neither file has been inside the paths of the tasks that built
+  this, and a reader who takes §5 literally would add the fall-through.
 - **Q1, the controlling terminal and provisioning are all phase 5.** ADR-008 §6
   makes Q1 fire only where a container can be created, and nothing in this
   build creates one, so the state Q1 exists for — a source, no target — takes
@@ -134,19 +138,17 @@ rung 4 and provisioning are phase 5 (ARCHITECTURE.md §14).
   `.env.local` holding the real URI under the same name is the standard dotenv
   override. Marking the name seen on the unusable value dropped the one value
   that connects, so `take` marks it only after a candidate is produced.
-- **`Result` carries the two endpoints and nothing else.** `core.Request` has no
-  field for the rung an endpoint came from or the label that goes with it, and
-  `internal/core` builds its own `pipeline.Candidate` with `pipeline.FromFlag`,
-  which `internal/emit` then writes into `lazyslice.yml`. So a discovered run
-  commits `from: flag` with no service name — and, because an argument-free run
-  now reaches `emit` where before it stopped at exit 3, a *committed*
-  `source: compose` / `source_label: db` is rewritten to `source: flag` on the
-  next such run, against §10's example. Carrying the provenance needs a change
-  in `internal/core` and `cmd/lazyslice` together: that is **T-0060**, which
-  also carries the containment if the carrier slips again — core falling back to
-  `r.prior.Source`/`SourceLabel` when the endpoint was not named on the command
-  line, so an existing file is at least not downgraded. Until then `Result`
-  holds no field nobody reads.
+- **`Result` carries the provenance and the label of each endpoint** (T-0060).
+  §10's `source:` block records the rung an endpoint came from, and only the
+  ladder knows it: `internal/core` builds its `pipeline.Candidate` from these
+  four fields and `internal/emit` writes them, so an argument-free re-run
+  re-emits a committed `from: compose` / `service: db` unchanged. Building both
+  candidates as `pipeline.FromFlag`, which is what `internal/core` did before,
+  rewrote those two lines on every such run — reachable only once the ladder
+  existed, because before it the run stopped at exit 3 and never reached `emit`.
+  Rung 0 carries the *file's* provenance forward rather than `FromYml`: the file
+  records where the endpoint was found, and stamping `yml` on it would lose the
+  rung on the second run instead of the first.
 - **Rung 1 has four names, not six.** ARCHITECTURE.md §9 lists
   `DATABASE_URL`, `POSTGRES_URL`, `PG_URL`, `DB_URL`; ADR-008 §2 says "one of
   the six names at rung 1" without listing them. The four §9 names are

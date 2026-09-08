@@ -151,11 +151,21 @@ type run struct {
 	sourceRef  dsn.Ref
 	sourceCand pipeline.Candidate
 	targetCand pipeline.Candidate
-	target     *pg.Target
-	targetPool *pgxpool.Pool
-	reader     pipeline.Reader
-	snapshot   pipeline.SnapshotID
-	released   bool
+	// The rung each endpoint came from and the name that goes with it, as the
+	// ladder handed them over (resolveEndpoints). They reach the emitted yml
+	// through sourceCand and targetCand, which is why they are kept rather than
+	// re-derived: internal/emit records the rung, and a run that rebuilt both
+	// candidates as pipeline.FromFlag rewrote a committed `from: compose` on
+	// every argument-free re-run (T-0060).
+	sourceProv  pipeline.Provenance
+	sourceLabel string
+	targetProv  pipeline.Provenance
+	targetLabel string
+	target      *pg.Target
+	targetPool  *pgxpool.Pool
+	reader      pipeline.Reader
+	snapshot    pipeline.SnapshotID
+	released    bool
 
 	priv   pipeline.RolePrivileges
 	schema *pipeline.Schema
@@ -280,23 +290,105 @@ func (r *run) readConfig() error {
 
 // ---------- discover ----------
 
+// resolveEndpoints fills in the endpoints the operator did not name.
+//
+// It is ARCHITECTURE.md section 9's ladder, and it runs here because this is
+// the stage that owns discovery: cmd/lazyslice builds a Request and calls Run,
+// and reaches no stage package directly (cmd/CLAUDE.md). It lived in
+// cmd/lazyslice's firstRun until T-0061 moved it, which changed nothing in
+// internal/discover.
+//
+// A run that named both endpoints walks no rung and makes no Docker call
+// (ADR-008 section 1), which is every run in CI and every run the invariant
+// suite makes.
+//
+// The ladder *chooses* for `lazyslice` with no arguments and for nothing else
+// in this build. The five stage subcommands still get it printed and stop at
+// exit 3 without an endpoint chosen for them: five subcommands quietly gaining
+// a network-touching first run is a widening no task has asked for
+// (T-DISCOVER).
+func (r *run) resolveEndpoints(ctx context.Context) error {
+	// An endpoint the operator named is FromFlag with no label, whether it
+	// arrived from a flag, the positional DSN or internal/tui. It is set before
+	// anything else because pipeline.FromYml is Provenance's zero value, and a
+	// field left at it would tell internal/emit the yml named this database.
+	if r.req.Source != "" {
+		r.sourceProv, r.sourceLabel = pipeline.FromFlag, ""
+	}
+	if r.req.Target != "" {
+		r.targetProv, r.targetLabel = pipeline.FromFlag, ""
+	}
+
+	if r.req.Mode != ModeRun {
+		if r.req.Source == "" {
+			// The ladder is walked so that it is printed, and nothing is chosen
+			// from it: a subcommand names its own source or stops.
+			if _, err := discover.New().Discover(ctx, r.req.Workdir, r.sink); err != nil {
+				return wrap(CodeSourceNone, exitNoSource, err, "no source: pass --source postgres://...")
+			}
+			return stop(CodeSourceNone, exitNoSource, "no source: pass --source postgres://...")
+		}
+		return nil
+	}
+	if r.req.Source != "" && (!r.req.Mode.needsTarget() || r.req.Target != "") {
+		return nil
+	}
+
+	res, err := discover.Resolve(ctx, discover.Options{
+		Workdir:    r.req.Workdir,
+		DockerHost: r.req.DockerHost,
+		// Rung 0 is the committed file readConfig has already read; --reconfigure
+		// leaves it nil, which is what makes that flag "run the first-run path".
+		Config:       r.prior,
+		Source:       r.req.Source,
+		Target:       r.req.Target,
+		NeedTarget:   r.req.Mode.needsTarget(),
+		CreateTarget: r.req.CreateTarget,
+	}, r.sink)
+	if err != nil {
+		return refusalStop(err)
+	}
+	r.req.Source, r.sourceProv, r.sourceLabel = res.Source, res.SourceProvenance, res.SourceLabel
+	r.req.Target, r.targetProv, r.targetLabel = res.Target, res.TargetProvenance, res.TargetLabel
+	return nil
+}
+
+// refusalStop turns internal/discover's Refusal into a Stop.
+//
+// The two carry the same three things and the dependency cannot go the other
+// way: core imports internal/discover, so discover cannot return a core.Stop.
+// The Error event has already reached the sink from the ladder itself, and the
+// line the user reads was rendered from the catalogue there, so the Stop is
+// marked sent and report does not print a second one under the same code.
+func refusalStop(err error) error {
+	refusal, ok := discover.AsRefusal(err)
+	if !ok {
+		return asStop(err)
+	}
+	return &Stop{
+		Code: refusal.Code, Exit: refusal.Exit, Args: refusal.Args,
+		Message: refusal.Message, err: err, sent: true,
+	}
+}
+
+// candidateOf is one endpoint as internal/emit records it: the redacted
+// reference, the rung it came from and the name that goes with it.
+func candidateOf(ref dsn.Ref, prov pipeline.Provenance, label string) pipeline.Candidate {
+	return pipeline.Candidate{Ref: ref, Provenance: prov, Label: label, Local: ref.Loopback()}
+}
+
 // discover resolves the source and the target.
 //
-// The ladder itself is internal/discover and it is not in this build (T-0045),
-// so a run that names neither database stops here rather than pretending: exit 3
-// naming --source, which is what ARCHITECTURE.md section 9 says a run with no
-// source does. A run that names both — which is every run in CI and every run
-// the invariant suite makes — needs no ladder at all.
+// The ladder runs here (resolveEndpoints), which is what lets cmd/lazyslice
+// build a Request and call Run and reach no stage package of its own
+// (cmd/CLAUDE.md, T-0061). A run that names both endpoints — which is every run
+// in CI and every run the invariant suite makes — walks no rung at all.
 func (r *run) discover(ctx context.Context) error {
 	r.start(event.Discover)
 	defer r.done(event.Discover)
 
-	if r.req.Source == "" {
-		if _, err := discover.New().Discover(ctx, r.req.Workdir, r.sink); err != nil {
-			return wrap(CodeSourceNone, exitNoSource, err,
-				"no source: pass --source postgres://... (discovery is not in this build)")
-		}
-		return stop(CodeSourceNone, exitNoSource, "no source: pass --source postgres://...")
+	if err := r.resolveEndpoints(ctx); err != nil {
+		return err
 	}
 
 	d, sourceRef, err := dsn.Parse(r.req.Source)
@@ -304,7 +396,7 @@ func (r *run) discover(ctx context.Context) error {
 		return wrap(CodeUsage, exitUsage, err, "--source is not a Postgres connection string")
 	}
 	r.sourceRef = sourceRef
-	r.sourceCand = pipeline.Candidate{Ref: sourceRef, Provenance: pipeline.FromFlag, Local: sourceRef.Loopback()}
+	r.sourceCand = candidateOf(sourceRef, r.sourceProv, r.sourceLabel)
 
 	shapes := sourceShapes()
 	src, err := pg.OpenSource(ctx, d, shapes...)
@@ -322,7 +414,7 @@ func (r *run) discover(ctx context.Context) error {
 		event.ArgHost:       sourceRef.Host,
 		event.ArgDatabase:   sourceRef.Database,
 		event.ArgRole:       priv.Role,
-		event.ArgProvenance: "flag",
+		event.ArgProvenance: discover.ProvenanceName(r.sourceProv, r.sourceLabel),
 		event.ArgFlag:       "--source",
 	})
 	if len(priv.Writable) > 0 {
@@ -348,14 +440,13 @@ func (r *run) discover(ctx context.Context) error {
 // openTarget opens the write side and runs the gate (ARCHITECTURE.md section 9).
 func (r *run) openTarget(ctx context.Context) error {
 	if r.req.Target == "" {
-		return stop(pg.CodeUnreachable, exitTarget,
-			"no target: pass --target postgres://... (discovery is not in this build)")
+		return stop(pg.CodeUnreachable, exitTarget, "no target: pass --target postgres://...")
 	}
 	d, targetRef, err := dsn.Parse(r.req.Target)
 	if err != nil {
 		return wrap(CodeUsage, exitUsage, err, "--target is not a Postgres connection string")
 	}
-	r.targetCand = pipeline.Candidate{Ref: targetRef, Provenance: pipeline.FromFlag, Local: targetRef.Loopback()}
+	r.targetCand = candidateOf(targetRef, r.targetProv, r.targetLabel)
 
 	// The gate's end of section 11.2's binding, wired to the one definition of
 	// the schema fingerprint there is (ADR-009). A Target built without it can
@@ -1136,6 +1227,11 @@ func (r *run) report(err error) {
 	var s *Stop
 	if !errors.As(err, &s) {
 		s = wrap(CodeInternal, exitInternal, err, "%s", err.Error())
+	}
+	if s.sent {
+		// The ladder already sent this one (refusalStop). One refusal is one
+		// line, whichever package rendered it.
+		return
 	}
 	r.sink.Send(event.Event{
 		At: time.Now(), Kind: event.Error, Code: s.Code, Exit: s.Exit,
