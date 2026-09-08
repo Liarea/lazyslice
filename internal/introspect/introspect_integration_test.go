@@ -172,13 +172,15 @@ func TestIntrospectNasty(t *testing.T) {
 	t.Run("TableList", func(t *testing.T) {
 		want := []string{
 			"billing.invoices",
-			"public.LegacyCustomer", "public.attachments", "public.audit_log",
+			"public.LegacyCustomer", "public.account_statuses", "public.attachments",
+			"public.audit_log",
 			"public.click_stream", "public.device_readings", "public.devices",
 			"public.events", "public.events_2024", "public.events_2025",
 			"public.order_items", "public.orders", "public.organisations",
 			"public.people", "public.price_list_notes", "public.price_lists",
 			"public.price_lists_eu", "public.price_lists_us",
-			"public.projects", "public.sites", "public.stream_docs", "public.stream_rows",
+			"public.projects", "public.settlements", "public.sites",
+			"public.stream_docs", "public.stream_rows",
 			"public.teams", "public.tenant_user_flags", "public.tenant_user_sessions",
 			"public.tenant_users",
 		}
@@ -719,15 +721,18 @@ func TestIntrospectNasty(t *testing.T) {
 		// contype 'u' rows this fixture has ever produced. Trap 26's
 		// stream_docs, declared above the big gate so every load carries it
 		// (T-0077), adds one more foreign key (person_id -> people) and one
-		// more primary key (doc_key). Unfiltered,
-		// PostgreSQL 18 adds 79 more of contype 'n' — the NOT NULLs it now
+		// more primary key (doc_key). Trap 27's two tables — account_statuses
+		// and settlements, the columns whose types the driver needs a codec
+		// for — add two more foreign keys (person_id -> people, one each) and
+		// two more primary keys. Unfiltered,
+		// PostgreSQL 18 adds more of contype 'n' — the NOT NULLs it now
 		// stores in pg_constraint — and the same schema would fingerprint
 		// differently per major (§11.2's marker could never bind across them).
-		assertConstraintKinds(t, s, map[byte]int{'c': 1, 'f': 29, 'p': 21, 'u': 4})
+		assertConstraintKinds(t, s, map[byte]int{'c': 1, 'f': 31, 'p': 23, 'u': 4})
 	})
 
 	t.Run("CatalogFieldsNothingElseReads", func(t *testing.T) {
-		assertCatalogFields(t, s)
+		assertCatalogFields(t, s, []string{"public.money_amount"})
 	})
 
 	t.Run("SamplesAreShapedLikeTheirTable", func(t *testing.T) {
@@ -1195,7 +1200,7 @@ func TestIntrospectPagila(t *testing.T) {
 	})
 
 	t.Run("CatalogFieldsNothingElseReads", func(t *testing.T) {
-		assertCatalogFields(t, s)
+		assertCatalogFields(t, s, nil)
 	})
 
 	t.Run("NoSelfReferencingEdge", func(t *testing.T) {
@@ -1243,7 +1248,7 @@ func assertConstraintKinds(t *testing.T, s *pipeline.Schema, want map[byte]int) 
 // names, on both fixtures: a stub returning the zero value for them would
 // otherwise pass the whole suite, which is how the PostgreSQL 18 contype 'n'
 // divergence went unnoticed (T-INTROSPECT review).
-func assertCatalogFields(t *testing.T, s *pipeline.Schema) {
+func assertCatalogFields(t *testing.T, s *pipeline.Schema, wantComposites []string) {
 	t.Helper()
 
 	// The lowest major ARCHITECTURE.md §14 supports is 14.
@@ -1262,12 +1267,24 @@ func assertCatalogFields(t *testing.T, s *pipeline.Schema) {
 			e.Name, e.Schema)
 	}
 
-	// Composite types. Neither fixture declares one, and an extension's own
-	// composite must not appear here either: §11.1 item 2 creates the extension
-	// before item 3 creates the types, so recreating dblink_pkey_results is a
-	// 42710 against a target whose tables have already been dropped.
+	// Composite types. nasty.sql declares exactly one — public.money_amount,
+	// trap 27's composite column type — and pagila declares none; an
+	// extension's own composite must not appear here for either, because §11.1
+	// item 2 creates the extension before item 3 creates the types, so
+	// recreating dblink_pkey_results is a 42710 against a target whose tables
+	// have already been dropped. The wanted set is passed in rather than
+	// derived, so a read that returns nothing fails on nasty instead of passing
+	// as it did while neither fixture had one.
+	var gotComposites []string
 	for _, c := range s.Composites {
-		t.Errorf("Composites carries %s (%q); neither fixture declares a composite type", c.Name, c.Def)
+		gotComposites = append(gotComposites, c.Name)
+		if c.Def == "" {
+			t.Errorf("Composites carries %s with no definition", c.Name)
+		}
+	}
+	sort.Strings(gotComposites)
+	if !reflect.DeepEqual(gotComposites, wantComposites) {
+		t.Errorf("Composites = %v, want %v", gotComposites, wantComposites)
 	}
 
 	// ApproxRows is pg_class.reltuples, which the fixture ANALYZE has filled. A

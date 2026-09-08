@@ -661,6 +661,64 @@ ALTER TABLE public.price_list_notes
 
 
 --
+-- Trap 27: a column whose type the driver has no codec for until we give it
+-- one.
+--
+-- ARCHITECTURE.md section 11.1 recreates enums, domains and composite types in
+-- the target and then says the load runs "CopyFrom with explicit column lists
+-- excluding generated columns, types registered in AfterConnect". The second
+-- half is a control, not a note: pgx's COPY is binary, and it encodes a value
+-- against the *target's* OID for the column. A user-defined type has an OID
+-- pgx has never seen and therefore no codec, so a value of one has no encode
+-- plan and the copy fails part-way through the table -- SQLSTATE 54000 for an
+-- enum array ("number of array dimensions ... exceeds the maximum allowed",
+-- the server reading the text form as binary) and 42804 for a composite.
+-- THREAT_MODEL.md T8's one-transaction-per-table then leaves the target empty
+-- rather than half-loaded, so the visible outcome is a failed run and not a
+-- corrupt copy -- but it is a failed run, on a schema section 11.1 says is
+-- recreatable.
+--
+-- Neither table's key is an identity column: trap 21 is the identity trap and
+-- its table in README.md is the spec for it, so two more identity columns here
+-- would widen that trap rather than add this one.
+--
+-- The two shapes are separate tables because only one of them is fixed by
+-- registering the OIDs. account_statuses is the array: once the target's
+-- account_status and its array type are registered, pgx encodes the source's
+-- text form through its own array codec and the column loads.
+-- settlements.booked is the composite, and registration alone is not enough
+-- for it -- pgx's composite codec encodes only a CompositeIndexGetter, and what
+-- arrives from the source is the text form `(1234.50,GBP)` -- so internal/pg
+-- has to make the text form decodable into something that codec accepts. A run
+-- that registers the OIDs and stops passes the first table and fails on the
+-- second.
+--
+-- Neither column is personal data and neither takes a name or a value hit:
+-- account_status classifies at `none` already (trap 13), and `booked`,
+-- `amount` and `currency` are no category in section 4. That is on purpose --
+-- what this trap is about is the driver, not the classifier, and a masked
+-- column here would test both at once and tell you neither.
+--
+-- Both tables reference public.people directly, per this fixture's rule.
+--
+CREATE TYPE public.money_amount AS (amount numeric(12,2), currency text);
+
+CREATE TABLE public.account_statuses (
+    history_id bigint PRIMARY KEY,
+    person_id  bigint NOT NULL REFERENCES public.people (person_id),
+    seen       public.account_status[] NOT NULL,
+    latest     public.account_status NOT NULL
+);
+
+CREATE TABLE public.settlements (
+    settlement_id bigint PRIMARY KEY,
+    person_id     bigint NOT NULL REFERENCES public.people (person_id),
+    booked        public.money_amount NOT NULL,
+    reversed      public.money_amount
+);
+
+
+--
 -- Data.
 --
 -- Small, hand-written and stable: the counts in
@@ -897,6 +955,22 @@ INSERT INTO public.price_lists (list_id, region, owner_person_id, currency) VALU
 INSERT INTO public.price_list_notes (list_id, person_id, note) VALUES
     (1, 90000, 'Reviewed for the spring catalogue.'),
     (2, 90007, 'Currency confirmed with finance.');
+
+-- Trap 27. The array rows cover the three cases an array codec gets wrong on
+-- its own: more than one element, exactly one, and an empty array (never a
+-- NULL column -- `seen` is NOT NULL, because an unregistered type that is
+-- always NULL never reaches an encode plan and the trap would pass by
+-- accident). settlements.reversed is the nullable composite for the same
+-- reason in reverse: `booked` is NOT NULL so every row exercises the codec,
+-- and `reversed` is NULL on one row so that a NULL composite is exercised too.
+INSERT INTO public.account_statuses (history_id, person_id, seen, latest) VALUES
+    (1, 90000, ARRAY['pending', 'active']::public.account_status[], 'active'),
+    (2, 90007, ARRAY['suspended']::public.account_status[],         'suspended'),
+    (3, 90014, '{}'::public.account_status[],                       'pending');
+
+INSERT INTO public.settlements (settlement_id, person_id, booked, reversed) VALUES
+    (1, 90000, ROW(1234.50, 'GBP')::public.money_amount, NULL),
+    (2, 90007, ROW(-99.99, 'USD')::public.money_amount, ROW(99.99, 'USD')::public.money_amount);
 
 -- pg_class.reltuples is -1 until something analyses the table, and the
 -- classifier's partition choice and the plan's row estimates both read it.

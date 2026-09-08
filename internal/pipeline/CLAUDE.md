@@ -27,6 +27,26 @@ here, behaviour in the stage package) is the one to follow for any new type.
 
 §2's `KeySet` block matches `plan.go` (Len, Bytes, Chunks, FirstChunk, EachChunk) as of 2026-09-08; a change here is a change to §2 in the same commit.
 
+**`TypeRegistrar` is in `source.go` and not yet in §2 (T-0083, owed as
+T-0091).** It is a second interface a `Writer` may also implement —
+`RegisterTypes(ctx, *Schema) error` — so `Writer` still has exactly the three
+methods §2 gives it and no existing implementation broke at compile time. It is
+separate rather than a fourth method on `Writer` because the schema is the
+loader's argument and registration can only happen once the DDL has created the
+types in the target, which is halfway through the load. `internal/pg`'s `writer`
+implements it, and `internal/load` calls it between §11.1 item 3 and the first
+`CopyFrom`. ARCHITECTURE.md §2 was outside the paths of the task that added it,
+so the rule above is honoured by the tracker item and not by the commit.
+**"Optional" is the wrong word for it, and it is not how the loader treats it**:
+a `Writer` that is not a `TypeRegistrar` fails the load, named. The original
+justification — a test double or a second engine loads everything that needs no
+codec — was reviewed and did not survive: there is one real `Writer` and no
+second engine in the v1 cut, `internal/core` already wraps that same writer in a
+`readableWriter` (which embeds the `Writer` *interface*, so it is not a
+registrar) for verify, and an assertion that misses is a load step that vanishes
+with no compile error. T-0093 is the compiler-enforced shape — a fourth method
+on `Writer` and four test doubles updated, two of them in `internal/verify`.
+
 **Test.** `go build ./internal/pipeline/...` (no logic to unit test on its
 own); `TestNoValueBearingFieldSerialised`, `TestReasonGrammar` and
 `TestConfigHasNoSecretField` live in this package or one that imports it.

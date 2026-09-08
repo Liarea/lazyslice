@@ -212,6 +212,9 @@ func (l loader) load(
 			return res, refuse(CodeRefusedDDL, exitLoad, ref.TableRef{}, "", err)
 		}
 	}
+	if err := registerTypes(ctx, w, schema); err != nil {
+		return res, err
+	}
 	if err := l.copy(ctx, w, plan, in, res); err != nil {
 		return res, err
 	}
@@ -219,6 +222,44 @@ func (l loader) load(
 		return res, err
 	}
 	return res, nil
+}
+
+// registerTypes is the step between item 3 of ARCHITECTURE.md section 11.1 and
+// the first CopyFrom: the source's enums, domains, composites and the array
+// types over them are registered on the target's connections, which is what
+// makes a value of one of them encodable at all (ADR-005, "types registered in
+// AfterConnect").
+//
+// It runs here and not before the DDL because the types do not exist in the
+// target until the DDL has created them — lazyslice owns the target schema — and
+// not after the copy because the copy is what needs them. Without it a composite
+// column fails 42804 and an enum array fails 54000, mid-table; T8's per-table
+// transaction then leaves the target empty or complete, and the run still fails.
+//
+// **A Writer that is not a pipeline.TypeRegistrar is an error here, not a
+// skipped step.** The registration is reached through an optional interface —
+// pipeline.Writer is ARCHITECTURE.md section 2's three methods and registration
+// needs the schema, which is the loader's argument and not the connection's —
+// and an optional interface that misses is a step that vanishes with no compile
+// error. internal/core already wraps this same writer in a readableWriter for
+// verify, and a readableWriter embeds the Writer interface, so it is one
+// refactor away from being what the loader is handed: the assertion would miss,
+// the load would carry on, and the failure would reappear as a mid-table encode
+// error in the integration suite and nowhere else. It therefore names the type
+// it was given and refuses. Every Writer in this tree registers types; a second
+// engine that genuinely cannot is a change to pipeline.Writer, not a silent
+// return (tracker T-0093).
+func registerTypes(ctx context.Context, w pipeline.Writer, schema *pipeline.Schema) error {
+	r, ok := w.(pipeline.TypeRegistrar)
+	if !ok {
+		return refuse(CodeRefusedDDL, exitLoad, ref.TableRef{}, "",
+			fmt.Errorf("the target writer (%T) cannot register the source's user-defined "+
+				"types, so a composite or an array of a user-defined type would fail mid-copy", w))
+	}
+	if err := r.RegisterTypes(ctx, schema); err != nil {
+		return refuse(CodeRefusedDDL, exitLoad, ref.TableRef{}, "", err)
+	}
+	return nil
 }
 
 // drop empties the target of everything ARCHITECTURE.md section 11.1 is about to

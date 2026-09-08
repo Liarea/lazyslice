@@ -64,6 +64,7 @@ var pagilaTables = map[string]int{
 var nastyTables = map[string]int{
 	"billing.invoices":            3,
 	"public.LegacyCustomer":       3,
+	"public.account_statuses":     3,
 	"public.attachments":          5,
 	"public.audit_log":            4,
 	"public.click_stream":         3,
@@ -81,6 +82,7 @@ var nastyTables = map[string]int{
 	"public.price_lists_eu":       2,
 	"public.price_lists_us":       1,
 	"public.projects":             2,
+	"public.settlements":          2,
 	"public.sites":                2,
 	"public.stream_docs":          0,
 	"public.stream_rows":          0,

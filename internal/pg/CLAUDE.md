@@ -1,9 +1,9 @@
 # internal/pg
 
 The only package that speaks Postgres. Implements `pipeline.Source`,
-`pipeline.Target` (including the gate), `pipeline.Reader`, `pipeline.Writer`,
-and registers the shape-allowlist tracers on the source pool. No other
-package opens a `pgxpool.Pool`.
+`pipeline.Target` (including the gate), `pipeline.Reader`, `pipeline.Writer`
+and `pipeline.TypeRegistrar`, and registers the shape-allowlist tracers on the
+source pool. No other package opens a `pgxpool.Pool`.
 
 **Contract.** ARCHITECTURE.md §2 "source and target handles" in full —
 `Source.Snapshot`/`.Reader`/`.Short`/`.Release`/`.Trace`,
@@ -469,23 +469,131 @@ for the privilege.
   literals in one statement leave an even number of quotes with a whole value
   standing between them. lazyslice generates no statement containing a
   backslash. The trace is what `--debug` prints.
-- **No type registration on either pool, and this package does not owe it.**
-  ARCHITECTURE.md §11.1 specifies load as "CopyFrom with explicit column lists
-  excluding generated columns, types registered in AfterConnect", and §12 lists
-  type registration under this package. It was **deferred to the task that
-  builds `internal/load`**, as the `CatalogFingerprinter` wiring was:
-  registering the source's enum, domain, composite and user-defined array OIDs
-  on each target connection needs the catalog `internal/introspect` reads, and
-  `Connect` has no access to it. That task shipped without taking it, so the
-  debt is now **T-0083** and not a deferral to a task that has closed. Until it
-  is done, a value of such a type has no encode plan on the target and
-  `CopyFrom` fails mid-table (THREAT_MODEL.md T8); the failure is at least
-  printable (see the withheld-error entry above). Whatever does it registers on
-  the **target** pool: an `AfterConnect` hook on the source is what T-0076
-  removed and what this file's Never list forbids.
+- **Type registration is on the target pool and only on the target pool**
+  (`types.go`, T-0083, closed). ARCHITECTURE.md §11.1 specifies load as
+  "CopyFrom with explicit column lists excluding generated columns, **types
+  registered in AfterConnect**", and §12 lists type registration under this
+  package. It was deferred to the task that built `internal/load`, that task
+  shipped without taking it, and until T-0083 nothing did it at all: a value of
+  an enum array or a composite had no encode plan on the target and `CopyFrom`
+  failed mid-table — **54000** and **42804**, measured on `postgres:16` — with
+  THREAT_MODEL.md T8's per-table transaction cleaning up after a run that still
+  failed.
+  **`writer.RegisterTypes(ctx, *pipeline.Schema)` is the entry point, and the
+  only one** (`pipeline.TypeRegistrar`; `internal/load` holds a `Writer` and
+  never a `Target`). It takes the source's enum, domain and composite names out
+  of the schema `internal/introspect` read; the loader calls it between §11.1
+  item 3 and the first `CopyFrom`, which is the only moment it can be called —
+  before it the target has none of those types, and after the copy is too late.
+  `Target` had an exported `RegisterTypes` of its own until this was reviewed,
+  with no caller but a unit test, and this file described that dead door first;
+  it is gone, and `registerTypes` in `types.go` is the private half both would
+  have shared.
+  **Domains are registered for the sake of arrays over them.** A scalar domain
+  column is reported as its base type on the wire and copies unregistered, so on
+  its own it would not be in the set — but `postal[]` fails **54000**
+  unregistered and loads registered (measured, one column at a time, alongside
+  the composite and enum-array numbers above).
+  **The array types are read from the target, never spelled.** Postgres truncates
+  the array type's name at 63 characters and prepends underscores when the
+  obvious spelling is taken, and `LoadTypes` returns *no error* for a name that
+  matches nothing — so a guessed `_mood` would leave the column unregistered and
+  silent. `sqlTargetUserTypes` resolves each name and its `typarray` on the
+  target connection instead.
+  **`RegisterTypes` resets the pool.** `AfterConnect` runs once per connection,
+  and the gate's, the drops' and the DDL's own connections were all made before
+  the types existed; without the reset one of them comes back out of the pool
+  for the first `CopyFrom` carrying a type map built when there was nothing to
+  register. `TestRegisteringTypesRetiresConnectionsMadeBeforeTheDDL` is the
+  guard. A schema with no user-defined type resets nothing, because the hook is
+  a no-op without names and a reset would cost the gate's connection for free.
+  **A type pgx cannot build a codec for is skipped, never fatal** (`loadTypes`).
+  pgx's `LoadTypes` is all-or-nothing over the list it is given: it walks each
+  name's dependency closure and ends the call on a dependency that is neither
+  user-defined nor in its own default type map. Returning that error from
+  `afterConnect` failed the connection, which failed every acquire, which killed
+  the pool and the run — *after* the drop and the pre-data DDL, so the operator
+  was left with an empty target and a message from inside the driver, and
+  `FinishRun` could not even close the marker. It takes one type to do it:
+  measured on a stock `postgres:16`, `CREATE DOMAIN d AS money`, `AS pg_lsn` and
+  `AS tsquery` each do, and so does anything over `citext` — a domain over it or
+  a composite with a field of it — which is a type §11.1 item 2 recreates and
+  `internal/plan/keyset.go` special-cases, so a schema lazyslice supports. The
+  whole list is still tried first (one round trip, the answer for every schema
+  that resolves); a failure retries one name at a time and skips the ones that
+  fail, which leaves those columns in exactly the state they were in before any
+  of this existed — a scalar domain still loads, a composite still fails 42804
+  at `CopyFrom`, and every other table loads. `typeRegistry.skipped()` is where
+  the skipped names are readable;
+  `TestATypeWithAnUnresolvableDependencyIsSkippedNotFatal` is the guard, over a
+  `citext` domain and a `citext`-fielded composite beside an enum array that
+  must still register. An error out of `afterConnect` is now reserved for the
+  connection itself failing — the catalog read, or a cancelled context.
+  **This is the one `AfterConnect` in lazyslice, and `Connect` refuses it on a
+  source pool** — `withAfterConnect` is unexported, and a tracer-carrying config
+  that reaches `Connect` with a hook is an error, not a convention
+  (`TestConnectRefusesAnAfterConnectHookOnASourcePool`). T-0076 is why: a hook on
+  a pooled source sets state on a server connection the pooler shares with other
+  applications.
+- **Registering the OIDs is not enough for a composite, and `compositeCodec` is
+  the other half.** The source pool runs in `pgx.QueryExecModeExec`, so every
+  value comes back in text format and `internal/extract` scans each cell into an
+  `any`: a composite arrives as the Go string `(1234.50,GBP)`. pgx's
+  `CompositeCodec.PlanEncode` takes a `CompositeIndexGetter` and nothing else, so
+  a string gets no plan; pgx's one fallback for this shape
+  (`tryScanStringCopyValueThenEncode`) scans the string in text format into an
+  `any` and re-encodes it in binary, and that scan runs the codec's `DecodeValue`,
+  which returns a `map[string]any` — not a getter either, so the fallback
+  dead-ends with "cannot find encode plan". `compositeCodec` embeds pgx's codec
+  and replaces `DecodeValue` alone, returning a value that *is* a
+  `CompositeIndexGetter`; the fields are read with pgx's own text and binary
+  composite scanners and encoded by pgx's own composite encoder. It carries
+  arrays of composites with it, because `ArrayCodec` decodes and encodes each
+  element through the map by OID. It is registered by mutating the
+  `*pgtype.Type` `LoadTypes` returned **in place**: an array type built over it
+  holds a pointer to that very struct, so replacing the map entry would leave the
+  array's element on the plain codec.
+  **`DecodeValue` is overridden for the text format only**, and the binary format
+  is left on pgx's own `map[string]any`. Text is the whole of what the COPY
+  fallback reads, and nothing but that fallback has a reason to see a type
+  private to this package.
+  **The reason first given for that restriction was false and is worth stating
+  so**, because a paragraph of this file and a paragraph of
+  `testdata/README.md` were built on it: it said a binary read of a composite is
+  `internal/verify` reading the target *through this pool*. `internal/verify`
+  does not read through this pool. `internal/core` opens a **second** target
+  pool with `pg.Connect(ctx, d, nil)` — no `AfterConnect`, no registration — and
+  its `readableWriter.Query` is what verify's target reader resolves to.
+  Measured on an unregistered pool against `postgres:16`, a composite scans into
+  an `any` as the string `(1234.50,GBP)` and an enum array as `{pending,active}`,
+  which is what the source side gives too, so §6 item 5 compares like with like
+  and this codec is not on verify's path at all. **T-0092 was filed on the false
+  reading and should be withdrawn; T-0095 says so** — as does the residual-scan
+  worry raised beside it, which reads through the same unregistered pool.
+  **`compositeCodec` rests on pgx internals, measured against pgx v5.10.0.**
+  `tryScanStringCopyValueThenEncode` is unexported, its text-format scan is not
+  documented, and neither is the `ArrayCodec`-holds-the-`*pgtype.Type`-pointer
+  behaviour the in-place mutation depends on.
+  `TestPgxStillFallsBackFromAStringToACompositeEncode` asserts the fallback's
+  three steps directly, through the exported API, so an upgrade that removes it
+  fails there by name instead of failing trap 27 with "cannot find encode plan".
+  ARCHITECTURE.md §11.1's sentence stops at "types registered in AfterConnect"
+  and owes this half; T-0091 records it, and `testdata/README.md` trap 27 states
+  it meanwhile.
+  **A composite column loads now, and nothing can mask one (T-0094).** That is
+  the consequence of this change that matters for THREAT_MODEL.md T1, and it is
+  recorded rather than fixed: before this, a composite column failed `CopyFrom`
+  at 42804 and could not reach a target at all. `mask.TypeTag` has no tag for a
+  composite, so `internal/transform` gives it `famOther`, no rule-pack category
+  but `special_category` accepts `famOther`, and a name or value hit on such a
+  column drops to `low` with a `type_conflict` reason and is copied;
+  `internal/verify`'s second net skips `famOther` and the residual scan walks
+  only masked columns. T-0094 owns the plan-time decision (refuse the column, or
+  mask a composite field-wise) and the THREAT_MODEL.md T1 entry that must record
+  it; both files were outside this package's paths.
 
 **Test.** `go test ./internal/pg/...`; the gate, tracer, identity,
-read-only-transaction and pooler behaviour need
+read-only-transaction, type-registration and pooler behaviour need
 `go test -tags integration ./internal/pg/...` (the `TestGate*` suite in
 THREAT_MODEL.md T2, `TestAWriteInsideASourceTransactionIsRefusedByTheServer`
 and `TestSystemIDRunsInsideAReadOnlyTransaction` for T9, and
@@ -498,9 +606,25 @@ plus `TestGateRefusesTheSourceUnderAnotherName` for the half of rule 1 that
 `SameEndpoint` cannot answer. Do not delete one because it is slow; the table
 cap builds 2,001 tables on purpose, against the real constant.
 
+`types_integration_test.go` is the type-registration half, and it is written
+as a control and its answer: `TestATargetWithoutTypeRegistrationCannotCopyAnEnumArray`
+copies with nothing registered and requires 54000 and an empty target, so the
+failure the mechanism exists for is proven to still exist, and
+`TestATargetConnectionCarriesTheSourcesUserTypes` then requires the target to
+hold the source's rows exactly — with the target's own types created after three
+throwaway ones, so its OIDs cannot be the source's.
+`TestATypeWithAnUnresolvableDependencyIsSkippedNotFatal` is the third: a schema
+pgx cannot fully resolve must leave the pool alive, register what it can, and
+say what it skipped.
+
 **Never:** open a `pgxpool.Pool` for the source or target anywhere but here;
 let the gate return `Eligible` for a `NotProbed` table; add a rung to the
 identity ladder that treats "not probed" as safe; leave session state on a
 source connection — no `AfterConnect`, no `SET` outside a transaction (T-0076);
 send a source statement outside a transaction, or teach `check` an exception
-that lets one through (T-0082).
+that lets one through (T-0082); put an `AfterConnect` hook on the source pool —
+`Connect` refuses one, and `withAfterConnect` exists for the target alone
+(T-0083); return an error from `afterConnect` for a type pgx cannot build a
+codec for — one such type kills every target connection and the run with it, and
+an unregistered type is only ever one column that fails the way it failed
+before.

@@ -161,20 +161,47 @@ then after-data: indexes, FKs, setval, ANALYZE, bookkeeping tables).
   check reaching a user function through an operator. Each needs a `pg_depend`
   field `internal/introspect` does not yet read, and each is reported as an owed
   item rather than passed silently.
-- **No type registration, so a composite column or an array of a user type
-  fails at `CopyFrom`.** Measured on postgres:16: an enum, a domain, a text
-  array, `tsvector`, `interval`, `jsonb` and `bytea` all copy correctly without
-  registration (an enum's binary form is its label; a domain is reported as its
-  base type), while a composite fails 42804 and an enum array fails 54000 —
-  loudly, in both cases. Registering the source's user types on each target
-  connection is `internal/pg`'s, on the **target** pool, and it is not reachable
-  from `pipeline.Writer`. It is not an `AfterConnect` hook: the target pool has
-  never had one and the source pool may never have one again (T-0076 — a session
-  hook on a pooled source sets state on the pooler's shared server connection).
-  `internal/pg/CLAUDE.md` recorded the debt as deferred "to the task that builds
-  `internal/load`"; that task is this one and it did not take it, so the debt is
-  now filed as **T-0083** rather than left pointing at a hook that does not
-  exist.
+- **The source's user types are registered between the pre-data DDL and the
+  first `CopyFrom`** (`registerTypes` in `load.go`, T-0083). Measured on
+  postgres:16: an enum, a *scalar* domain, a text array, `tsvector`, `interval`,
+  `jsonb` and `bytea` all copy correctly *without* registration (an enum's
+  binary form is its label; a domain is reported as its base type), while a
+  composite fails 42804, an enum array fails 54000 and an **array of a domain**
+  fails 54000 too — loudly, mid-table, with T8's per-table transaction leaving
+  the target empty or complete and the run failed anyway. The domain-array
+  measurement is why domains stay in the registered set although a scalar domain
+  column needs nothing: `internal/pg/types.go` records it beside the code.
+  ARCHITECTURE.md §11.1 and ADR-005 always said the load registers types in
+  `AfterConnect`; nothing did until T-0083, and `internal/pg/CLAUDE.md` had
+  deferred it to "the task that builds `internal/load`", which is the task that
+  shipped this package without taking it.
+  **It is a hook on the target pool now, and only the target pool.** The
+  registration itself is `internal/pg`'s (`writer.RegisterTypes`,
+  `internal/pg/types.go`); this package reaches it through
+  `pipeline.TypeRegistrar`, a second interface `pg`'s `writer` implements,
+  because `pipeline.Writer` is §2's three methods and a fourth would touch every
+  implementation of it, two of them in `internal/verify`. The source pool still
+  may never have an `AfterConnect` (T-0076), and `pg.Connect` refuses one.
+  **The ordering is the whole of it.** Before item 3 the target has none of the
+  source's types; after the first `CopyFrom` is too late. A registration that
+  fails fails the load before any row moves, rather than surfacing later as a
+  driver error that quotes a value (THREAT_MODEL.md T4).
+  **A `Writer` that is not a `TypeRegistrar` fails the load, named**, and does
+  not skip the step. It used to `return nil`, justified by this package's own
+  fake; a review pointed out that `internal/core` wraps this same writer in a
+  `readableWriter` for verify — which embeds the `Writer` *interface* and so is
+  not a registrar — so one refactor stands between a silent skip and a run that
+  fails mid-copy on a composite column, in the integration suite and nowhere
+  else. `fakeWriter` implements `RegisterTypes` now; `plainWriter` is the double
+  that does not, and `TestALoadWhoseWriterCannotRegisterTypesIsRefused` is what
+  holds the refusal. The compiler-checked version of this — `RegisterTypes` on
+  `pipeline.Writer` — is T-0093.
+  `TestLoadRegistersTheSourcesUserTypesBeforeTheFirstCopy` and
+  `TestALoadWhoseTypeRegistrationFailsCopiesNothing` are the rest of the unit
+  half;
+  `TestLoadNastyCopiesAnEnumArrayAndACompositeColumn` is the half against a real
+  server, over `testdata/nasty.sql` trap 27, and it fails when the
+  `registerTypes` call is removed (verified).
 - **Unlogged tables are recreated logged.** §11.1 says "Unlogged tables are
   recreated unlogged" and `pipeline.Table` has no `relpersistence` field for
   `internal/introspect` to fill. Owed there.
@@ -235,7 +262,8 @@ then after-data: indexes, FKs, setval, ANALYZE, bookkeeping tables).
 transaction contract against a fake `Writer`; `go test -tags integration
 ./internal/load/...` for what a real target holds —
 `TestLoadPagilaIntoAnEmptyTarget`, `TestLoadPagilaIntoAMarkedTarget`,
-`TestLoadNastyResetsAMixedCaseSequence` — testdata/nasty.sql rather than
+`TestLoadNastyResetsAMixedCaseSequence`,
+`TestLoadNastyCopiesAnEnumArrayAndACompositeColumn` — testdata/nasty.sql rather than
 pagila, because pagila has no mixed-case sequence and cannot see a `setval`
 whose `regclass` argument is unquoted — and
 `TestKillNineLeavesEveryTableEmptyOrComplete`, which re-execs this test binary

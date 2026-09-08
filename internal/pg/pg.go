@@ -84,7 +84,7 @@ import (
 // TestConnectAddsNoStartupParameterAPoolerWouldRefuse and
 // TestAStartupParameterOutsideThePoolersListRefusesTheConnection are that
 // guard; TestConnectSetsNoSessionStateOnASourceConnection is this one's.
-func Connect(ctx context.Context, d dsn.DSN, tracer *Tracer) (*pgxpool.Pool, error) {
+func Connect(ctx context.Context, d dsn.DSN, tracer *Tracer, opts ...ConnectOption) (*pgxpool.Pool, error) {
 	cfg, err := pgxpool.ParseConfig(string(d))
 	if err != nil {
 		// pgx's error quotes the string it failed on, which is the string that
@@ -97,11 +97,34 @@ func Connect(ctx context.Context, d dsn.DSN, tracer *Tracer) (*pgxpool.Pool, err
 		cfg.ConnConfig.StatementCacheCapacity = 0
 		cfg.ConnConfig.DescriptionCacheCapacity = 0
 	}
+	for _, o := range opts {
+		o(cfg)
+	}
+	if tracer != nil && cfg.AfterConnect != nil {
+		// The source's Never list, as a check rather than a convention: a hook on
+		// a source connection sets state on a server connection a pooler shares
+		// with other applications (T-0076), and no caller here has a reason to.
+		return nil, fmt.Errorf("pg: a source pool may not carry an AfterConnect hook")
+	}
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("pg: opening a connection pool: %w", err)
 	}
 	return pool, nil
+}
+
+// ConnectOption adjusts the pool configuration before the pool is opened. It is
+// variadic on Connect rather than a fourth parameter because internal/core and
+// internal/discover call Connect too and neither has anything to pass.
+//
+// There is one option and it is the target's: withAfterConnect. A source pool
+// that reached here with one is refused above.
+type ConnectOption func(*pgxpool.Config)
+
+// withAfterConnect runs f on every new connection in the pool. Only the target
+// pool may have one (T-0076, internal/pg/CLAUDE.md's Never list).
+func withAfterConnect(f func(context.Context, *pgx.Conn) error) ConnectOption {
+	return func(cfg *pgxpool.Config) { cfg.AfterConnect = f }
 }
 
 // RenderError turns a Postgres error into something safe to print: Message and
