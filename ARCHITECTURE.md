@@ -37,6 +37,8 @@ Where each hard problem from research/HARD_PROBLEMS.md lives: §1 subsetting in 
 
 A run holds the source snapshot from the start of introspect to the end of extract, releases it, loads, verifies, then emits. Stage transitions are events, so the transcript in CONCEPT.md is the event stream rendered as lines.
 
+**Entry points, recorded after T-PIN (2026-09-08):** `core.Run` (the run), `core.Introspect` (the introspect subcommand), and `core.Preview` (a plan-only pass that returns the resolved endpoints and the schema fingerprint so `--tui` can pin the writing run to what the operator reviewed via `core.Request.Reviewed`; a mismatch refuses with `core.refused.reviewed_changed`, exit 12). There is no fourth; the three share one prologue and epilogue.
+
 ## 2. Stage interfaces and types
 
 Package `internal/pipeline`. Engine-facing interfaces are implemented in `internal/pg`; classify, plan and transform are engine-agnostic. `ctx` is `context.Context` throughout.

@@ -3,12 +3,12 @@ id: T-0080
 title: "Anchor /lazyslice in .gitignore so a bare go build cannot commit a 32MB binary"
 epic: E9
 phase: ""
-status: open
+status: done
 owner: ""
 created: 2026-09-08
 started: ""
-closed: ""
-outcome: ""
+closed: 2026-09-08
+outcome: "done: /lazyslice anchored in .gitignore (2d57b00)"
 ---
 
 # T-0080 · Anchor /lazyslice in .gitignore so a bare go build cannot commit a 32MB binary
@@ -25,6 +25,8 @@ make build sends its -o to bin/, which .gitignore covers, but a bare 'go build .
 
 - 2026-09-08 created
 
+- 2026-09-08 closed: done: /lazyslice anchored in .gitignore (2d57b00)
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+Went well: the reviewer caught a 32 MB stray before commit. Went badly: second stray binary in two days. Change: .gitignore now covers both bare builds.

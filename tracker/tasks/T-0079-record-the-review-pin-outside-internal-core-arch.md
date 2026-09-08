@@ -3,12 +3,12 @@ id: T-0079
 title: "Record the review pin outside internal/core: ARCHITECTURE.md entry points, cmd/CLAUDE.md, and ADR-005's exit 12"
 epic: E9
 phase: ""
-status: open
+status: done
 owner: ""
 created: 2026-09-08
 started: ""
-closed: ""
-outcome: ""
+closed: 2026-09-08
+outcome: "done: ARCHITECTURE.md §1 records the three entry points and the review pin; ADR README errata carries the fifth exit-12 cause; cmd/CLAUDE.md names core.Preview"
 ---
 
 # T-0079 · Record the review pin outside internal/core: ARCHITECTURE.md entry points, cmd/CLAUDE.md, and ADR-005's exit 12
@@ -25,6 +25,8 @@ T-PIN added core.Preview (a third exported entry point beside Run and Introspect
 
 - 2026-09-08 created
 
+- 2026-09-08 closed: done: ARCHITECTURE.md §1 records the three entry points and the review pin; ADR README errata carries the fifth exit-12 cause; cmd/CLAUDE.md names core.Preview
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+Went well: documentation-only. Went badly: nothing. Change: none.
