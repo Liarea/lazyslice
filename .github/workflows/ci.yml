@@ -61,12 +61,14 @@ jobs:
   # skip_upload comment says it exists to avoid. A snapshot build takes about
   # three seconds and turns every one of those into a pull-request failure.
   #
-  # The assertions are the three things that have actually been wrong here: an
-  # archive with no LICENSE (Apache-2.0 §4(a) requires the licence to reach
-  # every recipient), a cask with no postflight (unsigned, un-notarized
-  # binaries are killed by Gatekeeper, so `brew install` succeeds and
-  # `lazyslice --version` does not), and a build that produced fewer than the
-  # six platforms .goreleaser.yaml names.
+  # The assertions are the things that have actually been wrong here, or that
+  # a config change to this file could get wrong next: an archive with no
+  # LICENSE (Apache-2.0 §4(a) requires the licence to reach every recipient),
+  # a cask with no postflight (unsigned, un-notarized binaries are killed by
+  # Gatekeeper, so `brew install` succeeds and `lazyslice --version` does
+  # not), a build that produced fewer than the six platforms .goreleaser.yaml
+  # names, and an sboms pipe that silently produced fewer documents than
+  # archives or that goreleaser did not list in checksums.txt.
   release-config:
     runs-on: ubuntu-latest
     steps:
@@ -86,11 +88,23 @@ jobs:
       - name: install the pinned build tools
         run: make tools
 
+      # syft, for the sboms pipe in .goreleaser.yaml (THREAT_MODEL.md T10's
+      # "published SBOM"). release.yml installs the same pinned action; a
+      # laptop's `make snapshot` still skips the pipe by default (Makefile's
+      # SNAPSHOT_SKIP), because the config's first execution must not be the
+      # tag itself, and until this step the sboms pipe had no execution at
+      # all before one.
+      - uses: anchore/sbom-action/download-syft@v0.24.2
+
       - name: the config is valid
         run: bin/tools/goreleaser check
 
+      # SNAPSHOT_SKIP=sign, not the Makefile default of sign,sbom: this job
+      # exists so a configuration error is a pull-request failure rather than
+      # a burned tag, and the sboms pipe is exactly as able to be
+      # misconfigured as the six-archive build above it.
       - name: the release builds
-        run: make snapshot
+        run: SNAPSHOT_SKIP=sign make snapshot
 
       - name: and what it built is what we promised
         run: |
@@ -104,6 +118,21 @@ jobs:
             ls -1 dist/ || true
             exit 1
           fi
+
+          sboms=$( { ls dist/lazyslice_*_*.tar.gz.sbom.json dist/lazyslice_*_*.zip.sbom.json 2>/dev/null || true; } | wc -l)
+          if [ "$sboms" -ne 6 ]; then
+            echo "release-config: $sboms sbom document(s), want 6 — one per archive"
+            echo "(.goreleaser.yaml's sboms pipe, THREAT_MODEL.md T10's 'published SBOM')."
+            ls -1 dist/ || true
+            exit 1
+          fi
+          for f in dist/lazyslice_*_*.tar.gz.sbom.json dist/lazyslice_*_*.zip.sbom.json; do
+            name=$(basename "$f")
+            if ! grep -qF "$name" dist/checksums.txt; then
+              echo "release-config: $name is not listed in dist/checksums.txt"
+              exit 1
+            fi
+          done
 
           cask=dist/homebrew/Casks/lazyslice.rb
           if ! grep -q 'postflight' "$cask"; then
@@ -126,7 +155,7 @@ jobs:
             fi
           done
 
-          echo "release-config: 6 archives, a quarantine-removing postflight, LICENSE in the archives"
+          echo "release-config: 6 archives, 6 sboms in checksums.txt, a quarantine-removing postflight, LICENSE in the archives"
 
   # CLAUDE.md's hardest rule, enforced over the whole tree rather than over the
   # registered flags of one command tree, which is all a Go test can see.
@@ -158,8 +187,10 @@ jobs:
         run: go test -race -count=1 ./...
 
   # The tests that matter are statements about a real Postgres, so they run
-  # against containers on a runner with a Docker daemon, on the oldest and the
-  # newest supported majors (ADR-003, ARCHITECTURE.md section 14).
+  # against containers on a runner with a Docker daemon, on every supported
+  # major (ADR-003: "Phase 4 CI runs 14 and 18; Gate 5 requires the full
+  # matrix" — phase 5 is where this file is that full matrix).
+  # testcontainers-go makes the five containers a loop, not five configs.
   #
   # This job blocks a merge: `make integration` decides it, and any failing
   # test fails it. It once carried a wrapper that allowed
@@ -189,7 +220,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        postgres: ["14", "18"]
+        postgres: ["14", "15", "16", "17", "18"]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
@@ -254,3 +285,56 @@ jobs:
             echo "integration: $ran test(s) ran and every one of them passed"
           fi
           exit "$status"
+
+  # ADR-002's second enforcement mechanism: docs/FLAGS.md, docs/KEYBINDINGS.md
+  # and docs/ERRORS.md are tools/docgen output and must never be hand-edited
+  # (docs/CLAUDE.md); this job is what makes that true rather than only
+  # written down. `make docs-check` regenerates into a temporary directory —
+  # never overwriting the tree a checkout of this job has — and prints a
+  # unified diff plus the regeneration command on drift
+  # (docs/adr/008-first-run.md §8, lazydocker's behaviour rather than
+  # lazygit's bare `git diff --quiet`).
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: docs/FLAGS.md, docs/KEYBINDINGS.md and docs/ERRORS.md match tools/docgen
+        run: make docs-check
+
+  # CONCEPT.md's enforcement list, ARCHITECTURE.md section 8: the registered
+  # flag set — not source identifiers, which `forbidden` above already covers
+  # — carries nothing named `--no-mask`, `--disable-mask` or `--skip-mask`,
+  # and no flag widens `unmask` past the exact per-column
+  # `--unmask TABLE.COL=REASON` opt-out.
+  unsafe-flags:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: no registered flag turns masking off or widens --unmask
+        run: make unsafe-flags
+
+  # THREAT_MODEL.md T10: "Every dependency pinned exactly; go.sum verified;
+  # govulncheck in CI; dependency bumps are their own pull requests with the
+  # reason." Marked "v1 but not blocking" there, but a job that does not fail
+  # the build is a job nobody reads (ci.yml's own `continue-on-error` note,
+  # above, on the integration job) — this one fails like every other.
+  govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: install the pinned govulncheck
+        run: make tools
+      - name: no known-reachable vulnerability in either module (THREAT_MODEL.md T10)
+        run: make vulncheck

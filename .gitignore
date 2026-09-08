@@ -17,3 +17,5 @@ coverage.out
 .idea/
 .vscode/
 *.swp
+/docgen
+/tools/docgen/docgen
