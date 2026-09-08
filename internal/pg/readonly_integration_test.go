@@ -134,3 +134,55 @@ func TestSystemIDRunsInsideAReadOnlyTransaction(t *testing.T) {
 		}
 	}
 }
+
+// And the rail that catches the next SystemID fires against a real server.
+//
+// TestASourceStatementOutsideATransactionIsRefused is the unit half, and it
+// hands check a transaction status written out as a constant. What it cannot
+// say is that a real, idle source connection actually reports 'I' at the moment
+// TraceQueryStart runs: txStatus reads it from the PgConn pgx updates on every
+// ReadyForQuery, and it answers 0 — deliberately not a violation — for a nil
+// conn or a nil PgConn. So a change in how pgx reports the status, or a future
+// wrapper that hands the tracer a connection without one, would turn this rail
+// into a no-op with every unit test still passing, while internal/pg/CLAUDE.md
+// and the comments in this package tell authors they are covered by it.
+//
+// This is the negative half of TestSystemIDRunsInsideAReadOnlyTransaction, in
+// the same place: an allowlisted statement, no BEGIN, and a refusal that names
+// the transaction and not the shape.
+func TestASourceStatementSentWithNoTransactionIsRefusedOnARealConnection(t *testing.T) {
+	ctx := context.Background()
+	testutil.SkipWithoutDocker(ctx, t)
+
+	url := testutil.Postgres(ctx, t, "")
+
+	tracer, err := NewTracer(SourceShapes()...)
+	if err != nil {
+		t.Fatalf("NewTracer: %v", err)
+	}
+	pool, err := Connect(ctx, dsn.DSN(url), tracer)
+	if err != nil {
+		t.Fatalf("connecting to the source: %v", err)
+	}
+	defer pool.Close()
+
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatalf("acquiring a source connection: %v", err)
+	}
+	defer conn.Release()
+
+	// sqlRole is on the allowlist and every call site sends it inside a
+	// transaction. This one does not, which is the whole of the test.
+	var role string
+	var superuser bool
+	if scanErr := conn.QueryRow(ctx, sqlRole).Scan(&role, &superuser); scanErr == nil {
+		t.Fatal("an allowlisted statement ran on an idle source connection")
+	}
+
+	violation := tracer.Violation()
+	if !errors.Is(violation, ErrOutsideTransaction) {
+		t.Fatalf("Violation() = %v, want ErrOutsideTransaction: txStatus did not see the idle connection "+
+			"a real server reported, so the rail is a no-op", violation)
+	}
+}

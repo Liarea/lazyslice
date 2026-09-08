@@ -50,7 +50,7 @@ const ExitNotRecreatable = 13
 // holds the dependency. event.ArgKey has no key for an index or a constraint
 // (internal/event/event.go), so all three travel under {column}; adding keys for
 // them and re-templating the two messages is owed to the task that adds an
-// ArgKey, exactly as target.refused.start_timeout records its own missing key.
+// ArgKey.
 type Refusal struct {
 	Code       event.Code
 	Exit       int

@@ -4,9 +4,15 @@ package pg
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 )
+
+// noConn is the transaction status check sees when it is called without a
+// connection, which is how most of these tests call it: they are asking the
+// allowlist about a shape, and the transaction rule has its own test below.
+const noConn = byte(0)
 
 // The allowlist is a shape allowlist and not a keyword allowlist, because a
 // keyword allowlist is defeated by statements that begin with an allowed word
@@ -24,7 +30,7 @@ func TestTracerRefusesWritesDressedAsReads(t *testing.T) {
 		`UPDATE users SET email = 'x'`,
 		`SELECT * FROM users`, // right table, wrong shape: no WHERE
 	} {
-		ctx := tr.check(context.Background(), sql)
+		ctx := tr.check(context.Background(), noConn, sql)
 		if ctx.Err() == nil {
 			t.Errorf("the allowlist admitted %q", sql)
 		}
@@ -40,7 +46,7 @@ func TestTracerRefusesWritesDressedAsReads(t *testing.T) {
 		`SELECT * FROM users WHERE id = ANY($1)`,
 		"select *\n  from public.\"Users\"\n  where id = any($1)",
 	} {
-		ctx := tr.check(context.Background(), sql)
+		ctx := tr.check(context.Background(), noConn, sql)
 		if ctx.Err() != nil {
 			t.Errorf("the allowlist refused its own shape: %q", sql)
 		}
@@ -55,7 +61,7 @@ func TestTracerRecordsShapesAndNotValues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewTracer: %v", err)
 	}
-	tr.check(context.Background(), `DELETE FROM users WHERE email = 'alice@example.com' AND id = 4173`)
+	tr.check(context.Background(), noConn, `DELETE FROM users WHERE email = 'alice@example.com' AND id = 4173`)
 
 	trace := tr.Trace()
 	if len(trace) != 1 {
@@ -97,7 +103,7 @@ func TestTracerElidesTheLiteralFormsAPatternCannotClose(t *testing.T) {
 		`INSERT INTO t (a,b,c) VALUES (E'o\'brien', 'carol@example.com', E'd\'angelo')`,
 		`SELECT * FROM t WHERE a = E'o\'brien' AND email = 'carol@example.com' AND b = E'd\'angelo'`,
 	} {
-		tr.check(context.Background(), sql)
+		tr.check(context.Background(), noConn, sql)
 	}
 
 	trace := tr.Trace()
@@ -118,7 +124,7 @@ func TestTracerElidesTheLiteralFormsAPatternCannotClose(t *testing.T) {
 
 	// And an ordinary statement is still recorded in full, so the elision is not
 	// simply refusing to record anything.
-	tr.check(context.Background(), `SELECT current_setting('is_superuser') = 'on'`)
+	tr.check(context.Background(), noConn, `SELECT current_setting('is_superuser') = 'on'`)
 	last := tr.Trace()[5]
 	if !strings.Contains(last.SQL, "current_setting") || strings.Contains(last.SQL, "<elided>") {
 		t.Errorf("Trace()[5].SQL = %q, want the statement with its literals elided", last.SQL)
@@ -144,6 +150,99 @@ func TestTracerRefusesCopyBatchAndPrepare(t *testing.T) {
 	if tr.Violation() == nil {
 		t.Error("Violation() = nil after three refusals")
 	}
+}
+
+// Read-only is set per transaction and never as a session default (T-0076), so
+// a statement that arrives on a source connection with no transaction open has
+// the allowlist and no server-side rail behind it. Until this check existed
+// nothing detected that: internal/discover's dial sent three catalog reads that
+// way and it was found by reading prose (T-0081, T-0082).
+func TestASourceStatementOutsideATransactionIsRefused(t *testing.T) {
+	tr, err := NewTracer(SourceShapes()...)
+	if err != nil {
+		t.Fatalf("NewTracer: %v", err)
+	}
+
+	// The statements a correct call site sends, in the order it sends them: the
+	// BEGIN arrives on an idle connection because opening the transaction is
+	// what it is for, and everything after it is inside one. 'E' is a
+	// transaction that has failed, which is still a transaction — the ROLLBACK
+	// that ends it must not be refused.
+	for _, c := range []struct {
+		tx  byte
+		sql string
+	}{
+		{txIdle, sqlBeginReadOnly},
+		{'T', sqlRole},
+		{'E', sqlRollback},
+		// No connection at all is not an idle connection: it is the tracer
+		// being asked about a shape, which is how the shape tests in this
+		// package and in internal/plan, internal/extract and internal/verify
+		// call it.
+		{noConn, sqlRole},
+	} {
+		if ctx := tr.check(context.Background(), c.tx, c.sql); ctx.Err() != nil {
+			t.Errorf("the allowlist refused %q at transaction status %q", c.sql, statusName(c.tx))
+		}
+	}
+	if err := tr.Violation(); err != nil {
+		t.Fatalf("Violation() = %v before anything was refused", err)
+	}
+
+	// The same registered statement on an idle connection is a violation.
+	if ctx := tr.check(context.Background(), txIdle, sqlRole); ctx.Err() == nil {
+		t.Error("a registered statement was admitted on a connection with no transaction open")
+	}
+
+	violation := tr.Violation()
+	if !errors.Is(violation, ErrOutsideTransaction) {
+		t.Fatalf("Violation() = %v, want ErrOutsideTransaction", violation)
+	}
+	if errors.Is(violation, ErrRefused) {
+		t.Error("Violation() reports an unallowlisted statement; the statement was allowlisted and had no transaction under it")
+	}
+
+	last := tr.Trace()[len(tr.Trace())-1]
+	if !last.Refused {
+		t.Error("the trace does not record the statement as refused")
+	}
+	if last.Shape != "" {
+		t.Errorf("Trace() records shape %q for a refused statement; pipeline.TracedStatement documents it as empty", last.Shape)
+	}
+}
+
+// A statement that is both unallowlisted and on an idle connection is refused
+// for the shape and not for the transaction.
+//
+// This is the THREAT_MODEL.md T9 case the allowlist exists for — an injected or
+// hand-added write on the source — and it is the case most likely to arrive
+// with no transaction under it. Reporting it as ErrOutsideTransaction would
+// tell the operator the statement was one of ours and only its transaction was
+// missing, which is the opposite of what happened.
+func TestAnUnallowlistedStatementOnAnIdleConnectionIsRefusedForItsShape(t *testing.T) {
+	tr, err := NewTracer(SourceShapes()...)
+	if err != nil {
+		t.Fatalf("NewTracer: %v", err)
+	}
+
+	if ctx := tr.check(context.Background(), txIdle, `DROP TABLE users`); ctx.Err() == nil {
+		t.Fatal("an unallowlisted statement was admitted")
+	}
+
+	violation := tr.Violation()
+	if !errors.Is(violation, ErrRefused) {
+		t.Fatalf("Violation() = %v, want ErrRefused", violation)
+	}
+	if errors.Is(violation, ErrOutsideTransaction) {
+		t.Error("Violation() blames the missing transaction; the statement was not one we generate")
+	}
+}
+
+func statusName(tx byte) string {
+	if tx == 0 {
+		return "none"
+	}
+	return string(rune(tx))
 }
 
 func TestShapePlaceholders(t *testing.T) {

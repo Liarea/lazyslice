@@ -118,21 +118,49 @@ type Shape struct {
 // Tracer.Violation returns.
 var ErrRefused = errors.New("pg: statement does not match any registered shape on the source")
 
+// ErrOutsideTransaction is the error a statement sent to the source outside a
+// transaction fails with. It is a separate sentinel from ErrRefused because the
+// two say different things to whoever reads the failure: ErrRefused means the
+// statement was not one we generate, and this means the statement was ours and
+// the read-only transaction was not under it.
+//
+// Read-only is set per transaction and never as a session default (T-0076), so
+// a statement on an idle source connection has the shape allowlist and no
+// server-side rail at all. That was true of internal/discover's dial for as
+// long as it took a person to notice it in prose (T-0081); this is the check
+// that notices instead (T-0082).
+var ErrOutsideTransaction = errors.New("pg: statement sent to the source outside a transaction")
+
 // Tracer is the source statement allowlist. It implements all five pgx tracers
 // (QueryTracer, BatchTracer, CopyFromTracer, PrepareTracer, ConnectTracer) and
 // is registered on the source pool and on no other pool.
 //
 // A statement whose shape is not registered gets a cancelled context from
 // TraceQueryStart, which pgconn checks before it writes anything to the wire,
-// and a recorded violation that fails the run (THREAT_MODEL.md T9). CopyFrom,
-// SendBatch and Prepare are refused unconditionally: the source uses Query and
-// Exec only, and a call to any of the three is a bug in this package, not a
-// statement to be matched.
+// and a recorded violation that fails the run (THREAT_MODEL.md T9). So does a
+// statement that matched a shape, does not itself open a transaction, and
+// arrives on a connection that has none open (see check). CopyFrom, SendBatch
+// and Prepare are refused
+// unconditionally: the source uses Query and Exec only, and a call to any of
+// the three is a bug in this package, not a statement to be matched.
 type Tracer struct {
 	mu         sync.Mutex
 	shapes     []compiledShape
 	trace      []pipeline.TracedStatement
 	violations int
+	// first is the first violation of the run, kept because Violation reports
+	// it and the trace entry alone cannot say which of the two rules refused
+	// it: pipeline.TracedStatement has one Refused bit and no room for a
+	// reason.
+	first *violation
+}
+
+// violation is why the first refusal was refused. outsideTx distinguishes a
+// statement that is not on the allowlist from one that is, on a connection with
+// no transaction open.
+type violation struct {
+	sql       string
+	outsideTx bool
 }
 
 type compiledShape struct {
@@ -199,28 +227,32 @@ func (t *Tracer) Violations() int {
 	return t.violations
 }
 
-// Violation returns ErrRefused wrapped with the first refused statement when
-// the allowlist refused anything, and nil otherwise. A run that saw a violation
-// fails even if the caller swallowed the error pgx returned.
+// Violation returns ErrRefused — or ErrOutsideTransaction, when that is what
+// the first refusal was — wrapped with the first refused statement, and nil
+// when nothing was refused. A run that saw a violation fails even if the caller
+// swallowed the error pgx returned.
 func (t *Tracer) Violation() error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.violations == 0 {
 		return nil
 	}
-	for _, s := range t.trace {
-		if s.Refused {
-			return fmt.Errorf("%w: %s (%d refused in this run)", ErrRefused, s.SQL, t.violations)
-		}
+	if t.first == nil {
+		return ErrRefused
 	}
-	return ErrRefused
+	err := ErrRefused
+	if t.first.outsideTx {
+		err = ErrOutsideTransaction
+	}
+	return fmt.Errorf("%w: %s (%d refused in this run)", err, t.first.sql, t.violations)
 }
 
-// TraceQueryStart matches the statement against the allowlist. An unmatched
-// statement gets a cancelled context, which pgconn checks before it writes to
-// the connection, so the statement never reaches the server.
-func (t *Tracer) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
-	return t.check(ctx, data.SQL)
+// TraceQueryStart matches the statement against the allowlist and checks that
+// there is a transaction under it. A statement that fails either gets a
+// cancelled context, which pgconn checks before it writes to the connection, so
+// the statement never reaches the server.
+func (t *Tracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	return t.check(ctx, txStatus(conn), data.SQL)
 }
 
 // TraceQueryEnd completes the QueryTracer interface.
@@ -258,32 +290,111 @@ func (t *Tracer) TracePrepareEnd(context.Context, *pgx.Conn, pgx.TracePrepareEnd
 // TraceConnectStart records the connection and allows it. Refusing here would
 // refuse the connection the allowlist exists to defend.
 func (t *Tracer) TraceConnectStart(ctx context.Context, _ pgx.TraceConnectStartData) context.Context {
-	t.record(pipeline.TracedStatement{At: time.Now(), Shape: "source.connect"})
+	t.record(pipeline.TracedStatement{At: time.Now(), Shape: "source.connect"}, false)
 	return ctx
 }
 
 // TraceConnectEnd completes the ConnectTracer interface.
 func (t *Tracer) TraceConnectEnd(context.Context, pgx.TraceConnectEndData) {}
 
-func (t *Tracer) check(ctx context.Context, sql string) context.Context {
+// check is the whole of the tracer's judgement: the statement has to match a
+// registered shape, and it has to have a transaction under it.
+//
+// tx is the connection's transaction status as of the last ReadyForQuery —
+// 'I' idle, 'T' in a transaction, 'E' in a failed one — or 0 when there is no
+// connection to ask, which is how the shape-matching unit tests in this package
+// and in internal/plan, internal/extract and internal/verify call
+// TraceQueryStart. Only 'I' is a violation, and only for a statement that
+// matched a registered shape and does not itself open the transaction — a
+// statement that matched nothing is ErrRefused wherever it arrived, because
+// what is wrong with it is not the transaction. Read-only is set per
+// transaction and never
+// as a session default (T-0076), so a statement on an idle source connection
+// has this allowlist and no server-side rail behind it. Refusing it here is the
+// structural form of that rule — the alternative was a comment at every call
+// site, and internal/discover's dial is what happened to the comment (T-0081,
+// T-0082).
+//
+// 0 is deliberately not a violation. It means the tracer was called without a
+// connection, which no statement on the wire ever is, so treating it as one
+// would fail unit tests that are asking about shapes and nothing else, and it
+// would fail them for a connection state that cannot exist in a run.
+func (t *Tracer) check(ctx context.Context, tx byte, sql string) context.Context {
 	norm := normaliseSQL(sql)
 	name := t.match(norm)
+	// The shape miss comes first, and outsideTx is asked only of a statement
+	// that matched one. A statement that is both unallowlisted and on an idle
+	// connection is the T9 case the allowlist exists for — an injected or
+	// hand-added write, which is exactly the kind that arrives with no
+	// transaction under it — and reporting it as ErrOutsideTransaction would
+	// tell the operator the statement was ours when the point is that it was
+	// not.
+	outsideTx := name != "" && tx == txIdle && !opensTransaction(norm)
+	refused := name == "" || outsideTx
 	rec := pipeline.TracedStatement{
 		At:      time.Now(),
 		Shape:   name,
 		SQL:     elideLiterals(norm),
-		Refused: name == "",
+		Refused: refused,
 	}
-	t.record(rec)
-	if rec.Refused {
+	if refused {
+		// pipeline.TracedStatement documents Shape as empty on a refusal, and a
+		// statement refused for having no transaction under it is refused: what
+		// it matched is not what it was allowed to do.
+		rec.Shape = ""
+	}
+	t.record(rec, outsideTx)
+	if refused {
 		return cancelled(ctx)
 	}
 	return ctx
 }
 
 func (t *Tracer) refuse(ctx context.Context, what string) context.Context {
-	t.record(pipeline.TracedStatement{At: time.Now(), SQL: what, Refused: true})
+	t.record(pipeline.TracedStatement{At: time.Now(), SQL: what, Refused: true}, false)
 	return cancelled(ctx)
+}
+
+// txIdle is the transaction status pgconn reports for a connection with no
+// transaction open. pgx tracks it from every ReadyForQuery, so it is the
+// server's own answer and not a count this package keeps.
+const txIdle = byte('I')
+
+// txStatus is the connection's transaction status, or 0 when there is no
+// connection: TraceQueryStart is called with a nil *pgx.Conn by the tests that
+// ask the allowlist about a shape, and a connection that has not finished
+// starting up has no pgconn to ask either.
+func txStatus(conn *pgx.Conn) byte {
+	if conn == nil {
+		return 0
+	}
+	c := conn.PgConn()
+	if c == nil {
+		return 0
+	}
+	return c.TxStatus()
+}
+
+// opensTransaction reports whether the statement is the one kind that may
+// legitimately arrive on an idle source connection: the BEGIN that opens the
+// transaction everything after it runs inside.
+//
+// It is a prefix test over the one spelling this program sends
+// (sqlBeginReadOnly), and it is asked only of a statement that already matched
+// a registered shape — so widening it to Postgres's other spellings would widen
+// nothing: the allowlist admits no `START TRANSACTION`, and a statement that
+// reaches here having matched a shape matched one of ours. If a shape for
+// another spelling is ever registered, widen this in the same change.
+//
+// Case is ignored because the allowlist ignores it, and a following space is
+// required so that a hypothetical identifier beginning with those five letters
+// is not read as an opener.
+func opensTransaction(norm string) bool {
+	const begin = "BEGIN"
+	if len(norm) < len(begin) || !strings.EqualFold(norm[:len(begin)], begin) {
+		return false
+	}
+	return len(norm) == len(begin) || norm[len(begin)] == ' '
 }
 
 func (t *Tracer) match(norm string) string {
@@ -297,12 +408,19 @@ func (t *Tracer) match(norm string) string {
 	return ""
 }
 
-func (t *Tracer) record(s pipeline.TracedStatement) {
+// record appends the statement to the trace and, when it was refused, counts it
+// and keeps the first one with the reason it was refused for, which is what
+// Violation reports.
+func (t *Tracer) record(s pipeline.TracedStatement, outsideTx bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.trace = append(t.trace, s)
-	if s.Refused {
-		t.violations++
+	if !s.Refused {
+		return
+	}
+	t.violations++
+	if t.first == nil {
+		t.first = &violation{sql: s.SQL, outsideTx: outsideTx}
 	}
 }
 
@@ -345,13 +463,13 @@ const (
 	// enforces, the tracer is the evidence — so the evidence was the layer that
 	// failed. And that transaction was not under every statement: Source.SystemID
 	// queried outside any BEGIN, so an autocommit path had this allowlist and
-	// nothing else. It opens a transaction of its own now, so the enforcement is
-	// under every statement this package sends (T-0076, source.go) — not under
-	// internal/discover's dial, which queries a pool from pg.Connect with no
-	// BEGIN and so is where this allowlist is still the whole defence (T-0081;
-	// T-0082 is the check that would notice). The list is every word
-	// format_type puts after the first one;
-	// a type spelling that needs another word is added here, once.
+	// nothing else. It opens a transaction of its own now (T-0076, source.go),
+	// internal/discover's dial opens one around its three catalog reads
+	// (T-0081), and check refuses any statement that reaches an idle source
+	// connection, so the enforcement is under every statement any package sends
+	// to the source and it is a check rather than a convention (T-0082). The
+	// list is every word format_type puts after the first one; a type spelling
+	// that needs another word is added here, once.
 	reTypeMod  = `(?:\( *[0-9]+ *(?:, *[0-9]+ *)?\))?`
 	reTypeWord = `(?:with|without|time|zone|varying|precision|double|to|year|month|day|hour|minute|second)`
 	reTypeName = reIdent + reTypeMod + `(?: ` + reTypeWord + reTypeMod + `){0,4}`
