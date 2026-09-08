@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -43,6 +44,14 @@ const (
 	// startupTimeout bounds a cold image pull plus initdb. A slower bound here
 	// costs one flake per contributor with an empty image cache.
 	startupTimeout = 3 * time.Minute
+
+	// portEndpointAttempts and portEndpointBudget bound the retry of
+	// PortEndpoint below: ~10 attempts spread over ~5 seconds. The wait
+	// strategy above already confirmed Postgres is accepting connections, but
+	// Docker's own port-mapping table can lag a beat behind that log line, so
+	// the first PortEndpoint call can still report the port unmapped (T-0052).
+	portEndpointAttempts = 10
+	portEndpointBudget   = 5 * time.Second
 )
 
 // Postgres starts a Postgres container and returns a connection URL for it.
@@ -68,7 +77,7 @@ func Postgres(ctx context.Context, t *testing.T, image string) string {
 		image = DefaultImage
 	}
 
-	ctr, err := testcontainers.Run(ctx, image,
+	opts := []testcontainers.ContainerCustomizer{
 		testcontainers.WithEnv(map[string]string{
 			"POSTGRES_USER":     user,
 			"POSTGRES_PASSWORD": password,
@@ -86,7 +95,19 @@ func Postgres(ctx context.Context, t *testing.T, image string) string {
 				WithOccurrence(2).
 				WithStartupTimeout(startupTimeout),
 		),
+	}
+
+	ctr, err, termErr := runWithReaperRetry(ctx,
+		func(ctx context.Context) (testcontainers.Container, error) {
+			return testcontainers.Run(ctx, image, opts...)
+		},
+		func(c testcontainers.Container) error {
+			return testcontainers.TerminateContainer(c)
+		},
 	)
+	if termErr != nil {
+		t.Logf("testutil: terminating orphaned %s after stale-reaper retry: %v", image, termErr)
+	}
 	// Registered before the error is checked, and nil-safe, because
 	// testcontainers.Run returns a container alongside its error precisely so
 	// that a container which started but failed its wait strategy can still be
@@ -106,7 +127,7 @@ func Postgres(ctx context.Context, t *testing.T, image string) string {
 		t.Fatalf("testutil: starting %s: %v", image, err)
 	}
 
-	endpoint, err := ctr.PortEndpoint(ctx, "5432/tcp", "")
+	endpoint, err := portEndpointWithRetry(ctx, ctr, "5432/tcp", "", time.Sleep)
 	if err != nil {
 		t.Fatalf("testutil: resolving the mapped port of %s: %v", image, err)
 	}
@@ -135,6 +156,82 @@ func SkipWithoutDocker(ctx context.Context, t *testing.T) {
 	if err := provider.Health(ctx); err != nil {
 		t.Skipf("testutil: docker is not reachable: %v", err)
 	}
+}
+
+// isStaleReaperError reports whether err is the "No such container" failure
+// Ryuk raises when it races a just-removed container from a prior test. It is
+// a plain string match: the error crosses a Docker API boundary and
+// testcontainers-go does not give it a sentinel or a type to compare against.
+func isStaleReaperError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "No such container")
+}
+
+// runWithReaperRetry calls run once. If it fails with the stale-reaper race
+// isStaleReaperError recognizes, it terminates the first attempt's container
+// via terminate -- Ryuk never registered it either, since the reaper connect
+// is what failed, so nothing else will reap it -- and calls run exactly once
+// more.
+//
+// terminate's own error, if any, is returned as terminateErr rather than
+// folded into err: it is a leak warning worth logging, not a reason to fail
+// the run when the retry itself succeeded.
+//
+// run and terminate are both injected so a unit test can drive this against
+// a fake instead of a real Docker daemon.
+func runWithReaperRetry(
+	ctx context.Context,
+	run func(context.Context) (testcontainers.Container, error),
+	terminate func(testcontainers.Container) error,
+) (ctr testcontainers.Container, err error, terminateErr error) {
+	ctr, err = run(ctx)
+	if err != nil && isStaleReaperError(err) {
+		// Ryuk (the reaper) is shared across the test binary's containers. If a
+		// prior test's container was already removed (its own cleanup, or a
+		// slow daemon), a Run that starts while Ryuk is still processing that
+		// removal can fail registering this container with a "No such
+		// container" error that has nothing to do with the image we asked for.
+		// One retry is enough: Ryuk's bookkeeping is on the order of
+		// milliseconds behind Docker's own state.
+		terminateErr = terminate(ctr)
+		ctr, err = run(ctx)
+	}
+	return ctr, err, terminateErr
+}
+
+// portEndpointer is the subset of testcontainers.Container that
+// portEndpointWithRetry needs. It exists so a unit test can retry against a
+// fake instead of a real container.
+type portEndpointer interface {
+	PortEndpoint(ctx context.Context, port, proto string) (string, error)
+}
+
+// portEndpointWithRetry resolves the mapped host:port for port/proto,
+// retrying with a bounded backoff (portEndpointAttempts attempts spread over
+// portEndpointBudget) before giving up. sleep is injected so a unit test can
+// drive the loop without actually waiting.
+func portEndpointWithRetry(ctx context.Context, c portEndpointer, port, proto string, sleep func(time.Duration)) (string, error) {
+	delay := portEndpointBudget / portEndpointAttempts
+
+	var lastErr error
+	for attempt := 1; attempt <= portEndpointAttempts; attempt++ {
+		// Checked before every call, including the first: a context that is
+		// already cancelled or past its deadline is not the T-0052 port-mapping
+		// race below, and burning the retry budget's sleeps on it would only
+		// delay reporting an error that has nothing to do with that race.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return "", ctxErr
+		}
+		endpoint, err := c.PortEndpoint(ctx, port, proto)
+		if err == nil {
+			return endpoint, nil
+		}
+		lastErr = err
+		if attempt < portEndpointAttempts {
+			sleep(delay)
+		}
+	}
+	return "", fmt.Errorf("port not mapped after %d attempts over %s (known startup race between the container reporting ready and Docker's port table catching up, see T-0052): %w",
+		portEndpointAttempts, portEndpointBudget, lastErr)
 }
 
 // URL parses a connection URL produced by Postgres. It exists so that a test
