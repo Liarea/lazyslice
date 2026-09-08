@@ -1,8 +1,9 @@
 # internal/testutil
 
 Fixture loaders for `testdata/`: `LoadPagila(ctx, url)`, `LoadNasty(ctx, url,
-big)`, and the Postgres container helpers other integration tests build on.
-Test support code only — nothing here is imported by non-test code.
+big)`, `LoadNastyNotRecreatable(ctx, url)`, and the Postgres container helpers
+other integration tests build on. Test support code only — nothing here is
+imported by non-test code.
 
 **Contract.** `testdata/README.md` is the spec this package implements: table
 lists, row counts, and every one of the 22 `nasty.sql` traps it must be
@@ -15,6 +16,16 @@ possible to assert against after loading. `fixtures_test.go` (behind
   when `big` is set, and **refuse to load at all** if the gate is missing or
   no longer fills `stream_rows` (`testdata/README.md` trap 22) — the psql path
   and the Go path must never be able to drift apart silently.
+- `nasty.sql` also gates trap 25's foreign key
+  (`public.price_list_notes.list_id REFERENCES public.price_lists_eu
+  (list_id)`) behind `\if :{?notrecreatable}`, the same device. That edge is
+  `ForeignKey.NotRecreatable`, and `internal/plan`'s `checkRecreatable` refuses
+  any `Plan` call over a schema carrying it, unconditionally, before a root is
+  even chosen — so `LoadNasty` always cuts it out, and every caller of
+  `LoadNasty` gets a fixture that plans. `LoadNastyNotRecreatable` loads the
+  fixture with that one constraint added back; it exists for the two tests
+  that are about trap 25 itself (`internal/introspect`'s `TestIntrospectNasty`
+  and `internal/plan`'s `TestPlanNastyNotRecreatable`), not for general use.
 - The only psql construct this package interprets beyond plain SQL is
   `COPY ... FROM stdin` (needed for `pagila-data.sql`); any other backslash
   command in a fixture file must be a loud error, never a silent partial load.
