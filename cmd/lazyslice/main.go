@@ -26,10 +26,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/signal"
 	"runtime"
 	"runtime/debug"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -44,6 +46,7 @@ import (
 	"github.com/Liarea/lazyslice/internal/pg"
 	"github.com/Liarea/lazyslice/internal/pipeline"
 	"github.com/Liarea/lazyslice/internal/render"
+	"github.com/Liarea/lazyslice/internal/tui"
 )
 
 // Exit codes (ADR-005). They are part of the interface: CI jobs branch on them,
@@ -268,6 +271,15 @@ func newRootCmd(ctx context.Context, req *core.Request, raw *rawFlags, stdout io
 			if err := finish(cmd, req, raw); err != nil {
 				return err
 			}
+			// --tui does not change what a run does; it changes who fills the
+			// request in. The mode, its discovery ladder and its target gate
+			// are the same ones this run would have had without it — the pass
+			// that fills the screens is this request stopped at --plan
+			// (previewRequest) — and the line printer is still the default and
+			// still prints the transcript (tui.go, ADR-002).
+			if wantsTUI(*req, stdout) {
+				return runTUI(ctx, *req, stdout)
+			}
 			_, err := core.Run(ctx, *req, sinkFor(*req, stdout))
 			return err
 		},
@@ -318,6 +330,9 @@ func subcommand(
 			// run is a widening no task has asked for (T-DISCOVER's brief).
 			if mode == core.ModeIntrospect {
 				return introspect(ctx, *req, stdout)
+			}
+			if wantsTUI(*req, stdout) {
+				return runTUI(ctx, *req, stdout)
 			}
 			_, err := core.Run(ctx, *req, sink)
 			return err
@@ -394,6 +409,261 @@ func sinkFor(req core.Request, stdout io.Writer) event.Sink {
 		return render.NewNDJSON(stdout)
 	}
 	return render.NewLines(stdout)
+}
+
+// ---------- the TUI ----------
+
+// The TUI half of the CLI (ADR-002).
+//
+// The line printer is the default and nothing here changes that: `lazyslice`
+// prints the transcript into scrollback, and the two Bubble Tea screens are
+// entered only when --tui asks for them, only on a TTY, and only for the two
+// tables that do not fit a screen. Everything the screens can do is a flag in
+// this file first — that is the rule root CLAUDE.md states and
+// TestEveryTUIActionHasFlag enforces.
+
+// wantsTUI reports whether this run enters the two screens.
+//
+// Five things have to hold, and each of them is a way the screens would
+// otherwise be wrong rather than a preference:
+//
+//   - --tui was passed. ADR-002 makes the line printer the default because the
+//     transcript is the artefact, so the TUI is never the TTY default.
+//   - --json was not. --json is a machine interface: NDJSON on stdout with a
+//     Bubble Tea program drawing over it is neither a transcript nor JSON.
+//   - --yes was not. --yes is the headless flag: it says ask nothing, and turns
+//     a question with no safe default into a hard failure naming its flag. A
+//     terminal is not evidence that somebody is watching one — ssh -t, a CI job
+//     and tmux all allocate a pty — so --tui --yes would otherwise open the
+//     screens and block on a keypress nobody is there to make. An unattended
+//     run that hangs is worse than one that exits with a code.
+//   - the mode has something to show. `introspect` and `doctor` produce no
+//     classification and no plan, so --tui on either falls back to the lines it
+//     would have printed rather than opening two empty tables.
+//   - stdin and stdout are both a terminal. A pipe cannot answer a keypress,
+//     and drawing an alternate screen into one destroys the output the caller
+//     was collecting.
+func wantsTUI(req core.Request, stdout io.Writer) bool {
+	if !req.TUI || req.JSON || req.Yes {
+		return false
+	}
+	switch req.Mode {
+	case core.ModeRun, core.ModeVerify, core.ModeClassify, core.ModePlan:
+	case core.ModeIntrospect, core.ModeDoctor:
+		return false
+	default:
+		return false
+	}
+	return isTerminal(os.Stdin) && isTerminal(stdout)
+}
+
+// isTerminal reports whether v is a character device.
+//
+// It is the standard library's own answer rather than a terminal package's,
+// because the only question here is whether a keypress can arrive and an
+// alternate screen can be drawn; Bubble Tea does the rest of the terminal
+// handling itself. Anything that is not an *os.File — a test's buffer, a pipe —
+// is not a terminal.
+func isTerminal(v any) bool {
+	f, ok := v.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return info.Mode()&os.ModeCharDevice != 0
+}
+
+// runTUI runs the pipeline as far as the plan, opens the two screens over what
+// the classifier and the planner said, and runs for real with the request the
+// operator built.
+//
+// The first pass is a plan pass and nothing else about the run changes: it
+// stops before the target is touched, which is what `lazyslice --plan` already
+// does and the reason the screens can be shown before anything is written. The
+// transcript of that pass is printed by the line printer as it happens — the
+// collector sits in front of it, not instead of it — so a run that ends at the
+// screens has still left its lines in scrollback.
+//
+// The second pass is the run itself. It happens when the mode has work left
+// after the plan, and also when the screens changed the request — which is what
+// the plan screen exists to do, and `lazyslice plan --tui` would otherwise
+// answer with the plan the operator has just retuned away from.
+//
+// What the second pass reprints is decided per stage rather than per "did
+// anything change", because those are different questions. Retuning --take on
+// the plan screen changes the plan and nothing else: the schema read is the
+// same read and the classification is the same classification, so keying the
+// suppression on `changed` would put a two-hundred-column classification into
+// scrollback twice on the common --tui run, and ADR-002 calls that transcript
+// the artefact a developer pastes into a compliance ticket. So afterThePlan
+// filters by the stage whose output can actually differ, on every second pass:
+// the plan is always reprinted (it is the thing the operator retuned), the
+// classification only when --unmask changed, the schema read never, and the
+// two lines naming the endpoints this run is writing always.
+//
+// The known limit of the arrangement is that two passes are two snapshots of
+// the source, and two walks of the discovery ladder. A schema that changes
+// between them is classified fresh by the pass that writes the target — a new
+// column is masked at possible+, so the drift is fail-safe — but the reasons
+// screen the operator reviewed was built over the first, and the endpoints the
+// second pass resolves are resolved again rather than inherited. Pinning the
+// two together needs the approved schema fingerprint and the chosen endpoints
+// carried into the second run and refused on a mismatch, which is a
+// core.Request field and a catalogue code this task's paths do not cover; it is
+// reported to the orchestrator as a follow-up. Until then the second pass at
+// least names the endpoints it actually wrote: afterThePlan never suppresses
+// CodeSourceChosen or CodeTargetChosen, so a resolution that differed from the
+// approved one is in scrollback rather than absent from it.
+func runTUI(ctx context.Context, req core.Request, stdout io.Writer) error {
+	collector := tui.NewCollector(render.NewLines(stdout))
+	if _, err := core.Run(ctx, previewRequest(req), collector); err != nil {
+		return err
+	}
+
+	result, err := tui.Run(ctx, tui.Input{
+		Request: req,
+		Events:  collector.Events(),
+		Dropped: collector.Dropped(),
+		In:      os.Stdin,
+		Out:     stdout,
+	})
+	if err != nil {
+		return err
+	}
+	// Leaving without running is a decision and not a failure: the plan pass
+	// wrote nothing, the transcript is in scrollback, and the exit code is 0.
+	if !result.Run {
+		return nil
+	}
+
+	if previewIsTheRun(req) && !requestChanged(req, result.Request) {
+		return nil
+	}
+
+	// The classification is reprinted only when the one flag that can change it
+	// from the screens changed. Everything else the screens write — --take,
+	// --cap, --depth, --root, --skip-table — moves the plan and leaves every
+	// column's category and reason exactly where the operator read them.
+	unmaskChanged := !maps.Equal(req.Unmask, result.Request.Unmask)
+	_, err = core.Run(ctx, result.Request, afterThePlan(render.NewLines(stdout), unmaskChanged))
+	return err
+}
+
+// previewRequest is the request the pass that fills the screens runs.
+//
+// It sets --plan and changes nothing else, and in particular it does not
+// rewrite the mode. Mode is not only where the pipeline stops: internal/core's
+// resolveEndpoints *chooses* a source and a target off the discovery ladder for
+// ModeRun alone and, for every other mode, walks the ladder to print it and
+// then stops at exit 3. A preview that called itself ModePlan would therefore
+// have made `lazyslice --tui` exit 3 in the very directory where plain
+// `lazyslice` finds a container and runs (ARCHITECTURE.md section 9).
+//
+// PlanOnly alone gives the same early stop — internal/core returns after the
+// plan stage on `Mode == ModePlan || PlanOnly`, before the target is written —
+// while the mode keeps its ladder and its target gate, so a target that would
+// be refused is refused before the screens open rather than after.
+func previewRequest(req core.Request) core.Request {
+	preview := req
+	preview.PlanOnly = true
+	return preview
+}
+
+// previewIsTheRun reports whether the pass that filled the screens was already
+// everything this request asks for. `classify` and `plan` both stop where the
+// screens start, and so does --plan on any mode.
+//
+// It is half of the answer and not all of it: a request the screens changed has
+// to be planned again whatever the mode, which is what requestChanged decides.
+func previewIsTheRun(req core.Request) bool {
+	if req.PlanOnly {
+		return true
+	}
+	switch req.Mode {
+	case core.ModeClassify, core.ModePlan:
+		return true
+	case core.ModeRun, core.ModeVerify, core.ModeIntrospect, core.ModeDoctor:
+		return false
+	default:
+		return false
+	}
+}
+
+// requestChanged reports whether the screens changed the request they were
+// handed.
+//
+// It compares the fields the two screens can write, which is what makes the
+// second pass a decision about work rather than about modes: --take, --cap,
+// --depth, --root, --skip-table and --unmask are all reachable from the
+// screens in `plan` and `classify` too, and a mode that stops at the plan still
+// has to recompute it when the operator retuned it.
+func requestChanged(before, after core.Request) bool {
+	switch {
+	case before.Root != after.Root,
+		before.Take != after.Take,
+		before.Depth != after.Depth,
+		before.StrictSchema != after.StrictSchema:
+		return true
+	case !maps.Equal(before.TableCaps, after.TableCaps),
+		!maps.Equal(before.Unmask, after.Unmask),
+		!maps.Equal(before.Explicit, after.Explicit),
+		!slices.Equal(before.SkipTables, after.SkipTables):
+		return true
+	default:
+		return false
+	}
+}
+
+// afterThePlan drops from the second pass the stage output the first pass
+// already printed and the second cannot have changed, so that one --tui run
+// leaves one transcript rather than two.
+//
+// It filters by stage and not by "did the request change", because those are
+// different questions and the run --tui exists for answers them differently:
+// the operator retunes --take on the plan screen and presses enter, so the plan
+// differs and nothing else does. The rules, in the order they matter:
+//
+//   - A warning or a refusal is kept whatever stage it came from. The second
+//     pass reads the source again, and the one thing about it an operator has to
+//     see is the sentence saying it stopped.
+//   - The two decision lines naming the source and the target are kept. They
+//     say which databases this run — the one that writes — resolved, and the
+//     ladder is walked again, so suppressing them would leave a differing
+//     resolution nowhere in scrollback (the follow-up runTUI describes).
+//   - Every other discover and introspect line is dropped. The endpoints, the
+//     role, the schema read: identical work, printed once.
+//   - Classify decisions are dropped unless --unmask changed on the reasons
+//     screen, which is the only thing the screens can do that moves them. This
+//     is the two-hundred-line half of the transcript.
+//   - The plan is always reprinted. It is what the plan screen retunes, and the
+//     plan the run executed is the one the ticket needs.
+func afterThePlan(next event.Sink, unmaskChanged bool) event.Sink {
+	return event.SinkFunc(func(e event.Event) {
+		if e.Kind == event.Warn || e.Kind == event.Error {
+			next.Send(e)
+			return
+		}
+		switch e.Stage {
+		case event.Discover:
+			if e.Code != core.CodeSourceChosen && e.Code != core.CodeTargetChosen &&
+				(e.Kind == event.Info || e.Kind == event.Decision) {
+				return
+			}
+		case event.Introspect:
+			if e.Kind == event.Info || e.Kind == event.Decision {
+				return
+			}
+		case event.Classify:
+			if e.Kind == event.Decision && !unmaskChanged {
+				return
+			}
+		default:
+		}
+		next.Send(e)
+	})
 }
 
 // ---------- flags ----------

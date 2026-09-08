@@ -7,6 +7,8 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"os"
+	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
@@ -18,6 +20,7 @@ import (
 	"github.com/Liarea/lazyslice/internal/core"
 	"github.com/Liarea/lazyslice/internal/event"
 	"github.com/Liarea/lazyslice/internal/pipeline"
+	"github.com/Liarea/lazyslice/internal/tui"
 )
 
 // The flag surface is a promise, not an implementation detail: docs/FLAGS.md is
@@ -475,5 +478,269 @@ func TestNoArgumentsWalksTheLadderAndStopsAtExitThree(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "--source") {
 		t.Errorf("the refusal does not name the flag that fixes it: %s", stderr.String())
+	}
+}
+
+// TestEveryTUIActionHasFlag is ADR-002's first enforcement mechanism and root
+// CLAUDE.md's hardest rule for internal/tui: "every TUI action must be
+// reachable by a CLI flag first."
+//
+// It lives here rather than in internal/tui because this is where the flags
+// are: internal/tui cannot import a main package, and a test that checked the
+// binding table against a second, transcribed list of flag names would pass
+// while the real command tree had lost the flag. It walks the registered
+// persistent flags of the tree a user gets.
+//
+// Failing it has one fix and it is not to edit this test: add the flag to
+// ARCHITECTURE.md section 8 and to bindFlags, then keep the binding.
+func TestEveryTUIActionHasFlag(t *testing.T) {
+	req := core.NewRequest()
+	root := newCommandTree(context.Background(), &req, io.Discard)
+
+	var actions int
+	for _, b := range tui.Bindings() {
+		if b.Nav {
+			// A navigation binding changes no field of the request, which is
+			// why it needs no flag. TestNavigationBindingsNameNoFlag and
+			// TestNavigationBuildsNoRequest in internal/tui hold that claim, so
+			// this test can take it.
+			if b.Flag != "" {
+				t.Errorf("the navigation binding %q names the flag --%s", b.Desc(), b.Flag)
+			}
+			continue
+		}
+		actions++
+		if b.Flag == "" {
+			t.Errorf("the action %q (%v) has no CLI flag", b.Desc(), b.Bind.Keys())
+			continue
+		}
+		if root.PersistentFlags().Lookup(b.Flag) == nil {
+			t.Errorf("the action %q builds --%s, which no command registers", b.Desc(), b.Flag)
+		}
+	}
+	if actions == 0 {
+		t.Fatal("the binding table has no actions, so this test proved nothing")
+	}
+}
+
+// TestTUIActionFlagsAreInTheV1Surface: a flag registered but absent from
+// ARCHITECTURE.md section 8 would pass the test above and still be a capability
+// the document does not admit. wantFlags is that section, transcribed.
+func TestTUIActionFlagsAreInTheV1Surface(t *testing.T) {
+	admitted := map[string]bool{}
+	for _, name := range wantFlags {
+		admitted[name] = true
+	}
+	for _, b := range tui.Bindings() {
+		if b.Nav {
+			continue
+		}
+		if !admitted[b.Flag] {
+			t.Errorf("the action %q builds --%s, which is not in ARCHITECTURE.md section 8",
+				b.Desc(), b.Flag)
+		}
+	}
+}
+
+// TestTheLinePrinterIsTheDefault. ADR-002 makes the line printer the default
+// because the transcript is the artefact, not because the TUI is expensive, so
+// no combination of a TTY and a subcommand may enter the screens on its own.
+func TestTheLinePrinterIsTheDefault(t *testing.T) {
+	req := core.NewRequest()
+	// io.Discard is not an *os.File, so this is also the pipe case: a run whose
+	// stdout is redirected never draws an alternate screen over it.
+	if wantsTUI(req, io.Discard) {
+		t.Error("a run with no --tui entered the TUI")
+	}
+
+	req.TUI = true
+	if wantsTUI(req, io.Discard) {
+		t.Error("--tui entered the TUI with no terminal to draw on")
+	}
+
+	req.JSON = true
+	if wantsTUI(req, os.Stdout) {
+		t.Error("--tui with --json entered the TUI, which would draw over the NDJSON")
+	}
+
+	// --yes is the headless flag, and a pty is not evidence that anybody is
+	// watching one: ssh -t, a CI job and tmux all allocate one. Opening the
+	// screens there would block on a keypress nobody makes, and an unattended
+	// run that hangs is worse than one that exits with a code.
+	req = core.NewRequest()
+	req.TUI = true
+	req.Yes = true
+	if wantsTUI(req, os.Stdout) {
+		t.Error("--tui with --yes entered the TUI, where nothing can answer a keypress")
+	}
+}
+
+// TestThePreviewPassKeepsTheModeAndItsLadder is the reason previewRequest
+// exists. Mode is not only where the pipeline stops: internal/core chooses a
+// source and a target off the discovery ladder for ModeRun alone, and prints
+// the ladder and stops at exit 3 for every other mode. A preview that called
+// itself ModePlan would therefore have made `lazyslice --tui` exit 3 in the
+// very directory where plain `lazyslice` finds a container and runs
+// (ARCHITECTURE.md section 9).
+func TestThePreviewPassKeepsTheModeAndItsLadder(t *testing.T) {
+	for _, mode := range []core.Mode{core.ModeRun, core.ModeVerify, core.ModeClassify, core.ModePlan} {
+		req := core.NewRequest()
+		req.Mode = mode
+
+		preview := previewRequest(req)
+		if preview.Mode != mode {
+			t.Errorf("the preview pass for %v runs as %v, which changes which ladder it walks",
+				mode, preview.Mode)
+		}
+		if !preview.PlanOnly {
+			t.Errorf("the preview pass for %v does not stop at the plan, so it would write the target",
+				mode)
+		}
+		// Nothing else about the run may differ: the screens are shown over the
+		// request the operator made.
+		want := req
+		want.PlanOnly = true
+		if !reflect.DeepEqual(preview, want) {
+			t.Errorf("the preview pass for %v changed something besides --plan", mode)
+		}
+	}
+}
+
+// TestASecondPassRunsWhateverTheModeWhenTheScreensChangedTheRequest: the plan
+// screen exists to change --take, --cap, --depth, --root and --skip-table, so
+// `lazyslice plan --tui` has to recompute the plan the operator retuned. The
+// footer advertises "enter" as "leave and run", and a mode that answered with
+// the plan the operator has just rejected would be that promise broken.
+func TestASecondPassRunsWhateverTheModeWhenTheScreensChangedTheRequest(t *testing.T) {
+	before := core.NewRequest()
+	before.Mode = core.ModePlan
+	before.PlanOnly = true
+
+	if requestChanged(before, before) {
+		t.Error("a request nobody touched reads as changed, so every run would read the source twice")
+	}
+
+	for name, change := range map[string]func(r *core.Request){
+		"--take":       func(r *core.Request) { r.Take = 50 },
+		"--depth":      func(r *core.Request) { r.Depth = 2 },
+		"--root":       func(r *core.Request) { r.Root = "public.customer" },
+		"--cap":        func(r *core.Request) { r.TableCaps["public.payment"] = 10 },
+		"--skip-table": func(r *core.Request) { r.SkipTables = append(r.SkipTables, "public.payment") },
+		"--unmask":     func(r *core.Request) { r.Unmask["public.customer.email"] = "reviewed" },
+		"--strict-schema": func(r *core.Request) {
+			r.StrictSchema = true
+			r.Explicit["strict-schema"] = true
+		},
+	} {
+		after := core.NewRequest()
+		after.Mode, after.PlanOnly = before.Mode, before.PlanOnly
+		change(&after)
+		if !requestChanged(before, after) {
+			t.Errorf("%s from the screens does not reach the run, so the operator's change is dropped", name)
+		}
+	}
+}
+
+// TestTheSecondPassDoesNotReprintTheFirstsTranscript: both passes read the
+// source, and the stages the screens cannot have changed produce the same
+// discover, introspect and classify lines twice. ADR-002 calls the transcript
+// the artefact a developer pastes into a compliance ticket, and two copies of a
+// two-hundred-column classification is not a better one.
+//
+// The filter is keyed on the stage and not on whether the request changed,
+// because the run --tui exists for is the one where the operator retuned --take
+// and the plan is the only thing that differs.
+func TestTheSecondPassDoesNotReprintTheFirstsTranscript(t *testing.T) {
+	stream := []event.Event{
+		{Stage: event.Discover, Kind: event.Info, Code: core.CodeConfigRead},
+		// The two lines naming the databases this run wrote are kept whatever
+		// changed: the ladder is walked again, and a resolution that differed
+		// from the approved one has to be somewhere in scrollback.
+		{Stage: event.Discover, Kind: event.Decision, Code: core.CodeSourceChosen},
+		{Stage: event.Discover, Kind: event.Decision, Code: core.CodeTargetChosen},
+		{Stage: event.Introspect, Kind: event.Info, Code: core.CodeSchemaRead},
+		{Stage: event.Classify, Kind: event.Decision, Code: "classify.masked.column"},
+		{Stage: event.Plan, Kind: event.Info, Code: core.CodePlanStep},
+		// A warning or a refusal is the one thing about the second pass the
+		// operator has to read, whatever stage it came from.
+		{Stage: event.Plan, Kind: event.Warn, Code: core.CodePlanPolymorphic},
+		{Stage: event.Load, Kind: event.Info, Code: core.CodeConfigWritten},
+	}
+
+	collect := func(unmaskChanged bool) []event.Event {
+		var seen []event.Event
+		sink := afterThePlan(event.SinkFunc(func(e event.Event) { seen = append(seen, e) }), unmaskChanged)
+		for _, e := range stream {
+			sink.Send(e)
+		}
+		return seen
+	}
+
+	want := []event.Code{
+		core.CodeSourceChosen,
+		core.CodeTargetChosen,
+		core.CodePlanStep,
+		core.CodePlanPolymorphic,
+		core.CodeConfigWritten,
+	}
+	var got []event.Code
+	for _, e := range collect(false) {
+		got = append(got, e.Code)
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("the second pass printed %v, want %v", got, want)
+	}
+
+	// --unmask is the one thing the screens can change that moves the
+	// classification, so it is the one case the classification is reprinted.
+	got = nil
+	for _, e := range collect(true) {
+		got = append(got, e.Code)
+	}
+	if !slices.Contains(got, event.Code("classify.masked.column")) {
+		t.Errorf("a second pass after --unmask changed printed %v, without the reclassification", got)
+	}
+}
+
+// TestTUIAsksForNothingIntrospectOrDoctorCanShow: those two produce no
+// classification and no plan, so --tui on either falls back to the lines it
+// would have printed rather than opening two empty tables.
+func TestTUIAsksForNothingIntrospectOrDoctorCanShow(t *testing.T) {
+	for _, mode := range []core.Mode{core.ModeIntrospect, core.ModeDoctor} {
+		req := core.NewRequest()
+		req.TUI = true
+		req.Mode = mode
+		if wantsTUI(req, os.Stdout) {
+			t.Errorf("--tui opened the screens for %v", mode)
+		}
+	}
+}
+
+// TestPreviewIsTheRunForTheModesThatStopThere: `classify`, `plan` and --plan
+// all stop where the screens start, so re-running after the operator leaves
+// would read the source twice to print the same thing. Every other mode has
+// work left, and a second pass is what does it.
+func TestPreviewIsTheRunForTheModesThatStopThere(t *testing.T) {
+	for mode, want := range map[core.Mode]bool{
+		core.ModeRun:        false,
+		core.ModeVerify:     false,
+		core.ModeClassify:   true,
+		core.ModePlan:       true,
+		core.ModeIntrospect: false,
+		core.ModeDoctor:     false,
+	} {
+		req := core.NewRequest()
+		req.Mode = mode
+		if got := previewIsTheRun(req); got != want {
+			t.Errorf("previewIsTheRun(%v) = %v, want %v", mode, got, want)
+		}
+	}
+
+	// --plan on the root command stops after the plan without changing the
+	// mode, so the mode alone cannot answer this.
+	req := core.NewRequest()
+	req.PlanOnly = true
+	if !previewIsTheRun(req) {
+		t.Error("--plan would run the pipeline a second time after the screens")
 	}
 }
