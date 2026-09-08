@@ -3,10 +3,10 @@ id: T-0068
 title: "T-POLY: polymorphic association inference"
 epic: E5
 phase: 5
-status: open
+status: in_progress
 owner: opus
 created: 2026-09-07
-started: ""
+started: 2026-09-08
 closed: ""
 outcome: ""
 ---
@@ -24,6 +24,8 @@ outcome: ""
 ## Log
 
 - 2026-09-07 created
+
+- 2026-09-08 started
 
 ## Post-mortem
 
