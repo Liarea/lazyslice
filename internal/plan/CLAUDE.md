@@ -163,10 +163,9 @@ reason for each.
     distinct values in its sample is not followed at all — a `_type` column
     holding free text is not a discriminator, and one virtual edge per value
     would be an unbounded fan-out of parent tables from one column. The cap is a
-    product decision this file introduced: ARCHITECTURE.md §3.2 does not state
-    it and ARCHITECTURE.md §3.2's amendment of 2026-09-08 now records it; until
-    it has one this bullet is the only record of it, which root CLAUDE.md
-    ("decisions live in docs/adr/") says is the wrong home. What it is no longer
+    product decision this file introduced and ARCHITECTURE.md §3.2's amendment
+    of 2026-09-08 now records, together with the 64-byte message bound. What it
+    is no longer
     is *silent*: a pair the cap stopped is reported as `public.attachments
     (owner_type, owner_id), the sample carries more than 50 distinct owner_type
     values`, so the one reason that is a threshold of ours rather than a
@@ -215,8 +214,7 @@ reason for each.
     it, and that is a deliberate deviation from §3.2: a `_type` column holding
     the table name itself is the shape `testdata/nasty.sql` trap 6 carries and
     the shape hand-rolled polymorphism takes, and without the fallback both
-    values of the only fixture this feature has would be unmapped. ARCHITECTURE.md §3.2's amendment of 2026-09-08 admits the fallback; it was owed a
-    §3.2 amendment. `djangoCandidates` has no fallback at all — the bare model
+    values of the only fixture this feature has would be unmapped. ARCHITECTURE.md §3.2's amendment of 2026-09-08 admits the fallback in that order. `djangoCandidates` has no fallback at all — the bare model
     name would bind an `auth`/`user` content type to any app's `public.user` —
     so a model with an explicit `db_table` resolves to no table and is reported
     as an unmapped value, which is the finding the feature already has for a
