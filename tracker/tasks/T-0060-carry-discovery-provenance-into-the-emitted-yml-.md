@@ -3,12 +3,12 @@ id: T-0060
 title: "Carry discovery provenance into the emitted yml: discover.Result and core.Request keep the rung and label, so a committed source: compose / source_label: db is not rewritten as source: flag"
 epic: E5
 phase: ""
-status: in_progress
+status: done
 owner: opus
 created: 2026-09-07
 started: 2026-09-07
-closed: ""
-outcome: ""
+closed: 2026-09-07
+outcome: "done: discover.Result carries provenance and label through core.Request into emit; a committed source: compose survives argument-free reruns"
 ---
 
 # T-0060 · Carry discovery provenance into the emitted yml: discover.Result and core.Request keep the rung and label, so a committed source: compose / source_label: db is not rewritten as source: flag
@@ -27,6 +27,8 @@ A run in a directory whose lazyslice.yml records source: compose / source_label:
 
 - 2026-09-07 started
 
+- 2026-09-07 closed: done: discover.Result carries provenance and label through core.Request into emit; a committed source: compose survives argument-free reruns
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+Went well: the round trip is pinned by a test. Went badly: blocked on two doc lines outside paths; the reviewers were right that the ADR wording invited a T2 fall-through. Change: orchestrator amended §9 and ADR-008 before the freeze.
