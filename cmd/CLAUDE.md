@@ -79,3 +79,5 @@ updating that table.
   this file needs no per-stage knowledge and an unmapped error is still
   `ExitInternal`. The ladder's exit 3 and exit 4 arrive the same way, converted
   from `internal/discover`'s `Refusal` by `internal/core`.
+
+Entry points this directory may call: `core.Run`, `core.Introspect`, and `core.Preview` (the `--tui` plan-only pass whose result is handed back as `core.Request.Reviewed`, so the writing run refuses if the snapshot or endpoints changed; T-PIN, 2026-09-08). Nothing else under internal/ is called from here.
