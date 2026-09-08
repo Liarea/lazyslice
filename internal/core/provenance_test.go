@@ -4,6 +4,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/Liarea/lazyslice/internal/dsn"
 	"github.com/Liarea/lazyslice/internal/emit"
 	"github.com/Liarea/lazyslice/internal/event"
+	"github.com/Liarea/lazyslice/internal/pg"
 	"github.com/Liarea/lazyslice/internal/pipeline"
 	"github.com/Liarea/lazyslice/internal/ref"
 )
@@ -178,11 +180,44 @@ func fillCandidates(t *testing.T, r *run) {
 	if r.sourceCand == (pipeline.Candidate{}) {
 		t.Fatal("discover returned before it built the source candidate")
 	}
-	if err := r.openTarget(t.Context()); err == nil {
+	err := r.openTarget(t.Context())
+	if err == nil {
 		t.Fatal("openTarget reached a database on a closed port")
 	}
 	if r.targetCand == (pipeline.Candidate{}) {
 		t.Fatal("openTarget returned before it built the target candidate")
+	}
+
+	// The gate itself refuses a closed port with CodeUnreachable (the dial
+	// failure surfaces there, not at OpenTarget or pg.Connect, because
+	// pgxpool.NewWithConfig never dials) and that refusal must still carry the
+	// host and reason Args unreachableTarget fills — a bare wrap leaves the
+	// catalogue row's {host}/{reason} unfilled (T-0071 review).
+	var s *Stop
+	if !errors.As(err, &s) {
+		t.Fatalf("openTarget returned %T, want *Stop", err)
+	}
+	if s.Code != pg.CodeUnreachable {
+		t.Fatalf("stop code = %s, want %s", s.Code, pg.CodeUnreachable)
+	}
+	if s.Args[event.ArgHost] == "" {
+		t.Error("stop has no ArgHost: the rendered line would show {host}")
+	}
+	// Not just non-empty: the dial error pgx returns for a closed port is
+	// multi-line, with the gate's own "pg: gate: connecting to the target:"
+	// preamble on line 1 and the driver's cause ("...connect: connection
+	// refused") on the lines after it. A reason that only proves non-empty
+	// would still pass if oneLine regressed to keeping the preamble and
+	// dropping the cause (T-0071 review).
+	reason := s.Args[event.ArgReason]
+	if reason == "" {
+		t.Error("stop has no ArgReason: the rendered line would show {reason}")
+	}
+	if !strings.Contains(reason, "refused") {
+		t.Errorf("ArgReason = %q, want the driver's dial cause (e.g. \"connection refused\")", reason)
+	}
+	if strings.HasSuffix(strings.TrimSpace(reason), ":") {
+		t.Errorf("ArgReason = %q, ends in a dangling colon with nothing after it", reason)
 	}
 }
 

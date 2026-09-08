@@ -26,6 +26,13 @@
   message: "target {host} did not respond: {reason}"
   args: [host, reason]
 
+- code: target.refused.missing
+  kind: error
+  stage: discover
+  exit: 4
+  message: "no target: pass {flag} postgres://..."
+  args: [flag]
+
 - code: target.refused.no_create
   kind: error
   stage: discover
@@ -37,16 +44,8 @@
   kind: error
   stage: discover
   exit: 4
-  # ADR-008 §6 step 3 requires this message to name the container and
-  # "docker logs <name>". Neither is expressible with today's ArgKey enum
-  # (internal/event/event.go): ArgStatement is documented there and in
-  # ARCHITECTURE.md §7 as SQL rendered from a catalogue template with
-  # identifiers substituted, never a docker CLI invocation, and there is no
-  # ArgKey for a container name. Owed to the phase 4 task that implements
-  # Q1' (ADR-008 §6): add an ArgKey (e.g. ArgContainer) and re-template this
-  # message before Q1' ships; do not reuse {statement} for a non-SQL command.
-  message: "target container did not become ready after {seconds}s"
-  args: [seconds]
+  message: "target container {container} did not become ready after {seconds}s: docker logs {container}"
+  args: [container, seconds]
 
 # The five gate refusals internal/pg declares (internal/pg/target.go) and could
 # not record here, because internal/event/catalogue.yml was not a file that

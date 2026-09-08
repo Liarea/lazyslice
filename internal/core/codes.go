@@ -13,6 +13,16 @@ const (
 	// --source gets, and the message names the flag rather than the stage.
 	CodeSourceNone event.Code = "source.refused.none"
 
+	// CodeTargetUnset is exit 4: openTarget was reached with no --target and no
+	// ladder pick. It used to be miscoded as pg.CodeUnreachable, which reads as
+	// a dial failure for a flag that was simply never given; the catalogue
+	// string is "target.refused.missing", not "target.refused.none" — that
+	// name is already discover.CodeTargetNone's, for the ladder's own "nothing
+	// target-shaped found" refusal (internal/discover/codes.go), and a second
+	// row for the same code string would make the catalogue ambiguous about
+	// which message renders.
+	CodeTargetUnset event.Code = "target.refused.missing"
+
 	// CodeSourceChosen and CodeTargetChosen are the decision header's two
 	// lines: which database is the source and which is the target, with the
 	// provenance and the flag that changes it (ARCHITECTURE.md section 9).

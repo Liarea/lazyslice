@@ -96,16 +96,12 @@ type Options struct {
 	// Yes is --yes. ADR-008 §7 makes it and "no controlling terminal" one code
 	// path: Q1 becomes its hard failure and Q1' takes its default.
 	//
-	// BLOCKED, and a merge blocker rather than a debt: internal/core builds
-	// this Options and does not copy Request.Yes into it (internal/core/run.go,
-	// resolveEndpoints, the literal that ends `CreateTarget: r.req.CreateTarget`
-	// — it needs `Yes: r.req.Yes,`). internal/core is outside this task's
-	// writable paths and the fix is one line there. Until it lands, `lazyslice
-	// --yes` on a machine that *has* a controlling terminal opens /dev/tty and
-	// blocks in Confirm with no timeout, which is a hang for any automation run
-	// under an allocated TTY (docker run -t, script(1), tmux). Without a
-	// controlling terminal — CI, cron — the headless path is taken anyway,
-	// which is the case ADR-004 relies on.
+	// Set by internal/core's resolveEndpoints (run.go) from Request.Yes, as of
+	// T-0071: the literal building this Options carries `Yes: r.req.Yes,`
+	// beside `CreateTarget`. Before that landed, this field was never copied
+	// and `lazyslice --yes` on a machine with a controlling terminal opened
+	// /dev/tty and blocked in Confirm with no timeout — a hang under any
+	// automation with an allocated TTY (docker run -t, script(1), tmux).
 	Yes bool
 	// dial builds the read-only Docker client rungs 3 and 4 use. It is
 	// unexported so that only this package's tests can replace it.

@@ -155,6 +155,9 @@ const (
 	// section 9. It never carries a statement the run executed.
 	ArgStatement ArgKey = "statement"
 	ArgHost      ArgKey = "host"
+	// ArgContainer is a container name — an identifier the operator can hand
+	// to `docker logs`, never a path this process reads (ADR-008 section 6).
+	ArgContainer ArgKey = "container"
 	ArgDatabase  ArgKey = "database"
 	ArgStage     ArgKey = "stage"
 	ArgReason    ArgKey = "reason"

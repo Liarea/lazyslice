@@ -10,6 +10,7 @@ import (
 	"os"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -344,6 +345,11 @@ func (r *run) resolveEndpoints(ctx context.Context) error {
 		Target:       r.req.Target,
 		NeedTarget:   r.req.Mode.needsTarget(),
 		CreateTarget: r.req.CreateTarget,
+		// --yes and "no controlling terminal" are one path (ADR-008 section 7).
+		// Without this line the flag stops at core: a run under an allocated
+		// TTY (docker run -t, script(1), tmux) opens /dev/tty and blocks in the
+		// prompt with no timeout instead of taking Q1's headless refusal.
+		Yes: r.req.Yes,
 	}, r.sink)
 	if err != nil {
 		return refusalStop(err)
@@ -369,6 +375,65 @@ func refusalStop(err error) error {
 		Code: refusal.Code, Exit: refusal.Exit, Args: refusal.Args,
 		Message: refusal.Message, err: err, sent: true,
 	}
+}
+
+// unreachableTarget is target.refused.unreachable with the two arguments its
+// catalogue row templates. The row is "target {host} did not respond: {reason}"
+// (internal/event/catalogue.yml), so a Stop built by wrap alone — which sets no
+// Args — reaches the operator with both placeholders unfilled.
+//
+// The host is the redacted reference and never the DSN, and the reason is
+// pg.RenderAnyError with values off, collapsed to one line by oneLine: a
+// driver error that wraps four dial attempts is a wall of text under a ✗.
+func unreachableTarget(target dsn.Ref, err error, message string) *Stop {
+	s := wrap(pg.CodeUnreachable, exitTarget, err, "%s", message)
+	s.Args = event.Args{
+		event.ArgHost:   target.String(),
+		event.ArgReason: oneLine(pg.RenderAnyError(err, false)),
+	}
+	return s
+}
+
+// oneLine collapses s to a single line without dropping the cause. A dial
+// failure from pgx is multi-line: line 1 names the gate step that failed
+// ("pg: gate: connecting to the target: failed to connect to `...`:") and the
+// driver's own reason — the only part that says *why* — is on the lines after
+// it. Taking only the first line (as a naive truncation would) keeps the
+// preamble and throws the reason away, so {reason} in the catalogue's
+// "target {host} did not respond: {reason}" ends up a dangling colon with
+// nothing after it.
+//
+// Instead: strip the "pg: gate: <step>: " preamble when present, so the
+// remaining text starts at the driver's own words, then join what's left
+// into one line — trimmed, non-empty lines only, each stripped of a trailing
+// ":" so joining does not leave "foo:; bar" — capped at two source lines
+// (pgx repeats the same dial error per address it tried, so two is enough to
+// carry the cause without reproducing the whole multi-address wall of text).
+func oneLine(s string) string {
+	const gatePrefix = "pg: gate: "
+	if strings.HasPrefix(s, gatePrefix) {
+		rest := s[len(gatePrefix):]
+		if i := strings.IndexByte(rest, ':'); i >= 0 {
+			s = rest[i+1:]
+		} else {
+			s = rest
+		}
+	}
+
+	var parts []string
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(line)
+		line = strings.TrimRight(line, ":")
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts = append(parts, line)
+		if len(parts) == 2 {
+			break
+		}
+	}
+	return strings.Join(parts, "; ")
 }
 
 // candidateOf is one endpoint as internal/emit records it: the redacted
@@ -440,7 +505,11 @@ func (r *run) discover(ctx context.Context) error {
 // openTarget opens the write side and runs the gate (ARCHITECTURE.md section 9).
 func (r *run) openTarget(ctx context.Context) error {
 	if r.req.Target == "" {
-		return stop(pg.CodeUnreachable, exitTarget, "no target: pass --target postgres://...")
+		return &Stop{
+			Code: CodeTargetUnset, Exit: exitTarget,
+			Args:    event.Args{event.ArgFlag: "--target"},
+			Message: "no target: pass --target postgres://...",
+		}
 	}
 	d, targetRef, err := dsn.Parse(r.req.Target)
 	if err != nil {
@@ -453,7 +522,7 @@ func (r *run) openTarget(ctx context.Context) error {
 	// never find a marker bound, which refuses a target lazyslice itself wrote.
 	tgt, err := pg.OpenTarget(ctx, d, load.GateFingerprint(introspect.New()))
 	if err != nil {
-		return wrap(pg.CodeUnreachable, exitTarget, err, "the target would not open")
+		return unreachableTarget(targetRef, err, "the target would not open")
 	}
 	r.target = tgt
 
@@ -466,6 +535,9 @@ func (r *run) openTarget(ctx context.Context) error {
 	}
 	e, err := tgt.Gate(ctx, r.sourceRef, systemID, r.req.AllowRemoteTarget)
 	if err != nil {
+		if gateCode(e) == pg.CodeUnreachable {
+			return unreachableTarget(targetRef, err, "the target did not pass the gate")
+		}
 		return wrap(gateCode(e), exitTarget, err, "the target did not pass the gate")
 	}
 	if e.Verdict != pipeline.Eligible {
@@ -513,7 +585,7 @@ func (r *run) openTarget(ctx context.Context) error {
 	// owed there; internal/core/CLAUDE.md records the deviation.
 	pool, err := pg.Connect(ctx, d, nil)
 	if err != nil {
-		return wrap(pg.CodeUnreachable, exitTarget, err, "the target's read side would not open")
+		return unreachableTarget(targetRef, err, "the target's read side would not open")
 	}
 	r.targetPool = pool
 	return nil
@@ -923,7 +995,7 @@ func (r *run) move(ctx context.Context) (*pipeline.Report, error) {
 
 	writer, err := r.target.Writer(ctx)
 	if err != nil {
-		return nil, wrap(pg.CodeUnreachable, exitTarget, err, "the target would not open a writer")
+		return nil, unreachableTarget(r.targetCand.Ref, err, "the target would not open a writer")
 	}
 
 	residual := smallDomainAware{
