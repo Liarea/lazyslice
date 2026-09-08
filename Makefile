@@ -92,71 +92,64 @@ forbidden:
 ## unsafe-flags: fail if any registered flag could turn masking off
 ##
 ## Distinct from `forbidden`, which greps source identifiers for a name that
-## could turn masking off before it is ever wired to a flag: this greps the
-## flag-name string literal out of every `*Var`/`*VarP` pflag registration in
-## cmd/lazyslice's non-test source — `.BoolVar(&x, "name", ...)`,
-## `.StringVar(&x, "name", ...)`, `.IntVarP(&x, "name", "short", ...)` and so
-## on — and checks the flag *names*, independently of which `*pflag.FlagSet`
-## receives the call: a named group's set (`bindFlags`), `root.PersistentFlags()`
-## directly, or a subcommand's own `Flags()`. That includes the one thing
-## `forbidden`'s pattern deliberately does not cover, because `--unmask`
-## itself is legitimate. "unmask" is safe only as that exact per-column
-## `--unmask TABLE.COL=REASON` opt-out (ARCHITECTURE.md section 8); a second,
-## wider spelling — `--global-unmask`, `--unmask-all` — would defeat the
-## reason-per-column requirement and is refused here even though
-## `forbidden`'s grep would not catch it, since it names no masking
-## identifier in source.
+## could turn masking off before it is ever wired to a flag: this walks the
+## real, registered `pflag.FlagSet`s of the whole command tree, recursively —
+## root persistent flags, root local flags, and, at every depth, each
+## subcommand's own persistent *and* local flags (cobra does not merge a
+## command's PersistentFlags() into its Flags() until ParseFlags/LocalFlags
+## runs, so visiting only Flags() on an unparsed tree would miss a
+## subcommand's persistent flags), VisitAll so hidden flags are seen too —
+## and checks the flag *names* themselves, independently of how or where each
+## was registered.
 ##
-## This used to read *rendered* `--help` text instead. That had a blind spot:
-## `groupedUsage` (cmd/lazyslice/main.go) prints only the eight named flag
-## groups plus the running command's own LocalNonPersistentFlags, so a flag
-## added straight to `root.PersistentFlags()` outside those groups, or to a
-## subcommand's own `Flags()` in a way `groupedUsage` does not walk, never
-## appeared in any `--help` text and passed regardless of its name (T-CI5
-## review). Grepping the registration call sites themselves has no such
-## blind spot — every flag reaches the binary through one of these calls,
-## however it is grouped — and it also removes the old per-subcommand loop
-## over hardcoded command names: there is no subcommand list here to go
-## stale when a seventh subcommand is added, because every registration
-## lives in cmd/lazyslice/main.go regardless of how many subcommands exist.
-## The sound long-term fix is still to walk the real, registered flag set
-## with `VisitAll` (cmd/lazyslice/main_test.go's
-## TestForbiddenFlagsDoNotExist already does this for the other forbidden
-## spellings); that is a cmd/lazyslice change and outside this recipe's
-## authority to make.
+## This used to grep cmd/lazyslice's non-test source for the flag-name string
+## literal in every `*Var`/`*VarP` pflag registration
+## (`.BoolVar(&x, "name", ...)` and so on). T-CI5's review found that grep's
+## blind spot: it cannot see a pointer-returning registration
+## (`fs.Bool("unmask-all", ...)`), a `Var(&v, "unmask-all", ...)`
+## registration, or a flag-name literal that wraps onto a second source line
+## — none of which is a `*Var`/`*VarP` call with the name on the same line,
+## so none of which the grep's regular expression ever matched, regardless of
+## the flag's name. `cmd/lazyslice/main_test.go`'s
+## TestForbiddenFlagsDoNotExist already walked the registered `pflag.FlagSet`
+## with `VisitAll` for the other forbidden spellings and has no such blind
+## spot: every flag reaches the binary through cobra's registration, however
+## it was made, and VisitAll sees it. `checkForbiddenFlagName` there now also
+## carries this rule: the exact name `unmask` is the legitimate per-column
+## `--unmask TABLE.COL=REASON` opt-out (ARCHITECTURE.md section 8) and must
+## pass, while any other flag name that merely *contains* "unmask" —
+## `--unmask-all`, `--global-unmask` — would widen that opt-out past the
+## reason-per-column requirement and must fail.
 ##
-## Before checking the real tree, this proves the check can actually fail:
-## it copies cmd/lazyslice's non-test source into a scratch directory,
-## appends a fake `--unmask-all` registration to the copy, and confirms the
-## same grep catches it there. A rail that has never been seen to fail on
-## the case it exists for is not proven to catch anything (T-CI5 review).
-UNSAFE_FLAG_GREP := grep -rhoE '\.[A-Za-z0-9]+Var(P)?\(&[A-Za-z0-9_.]+,[[:space:]]*"[^"]+"' \
-	--include='*.go' --exclude='*_test.go'
-
+## `TestForbiddenFlagsDoNotExist_SelfTestUnmaskAll` is the negative
+## self-test this recipe used to run itself, moved into the same test binary:
+## it registers a fake `--unmask-all` flag on a scratch `pflag.FlagSet` and
+## asserts `checkForbiddenFlagName` actually rejects it, so the rail is
+## proven to fail on the case it exists for rather than merely asserted to
+## (T-CI5 review). `-run TestForbiddenFlagsDoNotExist` picks up both tests,
+## because `go test -run` is an unanchored regexp match against the test name
+## and the self-test's name carries this one as a prefix.
+## `go test -run <pattern>` exits 0 and prints plain `ok` when the pattern
+## matches zero tests (verified: a typo'd -run prints "ok ... [no tests to
+## run]" and still exits 0), so a bare `go test -run` here would go silently
+## vacuous the moment either test is renamed or deleted and stop asserting
+## anything. Passing -v and grepping the output for both tests' own `---
+## PASS:` lines means a missing test fails this target instead of passing it
+## by accident.
 unsafe-flags:
-	@scratch=$$(mktemp -d); \
-	trap 'rm -rf "$$scratch"' EXIT; \
-	for f in cmd/lazyslice/*.go; do case "$$f" in *_test.go) continue;; esac; cp "$$f" "$$scratch/"; done; \
-	printf '\nfunc scratchNegativeSelfTest() { fs.BoolVar(&x, "unmask-all", false, "T-CI5 self-test") }\n' >> "$$scratch/main.go"; \
-	self_flags=$$($(UNSAFE_FLAG_GREP) "$$scratch" 2>/dev/null | sed -E 's/.*"([^"]+)"$$/\1/' | sort -u); \
-	if ! echo "$$self_flags" | grep -Eiq -- '^unmask-all$$'; then \
-		echo "unsafe-flags: self-test failed -- a scratch --unmask-all registration was not caught by"; \
-		echo "the flag-name grep, so this rail is not proven to fail on the case it exists for."; \
-		exit 1; \
-	fi; \
-	flags=$$($(UNSAFE_FLAG_GREP) cmd/lazyslice 2>/dev/null | sed -E 's/.*"([^"]+)"$$/\1/' | sort -u); \
-	bad=$$(echo "$$flags" | grep -Ei -- '^(no[-_]?mask|disable[-_]?mask|skip[-_]?mask)$$' || true); \
-	bad="$$bad"$$'\n'"$$(echo "$$flags" | grep -Ei -- 'unmask' | grep -Eiv -- '^unmask$$' || true)"; \
-	bad=$$(echo "$$bad" | sed '/^$$/d'); \
-	if [ -n "$$bad" ]; then \
-		echo "unsafe-flags: the registered flag set includes:"; \
-		echo "$$bad"; \
+	@out="$$(go test ./cmd/lazyslice -run 'TestForbiddenFlagsDoNotExist' -count=1 -v)"; \
+	echo "$$out"; \
+	ok=1; \
+	echo "$$out" | grep -q -- '--- PASS: TestForbiddenFlagsDoNotExist ' || ok=0; \
+	echo "$$out" | grep -q -- '--- PASS: TestForbiddenFlagsDoNotExist_SelfTestUnmaskAll ' || ok=0; \
+	if [ "$$ok" != 1 ]; then \
 		echo; \
-		echo "No flag may disable masking wholesale (CLAUDE.md), and unmask is safe only as the"; \
-		echo "exact per-column --unmask TABLE.COL=REASON opt-out (ARCHITECTURE.md section 8)."; \
+		echo "unsafe-flags: TestForbiddenFlagsDoNotExist and/or its self-test did not report --- PASS above."; \
+		echo "A go test -run that matches zero tests exits 0, so this target checks for the"; \
+		echo "explicit --- PASS lines rather than trusting the exit code alone."; \
 		exit 1; \
-	fi; \
-	echo "==> unsafe-flags: no *Var/*VarP registration in cmd/lazyslice turns masking off or widens --unmask (self-test passed)"
+	fi
+	@echo "==> unsafe-flags: no registered flag in cmd/lazyslice's command tree turns masking off or widens --unmask (self-test passed)"
 
 ## spdx: fail on any Go file whose first line is not the SPDX identifier
 ##
