@@ -3,12 +3,12 @@ id: T-0082
 title: "No mechanism detects a source statement sent outside a transaction"
 epic: E5
 phase: 5
-status: open
+status: done
 owner: ""
 created: 2026-09-08
 started: ""
-closed: ""
-outcome: ""
+closed: 2026-09-08
+outcome: "done: folded into T-0081; the tracer refuses any source statement outside a transaction, pinned by unit and real-server tests"
 ---
 
 # T-0082 · No mechanism detects a source statement sent outside a transaction
@@ -29,6 +29,8 @@ T-0076 removed the AfterConnect exec that set default_transaction_read_only=on o
 
 - 2026-09-08 moved to E5 phase 5
 
+- 2026-09-08 closed: done: folded into T-0081; the tracer refuses any source statement outside a transaction, pinned by unit and real-server tests
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+Went well: cheap structural check. Went badly: the dial path still continues to the next candidate on a violation rather than failing the run; a design question recorded in internal/discover/CLAUDE.md. Change: none.

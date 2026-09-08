@@ -3,12 +3,12 @@ id: T-0085
 title: "ARCHITECTURE.md section 9 Discoverer contract still says three statements per dial"
 epic: E9
 phase: ""
-status: open
+status: done
 owner: ""
 created: 2026-09-08
 started: ""
-closed: ""
-outcome: ""
+closed: 2026-09-08
+outcome: "done: ARCHITECTURE.md §9 Discoverer contract says three reads inside one read-only transaction"
 ---
 
 # T-0085 · ARCHITECTURE.md section 9 Discoverer contract still says three statements per dial
@@ -25,6 +25,8 @@ ARCHITECTURE.md:108, inside the Discoverer interface contract, says the dial run
 
 - 2026-09-08 created
 
+- 2026-09-08 closed: done: ARCHITECTURE.md §9 Discoverer contract says three reads inside one read-only transaction
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+Went well: doc. Went badly: nothing. Change: none.

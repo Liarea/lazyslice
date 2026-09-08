@@ -3,12 +3,12 @@ id: T-0078
 title: "internal/load/ddl: drop the dangling back-reference to target.refused.start_timeout's deleted comment"
 epic: E5
 phase: 5
-status: open
+status: done
 owner: ""
 created: 2026-09-08
 started: ""
-closed: ""
-outcome: ""
+closed: 2026-09-08
+outcome: "done: back-reference dropped in T-0081's commit"
 ---
 
 # T-0078 · internal/load/ddl: drop the dangling back-reference to target.refused.start_timeout's deleted comment
@@ -27,6 +27,8 @@ internal/load/ddl/recreatable.go:53 ends 'exactly as target.refused.start_timeou
 
 - 2026-09-08 moved to E5 phase 5
 
+- 2026-09-08 closed: done: back-reference dropped in T-0081's commit
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+Went well: trivial. Went badly: nothing. Change: none.

@@ -3,12 +3,12 @@ id: T-0086
 title: "Name internal/textsig in internal/CLAUDE.md's import graph, ARCHITECTURE.md section 2 and section 12"
 epic: E9
 phase: ""
-status: open
+status: done
 owner: opus
 created: 2026-09-08
 started: ""
-closed: ""
-outcome: ""
+closed: 2026-09-08
+outcome: "done: textsig named in ARCHITECTURE.md §2 import graph and §12 layout and in internal/CLAUDE.md"
 ---
 
 # T-0086 · Name internal/textsig in internal/CLAUDE.md's import graph, ARCHITECTURE.md section 2 and section 12
@@ -25,6 +25,8 @@ T-0055 added the leaf package internal/textsig (the value-only validators and th
 
 - 2026-09-08 created
 
+- 2026-09-08 closed: done: textsig named in ARCHITECTURE.md §2 import graph and §12 layout and in internal/CLAUDE.md
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+Went well: doc. Went badly: nothing. Change: none.

@@ -43,7 +43,7 @@ A run holds the source snapshot from the start of introspect to the end of extra
 
 Package `internal/pipeline`. Engine-facing interfaces are implemented in `internal/pg`; classify, plan and transform are engine-agnostic. `ctx` is `context.Context` throughout.
 
-**Import graph.** `internal/ref` is a leaf package holding only `TableRef` and `ColumnRef` and importing nothing. `internal/event` imports `ref`. `internal/pipeline` imports `ref`, `event`, `dsn` and `mask`. The stage packages import `pipeline`. `event` never imports `pipeline`, so the graph is acyclic; `TestImportGraph` in phase 3 fails on any edge added in the other direction. `Config` and every type in this section live in `pipeline` and nowhere else; `internal/emit` implements `Emitter` over `pipeline.Config` and holds no type of its own.
+**Import graph.** `internal/ref` is a leaf package holding only `TableRef` and `ColumnRef` and importing nothing. `internal/event` imports `ref`. `internal/pipeline` imports `ref`, `event`, `dsn` and `mask`. `internal/textsig` is a second leaf (the value-only halves of the classifier's validators and the embedded name dictionary) importing only `ref` and `pipeline`, so `classify` and `verify` share one implementation without importing each other (T-0055, 2026-09-08). The stage packages import `pipeline`. `event` never imports `pipeline`, so the graph is acyclic; `TestImportGraph` in phase 3 fails on any edge added in the other direction. `Config` and every type in this section live in `pipeline` and nowhere else; `internal/emit` implements `Emitter` over `pipeline.Config` and holds no type of its own.
 
 ```go
 package pipeline
@@ -105,7 +105,8 @@ type Candidate struct {
 type Discoverer interface {
     // Discover walks the ladder in ARCHITECTURE.md §9 with a 2 s listing budget
     // and a 1 s per-candidate dial timeout, emitting each candidate as it resolves.
-    // Inside the dial it runs at most three statements per candidate: version,
+    // Inside the dial it runs at most three reads per candidate, inside one
+    // REPEATABLE READ READ ONLY transaction it opens and rolls back: version,
     // the pg_class count and hint, and to_regclass('lazyslice_meta'). It never
     // probes emptiness table by table; that is the gate's job, after discovery,
     // and the decision header prints "checking…" until the gate answers.
@@ -1237,7 +1238,8 @@ internal/event/         Event, Sink, Code catalogue (catalogue.yml is the source
 internal/discover/      ladder, candidate verification, de-duplication; dockerctx/ resolves the Docker endpoint;
                         provision/ creates and starts the --create-target container (§9 "Provisioning")
 internal/introspect/    Postgres catalog queries producing *Schema; TABLESAMPLE sampling, leaf-partition sampling
-internal/classify/      rule pack (embedded YAML), validators, dictionaries, scoring, reasons.go templates; pure
+internal/textsig/       value validators and the embedded name dictionary shared by classify and verify; a leaf importing only ref and pipeline
+internal/classify/      rule pack (embedded YAML), scoring, reasons.go templates over textsig's validators; pure
 internal/plan/          FIFO worklist, identity fallback, root default, unreadable tables, SCC/topo order, estimates; pure
 internal/extract/       chunked typed unnest joins over the snapshot into chan RowBatch, one table at a time
 internal/transform/     applies mask per Decision, JSON leaf walking, canonicalisation, FK propagation, residual filter

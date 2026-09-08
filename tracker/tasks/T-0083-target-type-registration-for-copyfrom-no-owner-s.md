@@ -1,12 +1,12 @@
 ---
 id: T-0083
 title: "Target type registration for CopyFrom: no owner since internal/load shipped"
-epic: E9
-phase: ""
-status: open
+epic: E5
+phase: 5
+status: in_progress
 owner: ""
 created: 2026-09-08
-started: ""
+started: 2026-09-08
 closed: ""
 outcome: ""
 ---
@@ -24,6 +24,10 @@ ARCHITECTURE.md 11.1 and ADR-005 say load registers the source's user types on e
 ## Log
 
 - 2026-09-08 created
+
+- 2026-09-08 moved to E5 phase 5
+
+- 2026-09-08 started
 
 ## Post-mortem
 
