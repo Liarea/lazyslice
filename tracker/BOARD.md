@@ -7,7 +7,7 @@
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 1 | 0 | 9 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
-| E5 Hardening | 5 | 1 | 1 | 26 | 0 | 0 |
+| E5 Hardening | 5 | 4 | 1 | 26 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
 | E9 Later | later | 5 | 0 | 5 | 0 | 0 |
 
@@ -22,6 +22,9 @@
 - T-0065 [open] E6 · 20-second VHS GIF of the first run on Pagila (sonnet)
 - T-0083 [in_progress] E5 · Target type registration for CopyFrom: no owner since internal/load shipped ()
 - T-0087 [open] E9 · internal/classify's JSON leaf signal never consults the name dictionary, so verify's second net cannot score person_name or free_text over document leaves ()
+- T-0088 [open] E5 · T-TORTURE: ten real schemas, regressions, docs/TORTURE.md (opus)
+- T-0089 [open] E5 · T-FAILUX: failure UX and error catalogue drift test (opus)
+- T-0090 [open] E5 · T-PERF: performance baseline and CI throughput guard (opus)
 
 ## Recently closed
 
