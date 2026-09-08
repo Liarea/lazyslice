@@ -323,20 +323,20 @@ func nastySamples() mapSampler {
 	s[col(tPeople, "display_name")] = anyOf("Ada Lovelace", "Grace Hopper", "Alan Turing", "Katherine Johnson", "Edsger Dijkstra")
 	s[col(tPeople, "email_verified")] = anyOf(true, false, true, true, false)
 	s[col(tPeople, "ref")] = anyOf(
-		"ada.lovelace@example.com", "grace.hopper@example.com", "alan.turing@example.com",
-		"katherine.johnson@example.com", "edsger.dijkstra@example.com")
+		"ada.lovelace@fixture.test", "grace.hopper@fixture.test", "alan.turing@fixture.test",
+		"katherine.johnson@fixture.test", "edsger.dijkstra@fixture.test")
 	s[col(tPeople, "status")] = anyOf("active", "active", "suspended", "pending", "closed")
 	s[col(tPeople, "marital_status")] = anyOf("married", "single", "civil_partnership", "widowed", "undisclosed")
 	s[col(tPeople, "contact")] = anyOf(
-		`{"profile": {"contact": {"email": "ada.lovelace@example.com", "phone": "+44 20 7946 0958"}, "locale": "en-GB"}, "tags": ["founder"]}`,
-		`{"profile": {"contact": {"email": "grace.hopper@example.com", "phone": "+1 415 555 0132"}, "locale": "en-US"}, "tags": ["admin"]}`,
-		`{"profile": {"contact": {"email": "alan.turing@example.com", "phone": "+44 161 496 0123"}, "locale": "en-GB"}, "tags": []}`,
-		`{"profile": {"contact": {"email": "katherine.johnson@example.com", "phone": "+1 757 555 0188"}, "locale": "en-US"}, "tags": ["reviewer"]}`,
-		`{"profile": {"contact": {"email": "edsger.dijkstra@example.com", "phone": "+31 20 555 0177"}, "locale": "nl-NL"}, "tags": ["archived"]}`)
+		`{"profile": {"contact": {"email": "ada.lovelace@fixture.test", "phone": "+44 20 7946 0958"}, "locale": "en-GB"}, "tags": ["founder"]}`,
+		`{"profile": {"contact": {"email": "grace.hopper@fixture.test", "phone": "+1 415 555 0132"}, "locale": "en-US"}, "tags": ["admin"]}`,
+		`{"profile": {"contact": {"email": "alan.turing@fixture.test", "phone": "+44 161 496 0123"}, "locale": "en-GB"}, "tags": []}`,
+		`{"profile": {"contact": {"email": "katherine.johnson@fixture.test", "phone": "+1 757 555 0188"}, "locale": "en-US"}, "tags": ["reviewer"]}`,
+		`{"profile": {"contact": {"email": "edsger.dijkstra@fixture.test", "phone": "+31 20 555 0177"}, "locale": "nl-NL"}, "tags": ["archived"]}`)
 	s[col(tPeople, "alt_emails")] = []any{
-		[]any{"ada@example.org", "a.lovelace@example.net"},
-		[]any{"ghopper@example.org"},
-		[]any{nil, "a.turing@example.org"},
+		[]any{"ada@corp.invalid", "a.lovelace@corp.invalid"},
+		[]any{"ghopper@corp.invalid"},
+		[]any{nil, "a.turing@corp.invalid"},
 		nil,
 		[]any{},
 	}
@@ -349,8 +349,8 @@ func nastySamples() mapSampler {
 	s[col(tPeople, "preferred_order_id")] = anyOf(int64(200000), int64(200006), nil, int64(200009), nil)
 
 	s[col(tTenantU, "email")] = anyOf(
-		"ada.lovelace@example.com", "grace.hopper@example.com",
-		"alan.turing@example.com", "katherine.johnson@example.com")
+		"ada.lovelace@fixture.test", "grace.hopper@fixture.test",
+		"alan.turing@fixture.test", "katherine.johnson@fixture.test")
 	s[col(tTenantU, "joined_on")] = anyOf("2024-01-05", "2024-01-06", "2024-02-11", "2024-02-12")
 
 	s[col(tSessions, "origin")] = anyOf("10.20.30.40", "10.20.30.41", "172.16.5.6", "2001:db8::1", "172.16.5.7")
@@ -363,20 +363,20 @@ func nastySamples() mapSampler {
 
 	s[col(tAttach, "filename")] = anyOf("signature.png", "id-scan.pdf", "spec-v3.pdf", "orphan.txt")
 	s[col(tAttach, "uploaded_by")] = anyOf(
-		"ada.lovelace@example.com", "grace.hopper@example.com",
-		"alan.turing@example.com", "nobody@example.invalid")
+		"ada.lovelace@fixture.test", "grace.hopper@fixture.test",
+		"alan.turing@fixture.test", "nobody@example.invalid")
 	s[col(tAttach, "owner_type")] = anyOf("people", "people", "projects", "people")
 
 	s[col(tEvents, "kind")] = anyOf("order.placed", "order.placed", "order.placed", "account.suspended", "account.reviewed")
 	s[col(tEvents, "payload")] = anyOf(
-		`{"actor": {"contact": {"email": "ada.lovelace@example.com", "phone": "+44 20 7946 0958"}}, "order_id": 200000}`,
-		`{"actor": {"contact": {"email": "ada.lovelace@example.com", "phone": "+44 20 7946 0958"}}, "order_id": 200003}`,
-		`{"actor": {"contact": {"email": "grace.hopper@example.com", "phone": "+1 415 555 0132"}}, "order_id": 200006}`,
-		`{"actor": {"contact": {"email": "katherine.johnson@example.com", "phone": "+1 757 555 0188"}}, "reason": "review"}`,
-		`{"actor": {"contact": {"email": "katherine.johnson@example.com", "phone": "+1 757 555 0188"}}}`)
+		`{"actor": {"contact": {"email": "ada.lovelace@fixture.test", "phone": "+44 20 7946 0958"}}, "order_id": 200000}`,
+		`{"actor": {"contact": {"email": "ada.lovelace@fixture.test", "phone": "+44 20 7946 0958"}}, "order_id": 200003}`,
+		`{"actor": {"contact": {"email": "grace.hopper@fixture.test", "phone": "+1 415 555 0132"}}, "order_id": 200006}`,
+		`{"actor": {"contact": {"email": "katherine.johnson@fixture.test", "phone": "+1 757 555 0188"}}, "reason": "review"}`,
+		`{"actor": {"contact": {"email": "katherine.johnson@fixture.test", "phone": "+1 757 555 0188"}}}`)
 
 	s[col(tLegacy, "EmailAddress")] = anyOf(
-		"ada.lovelace@example.com", "grace.hopper@example.com", "alan.turing@example.com")
+		"ada.lovelace@fixture.test", "grace.hopper@fixture.test", "alan.turing@fixture.test")
 	s[col(tLegacy, "ContactNumber")] = anyOf("+447700900123", "+14155550132", nil)
 	s[col(tLegacy, "MobileNumber")] = anyOf("+44 7700 900123", "+1 415 555 0132", nil)
 	s[col(tLegacy, "Notes")] = anyOf(
@@ -386,16 +386,16 @@ func nastySamples() mapSampler {
 
 	s[col(tSites, "site_code")] = anyOf("SITE-LDN", "SITE-NYC")
 	s[col(tSites, "name")] = anyOf("London", "New York")
-	s[col(tSites, "contact_email")] = anyOf("site.london@example.com", "site.newyork@example.com")
+	s[col(tSites, "contact_email")] = anyOf("site.london@fixture.test", "site.newyork@fixture.test")
 
 	s[col(tDevices, "asset_tag")] = anyOf("AT-0001", "AT-0002", "AT-0003")
-	s[col(tDevices, "owned_by")] = anyOf("ada.lovelace@example.com", "grace.hopper@example.com", nil)
+	s[col(tDevices, "owned_by")] = anyOf("ada.lovelace@fixture.test", "grace.hopper@fixture.test", nil)
 
 	s[col(tClicks, "url")] = anyOf(
 		"https://example.com/pricing", "https://example.com/pricing", "https://example.com/docs")
 
 	s[col(tInvoices, "bill_to_email")] = anyOf(
-		"accounts@example.com", "grace.hopper@example.com", "katherine.johnson@example.com")
+		"accounts@fixture.test", "grace.hopper@fixture.test", "katherine.johnson@fixture.test")
 	s[col(tInvoices, "bill_to_phone")] = anyOf("+44 20 7946 0958", "+1 415 555 0132", nil)
 
 	s[col(tOrgs, "name")] = anyOf("Analytical Engines Ltd", "Compiler Works")

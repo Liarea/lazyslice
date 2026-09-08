@@ -529,12 +529,12 @@ func TestAColumnBelowMinValuesFailsOnAnyHit(t *testing.T) {
 	}{
 		{
 			name:     "two values, one an email address",
-			vals:     []any{"ada.lovelace@example.com", "nothing to see"},
+			vals:     []any{"ada.lovelace@fixture.test", "nothing to see"},
 			wantFail: true,
 		},
 		{
 			name:     "one value, an email address",
-			vals:     []any{"ada.lovelace@example.com", nil},
+			vals:     []any{"ada.lovelace@fixture.test", nil},
 			wantFail: true,
 		},
 		{
@@ -547,7 +547,7 @@ func TestAColumnBelowMinValuesFailsOnAnyHit(t *testing.T) {
 			// decides once there are enough values for a ratio to mean
 			// anything, and half of four is below it.
 			name:     "four values, two email addresses",
-			vals:     []any{"ada.lovelace@example.com", "grace.hopper@example.com", "nothing to see", "still nothing"},
+			vals:     []any{"ada.lovelace@fixture.test", "grace.hopper@fixture.test", "nothing to see", "still nothing"},
 			wantFail: false,
 		},
 	}

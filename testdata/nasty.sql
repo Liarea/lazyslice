@@ -547,24 +547,24 @@ INSERT INTO public.people
      contact, alt_emails, notes)
 OVERRIDING SYSTEM VALUE
 VALUES
-    (90000, NULL, 'Ada', 'Lovelace', true, 'ada.lovelace@example.com', 'active', 'married',
-     '{"profile": {"contact": {"email": "ada.lovelace@example.com", "phone": "+44 20 7946 0958"}, "locale": "en-GB"}, "tags": ["founder"]}'::jsonb,
-     ARRAY['ada@example.org', 'a.lovelace@example.net'],
+    (90000, NULL, 'Ada', 'Lovelace', true, 'ada.lovelace@fixture.test', 'active', 'married',
+     '{"profile": {"contact": {"email": "ada.lovelace@fixture.test", "phone": "+44 20 7946 0958"}, "locale": "en-GB"}, "tags": ["founder"]}'::jsonb,
+     ARRAY['ada@corp.invalid', 'a.lovelace@corp.invalid'],
      'Ada Lovelace asked that Grace Hopper be copied on the renewal. Call back on +44 20 7946 0958.'),
-    (90007, 90000, 'Grace', 'Hopper', false, 'grace.hopper@example.com', 'active', 'single',
-     '{"profile": {"contact": {"email": "grace.hopper@example.com", "phone": "+1 415 555 0132"}, "locale": "en-US"}, "tags": ["admin"]}'::jsonb,
-     ARRAY['ghopper@example.org'],
+    (90007, 90000, 'Grace', 'Hopper', false, 'grace.hopper@fixture.test', 'active', 'single',
+     '{"profile": {"contact": {"email": "grace.hopper@fixture.test", "phone": "+1 415 555 0132"}, "locale": "en-US"}, "tags": ["admin"]}'::jsonb,
+     ARRAY['ghopper@corp.invalid'],
      'Grace Hopper prefers email. Escalation contact is Alan Turing.'),
-    (90014, 90000, 'Alan', 'Turing', true, 'alan.turing@example.com', 'suspended', 'civil_partnership',
-     '{"profile": {"contact": {"email": "alan.turing@example.com", "phone": "+44 161 496 0123"}, "locale": "en-GB"}, "tags": []}'::jsonb,
-     ARRAY[NULL, 'a.turing@example.org']::text[],
+    (90014, 90000, 'Alan', 'Turing', true, 'alan.turing@fixture.test', 'suspended', 'civil_partnership',
+     '{"profile": {"contact": {"email": "alan.turing@fixture.test", "phone": "+44 161 496 0123"}, "locale": "en-GB"}, "tags": []}'::jsonb,
+     ARRAY[NULL, 'a.turing@corp.invalid']::text[],
      'Suspended pending review. Raised by Katherine Johnson on 2024-03-02.'),
-    (90021, 90007, 'Katherine', 'Johnson', true, 'katherine.johnson@example.com', 'pending', 'widowed',
-     '{"profile": {"contact": {"email": "katherine.johnson@example.com", "phone": "+1 757 555 0188"}, "locale": "en-US"}, "tags": ["reviewer"]}'::jsonb,
+    (90021, 90007, 'Katherine', 'Johnson', true, 'katherine.johnson@fixture.test', 'pending', 'widowed',
+     '{"profile": {"contact": {"email": "katherine.johnson@fixture.test", "phone": "+1 757 555 0188"}, "locale": "en-US"}, "tags": ["reviewer"]}'::jsonb,
      NULL,
      'Katherine Johnson is the reviewer of record for Alan Turing.'),
-    (90028, 90007, 'Edsger', 'Dijkstra', false, 'edsger.dijkstra@example.com', 'closed', 'undisclosed',
-     '{"profile": {"contact": {"email": "edsger.dijkstra@example.com", "phone": "+31 20 555 0177"}, "locale": "nl-NL"}, "tags": ["archived"]}'::jsonb,
+    (90028, 90007, 'Edsger', 'Dijkstra', false, 'edsger.dijkstra@fixture.test', 'closed', 'undisclosed',
+     '{"profile": {"contact": {"email": "edsger.dijkstra@fixture.test", "phone": "+31 20 555 0177"}, "locale": "nl-NL"}, "tags": ["archived"]}'::jsonb,
      '{}'::text[],
      'Account closed at the request of Edsger Dijkstra.');
 
@@ -596,10 +596,10 @@ UPDATE public.people SET preferred_order_id = 200006 WHERE person_id = 90007;
 UPDATE public.people SET preferred_order_id = 200009 WHERE person_id = 90021;
 
 INSERT INTO public.tenant_users (tenant_id, user_id, owner_person_id, email, joined_on) VALUES
-    (1, 1, 90000, 'ada.lovelace@example.com',      '2024-01-05'),
-    (1, 2, 90007, 'grace.hopper@example.com',      '2024-01-06'),
-    (2, 1, 90014, 'alan.turing@example.com',       '2024-02-11'),
-    (2, 7, 90021, 'katherine.johnson@example.com', '2024-02-12');
+    (1, 1, 90000, 'ada.lovelace@fixture.test',      '2024-01-05'),
+    (1, 2, 90007, 'grace.hopper@fixture.test',      '2024-01-06'),
+    (2, 1, 90014, 'alan.turing@fixture.test',       '2024-02-11'),
+    (2, 7, 90021, 'katherine.johnson@fixture.test', '2024-02-12');
 
 -- Session 5044 has a tenant and no user. Under MATCH SIMPLE that row references
 -- no tenant_users row at all, so following its parent edge must select nothing
@@ -667,11 +667,11 @@ ALTER TABLE public.organisations ALTER COLUMN primary_team_id SET NOT NULL;
 INSERT INTO public.attachments
     (attachment_id, owner_type, owner_id, uploaded_by_person_id, filename, uploaded_by)
 VALUES
-    (800,  'people',   90000, 90000, 'signature.png',   'ada.lovelace@example.com'),
-    (813,  'people',   90007, 90007, 'id-scan.pdf',     'grace.hopper@example.com'),
-    (826,  'projects',   700, 90014, 'spec-v3.pdf',     'alan.turing@example.com'),
+    (800,  'people',   90000, 90000, 'signature.png',   'ada.lovelace@fixture.test'),
+    (813,  'people',   90007, 90007, 'id-scan.pdf',     'grace.hopper@fixture.test'),
+    (826,  'projects',   700, 90014, 'spec-v3.pdf',     'alan.turing@fixture.test'),
     (839,  'people',   99999, NULL,  'orphan.txt',      'nobody@example.invalid'),
-    (845,  'Person',  90007, 90007, 'contract.pdf',    'grace.hopper@example.com');
+    (845,  'Person',  90007, 90007, 'contract.pdf',    'grace.hopper@fixture.test');
 
 ALTER TABLE public.attachments ALTER COLUMN attachment_id RESTART WITH 852;
 
@@ -679,19 +679,19 @@ ALTER TABLE public.attachments ALTER COLUMN attachment_id RESTART WITH 852;
 -- by reltuples" has an unambiguous answer.
 INSERT INTO public.events (event_id, person_id, occurred_at, kind, payload) VALUES
     (1, 90000, '2024-02-01 10:00:01+00', 'order.placed',
-     '{"actor": {"contact": {"email": "ada.lovelace@example.com", "phone": "+44 20 7946 0958"}}, "order_id": 200000}'::jsonb),
+     '{"actor": {"contact": {"email": "ada.lovelace@fixture.test", "phone": "+44 20 7946 0958"}}, "order_id": 200000}'::jsonb),
     (2, 90000, '2024-03-11 11:30:01+00', 'order.placed',
-     '{"actor": {"contact": {"email": "ada.lovelace@example.com", "phone": "+44 20 7946 0958"}}, "order_id": 200003}'::jsonb),
+     '{"actor": {"contact": {"email": "ada.lovelace@fixture.test", "phone": "+44 20 7946 0958"}}, "order_id": 200003}'::jsonb),
     (3, 90007, '2024-04-02 09:15:01+00', 'order.placed',
-     '{"actor": {"contact": {"email": "grace.hopper@example.com", "phone": "+1 415 555 0132"}}, "order_id": 200006}'::jsonb),
+     '{"actor": {"contact": {"email": "grace.hopper@fixture.test", "phone": "+1 415 555 0132"}}, "order_id": 200006}'::jsonb),
     (4, 90014, '2024-03-02 14:00:00+00', 'account.suspended',
-     '{"actor": {"contact": {"email": "katherine.johnson@example.com", "phone": "+1 757 555 0188"}}, "reason": "review"}'::jsonb),
+     '{"actor": {"contact": {"email": "katherine.johnson@fixture.test", "phone": "+1 757 555 0188"}}, "reason": "review"}'::jsonb),
     (5, 90021, '2024-06-30 23:59:59+00', 'account.reviewed',
-     '{"actor": {"contact": {"email": "katherine.johnson@example.com", "phone": "+1 757 555 0188"}}}'::jsonb),
+     '{"actor": {"contact": {"email": "katherine.johnson@fixture.test", "phone": "+1 757 555 0188"}}}'::jsonb),
     (6, 90007, '2025-01-20 16:45:01+00', 'order.placed',
-     '{"actor": {"contact": {"email": "grace.hopper@example.com", "phone": "+1 415 555 0132"}}, "order_id": 200009}'::jsonb),
+     '{"actor": {"contact": {"email": "grace.hopper@fixture.test", "phone": "+1 415 555 0132"}}, "order_id": 200009}'::jsonb),
     (7, 90021, '2025-02-14 08:05:01+00', 'order.placed',
-     '{"actor": {"contact": {"email": "katherine.johnson@example.com", "phone": "+1 757 555 0188"}}, "order_id": 200012}'::jsonb);
+     '{"actor": {"contact": {"email": "katherine.johnson@fixture.test", "phone": "+1 757 555 0188"}}, "order_id": 200012}'::jsonb);
 
 -- "ContactNumber" is varchar(15) and unique, so every value here is distinct
 -- and fits: it is the column ARCHITECTURE.md section 5's worked example is
@@ -701,22 +701,22 @@ INSERT INTO public."LegacyCustomer"
     ("CustomerID", "MigratedFromPersonID", "EmailAddress", "ContactNumber", "MobileNumber", "Notes")
 OVERRIDING SYSTEM VALUE
 VALUES
-    (42, 90000, 'ada.lovelace@example.com',  '+447700900123', '+44 7700 900123',
+    (42, 90000, 'ada.lovelace@fixture.test',  '+447700900123', '+44 7700 900123',
      'Migrated from the 1998 system. Contact is Ada Lovelace.'),
-    (43, 90007, 'grace.hopper@example.com',  '+14155550132',  '+1 415 555 0132',
+    (43, 90007, 'grace.hopper@fixture.test',  '+14155550132',  '+1 415 555 0132',
      'Do not merge with Grace Hopper''s new record.'),
-    (44, 90014, 'alan.turing@example.com',   NULL,            NULL,
+    (44, 90014, 'alan.turing@fixture.test',   NULL,            NULL,
      'Left blank on purpose.');
 
 ALTER TABLE public."LegacyCustomer" ALTER COLUMN "CustomerID" RESTART WITH 45;
 
 INSERT INTO public.sites (site_code, name, owner_person_id, contact_email) VALUES
-    ('SITE-LDN', 'London',   90000, 'site.london@example.com'),
-    ('SITE-NYC', 'New York', 90007, 'site.newyork@example.com');
+    ('SITE-LDN', 'London',   90000, 'site.london@fixture.test'),
+    ('SITE-NYC', 'New York', 90007, 'site.newyork@fixture.test');
 
 INSERT INTO public.devices (device_id, site_code, asset_tag, owned_by) VALUES
-    ('11111111-2222-4333-8444-555555555551', 'SITE-LDN', 'AT-0001', 'ada.lovelace@example.com'),
-    ('11111111-2222-4333-8444-555555555552', 'SITE-LDN', 'AT-0002', 'grace.hopper@example.com'),
+    ('11111111-2222-4333-8444-555555555551', 'SITE-LDN', 'AT-0001', 'ada.lovelace@fixture.test'),
+    ('11111111-2222-4333-8444-555555555552', 'SITE-LDN', 'AT-0002', 'grace.hopper@fixture.test'),
     ('11111111-2222-4333-8444-555555555553', 'SITE-NYC', 'AT-0003', NULL);
 
 INSERT INTO public.device_readings (device_id, taken_at, celsius) VALUES
@@ -747,9 +747,9 @@ INSERT INTO public.click_stream (person_id, url, clicked_at) VALUES
     (90007, 'https://example.com/docs',    '2025-04-01 10:01:00+00');
 
 INSERT INTO billing.invoices (invoice_id, person_id, bill_to_email, bill_to_phone, total_pence, issued_on) VALUES
-    (3000, 90000, 'accounts@example.com',        '+44 20 7946 0958',  9650, '2024-04-01'),
-    (3005, 90007, 'grace.hopper@example.com',    '+1 415 555 0132',    399, '2024-05-01'),
-    (3010, 90021, 'katherine.johnson@example.com', NULL,              2750, '2025-03-01');
+    (3000, 90000, 'accounts@fixture.test',        '+44 20 7946 0958',  9650, '2024-04-01'),
+    (3005, 90007, 'grace.hopper@fixture.test',    '+1 415 555 0132',    399, '2024-05-01'),
+    (3010, 90021, 'katherine.johnson@fixture.test', NULL,              2750, '2025-03-01');
 
 ALTER TABLE billing.invoices ALTER COLUMN invoice_id RESTART WITH 3015;
 
