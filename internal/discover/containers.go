@@ -6,14 +6,15 @@ import (
 	"context"
 	"fmt"
 	"net/netip"
-	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
 
 	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/client"
 
+	"github.com/Liarea/lazyslice/internal/discover/provision"
 	"github.com/Liarea/lazyslice/internal/dsn"
 	"github.com/Liarea/lazyslice/internal/pipeline"
 )
@@ -41,23 +42,27 @@ type dockerAPI interface {
 	ContainerInspect(ctx context.Context, id string, options client.ContainerInspectOptions) (client.ContainerInspectResult, error)
 }
 
-// containers is rung 3: running Postgres containers on a local Docker endpoint.
+// containers is rungs 3 and 4: running and exited Postgres containers on a
+// local Docker endpoint.
 //
-// It lists with All: true so that rung 4's exited containers come from the same
-// call (ADR-008 §4); this build reports how many it saw and builds no candidate
-// from them, because rung 4 is phase 5 (ARCHITECTURE.md §14).
+// It lists with All: true so that both rungs come from the same call (ADR-008
+// §4). A running container is dialled like any other candidate; an exited one
+// carries Reachable false with "the container is stopped" as its reason, which
+// is what makes it a rung-4 candidate rather than an eligible target: ADR-008
+// §6 asks Q1' about it *before* the gate runs, because reachability is the
+// precondition of every gate rule.
 //
 // local is the caller's answer to "is this endpoint local", and it is a
 // parameter rather than a re-derivation because address normalisation is a
 // function of (binding, endpointIsLocal) and it is a programming error to
 // normalise a binding from a daemon that is not this machine (ADR-008 §4).
-func containers(ctx context.Context, api dockerAPI, workdir string, local bool) (out []found, stopped int, matchedProject bool, err error) {
+func containers(ctx context.Context, api dockerAPI, workdir string, local bool) (out []found, matchedProject bool, err error) {
 	if !local {
-		return nil, 0, false, fmt.Errorf("discover: refusing to read containers from a non-local docker endpoint")
+		return nil, false, fmt.Errorf("discover: refusing to read containers from a non-local docker endpoint")
 	}
 	list, err := api.ContainerList(ctx, client.ContainerListOptions{All: true})
 	if err != nil {
-		return nil, 0, false, fmt.Errorf("discover: listing containers: %w", err)
+		return nil, false, fmt.Errorf("discover: listing containers: %w", err)
 	}
 
 	postgres := make([]container.Summary, 0, len(list.Items))
@@ -73,17 +78,17 @@ func containers(ctx context.Context, api dockerAPI, workdir string, local bool) 
 
 	inProject, matchedProject := filterToProject(postgres, workdir)
 	for _, c := range inProject {
+		build := candidateFor
 		if c.State != container.StateRunning {
-			stopped++
-			continue
+			build = stoppedCandidateFor
 		}
-		f, ok := candidateFor(ctx, api, c)
+		f, ok := build(ctx, api, c)
 		if !ok {
 			continue
 		}
 		out = append(out, f)
 	}
-	return out, stopped, matchedProject, nil
+	return out, matchedProject, nil
 }
 
 // isPostgres reports whether a container is a Postgres server: it publishes or
@@ -101,6 +106,11 @@ func isPostgres(c container.Summary) bool {
 // filterToProject applies ARCHITECTURE.md §9's working_dir filter: the compose
 // project whose working_dir label is the cwd or an ancestor, then any.
 //
+// A container this tool provisioned belongs to no compose project and carries
+// provision.LabelWorkingDir instead, so the filter reads that label too. Without
+// it, a developer whose project does have a compose Postgres service would have
+// their own --create-target container filtered out of every later run.
+//
 // The "then any" fallback is why the caller prints which provenance it used
 // (ADR-008 §4): the empty case is common, not exotic. matched says which of the
 // two happened, so that the header can say so rather than being silent.
@@ -113,9 +123,12 @@ func filterToProject(cs []container.Summary, workdir string) (out []container.Su
 		return cs, false
 	}
 	for _, c := range cs {
-		dir := c.Labels[labelWorkingDir]
-		if dir != "" && underOrEqual(abs, dir) {
-			out = append(out, c)
+		for _, label := range []string{labelWorkingDir, provision.LabelWorkingDir} {
+			dir := c.Labels[label]
+			if dir != "" && underOrEqual(abs, dir) {
+				out = append(out, c)
+				break
+			}
 		}
 	}
 	if len(out) == 0 {
@@ -146,31 +159,13 @@ func candidateFor(ctx context.Context, api dockerAPI, c container.Summary) (foun
 		return found{}, false
 	}
 
-	user, database, password := "postgres", "postgres", ""
+	var env []string
 	if insp, err := api.ContainerInspect(ctx, c.ID, client.ContainerInspectOptions{}); err == nil && insp.Container.Config != nil {
-		env := envMap(insp.Container.Config.Env)
-		if v := env["POSTGRES_USER"]; v != "" {
-			user, database = v, v
-		}
-		if v := env["POSTGRES_DB"]; v != "" {
-			database = v
-		}
-		password = env["POSTGRES_PASSWORD"]
+		env = insp.Container.Config.Env
 	}
+	user, database, password := provision.Credentials(provision.EnvMap(env))
 
-	u := url.URL{
-		Scheme:   "postgres",
-		Host:     host + ":" + strconv.Itoa(port),
-		Path:     "/" + database,
-		RawQuery: "sslmode=disable",
-	}
-	if password == "" {
-		u.User = url.User(user)
-	} else {
-		u.User = url.UserPassword(user, password)
-	}
-
-	d, ref, err := dsn.Parse(u.String())
+	d, ref, err := dsn.Parse(provision.ConnString(host, port, user, database, password))
 	if err != nil {
 		return found{}, false
 	}
@@ -186,6 +181,77 @@ func candidateFor(ctx context.Context, api dockerAPI, c container.Summary) (foun
 			Local: true,
 		},
 	}, true
+}
+
+// stoppedCandidateFor builds one rung-4 candidate from an exited container.
+//
+// It is not dialled and never can be: the reason on the line is "the container
+// is stopped", which is what ADR-008 §6 asks Q1' about before the gate runs. The
+// host binding comes from HostConfig.PortBindings rather than the summary's
+// Ports, because a container that is not running publishes nothing; a container
+// whose binding names no concrete host port is skipped, since neither this run
+// nor the developer could reach it without starting it and asking again.
+func stoppedCandidateFor(ctx context.Context, api dockerAPI, c container.Summary) (found, bool) {
+	insp, err := api.ContainerInspect(ctx, c.ID, client.ContainerInspectOptions{})
+	if err != nil {
+		return found{}, false
+	}
+	host, port, ok := configuredBinding(insp)
+	if !ok {
+		return found{}, false
+	}
+
+	user, database, password := provision.Credentials(provision.EnvMap(configEnv(insp)))
+
+	d, ref, err := dsn.Parse(provision.ConnString(host, port, user, database, password))
+	if err != nil {
+		return found{}, false
+	}
+	return found{
+		dsn:         d,
+		stopped:     true,
+		containerID: c.ID,
+		cand: pipeline.Candidate{
+			Ref:        ref,
+			Provenance: pipeline.FromStoppedContainer,
+			Label:      displayName(c),
+			Local:      true,
+			ConnectErr: stoppedReason,
+		},
+	}, true
+}
+
+// stoppedReason is what the candidate list prints beside a rung-4 container. It
+// is the reason a gate rule cannot be evaluated for it, and the reason Q1' is
+// asked before the gate rather than after (ADR-008 §6).
+const stoppedReason = "the container is stopped"
+
+// configuredBinding is the host binding a stopped container is configured with.
+//
+// A HostIP of 0.0.0.0 or :: is loopback-equivalent here for the same reason it
+// is in binding and only for that reason: the caller has established the daemon
+// is this machine. An empty HostPort is a dynamic publish whose port the daemon
+// picks at start, and it yields no candidate.
+func configuredBinding(insp client.ContainerInspectResult) (host string, port int, ok bool) {
+	if insp.Container.HostConfig == nil {
+		return "", 0, false
+	}
+	want, err := network.ParsePort("5432/tcp")
+	if err != nil {
+		return "", 0, false
+	}
+	for _, b := range insp.Container.HostConfig.PortBindings[want] {
+		n, err := strconv.Atoi(b.HostPort)
+		if err != nil || n == 0 {
+			continue
+		}
+		addr := b.HostIP
+		if !addr.IsValid() || addr.IsUnspecified() {
+			addr = netip.MustParseAddr("127.0.0.1")
+		}
+		return addr.String(), n, true
+	}
+	return "", 0, false
 }
 
 // binding picks the published host binding for 5432 and normalises it.
@@ -230,12 +296,11 @@ func containerName(c container.Summary) string {
 	return ""
 }
 
-func envMap(env []string) map[string]string {
-	out := make(map[string]string, len(env))
-	for _, e := range env {
-		if name, value, ok := strings.Cut(e, "="); ok {
-			out[name] = value
-		}
+// configEnv is the container's declared environment, or nothing when the daemon
+// reported no config for it.
+func configEnv(insp client.ContainerInspectResult) []string {
+	if insp.Container.Config == nil {
+		return nil
 	}
-	return out
+	return insp.Container.Config.Env
 }

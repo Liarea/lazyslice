@@ -14,15 +14,17 @@
 // to_regclass('lazyslice_meta'). It never probes emptiness table by table; that
 // is the gate's job, in internal/pg, after discovery.
 //
-// This build implements rungs 0 to 3. Rung 4 (exited containers) and
-// provisioning are phase 5 (ARCHITECTURE.md §14): rung 4 counts the stopped
-// containers it saw and says so, and --create-target is a refusal that names
-// what is missing rather than a silent no-op.
+// Rungs 0 to 4 are here; rung 5 (compose service names) is a naming source and
+// contributes no candidate. The one blocking question is here too: Q1 offers to
+// create a target container and Q1' offers to start a stopped one, both through
+// internal/discover/provision, which is the only code in the tree that creates
+// or starts one (ADR-008 §6).
 package discover
 
 import (
 	"context"
 	"errors"
+	"io"
 	"net/url"
 	"regexp"
 	"sort"
@@ -33,6 +35,7 @@ import (
 	"github.com/moby/moby/client"
 
 	"github.com/Liarea/lazyslice/internal/discover/dockerctx"
+	"github.com/Liarea/lazyslice/internal/discover/provision"
 	"github.com/Liarea/lazyslice/internal/dsn"
 	"github.com/Liarea/lazyslice/internal/event"
 	"github.com/Liarea/lazyslice/internal/pipeline"
@@ -55,6 +58,13 @@ type found struct {
 	// also names the provenances of candidates that collapsed into this one,
 	// printed in parentheses so the collapse is visible (ADR-008 §4).
 	also []string
+	// stopped marks a rung-4 candidate: an exited container, which is never
+	// dialled and never reachable, and which ADR-008 §6 asks Q1' about before
+	// the gate runs.
+	stopped bool
+	// containerID is the container behind this candidate, empty for every rung
+	// that is not 3 or 4. It is what Q1' hands to provision.Start.
+	containerID string
 }
 
 // Options is what the ladder needs from the CLI. cmd/lazyslice fills it from
@@ -77,13 +87,45 @@ type Options struct {
 	// NeedTarget is false for the four read-only modes, which never open a
 	// target and must not stop for the want of one.
 	NeedTarget bool
-	// CreateTarget is --create-target. Provisioning is phase 5
-	// (ARCHITECTURE.md §14), so in this build the flag selects which refusal
-	// the no-target state produces and never creates anything.
+	// CreateTarget is --create-target: create the target container instead of
+	// asking Q1 about it. It is the flag Q1's headless failure names, and it is
+	// reached only where Q1 would have been asked — ADR-008 §6 makes it that
+	// question's answer, and §1 does not list it among the things that
+	// short-circuit the ladder.
 	CreateTarget bool
-	// dial builds the Docker client. It is unexported so that only this
-	// package's tests can replace it.
+	// Yes is --yes. ADR-008 §7 makes it and "no controlling terminal" one code
+	// path: Q1 becomes its hard failure and Q1' takes its default.
+	//
+	// BLOCKED, and a merge blocker rather than a debt: internal/core builds
+	// this Options and does not copy Request.Yes into it (internal/core/run.go,
+	// resolveEndpoints, the literal that ends `CreateTarget: r.req.CreateTarget`
+	// — it needs `Yes: r.req.Yes,`). internal/core is outside this task's
+	// writable paths and the fix is one line there. Until it lands, `lazyslice
+	// --yes` on a machine that *has* a controlling terminal opens /dev/tty and
+	// blocks in Confirm with no timeout, which is a hang for any automation run
+	// under an allocated TTY (docker run -t, script(1), tmux). Without a
+	// controlling terminal — CI, cron — the headless path is taken anyway,
+	// which is the case ADR-004 relies on.
+	Yes bool
+	// dial builds the read-only Docker client rungs 3 and 4 use. It is
+	// unexported so that only this package's tests can replace it.
 	dial func(dockerctx.Endpoint) (dockerAPI, error)
+	// dialCandidate is the per-candidate probe. It is unexported for the same
+	// reason dial is, and it exists because Q1 chooses postgres:<source major>
+	// and hands the container it started back through the same dial: neither
+	// fact can be produced in a test without a running server.
+	dialCandidate func(context.Context, *found)
+	// provisioner builds the write-capable client Q1 and Q1' use. It is
+	// separate from dial, and unexported for the same reason: creating or
+	// starting a container is internal/discover/provision's alone, and nothing
+	// outside this file may hand this package a client that can write.
+	provisioner func(dockerctx.Endpoint) (provision.Provisioner, error)
+	// prompter answers the one blocking question. Nil opens the controlling
+	// terminal (ADR-008 §7); a test supplies its own.
+	prompter Prompter
+	// progress is where the pull and the wait print. Nil is os.Stderr, which
+	// is the channel ADR-008 §7 already puts the prompt itself on.
+	progress io.Writer
 }
 
 // Result is what the ladder decided, in the form internal/core takes.
@@ -183,6 +225,11 @@ func Resolve(ctx context.Context, o Options, sink event.Sink) (Result, error) {
 		// provenance forward — `from: compose` stays `compose` — because the
 		// file records where the endpoint was found and not that it was read
 		// back from a file (ARCHITECTURE.md §10).
+		//
+		// --create-target does not short-circuit this. ADR-008 §1 enumerates
+		// what does — --source, --target, the positional DSN and rung 0 — and
+		// §6 scopes --create-target to being Q1's headless answer, which fires
+		// only where the ladder found no target at all.
 		if res.Source == "" {
 			if d, ok := refDSN(o.Config.SourceRef); ok {
 				res.Source = d
@@ -190,7 +237,7 @@ func Resolve(ctx context.Context, o Options, sink event.Sink) (Result, error) {
 			}
 		}
 		if res.Target == "" && o.NeedTarget {
-			if d, ok := refDSN(o.Config.TargetRef); ok {
+			if d, ok := rung0Target(o); ok {
 				res.Target = d
 				res.TargetProvenance, res.TargetLabel = o.Config.Target, o.Config.TargetLabel
 			}
@@ -225,9 +272,18 @@ func Resolve(ctx context.Context, o Options, sink event.Sink) (Result, error) {
 		return res, nil
 	}
 
+	// --create-target is not consulted here. ADR-008 §6 makes it Q1's headless
+	// answer and Q1 fires only when nothing target-shaped was found, so the
+	// flag is reached through noTarget and nowhere else; a flag that also
+	// discarded an otherwise-eligible target would be widening a frozen ADR
+	// (docs/adr/008-first-run.md, root CLAUDE.md).
 	target, runnerUp := chooseTarget(cands, source)
 	if target == nil {
-		return res, refuseNoTarget(o, dock, sink)
+		t, err := noTarget(ctx, o, cands, source, dock, sink)
+		if err != nil {
+			return res, err
+		}
+		target, runnerUp = t, nil
 	}
 	res.Target = string(target.dsn)
 	res.TargetProvenance, res.TargetLabel = target.cand.Provenance, target.cand.Label
@@ -245,16 +301,21 @@ func Resolve(ctx context.Context, o Options, sink event.Sink) (Result, error) {
 }
 
 // namedSource is the given --source (or the yml's) as a candidate, so that the
-// target rules can exclude it. It carries no dsn, because nothing selects it.
+// target rules can exclude it.
+//
+// It keeps the connection string, unlike the version that only had to be
+// excluded: Q1 creates postgres:<source major> and the major of a source that
+// short-circuited the ladder was never probed, so the provisioning path dials
+// it once (sourceMajor) rather than guessing a version to run.
 func namedSource(s string) *found {
 	if s == "" {
 		return nil
 	}
-	_, ref, err := dsn.Parse(s)
+	d, ref, err := dsn.Parse(s)
 	if err != nil {
 		return nil
 	}
-	return &found{cand: pipeline.Candidate{Ref: ref, Provenance: pipeline.FromFlag}}
+	return &found{dsn: d, cand: pipeline.Candidate{Ref: ref, Provenance: pipeline.FromFlag}}
 }
 
 // dockerEndpoint is what rung 3 resolved, carried out of the walk so that the
@@ -265,6 +326,10 @@ func namedSource(s string) *found {
 // that creates a container, so the answer has to leave rung 3 rather than being
 // re-derived by whoever needs it next.
 type dockerEndpoint struct {
+	// endpoint is what dockerctx resolved, carried whole so that provisioning
+	// dials the same daemon rung 3 listed and does not resolve it a second
+	// time.
+	endpoint dockerctx.Endpoint
 	// name is the endpoint as it is printed, or "(none)" when it could not be
 	// resolved at all.
 	name string
@@ -318,7 +383,13 @@ func walk(ctx context.Context, o Options, sink event.Sink) ([]found, dockerEndpo
 	cands = append(cands, containerCands...)
 
 	for i := range cands {
-		probe(ctx, &cands[i])
+		if cands[i].stopped {
+			// A stopped container cannot answer, and a 1 s dial spent proving
+			// that is a second of the listing budget spent on a fact the
+			// daemon already stated. Q1' is what asks about it (ADR-008 §6).
+			continue
+		}
+		o.probe(ctx, &cands[i])
 	}
 	cands = collapse(cands)
 	for i := range cands {
@@ -340,7 +411,7 @@ func rung3(ctx context.Context, o Options, sink event.Sink) ([]found, dockerEndp
 		})
 		return nil, dockerEndpoint{name: "(none)"}
 	}
-	dock := dockerEndpoint{name: endpoint.String(), local: endpoint.Local() && !endpoint.SSH()}
+	dock := dockerEndpoint{endpoint: endpoint, name: endpoint.String(), local: endpoint.Local() && !endpoint.SSH()}
 	if endpoint.Note != "" {
 		send(sink, event.Warn, CodeDockerContextUnreadable, event.Args{
 			event.ArgReason: endpoint.Note,
@@ -381,7 +452,7 @@ func rung3(ctx context.Context, o Options, sink event.Sink) ([]found, dockerEndp
 	}
 	dock.reachable = true
 
-	cands, stopped, matchedProject, err := containers(list, api, o.Workdir, endpoint.Local())
+	cands, matchedProject, err := containers(list, api, o.Workdir, endpoint.Local())
 	if err != nil {
 		send(sink, event.Warn, CodeDockerUnreachable, event.Args{
 			event.ArgHost:   endpoint.String(),
@@ -393,16 +464,6 @@ func rung3(ctx context.Context, o Options, sink event.Sink) ([]found, dockerEndp
 	if !matchedProject && len(cands) > 0 {
 		send(sink, event.Info, CodeComposeNoProject, nil)
 	}
-	if stopped > 0 {
-		// Rung 4 is phase 5 (ARCHITECTURE.md §14). The count is printed so that
-		// a developer whose database is stopped is told why it is not listed,
-		// rather than being shown an empty ladder.
-		send(sink, event.Info, CodeRungNotImplemented, event.Args{
-			event.ArgProvenance: "rung 4 (stopped containers)",
-			event.ArgCount:      strconv.Itoa(stopped),
-			event.ArgFlag:       "--target",
-		})
-	}
 	if compose := readCompose(o.Workdir); len(compose.PostgresServices) > 0 && len(cands) == 0 {
 		// lazyslice never starts the developer's own compose services: their
 		// images, volumes and networks are a larger surprise than ours
@@ -412,6 +473,16 @@ func rung3(ctx context.Context, o Options, sink event.Sink) ([]found, dockerEndp
 		})
 	}
 	return cands, dock
+}
+
+// probe dials one candidate, through Options.dialCandidate when a test supplied
+// one.
+func (o Options) probe(ctx context.Context, f *found) {
+	if o.dialCandidate != nil {
+		o.dialCandidate(ctx, f)
+		return
+	}
+	probe(ctx, f)
 }
 
 // dialDocker opens the Docker client, through Options.dial when a test supplied
@@ -484,6 +555,55 @@ func refDSN(r dsn.Ref) (string, bool) {
 	return u.String(), true
 }
 
+// rung0Target is the committed yml's target, with the credential of a container
+// lazyslice provisioned put back into it.
+//
+// lazyslice.yml records a reference and never a password (ADR-004), and the
+// ordinary password sources — PGPASSWORD, ~/.pgpass, --password-command — cover
+// a database the developer administers. They do not cover the one case
+// lazyslice creates itself: --create-target mints a random POSTGRES_PASSWORD
+// whose only home is the machine-local state dir, so the second run of a
+// provisioned target dialled it with no password at all and stopped at exit 4
+// with "password authentication failed". That contradicts ARCHITECTURE.md §9's
+// "the container survives the run: it is the developer's local database from
+// then on" and ADR-004's zero-question second run.
+//
+// The container name is computed from the working directory, never taken from
+// the file: the label is committed text, and provision.Password refuses a name
+// that is not a single path element, so a lazyslice.yml naming another file
+// cannot make this read it. The label only has to *agree* with the name we
+// would have used, which is what identifies the endpoint as ours.
+func rung0Target(o Options) (string, bool) {
+	s, ok := refDSN(o.Config.TargetRef)
+	if !ok {
+		return "", false
+	}
+	name := provision.Name(projectName(o.Workdir))
+	if o.Config.TargetLabel != name || !o.Config.TargetRef.Loopback() {
+		return s, true
+	}
+	secret, remembered := provision.Password(name)
+	if !remembered {
+		return s, true
+	}
+	return withPassword(s, secret), true
+}
+
+// withPassword puts a password into a connection string that has none. A string
+// that already carries one is returned unchanged: an explicit credential is
+// never overwritten by a remembered one.
+func withPassword(connURL, secret string) string {
+	u, err := url.Parse(connURL)
+	if err != nil || u.User == nil {
+		return connURL
+	}
+	if _, set := u.User.Password(); set {
+		return connURL
+	}
+	u.User = url.UserPassword(u.User.Username(), secret)
+	return u.String()
+}
+
 // collapse de-duplicates candidates on the normalised (host, port, database).
 //
 // The lower-numbered rung wins the printed provenance and the discarded one is
@@ -507,6 +627,14 @@ func collapse(in []found) []found {
 			// A candidate known to be local through a route the winner did not
 			// have stays local: locality only ever grows here.
 			out[at].cand.Local = out[at].cand.Local || f.cand.Local
+			// A rung-4 container that collapsed into a lower rung takes its
+			// container with it, so Q1' still has something to start. It is
+			// only ever adopted by a candidate nothing could reach: a winner
+			// that answered is a server on that endpoint right now, and
+			// marking it stopped would ask Q1' about a database that is up.
+			if !out[at].cand.Reachable && out[at].containerID == "" && f.containerID != "" {
+				out[at].containerID, out[at].stopped = f.containerID, f.stopped
+			}
 			adoptReachable(&out[at], f)
 			continue
 		}
@@ -665,54 +793,6 @@ func refuseNoSource(sink event.Sink) error {
 		Code:    CodeSourceNone,
 		Exit:    exitNoSource,
 		Message: "nothing on the ladder answered: pass --source postgres://...",
-	}
-	sendError(sink, r)
-	return r
-}
-
-// refuseNoTarget is the state Q1 exists for: a source was found and nothing
-// target-shaped was.
-//
-// Q1 is not asked in this build. Provisioning is phase 5 (ARCHITECTURE.md §14),
-// and a question whose yes cannot be honoured is not a question, so the state
-// takes the stop §9's one-question rule prescribes for an item with no safe
-// default: the run stops and names the flag that settles it.
-//
-// The locality guard comes first and is not phase 5. ADR-008 §3 makes
-// --create-target against a non-local or unreachable endpoint a refusal, exit
-// 4, naming the endpoint and --docker-host — "never a silent no-op and never a
-// container created elsewhere" — and THREAT_MODEL.md T2 is what forces it: a
-// container created on someone else's daemon publishes on that host's
-// interfaces, is not local, and lazyslice never removes a container. The guard
-// sits here, ahead of every other answer to this state, so that phase 5 cannot
-// wire a provisioner past it.
-func refuseNoTarget(o Options, dock dockerEndpoint, sink event.Sink) error {
-	if o.CreateTarget && !dock.usable() {
-		r := &Refusal{
-			Code: CodeTargetDockerNotLocal, Exit: exitTarget,
-			Args: event.Args{
-				event.ArgHost:   dock.name,
-				event.ArgReason: dock.why(),
-				event.ArgFlag:   "--docker-host",
-			},
-			Message: "--create-target needs a local, reachable docker endpoint",
-		}
-		sendError(sink, r)
-		return r
-	}
-
-	// Both refusals name --target, because --target is the flag that names a
-	// database to load into. --create-target changes only which of the two the
-	// run gets: a run that passed it is told that starting a container is not in
-	// this build, rather than being told to pass the flag it just passed.
-	code := CodeTargetNone
-	if o.CreateTarget {
-		code = CodeTargetNotImplemented
-	}
-	r := &Refusal{
-		Code: code, Exit: exitTarget,
-		Args:    event.Args{event.ArgFlag: "--target"},
-		Message: "no local postgres to load into, and starting one is not in this build",
 	}
 	sendError(sink, r)
 	return r

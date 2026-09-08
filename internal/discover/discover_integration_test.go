@@ -5,9 +5,19 @@
 package discover
 
 import (
+	"context"
+	"os"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/moby/moby/client"
+
+	"github.com/Liarea/lazyslice/internal/discover/dockerctx"
+	"github.com/Liarea/lazyslice/internal/discover/provision"
+	"github.com/Liarea/lazyslice/internal/dsn"
 	"github.com/Liarea/lazyslice/internal/event"
 	"github.com/Liarea/lazyslice/internal/pipeline"
 	"github.com/Liarea/lazyslice/internal/testutil"
@@ -112,6 +122,198 @@ func TestContainerAndEnvVarCollapseToOneCandidate(t *testing.T) {
 	if matches != 1 {
 		t.Errorf("the container appears %d times on the ladder, want once", matches)
 	}
+}
+
+// Rung 4 and Q1', end to end against a real daemon: a container this tool
+// provisioned is stopped, the ladder shows it as a stopped candidate rather
+// than counting it, Q1' takes its default headlessly and starts it, and the
+// endpoint that comes back answers.
+//
+// It removes what it made, which lazyslice itself never does.
+func TestAStoppedContainerIsOfferedAndStarted(t *testing.T) {
+	ctx := t.Context()
+	testutil.SkipWithoutDocker(ctx, t)
+	quietRungs(t)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	endpoint, err := dockerctx.Resolve(ctx, "")
+	if err != nil || !endpoint.Local() {
+		t.Skipf("no local docker endpoint: %v", endpoint)
+	}
+	api, err := dockerctx.Dial(endpoint)
+	if err != nil {
+		t.Skipf("docker endpoint %s did not open: %v", endpoint, err)
+	}
+
+	// The workdir is what the working_dir label carries, and it is what keeps
+	// every other Postgres container on this machine off this run's ladder.
+	dir := t.TempDir()
+	project := "lazyslicerung4" + strconv.FormatInt(time.Now().UnixNano(), 36)
+	t.Cleanup(func() {
+		clean, cancel := context.WithTimeout(context.WithoutCancel(ctx), 60*time.Second)
+		defer cancel()
+		if _, rmErr := api.ContainerRemove(clean, provision.Name(project), client.ContainerRemoveOptions{
+			Force: true, RemoveVolumes: true,
+		}); rmErr != nil {
+			t.Logf("removing %s: %v", provision.Name(project), rmErr)
+		}
+		if _, rmErr := api.VolumeRemove(clean, provision.Volume(project), client.VolumeRemoveOptions{Force: true}); rmErr != nil {
+			t.Logf("removing %s: %v", provision.Volume(project), rmErr)
+		}
+	})
+
+	made, err := provision.New(api).Provision(ctx, provision.Request{
+		Project: project, Workdir: dir, Major: imageMajor(t),
+	})
+	if err != nil {
+		t.Fatalf("provisioning the container this test then stops: %v", err)
+	}
+	if _, stopErr := api.ContainerStop(ctx, provision.Name(project), client.ContainerStopOptions{}); stopErr != nil {
+		t.Fatalf("stopping %s: %v", provision.Name(project), stopErr)
+	}
+
+	// A source is named so that the ladder has one; what is under test is the
+	// target side. The source is a container of its own and is not in this
+	// project, so it never reaches the candidate list.
+	source := testutil.Postgres(ctx, t, "")
+
+	var events []event.Event
+	sink := event.SinkFunc(func(e event.Event) { events = append(events, e) })
+
+	res, err := Resolve(ctx, Options{
+		Workdir: dir, NeedTarget: true, Yes: true,
+		Source: source,
+	}, sink)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if res.Target != made.DSN {
+		t.Errorf("target = %q, want the started container %q", res.Target, made.DSN)
+	}
+
+	insp, err := api.ContainerInspect(ctx, provision.Name(project), client.ContainerInspectOptions{})
+	if err != nil {
+		t.Fatalf("inspecting the started container: %v", err)
+	}
+	if insp.Container.State == nil || !insp.Container.State.Running {
+		t.Error("Q1' answered yes and the container is not running")
+	}
+	if !hasCode(events, CodeCandidateUnreachable) {
+		t.Error("the stopped container never printed on the ladder")
+	}
+}
+
+// The second run of a provisioned target, end to end against a real daemon.
+//
+// ARCHITECTURE.md section 9 says the container survives the run and is "the
+// developer's local database from then on", and ADR-004 says the second run
+// asks nothing. lazyslice.yml records a reference and never a password, and the
+// password --create-target minted is random, so rung 0 alone handed the run a
+// passwordless DSN and the run stopped at exit 4 with "password authentication
+// failed for user postgres". What is asserted here is the thing that failed:
+// the endpoint Resolve returns actually opens.
+func TestASecondRunOpensTheTargetItProvisioned(t *testing.T) {
+	ctx := t.Context()
+	testutil.SkipWithoutDocker(ctx, t)
+	quietRungs(t)
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+
+	endpoint, err := dockerctx.Resolve(ctx, "")
+	if err != nil || !endpoint.Local() {
+		t.Skipf("no local docker endpoint: %v", endpoint)
+	}
+	api, err := dockerctx.Dial(endpoint)
+	if err != nil {
+		t.Skipf("docker endpoint %s did not open: %v", endpoint, err)
+	}
+
+	// The project name is the one a real run would use, because it is what
+	// names the container and therefore keys the remembered credential.
+	dir := t.TempDir()
+	project := projectName(dir)
+	t.Cleanup(func() {
+		clean, cancel := context.WithTimeout(context.WithoutCancel(ctx), 60*time.Second)
+		defer cancel()
+		if _, rmErr := api.ContainerRemove(clean, provision.Name(project), client.ContainerRemoveOptions{
+			Force: true, RemoveVolumes: true,
+		}); rmErr != nil {
+			t.Logf("removing %s: %v", provision.Name(project), rmErr)
+		}
+		if _, rmErr := api.VolumeRemove(clean, provision.Volume(project), client.VolumeRemoveOptions{Force: true}); rmErr != nil {
+			t.Logf("removing %s: %v", provision.Volume(project), rmErr)
+		}
+	})
+
+	made, err := provision.New(api).Provision(ctx, provision.Request{
+		Project: project, Workdir: dir, Major: imageMajor(t),
+	})
+	if err != nil {
+		t.Fatalf("provisioning the target the second run then reopens: %v", err)
+	}
+
+	// What internal/emit committed on the first run: the provenance, the label
+	// and the redacted reference, and no credential of any kind.
+	committed := &pipeline.Config{
+		Target:      pipeline.FromContainer,
+		TargetLabel: made.Candidate.Label,
+		TargetRef:   made.Candidate.Ref,
+	}
+
+	res, err := Resolve(ctx, Options{
+		Workdir: dir, NeedTarget: true, Yes: true,
+		Source: testutil.Postgres(ctx, t, ""),
+		Config: committed,
+	}, event.Discard)
+	if err != nil {
+		t.Fatalf("Resolve on the second run: %v", err)
+	}
+	// The reference is the file's, so the spelling is the file's — what has to
+	// match is the endpoint, and what has to be added back is the credential.
+	if _, ref, parseErr := dsn.Parse(res.Target); parseErr != nil || ref != made.Candidate.Ref {
+		t.Errorf("target = %q (%v), want the endpoint the first run provisioned, %s",
+			redactDSN(res.Target), parseErr, made.Candidate.Ref)
+	}
+
+	cfg, err := pgconn.ParseConfig(res.Target)
+	if err != nil {
+		t.Fatalf("parsing the target the second run resolved: %v", err)
+	}
+	conn, err := pgconn.ConnectConfig(ctx, cfg)
+	if err != nil {
+		t.Fatalf("the second run could not open the target it provisioned: %v", err)
+	}
+	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
+	if _, execErr := conn.Exec(ctx, "SELECT 1").ReadAll(); execErr != nil {
+		t.Fatalf("the target did not answer: %v", execErr)
+	}
+}
+
+// redactDSN keeps a failing assertion from printing a password.
+func redactDSN(connURL string) string {
+	at := strings.LastIndex(connURL, "@")
+	if at < 0 {
+		return connURL
+	}
+	return "postgres://…" + connURL[at:]
+}
+
+// imageMajor is the major of the image the rest of the suite already pulls, so
+// this test needs no download on a warm cache.
+func imageMajor(t *testing.T) int {
+	t.Helper()
+	image := os.Getenv(testutil.ImageEnv)
+	if image == "" {
+		image = testutil.DefaultImage
+	}
+	_, tag, ok := strings.Cut(image, ":")
+	if !ok {
+		t.Skipf("cannot read a major out of %q", image)
+	}
+	n, err := strconv.Atoi(strings.SplitN(tag, ".", 2)[0])
+	if err != nil {
+		t.Skipf("cannot read a major out of %q", image)
+	}
+	return n
 }
 
 // quietRungs clears the rung 1 and rung 2 variables. DOCKER_HOST and the Docker
