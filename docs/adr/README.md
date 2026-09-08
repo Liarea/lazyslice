@@ -29,7 +29,7 @@ Phase gates check that every ADR has a stated reversal condition (docs/BUILD_PLA
 | [007](007-tool-not-company.md) | v1 is a tool, not a company | accepted 2026-09-05 |
 | [010](010-type-gate-on-value-signals.md) | The accepted-types gate silences value signals too; derived_text for tsvector | accepted 2026-09-06 |
 | [009](009-schema-fingerprint.md) | One definition of the schema fingerprint: the generated DDL text | accepted 2026-09-06 |
-| [008](008-first-run.md) | First-run experience: the discovery ladder, the one-question rule and the question catalogue | proposed 2026-09-05 |
+| [008](008-first-run.md) | First-run experience: the discovery ladder, the one-question rule and the question catalogue | accepted 2026-09-08 |
 
 ## Numbering note
 

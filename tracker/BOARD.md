@@ -7,7 +7,8 @@
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 1 | 0 | 9 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
-| E5 Hardening | 5 | 8 | 0 | 3 | 0 | 0 |
+| E5 Hardening | 5 | 9 | 0 | 3 | 0 | 0 |
+| E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
 | E9 Later | later | 4 | 0 | 0 | 0 | 0 |
 
 ## Open and in progress
@@ -25,6 +26,8 @@
 - T-0055 [open] E5 · Shared leaf package for value validators including the name dictionary; register person_name and free_text in verify's second net with a verify-side false-positive threshold decision (opus)
 - T-0056 [open] E5 · Second net: weak threshold (0.5) plus neighbouring-column raise; the faithful reading is decorative, the alternative is a different control and needs a T1 review first (opus)
 - T-0063 [open] E5 · Q1, the controlling terminal, and provisioning: widen pipeline.Provisioner to carry the generated POSTGRES_PASSWORD, then wire --create-target and the one blocking question (opus)
+- T-0064 [open] E5 · Dogfood: two sessions against a real project of Gareth's choosing, logged in docs/DOGFOOD_LOG.md (human)
+- T-0065 [open] E6 · 20-second VHS GIF of the first run on Pagila (sonnet)
 
 ## Recently closed
 
