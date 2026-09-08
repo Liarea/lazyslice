@@ -55,11 +55,18 @@ const (
 // --skip-table, the unreadable drops and findLookups, because §3.6 needs its
 // answer before a key is fetched.
 //
-// A virtual edge is followed in neither direction. §3.2's mapping half is not
-// implemented in v1 (polymorphic.go), so Plan.Virtual is empty; following a
-// Virtual edge introspect supplied would pull parent rows into the slice
-// through an inferred edge the plan does not print, which is the one thing
-// §3.5 says a plan must never do.
+// A virtual edge is followed in neither direction *here*, and that is not the
+// same statement it was before §3.2 landed. The inferred polymorphic edges are
+// followed, in the parent direction only, by virtualParents (polymorphic.go):
+// they carry a discriminator — the `_type` value the mapping was made for — and
+// following one without it is research/COMPLAINTS.md FK-10, the polymorphic
+// edge that selects almost nothing because its type guard went missing. These
+// two functions are the rule for the *declared* graph, where an edge carries no
+// discriminator, so a Virtual edge arriving on pipeline.Schema from anywhere
+// else is still followed in neither direction. §3's pseudo-code writes the
+// parent step as `fk.Validated ∨ fk.Virtual`; the deviation, and why the
+// inferred edges do not travel through p.outgoing, is recorded in this
+// package's CLAUDE.md.
 func followsAsParent(fk pipeline.ForeignKey) bool { return fk.Validated && !fk.Virtual }
 
 func followsAsChild(fk pipeline.ForeignKey) bool { return !fk.Virtual }
@@ -161,6 +168,21 @@ type run struct {
 	skipped     []ref.TableRef
 	unreadable  []ref.TableRef
 	selectedRow int64
+
+	// §3.2's inference, decided before the walk and reported by assemble.
+	// inferred holds the pairs the walk follows, by the table they are on;
+	// virtual, polymorphic and unmapped are the three findings the plan prints.
+	// unknownTypes is filled during the walk rather than before it: a `_type`
+	// value the sample never produced has no edge, and saying nothing about it
+	// would report the pair as fully resolved while its rows were dropped.
+	inferred     map[ref.TableRef][]pairPlan
+	byName       map[string][]ref.TableRef // planned tables by lower-case bare name
+	virtual      []pipeline.ForeignKey
+	polymorphic  []string
+	unmapped     []string
+	unknownTypes map[polymorphicPair]*unknownValues
+	django       map[int64][2]string // django_content_type id -> (app_label, model)
+	djangoLoaded bool
 }
 
 // item is one entry of the FIFO worklist.
@@ -205,6 +227,12 @@ func (p *run) plan(ctx context.Context) (*pipeline.Plan, error) {
 		return nil, err
 	}
 	if err := p.findLookups(ctx, root); err != nil {
+		return nil, err
+	}
+	// §3.2 is decided before the walk, so that every inferred edge is in the
+	// plan the operator reads before a row moves (§3.5). It reads the source, so
+	// it cannot run before §3.6 has said what this role may read.
+	if err := p.inferPolymorphic(ctx); err != nil {
 		return nil, err
 	}
 	if err := p.walk(ctx, root); err != nil {
@@ -621,7 +649,13 @@ func (p *run) parents(ctx context.Context, it item, fresh *keys) ([]item, error)
 			out = append(out, item{table: fk.Parent, keys: pending, mode: pipeline.ParentOnly, depth: it.depth})
 		}
 	}
-	return out, nil
+	// §3.2's inferred edges are parent-direction only, so they are pushed here
+	// and nowhere else (polymorphic.go).
+	virtual, err := p.virtualParents(ctx, it, fresh)
+	if err != nil {
+		return nil, err
+	}
+	return append(out, virtual...), nil
 }
 
 // children is the child step: only from CHILD_OK rows, capped per parent key
@@ -855,23 +889,28 @@ func (p *run) assemble(root ref.TableRef, rootReason string) *pipeline.Plan {
 			unindexed = append(unindexed, fk)
 		}
 	}
-	// §3.2's two findings are two lists. A detected pair goes under
-	// Polymorphic; Unmapped is for the sampled _type values that map to no
-	// table, which v1 never produces because it never samples them. Printing a
-	// pair name under "not mapped" would say a column pair is a value
-	// (T-CORE, 2026-09-06).
-	var polymorphic []string
-	for _, pair := range polymorphicPairs(p.tables, p.outgoing) {
-		polymorphic = append(polymorphic, pair.String())
-	}
-
+	// §3.2's three findings are three lists. Virtual is the edges inference
+	// resolved and the walk followed; Polymorphic is what it could not resolve,
+	// which keeps the v1 sentence "polymorphic pair detected, not followed: no
+	// constraint"; Unmapped is the sampled `_type` values that name no table.
+	// Printing a pair name under "not mapped" would say a column pair is a
+	// value (T-CORE, 2026-09-06).
+	//
+	// Two of the three are decided before the walk, and the third has a tail
+	// that only the walk can find: a `_type` value that lives outside the
+	// sample. unknownFindings is that tail, and it is appended here rather than
+	// merged earlier so that the order of the list is the order of the pairs and
+	// not the order rows happened to arrive in.
+	polymorphic := append(append([]string(nil), p.polymorphic...), p.unknownFindings()...)
 	return &pipeline.Plan{
 		Root:        root,
 		RootReason:  rootReason,
 		Take:        p.req.Take,
 		Steps:       ordered,
 		SCCs:        components,
+		Virtual:     p.virtual,
 		Polymorphic: polymorphic,
+		Unmapped:    p.unmapped,
 		Unindexed:   unindexed,
 		Skipped:     p.skipped,
 		Unreadable:  p.unreadable,
