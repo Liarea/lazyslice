@@ -61,6 +61,16 @@ checksum:
   name_template: "checksums.txt"
   algorithm: sha256
 
+# One SPDX SBOM per archive (THREAT_MODEL.md T10's "published SBOM"), built by
+# syft against the built artifact rather than declared by hand, so it lists
+# what actually shipped rather than what go.mod says should have. The release
+# workflow installs the pinned syft via anchore/sbom-action/download-syft
+# before this step runs; a laptop running `make snapshot` does not need it
+# installed, because that target passes `--skip=sbom`.
+sboms:
+  - id: archive
+    artifacts: archive
+
 snapshot:
   version_template: "{{ incpatch .Version }}-next"
 

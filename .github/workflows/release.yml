@@ -43,6 +43,12 @@ jobs:
 
       - uses: sigstore/cosign-installer@v4
 
+      # syft, for the sboms pipe in .goreleaser.yaml (THREAT_MODEL.md T10's
+      # "published SBOM"). goreleaser shells out to it rather than generating
+      # one itself; `make snapshot` skips the pipe with --skip=sbom precisely
+      # so nothing but this workflow needs syft on its PATH.
+      - uses: anchore/sbom-action/download-syft@v0.24.2
+
       # The version here must equal Makefile's GORELEASER_VERSION, which is
       # what `make tools`, `make snapshot` and ci.yml's release-config job all
       # use. The action takes a literal, so this is the one place the pin is
