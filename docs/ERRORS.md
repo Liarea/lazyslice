@@ -73,6 +73,7 @@ One row per code in the catalogue, in the file's own order. Exit is only meaning
 | `target.marker.classification_changed` | discover | - | classification changed — masked values will differ from the ones already in the target |
 | `target.marker.tool_changed` | discover | - | lazyslice version changed — masked values may differ from the ones already in the target |
 | `introspect.schema.read` | introspect | - | {count} tables on Postgres {version}: {reason} |
+| `core.refused.reviewed_changed` | introspect | 12 | this run is not the one that was reviewed: {reason} |
 | `plan.step` | plan | - | {table}: {count} rows, {reason} |
 | `plan.estimate` | plan | - | {count} rows, {reason}; the snapshot is held about {seconds}s, assuming 20,000 rows/s |
 | `plan.polymorphic.detected` | plan | - | polymorphic pair detected, not followed: no constraint — {reason} |

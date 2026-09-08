@@ -9,7 +9,7 @@
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 5 | 0 | 19 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 4 | 0 | 0 | 0 | 0 |
+| E9 Later | later | 7 | 0 | 0 | 0 | 0 |
 
 ## Open and in progress
 
@@ -24,6 +24,9 @@
 - T-0070 [open] E5 · T-PIN: the run that writes the target is pinned to the reviewed snapshot and endpoints (core.Request.Reviewed, core.refused.reviewed_changed) (opus)
 - T-0076 [open] E5 · T-0076: source read-only setting per transaction, never a session GUC that leaks through a transaction-pooling PgBouncer; T9 reworded (opus)
 - T-0077 [open] E5 · T-0077: stream_docs lifted above the nasty.sql big gate; introspect table list updated; extract workaround removed (sonnet)
+- T-0078 [open] E9 · internal/load/ddl: drop the dangling back-reference to target.refused.start_timeout's deleted comment ()
+- T-0079 [open] E9 · Record the review pin outside internal/core: ARCHITECTURE.md entry points, cmd/CLAUDE.md, and ADR-005's exit 12 ()
+- T-0080 [open] E9 · Anchor /lazyslice in .gitignore so a bare go build cannot commit a 32MB binary ()
 
 ## Recently closed
 

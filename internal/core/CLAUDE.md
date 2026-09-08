@@ -8,8 +8,14 @@ events; it never contains a SQL statement or a masking rule itself.
 **Contract.** ARCHITECTURE.md §1: `core.Run(ctx, Request, event.Sink)
 (*Report, error)` drives discover → introspect → classify → plan → extract →
 transform → load → verify → emit, in that order, with no other entry point.
+Two exported functions stand beside it and are not a second pipeline — both run
+the same stages through the same `run` struct and stop where a mode stops,
+because what they return is a document and events are all `Run` returns:
+`Introspect` (a `SchemaSummary`) and `Preview` (a `Reviewed`). Both are
+recorded below; ARCHITECTURE.md §1 is owed the correction (tracker T-0079).
 `Request` mirrors the CLI flags in §8 field for field — `cmd/lazyslice` builds
-one from flags, `internal/tui` builds the same struct from keystrokes.
+one from flags, `internal/tui` builds the same struct from keystrokes — with
+one field that is not a flag and must not become one (`Reviewed`, below).
 
 **Rules.**
 - `Run` is the only place stages are sequenced; a stage package must never
@@ -187,3 +193,86 @@ each one is a deviation a reviewer should see rather than discover.
   gains a `CodeInterrupted`/130 case, so a genuine Ctrl-C makes the Error event
   and the process exit carry the same number — `cmd/lazyslice` used to print
   exit 1 into the stream and return 130 from the process.
+
+## Decisions made during T-PIN (2026-09-08)
+
+- **`Preview` is a third entry point** (run.go). §1 gives this package `Run` and
+  "no other entry point"; `Introspect` was already the exception, for the reason
+  restated here — a document is not an event, and events are all `Run` returns.
+  `Preview` runs the same stages through the same `run` struct with `PlanOnly`
+  forced and returns a `Reviewed`: the schema fingerprint (ADR-009), the
+  classifier's own verdicts and the two endpoints one pass resolved. It exists
+  because `--tui` runs the pipeline twice, and before it nothing tied the two
+  passes together — the operator
+  reviewed a classification and a plan built over one snapshot and one walk of
+  the discovery ladder, and a second pass took its own of each and wrote the
+  target. **Owed:** ARCHITECTURE.md §1 should name both exceptions, and
+  cmd/CLAUDE.md should carry a `core.Preview` bullet beside its `core.Introspect`
+  one; both files were outside T-PIN's paths (tracker T-0079).
+- **`Request.Reviewed` is the one field that is not a flag.** §8 has no flag for
+  it and must not gain one: it carries no operator intent, only the identity of
+  what was reviewed, and a `--reviewed-fingerprint` on the command line would be
+  a way to assert a review that never happened. `cmd/lazyslice`'s `runTUI` is the
+  only filler in the tree. It is compared in two places, each the first point at
+  which the thing it pins exists: `checkReviewed` (the two endpoints and the
+  schema) immediately after `introspectStage`, and
+  `checkReviewedClassification` immediately after `classifyStage`. Both are
+  before the plan, before extract and before every write.
+- **The classification is pinned as well as the schema, and the two are not the
+  same fact.** The reasons screen is the masking review, and a classification is
+  not a function of the DDL: `internal/classify` reads `Table.Samples`, drawn
+  with `TABLESAMPLE SYSTEM ... REPEATABLE`, which is identical between two passes
+  only while the data is. A column that reaches the mask threshold on a value
+  signal alone (THREAT_MODEL.md T1's `ref` column holding emails) can fall below
+  it when the second pass draws different blocks and be copied in clear by the
+  run that writes, with the schema fingerprint unchanged throughout. What is
+  compared is `classifierFingerprint`: `Classification.Fingerprint` recomputed
+  from the committed yml alone, with this run's `--unmask` flags left out,
+  because the reasons screen writes those and pinning them would refuse the
+  operator for using the screen. With no `--unmask` flag the run's own
+  classification already is that classification and no second call is made.
+- **The pin's exit is ADR-005's 12.** That table calls 12 "plan refused" and
+  lists four cases, none of them this one, and this refusal happens *before* the
+  planner runs. It is the nearest fit — the operator's approved plan is what is
+  being refused — and T-PIN's brief named it. ADR-005 is accepted and frozen, so
+  widening 12 or giving the review pin an exit of its own needs a superseding
+  ADR (tracker T-0079).
+- **The pin does not cover the plan, and `afterThePlan` still reprints it.** An
+  earlier round of this task dropped the plan lines from an unchanged second
+  pass on the argument that the pin made them redundant. It does not: a plan is
+  not a function of the schema. Each step's `Mode` — `child_ok`, `parent_only`,
+  `lookup`, `schema_only`, and so whether a table's children are followed and
+  whether it is copied at all — comes from the rows the discovery walk popped,
+  and `Plan.Virtual` comes from `internal/plan`'s bounded data sample of the
+  source, so two passes with one fingerprint over one pair of endpoints can
+  follow different virtual edges and copy a different set of tables. §3.5 wants
+  every step and every virtual FK stated before the extraction, and the second
+  pass is the one that extracts. `plan.estimate` is likewise the hold estimate
+  for the snapshot that pass holds (THREAT_MODEL.md A9). So the plan is printed
+  by both passes and the classification, which the pin does cover, is printed
+  once.
+- **The wiring is pinned structurally.** `checkReviewed`, its classification
+  half and `Preview`'s forced `PlanOnly` are each one statement, and a unit test
+  of the comparison functions alone stayed green with all three deleted — a
+  safety rail nothing noticed the absence of.
+  `TestTheReviewPinIsWiredIntoTheRunItGuards` parses `run.go` with `go/ast`, in
+  the manner of `TestEveryLadderOptionTheRequestCarriesIsCopied`, and asserts
+  both the presence and the position of the two checks inside `execute`.
+  `cmd/lazyslice` does the same for `runTUI` over its `pinned` helper. Driving
+  either through `Run` needs two Postgres servers and a schema that changes
+  between them, which is an integration test and not this one.
+- **The catalogue's dangling back-references.** Two comments in
+  `internal/event/catalogue.yml` pointed at a comment on
+  `target.refused.start_timeout` that T-0071 deleted when it gave that code its
+  own `ArgContainer`; both clauses are gone. The third,
+  `internal/load/ddl/recreatable.go:53`, was outside T-PIN's paths and is filed
+  as tracker T-0078.
+- **A root `lazyslice` binary is not gitignored.** T-PIN's review found a ~32MB
+  Mach-O left at the repo root by a bare `go build ./cmd/lazyslice`; that
+  binary is deleted. `make build` sends its `-o` to `bin/`, which `.gitignore`
+  covers, but nothing in that file's build section matches the root artefact a
+  bare `go build` writes, so `git status` reports it as untracked and
+  `implement.js`'s `git add -A` commit step would put it in history
+  permanently. The fix is a `/lazyslice` line in `.gitignore` — anchored, or it
+  would also ignore the tracked source directory `cmd/lazyslice/` — and that
+  file was outside T-PIN's paths: tracker T-0080.

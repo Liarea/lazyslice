@@ -113,6 +113,66 @@ func Introspect(ctx context.Context, req Request, sink event.Sink) (*pipeline.Sc
 	return summaryOf(r.schema), nil
 }
 
+// Preview runs the pipeline as far as the plan and returns the identity of what
+// it read, so that a later run can be pinned to it.
+//
+// It is the pass --tui makes before it opens the two screens: the operator
+// reviews a classification and a plan built over one schema read of two
+// resolved endpoints, and then a second pass writes the target. Without the
+// value this returns nothing tied the two together — two snapshots, two walks
+// of the discovery ladder, and no comparison — so the review could be of a
+// database the run never touched (Reviewed, cmd/lazyslice's runTUI).
+//
+// It is a third entry point beside Run and Introspect for the same reason
+// Introspect is a second one: a Reviewed is a document and not an event, and
+// events are the only thing Run returns. It is not a second pipeline. It sets
+// --plan on the request it was given and runs the same stages through the same
+// run struct, stopping where PlanOnly stops, which is before the target is
+// written.
+func Preview(ctx context.Context, req Request, sink event.Sink) (*Reviewed, error) {
+	if sink == nil {
+		sink = event.Discard
+	}
+	ch := newEventChannel(sink)
+	r := &run{req: normalise(req), sink: ch}
+	// PlanOnly is set here and not only by the caller, so that Preview cannot be
+	// the pass that writes a target whatever request it is handed.
+	r.req.PlanOnly = true
+	defer func() {
+		r.close(ctx)
+		ch.close()
+	}()
+
+	if _, err := r.execute(ctx); err != nil {
+		r.report(err)
+		return nil, err
+	}
+	return r.reviewed(), nil
+}
+
+// reviewed is what the preview pass read, as the run that writes compares it.
+//
+// The schema fingerprint is ADR-009's, filled by introspectStage from
+// load.SchemaFingerprint; the classification fingerprint is the classifier's
+// own verdicts, filled by classifyStage from classifierFingerprint; the two
+// endpoints are the redacted dsn.Refs discover resolved. All four are
+// identifiers, which is what makes them safe to carry (Reviewed).
+//
+// The classification fingerprint is empty for the two modes that stop before
+// classify (ModeIntrospect, ModeDoctor); that is not a hole, because the run
+// being pinned stops there too and never reaches the comparison.
+func (r *run) reviewed() *Reviewed {
+	out := &Reviewed{
+		ClassFingerprint: r.classFP,
+		Source:           r.sourceCand.Ref.String(),
+		Target:           r.targetCand.Ref.String(),
+	}
+	if r.schema != nil {
+		out.SchemaFingerprint = r.schema.Fingerprint
+	}
+	return out
+}
+
 // summaryOf is pipeline.SchemaSummary over a schema. Schema itself is never
 // serialised, because it reaches Table.Samples (ARCHITECTURE.md section 2).
 func summaryOf(s *pipeline.Schema) *pipeline.SchemaSummary {
@@ -171,7 +231,11 @@ type run struct {
 	priv   pipeline.RolePrivileges
 	schema *pipeline.Schema
 	cls    *pipeline.Classification
-	plan   *pipeline.Plan
+	// classFP is the classifier's own verdicts without this run's --unmask
+	// opt-outs, which is the half of the review pin a schema fingerprint cannot
+	// stand for (classifierFingerprint, Reviewed.ClassFingerprint).
+	classFP string
+	plan    *pipeline.Plan
 
 	key    mask.Key
 	keyFP  string
@@ -244,10 +308,24 @@ func (r *run) execute(ctx context.Context) (*pipeline.Report, error) {
 	if err := r.introspectStage(ctx); err != nil {
 		return nil, err
 	}
+	// The review pin. It is checked here because this is the first point at
+	// which both halves of it exist — discover resolved the endpoints,
+	// introspect computed the fingerprint — and it is before classify, before
+	// the plan and before every write (checkReviewed).
+	if err := r.checkReviewed(); err != nil {
+		return nil, err
+	}
 	if r.req.Mode == ModeIntrospect || r.req.Mode == ModeDoctor {
 		return nil, nil
 	}
 	if err := r.classifyStage(); err != nil {
+		return nil, err
+	}
+	// The second half of the review pin. The reasons screen is built from the
+	// classification and the classifier reads samples, not DDL, so the schema
+	// fingerprint above cannot stand for it. It is checked here, before the
+	// plan and before every write (checkReviewedClassification).
+	if err := r.checkReviewedClassification(); err != nil {
 		return nil, err
 	}
 	if r.req.Mode == ModeClassify {
@@ -626,6 +704,143 @@ func (r *run) markerWarnings() {
 	}
 }
 
+// checkReviewed refuses a run that is not the run the operator reviewed.
+//
+// Request.Reviewed is set by a caller that ran Preview and then showed somebody
+// the result: --tui's two screens are built from one pass and the target is
+// written by a second, and the second takes its own snapshot and walks the
+// discovery ladder again. A schema that changed between the two, or a ladder
+// that picked a different container the second time, would leave the operator
+// having approved a plan over a database this run is not writing.
+//
+// This is the first half of the pin: the two endpoints and the schema. The
+// second half is the classification, which the classifier derives from samples
+// and not from DDL, so no schema fingerprint can stand for it; it is compared
+// by checkReviewedClassification, one stage later, because that is the first
+// point at which it exists.
+//
+// All three comparisons here are made whenever Reviewed is set; none of them is
+// skipped for an empty value, because "empty" is how a review that never
+// happened would look and skipping it is how a pin silently stops pinning. The
+// target is compared only for the two modes that open one at all
+// (Mode.needsTarget), where an empty reviewed target is a fact about the mode
+// and not a missing review.
+//
+// The refusal names what changed rather than only that something did: the
+// operator's next move differs entirely between "somebody migrated the source"
+// and "the ladder chose the other container".
+func (r *run) checkReviewed() error {
+	rev := r.req.Reviewed
+	if rev == nil {
+		return nil
+	}
+	fingerprint := ""
+	if r.schema != nil {
+		fingerprint = r.schema.Fingerprint
+	}
+
+	var changed []string
+	if got := r.sourceCand.Ref.String(); got != rev.Source {
+		changed = append(changed, "the source is "+endpointName(got)+
+			", and "+endpointName(rev.Source)+" was reviewed")
+	}
+	if r.req.Mode.needsTarget() {
+		if got := r.targetCand.Ref.String(); got != rev.Target {
+			changed = append(changed, "the target is "+endpointName(got)+
+				", and "+endpointName(rev.Target)+" was reviewed")
+		}
+	}
+	if fingerprint != rev.SchemaFingerprint {
+		changed = append(changed, "the source schema is not the one that was read")
+	}
+	if len(changed) == 0 {
+		return nil
+	}
+
+	reason := strings.Join(changed, "; ")
+	return &Stop{
+		Code: CodeReviewedChanged, Exit: exitReviewed,
+		Args:    event.Args{event.ArgReason: reason},
+		Message: "this run is not the one that was reviewed: " + reason,
+	}
+}
+
+// endpointName is an endpoint as the review refusal names it, with a word for
+// the one that is not there: "the target is , and ... was reviewed" is a
+// sentence with a hole in it, and an absent endpoint is exactly the case this
+// refusal exists to report.
+func endpointName(s string) string {
+	if s == "" {
+		return "none"
+	}
+	return s
+}
+
+// checkReviewedClassification refuses a run whose columns were not classified
+// the way the operator was shown.
+//
+// The reasons screen is the masking review: it lists every column, its category
+// and why. That list is not a function of the DDL. internal/classify reads
+// Table.Samples, which internal/introspect draws from the snapshot with
+// TABLESAMPLE SYSTEM ... REPEATABLE — identical between two passes only while
+// the data is identical — so a column that reaches the mask threshold on a
+// value signal alone (THREAT_MODEL.md T1's `ref` column holding emails) can
+// fall below it when the second pass draws different blocks, and be copied in
+// clear by the run that writes while the operator's review showed it masked.
+// The schema fingerprint cannot see that: the DDL did not change.
+//
+// What is compared is the classifier's own verdict with this run's --unmask
+// opt-outs left out (classifierFingerprint). The reasons screen writes those
+// opt-outs, so folding them in would refuse the operator for doing the one
+// thing that screen is for, and the yml's opt-outs are the same file on both
+// passes and stay in.
+//
+// It runs immediately after classifyStage and therefore before the plan, before
+// extract and before every write.
+func (r *run) checkReviewedClassification() error {
+	rev := r.req.Reviewed
+	if rev == nil {
+		return nil
+	}
+	if r.classFP == rev.ClassFingerprint {
+		return nil
+	}
+	const reason = "the classification is not the one that was reviewed"
+	return &Stop{
+		Code: CodeReviewedChanged, Exit: exitReviewed,
+		Args:    event.Args{event.ArgReason: reason},
+		Message: "this run is not the one that was reviewed: " + reason,
+	}
+}
+
+// classifierFingerprint is pipeline.Classification.Fingerprint as the
+// classifier alone decided it: the committed yml as prior, and none of this
+// run's --unmask flags.
+//
+// The flags are left out because --tui's reasons screen writes them, and the
+// two passes are therefore allowed to differ by exactly that much. Everything
+// else the fingerprint covers — the rule-pack version and each column's
+// category and masker — is what the operator read and what the pin exists to
+// hold still.
+//
+// With no --unmask flag the run's own prior is the committed yml, so the
+// classification already on the run is that classification and no second call
+// is made. markSmallDomains is not in the way: Fingerprint is computed inside
+// Classify, and Domain and SmallDomain are written after it.
+func (r *run) classifierFingerprint() (string, error) {
+	if r.cls == nil {
+		return "", nil
+	}
+	if len(r.req.Unmask) == 0 {
+		return r.cls.Fingerprint, nil
+	}
+	cls, err := classify.New().Classify(r.schema, schemaSampler{schema: r.schema}, r.prior)
+	if err != nil {
+		return "", wrap(CodeInternal, exitInternal, err, "the columns could not be classified")
+	}
+	return cls.Fingerprint, nil
+}
+
 // ---------- introspect ----------
 
 func (r *run) introspectStage(ctx context.Context) error {
@@ -747,6 +962,9 @@ func (r *run) classifyStage() error {
 	// leaves them out, and both are downstream of here.
 	markSmallDomains(r.schema, cls)
 	r.cls = cls
+	if r.classFP, err = r.classifierFingerprint(); err != nil {
+		return err
+	}
 
 	for _, col := range sortedColumns(cls.Decisions) {
 		d := cls.Decisions[col]

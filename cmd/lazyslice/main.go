@@ -492,34 +492,45 @@ func isTerminal(v any) bool {
 // the plan screen exists to do, and `lazyslice plan --tui` would otherwise
 // answer with the plan the operator has just retuned away from.
 //
-// What the second pass reprints is decided per stage rather than per "did
-// anything change", because those are different questions. Retuning --take on
-// the plan screen changes the plan and nothing else: the schema read is the
-// same read and the classification is the same classification, so keying the
-// suppression on `changed` would put a two-hundred-column classification into
-// scrollback twice on the common --tui run, and ADR-002 calls that transcript
-// the artefact a developer pastes into a compliance ticket. So afterThePlan
-// filters by the stage whose output can actually differ, on every second pass:
-// the plan is always reprinted (it is the thing the operator retuned), the
-// classification only when --unmask changed, the schema read never, and the
-// two lines naming the endpoints this run is writing always.
+// What the second pass reprints is decided per stage, and per the one question
+// that can move that stage's output, rather than per "did anything change".
+// Retuning --take on the plan screen changes the plan and nothing else: the
+// schema read is the same read and the classification is the same
+// classification, so keying every stage's suppression on `changed` would put a
+// two-hundred-column classification into scrollback twice on the common --tui
+// run, and ADR-002 calls that transcript the artefact a developer pastes into a
+// compliance ticket. So afterThePlan asks a different question per stage: the
+// plan is always reprinted (it is the thing the operator retuned, and it is
+// also the one stage output the pin below does not cover), the classification
+// only when --unmask changed, the schema read never, and the two lines naming
+// the endpoints this run is writing always.
 //
-// The known limit of the arrangement is that two passes are two snapshots of
-// the source, and two walks of the discovery ladder. A schema that changes
-// between them is classified fresh by the pass that writes the target — a new
-// column is masked at possible+, so the drift is fail-safe — but the reasons
-// screen the operator reviewed was built over the first, and the endpoints the
-// second pass resolves are resolved again rather than inherited. Pinning the
-// two together needs the approved schema fingerprint and the chosen endpoints
-// carried into the second run and refused on a mismatch, which is a
-// core.Request field and a catalogue code this task's paths do not cover; it is
-// reported to the orchestrator as a follow-up. Until then the second pass at
-// least names the endpoints it actually wrote: afterThePlan never suppresses
-// CodeSourceChosen or CodeTargetChosen, so a resolution that differed from the
-// approved one is in scrollback rather than absent from it.
+// Two passes are still two snapshots of the source and two walks of the
+// discovery ladder, and the second pass is pinned to the first rather than
+// trusted to repeat it. core.Preview returns the identity of what the review
+// was built over — the schema fingerprint (ADR-009), the classifier's own
+// verdicts and the two endpoints; that value goes onto the request the operator
+// left with, and internal/core compares it against its own discover, introspect
+// and classify and refuses with core.refused.reviewed_changed, exit 12, naming
+// what changed, before the plan and before anything is written. A migration
+// between the two passes, a sample that moved a column across the mask
+// threshold, or a ladder that picks a different container the second time, is
+// now a refusal the operator reads rather than a target written against a
+// review of some other database.
+//
+// The plan is what the pin does not cover, which is why the second pass still
+// prints it in full. A plan is not a function of the schema: internal/plan
+// infers polymorphic edges from a bounded data sample and decides each step's
+// mode — child_ok, parent_only, lookup, schema_only, and so whether a table is
+// copied at all — from the rows the discovery walk popped. Two passes with the
+// same fingerprint over the same endpoints can therefore follow a different set
+// of virtual edges and copy a different set of tables, and ARCHITECTURE.md
+// section 3.5 wants every step and every virtual FK stated before the
+// extraction that this pass, not the first one, performs.
 func runTUI(ctx context.Context, req core.Request, stdout io.Writer) error {
 	collector := tui.NewCollector(render.NewLines(stdout))
-	if _, err := core.Run(ctx, previewRequest(req), collector); err != nil {
+	reviewed, err := core.Preview(ctx, previewRequest(req), collector)
+	if err != nil {
 		return err
 	}
 
@@ -548,8 +559,23 @@ func runTUI(ctx context.Context, req core.Request, stdout io.Writer) error {
 	// --cap, --depth, --root, --skip-table — moves the plan and leaves every
 	// column's category and reason exactly where the operator read them.
 	unmaskChanged := !maps.Equal(req.Unmask, result.Request.Unmask)
-	_, err = core.Run(ctx, result.Request, afterThePlan(render.NewLines(stdout), unmaskChanged))
+	_, err = core.Run(ctx, pinned(result.Request, reviewed),
+		afterThePlan(render.NewLines(stdout), unmaskChanged))
 	return err
+}
+
+// pinned is the request the second pass runs: what the operator left the
+// screens with, tied to what they reviewed.
+//
+// The screens can change what the run asks for; they cannot change which
+// databases it writes, which schema it was approved over or how its columns
+// were classified. Everything on the request except the pin came from the
+// screens, so the pin is added and nothing else is touched — a second pass that
+// dropped it would be exactly the unpinned run core.Preview exists to prevent,
+// and it would look identical in scrollback.
+func pinned(req core.Request, reviewed *core.Reviewed) core.Request {
+	req.Reviewed = reviewed
+	return req
 }
 
 // previewRequest is the request the pass that fills the screens runs.
@@ -621,25 +647,38 @@ func requestChanged(before, after core.Request) bool {
 // already printed and the second cannot have changed, so that one --tui run
 // leaves one transcript rather than two.
 //
-// It filters by stage and not by "did the request change", because those are
-// different questions and the run --tui exists for answers them differently:
-// the operator retunes --take on the plan screen and presses enter, so the plan
-// differs and nothing else does. The rules, in the order they matter:
+// It filters per stage, and per the one question that can move that stage's
+// output — --unmask for the classification, nothing for the schema read,
+// nothing for the plan — rather than by "did the request change", because those
+// are different questions and the run --tui exists for answers them
+// differently: the operator retunes --take on the plan screen and presses
+// enter, so the plan differs and nothing else does. The rules, in the order
+// they matter:
 //
 //   - A warning or a refusal is kept whatever stage it came from. The second
 //     pass reads the source again, and the one thing about it an operator has to
 //     see is the sentence saying it stopped.
 //   - The two decision lines naming the source and the target are kept. They
-//     say which databases this run — the one that writes — resolved, and the
-//     ladder is walked again, so suppressing them would leave a differing
-//     resolution nowhere in scrollback (the follow-up runTUI describes).
+//     name the databases this run — the one that writes — actually resolved.
+//     The review pin refuses a resolution that differs from the approved one
+//     (core.refused.reviewed_changed, runTUI), so these lines are no longer the
+//     only record of it; they stay because the transcript of the pass that
+//     wrote has to say what it wrote to.
 //   - Every other discover and introspect line is dropped. The endpoints, the
 //     role, the schema read: identical work, printed once.
 //   - Classify decisions are dropped unless --unmask changed on the reasons
 //     screen, which is the only thing the screens can do that moves them. This
 //     is the two-hundred-line half of the transcript.
-//   - The plan is always reprinted. It is what the plan screen retunes, and the
-//     plan the run executed is the one the ticket needs.
+//   - The plan is always reprinted, on a retuned request and an unchanged one
+//     alike. It is what the plan screen retunes, and the plan the run executed
+//     is the one the ticket needs. The review pin does not make it redundant:
+//     the plan is not a function of the schema the pin holds still. Each step's
+//     mode (child_ok, parent_only, lookup, schema_only) comes from the rows the
+//     discovery walk popped, and the virtual FK edges come from a bounded data
+//     sample of the source (internal/plan's sampleTypeValues), so two passes
+//     with one fingerprint can follow different edges and copy different
+//     tables. Dropping these lines would leave the transcript recording the
+//     plan of the pass that wrote nothing.
 func afterThePlan(next event.Sink, unmaskChanged bool) event.Sink {
 	return event.SinkFunc(func(e event.Event) {
 		if e.Kind == event.Warn || e.Kind == event.Error {
