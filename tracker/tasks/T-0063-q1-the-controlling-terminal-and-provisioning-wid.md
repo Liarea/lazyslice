@@ -3,12 +3,12 @@ id: T-0063
 title: "Q1, the controlling terminal, and provisioning: widen pipeline.Provisioner to carry the generated POSTGRES_PASSWORD, then wire --create-target and the one blocking question"
 epic: E5
 phase: ""
-status: open
+status: done
 owner: opus
 created: 2026-09-07
 started: ""
-closed: ""
-outcome: ""
+closed: 2026-09-08
+outcome: "done: folded into T-PROVISION"
 ---
 
 # T-0063 · Q1, the controlling terminal, and provisioning: widen pipeline.Provisioner to carry the generated POSTGRES_PASSWORD, then wire --create-target and the one blocking question
@@ -25,6 +25,8 @@ pipeline.Provisioner returns the created endpoint including its generated creden
 
 - 2026-09-07 created
 
+- 2026-09-08 closed: done: folded into T-PROVISION
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+Went well: seam closed as recorded. Went badly: nothing. Change: none.
