@@ -132,22 +132,33 @@ type Target struct {
 	ref         dsn.Ref
 	fingerprint CatalogFingerprinter
 	local       bool
+	// types is the source's user-defined types, registered on every target
+	// connection once the DDL has created them (types.go, ARCHITECTURE.md
+	// §11.1). It is empty until the loader calls RegisterTypes.
+	types *typeRegistry
 }
 
 var _ pipeline.Target = (*Target)(nil)
 
 // OpenTarget opens the write side. No tracer is registered on this pool: the
 // target is the side lazyslice writes to, and what defends it is the gate.
+//
+// This pool is the one pool in lazyslice with an AfterConnect hook, and the hook
+// is the type registration ARCHITECTURE.md §11.1 and ADR-005 specify. It carries
+// nothing until the loader calls RegisterTypes, because at this point the target
+// has none of the source's types: lazyslice creates them itself, after the gate
+// and after the drop.
 func OpenTarget(ctx context.Context, d dsn.DSN, opts ...TargetOption) (*Target, error) {
 	_, r, err := dsn.Parse(string(d))
 	if err != nil {
 		return nil, err
 	}
-	pool, err := Connect(ctx, d, nil)
+	types := &typeRegistry{}
+	pool, err := Connect(ctx, d, nil, withAfterConnect(types.afterConnect))
 	if err != nil {
 		return nil, err
 	}
-	t := &Target{pool: pool, ref: r, local: r.Loopback()}
+	t := &Target{pool: pool, ref: r, local: r.Loopback(), types: types}
 	for _, o := range opts {
 		o(t)
 	}
@@ -473,5 +484,5 @@ func (t *Target) checkEmpty(ctx context.Context, conn *pgxpool.Conn, e pipeline.
 // Eligible; that ordering is core.Run's, and this package does not second-guess
 // it, because a Writer that re-ran the gate would run it twice on every load.
 func (t *Target) Writer(_ context.Context) (pipeline.Writer, error) {
-	return &writer{pool: t.pool}, nil
+	return &writer{pool: t.pool, types: t.types}, nil
 }

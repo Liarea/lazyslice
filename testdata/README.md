@@ -119,7 +119,7 @@ the partitioned root, so its count is the sum of its seven leaves.
 
 ## nasty.sql
 
-26 tables, 5 people, and one trap per thing
+28 tables, 5 people, and one trap per thing
 that goes wrong. It needs no
 extension and no superuser, and it loads unchanged on PostgreSQL 14, 16 and 18.
 
@@ -146,10 +146,11 @@ file can run without the flag.
 |---|---:|---|---|---:|
 | `billing.invoices` | 3 | | `public.people` | 5 |
 | `public."LegacyCustomer"` | 3 | | `public.price_list_notes` | 2 |
-| `public.attachments` | 5 | | `public.price_lists` | 3 |
-| `public.audit_log` | 4 | | `public.price_lists_eu` | 2 |
-| `public.click_stream` | 3 | | `public.price_lists_us` | 1 |
-| `public.device_readings` | 4 | | `public.projects` | 2 |
+| `public.account_statuses` | 3 | | `public.price_lists` | 3 |
+| `public.attachments` | 5 | | `public.price_lists_eu` | 2 |
+| `public.audit_log` | 4 | | `public.price_lists_us` | 1 |
+| `public.click_stream` | 3 | | `public.projects` | 2 |
+| `public.device_readings` | 4 | | `public.settlements` | 2 |
 | `public.devices` | 3 | | `public.sites` | 2 |
 | `public.events` | 7 | | `public.stream_docs` | 0 (1,000,000 with `big`) |
 | `public.events_2024` | 5 | | `public.stream_rows` | 0 (2,000,000 with `big`) |
@@ -684,7 +685,8 @@ applies: under §3's defaults `stream_docs` is a capped child of `people` and a
 default run pulls 100 rows, not a million.
 
 **The table and its fill function are declared above the gate, like `stream_rows`'.**
-So the fixture's schema is the same 26 tables on every load; only the
+So the fixture's schema is the same 28 tables on every load (26 when this was
+written; trap 27 added two); only the
 million-row fill is gated (T-0077). Earlier, `stream_docs`'s `CREATE TABLE` sat
 inside the gate and a default load had 25 tables against 26 with `big`, which
 existed only because the task that added this trap (T-0050) was authorised to
@@ -829,3 +831,78 @@ out, so `psql -f testdata/nasty.sql` and every Go caller of `LoadNasty` —
 the fixture with the constraint present, and it plans through
 `refusingReader` precisely because §11.1 says no statement may reach the
 source first.
+
+**27. A column of a user-defined type the driver has no codec for** —
+`public.account_statuses.seen` (`public.account_status[]`) and
+`public.settlements.booked` (`public.money_amount`, a composite).
+
+ARCHITECTURE.md §11.1 recreates enums, domains and composites in the target
+(item 3) and then states the load as "`CopyFrom` with explicit column lists
+excluding generated columns, **types registered in `AfterConnect`**". The
+second half is a control and this trap is what makes it one. pgx's `COPY` is
+binary and encodes each value against the *target's* OID for that column; a
+user-defined type has an OID pgx has never seen, so there is no codec, no
+encode plan, and the copy fails part-way through the table. Measured on
+`postgres:16`: an enum array is **54000** ("number of array dimensions
+(2071159140) exceeds the maximum allowed (6)" — the server reading the text
+form as a binary array header) and a composite is **42804**. An enum, a
+domain and an array of a *built-in* type all copy without registration, which
+is why these two columns and not any of the fixture's existing ones are the
+trap.
+
+The required behaviour is that a full load of this fixture succeeds, with
+`account_statuses` and `settlements` holding their rows unchanged. What
+makes it succeed has two parts, and the second is not implied by the first:
+
+- **Register the source's enums, domains, composites and the array types over
+  them on every target connection**, after the DDL has created them
+  (`internal/pg/types.go`, reached through `writer.RegisterTypes`, which the
+  loader calls between item 3 and the first `CopyFrom`). That is what §11.1
+  says, and on its own it fixes `seen`.
+- **Make the composite's text form encodable.** The source pool runs in
+  `pgx.QueryExecModeExec`, so every value arrives as text, and a composite
+  arrives as the Go string `(1234.50,GBP)`. pgx's composite codec encodes a
+  `CompositeIndexGetter` and nothing else, and its own string fallback
+  dead-ends on a `map[string]any`. `internal/pg`'s `compositeCodec` replaces
+  one method so the fallback completes. A run that registers the OIDs and stops
+  loads `account_statuses` and fails on `settlements`.
+
+Neither column is personal data and neither takes a name or a value hit in §4 —
+`account_status` already classifies at `none` (trap 13), and `booked`, `amount`
+and `currency` are no category — because what this trap is about is the driver
+and not the classifier. **That steers around a hole rather than covering it**,
+and the hole is worth naming here because this trap is what opened it: a
+composite column could not be loaded at all before the registration existed, and
+now that it can be, nothing downstream can mask one. `mask.TypeTag` has no tag
+for a composite, `internal/transform` gives it `famOther`, no rule-pack category
+but `special_category` accepts `famOther`, so a name or value hit on a composite
+column drops to `low` with a `type_conflict` reason and the column is copied;
+`internal/verify`'s second net skips `famOther` and the residual scan only walks
+masked columns. A composite column holding personal data would therefore be
+copied verbatim and reported by nothing. Tracker T-0094 owns the decision —
+refuse such a column at plan time, or mask a composite field-wise — and the
+THREAT_MODEL.md T1 entry that must record it meanwhile. `seen` is `NOT NULL` and one of its three rows is the
+empty array `'{}'`: a column that were always `NULL` would never reach an
+encode plan and the trap would pass by accident.
+`settlements.reversed` is the nullable composite, so a `NULL` of a
+registered composite type is exercised too.
+
+Neither table's key is an identity column, and that is deliberate: trap 21 is
+the identity trap and the table under it is the spec for it, so two more
+identity columns here would widen that trap rather than add this one. Both
+tables reference `public.people` directly, per this fixture's own rule.
+
+**§6 item 5 must report no difference on these two tables**, and a
+`verify.sample.differs` on either of them is a real defect and not noise. An
+earlier version of this paragraph said the opposite — that the two sides decode
+a user-defined type differently and a difference should be disregarded — and
+that was wrong: `internal/verify` reads the target through `internal/core`'s own
+second target pool (`run.go`, `pg.Connect(ctx, d, nil)`), which has no
+`AfterConnect` and registers nothing, so a composite scans into an `any` as the
+string `(1234.50,GBP)` on both sides, and an enum array as `{pending,active}` on
+both. Measured against `postgres:16` on an unregistered pool. That comparison is
+the only check in the tree that would catch a composite round-tripped wrongly
+through `internal/pg`'s `compositeCodec` — a field type whose text decode and
+binary re-encode are not exact shows up here and nowhere else — so it must not
+be taught to expect a difference. Tracker T-0095 withdraws T-0092, which was
+filed on the mistaken reading.

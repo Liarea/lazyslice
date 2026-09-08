@@ -639,6 +639,78 @@ func TestLoadNastyResetsAMixedCaseSequence(t *testing.T) {
 	})
 }
 
+// testdata/README.md trap 27: the two tables whose column types the driver has
+// no codec for until the load gives it one. This is the end-to-end half of
+// ARCHITECTURE.md §11.1's "types registered in AfterConnect" — the source read
+// through the real extractor, the real DDL, the real registration and a real
+// CopyFrom — and it is the test that fails if internal/pg stops registering.
+//
+// Without registration public.account_statuses.seen fails at 54000 and
+// public.settlements.booked at 42804, both mid-table; internal/pg's own
+// TestATargetWithoutTypeRegistrationCannotCopyAnEnumArray is that failure held
+// against a real server, and this is the same property over the fixture the
+// architecture is judged on.
+func TestLoadNastyCopiesAnEnumArrayAndACompositeColumn(t *testing.T) {
+	ctx := context.Background()
+	testutil.SkipWithoutDocker(ctx, t)
+	sourceURL := testutil.Postgres(ctx, t, "")
+	if err := testutil.LoadNasty(ctx, sourceURL, false); err != nil {
+		t.Fatalf("loading nasty.sql: %v", err)
+	}
+	targetURL := testutil.Postgres(ctx, t, "")
+
+	s := openSource(ctx, t, sourceURL, nastyRequest())
+	if _, err := loadInto(ctx, s, targetURL); err != nil {
+		t.Fatalf("Load: %s", pg.RenderAnyError(err, false))
+	}
+
+	sourceConn := connect(ctx, t, sourceURL)
+	targetConn := connect(ctx, t, targetURL)
+
+	// The composite type itself must exist in the target: §11.1 item 3.
+	if n := scalar[int64](ctx, t, targetConn,
+		`SELECT count(*) FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace
+		 WHERE n.nspname = 'public' AND t.typname = 'money_amount' AND t.typtype = 'c'`); n != 1 {
+		t.Fatal("public.money_amount was not recreated in the target")
+	}
+
+	// Row for row, through the server's own output of each type, so what is
+	// compared is the server's opinion and not the driver's.
+	for _, q := range []struct {
+		name string
+		sql  string
+	}{
+		{
+			"public.account_statuses",
+			`SELECT coalesce(string_agg(person_id || ' ' || seen::text || ' ' || latest::text, E'\n'
+			                            ORDER BY person_id), '<empty>')
+			 FROM public.account_statuses`,
+		},
+		{
+			"public.settlements",
+			`SELECT coalesce(string_agg(person_id || ' ' || booked::text || ' ' || coalesce(reversed::text, 'NULL'),
+			                            E'\n' ORDER BY person_id), '<empty>')
+			 FROM public.settlements`,
+		},
+	} {
+		want := scalar[string](ctx, t, sourceConn, q.sql)
+		got := scalar[string](ctx, t, targetConn, q.sql)
+		if want == "<empty>" {
+			t.Fatalf("%s is empty in the source; trap 27 has lost its rows and this test proves nothing", q.name)
+		}
+		if got != want {
+			t.Errorf("%s holds\n%s\nthe source holds\n%s", q.name, got, want)
+		}
+	}
+
+	// The empty array is one of the three rows and is the one an encode plan
+	// gets wrong on its own, so it is named rather than left to the comparison.
+	if n := scalar[int64](ctx, t, targetConn,
+		`SELECT count(*) FROM public.account_statuses WHERE cardinality(seen) = 0`); n != 1 {
+		t.Errorf("%d rows of public.account_statuses hold the empty array, want 1", n)
+	}
+}
+
 // THREAT_MODEL.md T8, stated as it is: after a kill -9 mid-load the target is
 // either empty or carries a marker row at running or failed, and every table in
 // it holds either none of its rows or all of them. Load commits one transaction

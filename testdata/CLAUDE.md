@@ -6,8 +6,8 @@ lives here — loaders are `internal/testutil`; this directory is data plus
 `README.md`.
 
 **Contract.** `README.md` in this directory is the spec: it names every table,
-every row count, and every one of the 26 numbered traps in `nasty.sql` (1 to
-26, with 16 split into 16a and 16b because §4 prescribes two different
+every row count, and every one of the 27 numbered traps in `nasty.sql` (1 to
+27, with 16 split into 16a and 16b because §4 prescribes two different
 behaviours for the two JSON columns) with the exact required behaviour.
 `internal/testutil/fixtures_test.go` (behind `integration`) is what checks the
 loaded databases against it. There is no type in ARCHITECTURE.md this directory
@@ -53,8 +53,8 @@ proven against.
   second is expensive enough to catch a stage that copies a whole key set;
   `splitNastyGate` checks both fills are still called with the row counts
   `StreamRows` and `StreamDocs` name. Both tables' `CREATE TABLE` and
-  `CREATE FUNCTION` sit above the gate, so the fixture is 26 tables on every
-  load and only the fills are gated (T-0077); `README.md` trap 26 has the
+  `CREATE FUNCTION` sit above the gate, so the fixture is 28 tables on every
+  load and only the fills are gated (T-0077; trap 27 added the last two); `README.md` trap 26 has the
   history. The same file has a second gate,
   `\if :{?notrecreatable}`, around trap 25's foreign key: that edge is
   `ForeignKey.NotRecreatable` and `internal/plan`'s `checkRecreatable` refuses

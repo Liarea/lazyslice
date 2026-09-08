@@ -53,6 +53,13 @@ func (w *fakeWriter) CopyFrom(context.Context, ref.TableRef, []string, <-chan []
 	return 0, errors.New("the loader must copy inside a transaction, never on the writer")
 }
 
+// RegisterTypes makes this a pipeline.TypeRegistrar, which every Writer the
+// loader accepts must be: a Writer that cannot register the source's
+// user-defined types is refused (load.go, registerTypes), because an optional
+// interface that misses is a load step that disappears without a compile error.
+// registeringWriter below overrides this to record when it was called.
+func (w *fakeWriter) RegisterTypes(context.Context, *pipeline.Schema) error { return nil }
+
 func (w *fakeWriter) Begin(context.Context) (pipeline.Tx, error) {
 	tx := &fakeTx{w: w}
 	w.mu.Lock()
@@ -481,5 +488,153 @@ func TestGateFingerprintFallsBackToTheFullRead(t *testing.T) {
 func TestGateFingerprintWithNoIntrospectorFailsClosed(t *testing.T) {
 	if _, err := gateFingerprint(nil)(context.Background(), nil); err == nil {
 		t.Fatal("the gate's fingerprinter returned a fingerprint with no introspector to read the catalog")
+	}
+}
+
+// registeringWriter is a fakeWriter that also implements
+// pipeline.TypeRegistrar, so that the assertion in registerTypes can be
+// observed at all.
+type registeringWriter struct {
+	fakeWriter
+	// at is the number of statements the writer had seen when RegisterTypes was
+	// called; -1 until it is called.
+	at     int
+	schema *pipeline.Schema
+	err    error
+}
+
+func newRegisteringWriter() *registeringWriter { return &registeringWriter{at: -1} }
+
+func (w *registeringWriter) RegisterTypes(_ context.Context, s *pipeline.Schema) error {
+	w.mu.Lock()
+	w.at = len(w.statements)
+	w.mu.Unlock()
+	w.schema = s
+	return w.err
+}
+
+// ARCHITECTURE.md §11.1 item 3 creates the source's enums, domains and
+// composites in the target, and ADR-005 then loads with "types registered in
+// AfterConnect". The registration has to sit between the two: before it the
+// types do not exist in the target, and after the first CopyFrom is too late,
+// because a value of one of them has no encode plan and the copy fails
+// mid-table (54000 for an enum array, 42804 for a composite — measured, and
+// testdata/nasty.sql trap 27 is the fixture).
+//
+// The call is behind a type assertion, and a type assertion that misses
+// degrades silently: the loader would go on copying and the failure would
+// reappear only in the integration suite, on the two tables of trap 27. This is
+// what holds the assertion.
+func TestLoadRegistersTheSourcesUserTypesBeforeTheFirstCopy(t *testing.T) {
+	w := newRegisteringWriter()
+	l := New(Run{ToolVersion: "test"}, nil)
+	schema := testSchema()
+
+	orders, items := tref("public", "orders"), tref("public", "order_items")
+	if _, err := l.Load(context.Background(), w, testPlan(), schema, feed(
+		pipeline.RowBatch{Table: orders, Cols: []string{"id"}, Rows: [][]any{row(1)}, Seq: 0, Last: true},
+		pipeline.RowBatch{Table: items, Cols: []string{"id"}, Rows: [][]any{row(2)}, Seq: 0, Last: true},
+	)); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if w.at < 0 {
+		t.Fatal("Load never registered the source's user-defined types on the target")
+	}
+	if w.schema != schema {
+		t.Errorf("RegisterTypes was given %p, want the schema being loaded (%p)", w.schema, schema)
+	}
+
+	// The registration must come after the last CREATE TYPE and before the
+	// first transaction, which is the first CopyFrom's.
+	log := w.log()
+	lastCreate := -1
+	for i, s := range log[:w.at] {
+		if strings.HasPrefix(s, "CREATE TYPE") || strings.HasPrefix(s, "CREATE DOMAIN") ||
+			strings.HasPrefix(s, "CREATE TABLE") {
+			lastCreate = i
+		}
+	}
+	if lastCreate < 0 {
+		t.Errorf("no CREATE ran before the registration; the target had no types to register: %v", log[:w.at])
+	}
+	if len(w.txs) == 0 {
+		t.Fatal("the load opened no transaction, so there was no copy for the registration to precede")
+	}
+}
+
+// plainWriter is a pipeline.Writer and nothing more: Exec, CopyFrom and Begin,
+// ARCHITECTURE.md §2's three methods, with no RegisterTypes. It is what a Writer
+// wrapped for some other purpose looks like to the type assertion in
+// registerTypes.
+type plainWriter struct{ w *fakeWriter }
+
+func (p plainWriter) Exec(ctx context.Context, sql string, args ...any) error {
+	return p.w.Exec(ctx, sql, args...)
+}
+
+func (p plainWriter) CopyFrom(ctx context.Context, t ref.TableRef, cols []string, rows <-chan []any) (int64, error) {
+	return p.w.CopyFrom(ctx, t, cols, rows)
+}
+
+func (p plainWriter) Begin(ctx context.Context) (pipeline.Tx, error) { return p.w.Begin(ctx) }
+
+// A Writer that cannot register types fails the load and names itself, rather
+// than skipping the step.
+//
+// The assertion in registerTypes is the whole wiring: nothing in the compiler
+// checks that the Writer the loader is handed is a pipeline.TypeRegistrar, and
+// internal/core already wraps this same writer in a readableWriter (which embeds
+// the Writer interface and would therefore *not* be a registrar) for verify. A
+// silent skip there is a load that carries on and fails mid-copy on a composite
+// column, in the integration suite and nowhere else.
+func TestALoadWhoseWriterCannotRegisterTypesIsRefused(t *testing.T) {
+	inner := &fakeWriter{}
+	w := plainWriter{w: inner}
+	l := New(Run{ToolVersion: "test"}, nil)
+
+	orders := tref("public", "orders")
+	_, err := l.Load(context.Background(), w, testPlan(), testSchema(), feed(
+		pipeline.RowBatch{Table: orders, Cols: []string{"id"}, Rows: [][]any{row(1)}, Seq: 0, Last: true},
+	))
+	var refusal *Refusal
+	if !errors.As(err, &refusal) {
+		t.Fatalf("a Writer that cannot register types loaded anyway: err = %v", err)
+	}
+	if refusal.Code != CodeRefusedDDL || refusal.Exit != exitLoad {
+		t.Errorf("the refusal is %s exit %d, want %s exit %d", refusal.Code, refusal.Exit, CodeRefusedDDL, exitLoad)
+	}
+	if !strings.Contains(err.Error(), "plainWriter") {
+		t.Errorf("the refusal is %q; it must name the Writer that could not register", err)
+	}
+	if len(inner.txs) != 0 {
+		t.Errorf("the load opened %d transactions, want none", len(inner.txs))
+	}
+}
+
+// A registration that fails fails the load, before any row is copied. The
+// alternative is a run that carries on and fails at CopyFrom with the driver's
+// own words about a value (THREAT_MODEL.md T4).
+func TestALoadWhoseTypeRegistrationFailsCopiesNothing(t *testing.T) {
+	w := newRegisteringWriter()
+	w.err = errors.New("no codec for public.money_amount")
+	l := New(Run{ToolVersion: "test"}, nil)
+
+	orders := tref("public", "orders")
+	_, err := l.Load(context.Background(), w, testPlan(), testSchema(), feed(
+		pipeline.RowBatch{Table: orders, Cols: []string{"id"}, Rows: [][]any{row(1)}, Seq: 0, Last: true},
+	))
+	if err == nil {
+		t.Fatal("Load succeeded though the type registration failed")
+	}
+	if !strings.Contains(err.Error(), "money_amount") {
+		t.Errorf("Load failed with %q, want the registration's own reason", err)
+	}
+	if len(w.txs) != 0 {
+		t.Errorf("the load opened %d transactions after a failed registration, want none", len(w.txs))
+	}
+	last := w.log()[len(w.log())-1]
+	if !strings.HasPrefix(last, "UPDATE lazyslice_meta") {
+		t.Errorf("the marker was not closed after the failure; the last statement is %q", last)
 	}
 }

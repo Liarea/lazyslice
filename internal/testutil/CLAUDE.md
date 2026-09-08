@@ -7,7 +7,7 @@ integration tests build on — `Postgres(ctx, t, image)` and
 is imported by non-test code.
 
 **Contract.** `testdata/README.md` is the spec this package implements: table
-lists, row counts, and every one of the 26 `nasty.sql` traps it must be
+lists, row counts, and every one of the 27 `nasty.sql` traps it must be
 possible to assert against after loading. `fixtures_test.go` (behind
 `integration`) is the enforcement.
 

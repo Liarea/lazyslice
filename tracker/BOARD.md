@@ -9,7 +9,7 @@
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 4 | 1 | 26 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 5 | 0 | 5 | 0 | 0 |
+| E9 Later | later | 10 | 0 | 5 | 0 | 0 |
 
 ## Open and in progress
 
@@ -25,6 +25,11 @@
 - T-0088 [open] E5 · T-TORTURE: ten real schemas, regressions, docs/TORTURE.md (opus)
 - T-0089 [open] E5 · T-FAILUX: failure UX and error catalogue drift test (opus)
 - T-0090 [open] E5 · T-PERF: performance baseline and CI throughput guard (opus)
+- T-0091 [open] E9 · ARCHITECTURE.md section 2 owes pipeline.TypeRegistrar, and section 11.1 owes the composite text-form note ()
+- T-0092 [open] E9 · verify item 5 compares a user-defined-type column as two different Go values ()
+- T-0093 [open] E9 · Move RegisterTypes onto pipeline.Writer so the load's type registration is compiler-checked ()
+- T-0094 [open] E9 · A composite column now loads, and no rule pack category accepts its type family: decide refuse or mask field-wise (THREAT_MODEL.md T1) ()
+- T-0095 [open] E9 · Withdraw T-0092: verify does not read the target through the type-registered pool ()
 
 ## Recently closed
 
