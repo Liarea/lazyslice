@@ -42,12 +42,8 @@ func TestASourceOpensAndReadsThroughAPooler(t *testing.T) {
 
 	pooled, _ := testutil.PgBouncer(ctx, t, "")
 
-	// test.setting is registered for this test alone: no stage reads a setting
-	// back, and a statement outside the allowlist would be refused by our own
-	// tracer rather than answered by the pooler.
 	src, err := OpenSource(ctx, dsn.DSN(pooled),
 		Shape{Name: "test.read", SQL: `SELECT {int}`},
-		Shape{Name: "test.setting", SQL: `SELECT current_setting('default_transaction_read_only')`},
 	)
 	if err != nil {
 		t.Fatalf("opening the source through the pooler: %v", err)
@@ -68,32 +64,13 @@ func TestASourceOpensAndReadsThroughAPooler(t *testing.T) {
 	}
 	defer conn.Release()
 
-	// AfterConnect ran on that connection, through the pooler, and its SET
-	// reached the server connection this client was assigned: the setting is
-	// what ARCHITECTURE.md §2 covers an autocommit statement with, and a pooler
-	// is where it was nearly written as a startup parameter instead.
-	//
-	// That is all this asserts, and it is deliberately less than it looks. It is
-	// **not** a certificate that a pooled run leaves the pooler as it found it.
-	// PgBouncer in transaction pooling does not run server_reset_query by
-	// default (server_reset_query_always is 0), so a session SET persists on the
-	// shared server connection after this client is done with it, and the next
-	// client assigned that connection inherits it — for up to server_lifetime,
-	// and after lazyslice has exited. Measured against this image, not inferred:
-	// a second, unrelated client through the same pooler read `on` back without
-	// issuing any SET of its own, and its CREATE TABLE failed with "cannot
-	// execute CREATE TABLE in a read-only transaction". internal/pg/CLAUDE.md
-	// records that as an open defect against pg.go's AfterConnect; this test is
-	// the evidence the SET reaches the server through a pooler at all, which is
-	// what makes it a workable substitute for the startup parameter the next
-	// test shows a pooler refuses.
-	var readOnly string
-	if scanErr := conn.QueryRow(ctx, `SELECT current_setting('default_transaction_read_only')`).Scan(&readOnly); scanErr != nil {
-		t.Fatalf("reading default_transaction_read_only through the pooler: %v", scanErr)
-	}
-	if readOnly != "on" {
-		t.Errorf("default_transaction_read_only is %q on this client's own pooled connection, want \"on\": "+
-			"AfterConnect's SET did not reach the server connection through the pooler", readOnly)
+	// The identity read is the statement that used to be sent on an autocommit
+	// path, covered by a session GUC; it now opens a transaction of its own, and
+	// through a pooler that is a BEGIN and a ROLLBACK the pooler has to route on
+	// the same server connection. Which it does, in transaction mode, because
+	// that is what a transaction is to it.
+	if _, idErr := src.SystemID(ctx); idErr != nil {
+		t.Fatalf("reading the system identifier through the pooler: %v", idErr)
 	}
 
 	// And a whole snapshot works through it: export, import, read.
@@ -123,12 +100,110 @@ func TestASourceOpensAndReadsThroughAPooler(t *testing.T) {
 	}
 }
 
-// The negative control, and the reason the read-only setting is a session SET
-// and not a startup parameter: the same pooler, the same server, one parameter
-// moved into the startup packet, and no connection can be opened at all.
+// A pooled run leaves the pooler as it found it (T-0076).
 //
-// Without this the decision in Connect is a comment. With it, deleting the
-// AfterConnect SET in favour of a RuntimeParams entry fails here.
+// This is the test for the defect the T-0050 fix round measured. Connect used to
+// exec `SET default_transaction_read_only = on` in an AfterConnect hook, as a
+// second layer under ARCHITECTURE.md §2's READ ONLY transactions. Through a
+// transaction-pooling PgBouncer that GUC is set on the *server* connection the
+// pooler assigned, not on anything lazyslice owns, and PgBouncer does not run
+// server_reset_query in transaction mode by default
+// (server_reset_query_always = 0) — so it stayed there after lazyslice exited
+// and every later client assigned that server connection inherited it, for up
+// to server_lifetime (3600 s). A safety rail that turns a neighbour's
+// application read-only is damage, and every source transaction was already
+// `BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY` anyway; the one statement
+// that ran outside a transaction, Source.SystemID, runs inside one now.
+//
+// One server connection for the whole pooler is what makes this a proof rather
+// than a coincidence: the second client below cannot be given a different
+// server connection than the one the run used, so if the run left anything on
+// it, the second client sees it. Against the old AfterConnect exec this test
+// fails on the CREATE TABLE with SQLSTATE 25006.
+func TestAPooledRunLeavesThePoolerWritableForOtherClients(t *testing.T) {
+	ctx := context.Background()
+	testutil.SkipWithoutDocker(ctx, t)
+
+	pooled, _ := testutil.PgBouncer(ctx, t, "", map[string]string{
+		"MAX_DB_CONNECTIONS": "1",
+		"DEFAULT_POOL_SIZE":  "1",
+		// PgBouncer's own default is 120 s, which would turn a bug here into a
+		// two-minute hang instead of an answer.
+		"QUERY_WAIT_TIMEOUT": "10",
+	})
+
+	// A source session, in its own scope so that everything it holds is closed
+	// before the second client connects: the run is over, the way it is over
+	// when the binary exits.
+	//
+	// SystemID and the holder transaction are the whole of it. Every statement
+	// this package sends to the source is one of these three forms — a
+	// standalone read-only transaction, the holder's, or a reader's — and a
+	// reader is left out on purpose: with one server connection the pooler has
+	// none to give while the holder's transaction pins it, so opening one would
+	// wait out QUERY_WAIT_TIMEOUT and exercise the serialised fallback that
+	// TestAPoolerWithOneServerConnectionSerialisesTheExtract is already for.
+	func() {
+		src, err := OpenSource(ctx, dsn.DSN(pooled))
+		if err != nil {
+			t.Fatalf("opening the source through the pooler: %v", err)
+		}
+		defer src.Close()
+
+		if _, idErr := src.SystemID(ctx); idErr != nil {
+			t.Fatalf("reading the system identifier through the pooler: %v", idErr)
+		}
+		if _, snapErr := src.Snapshot(ctx); snapErr != nil {
+			t.Fatalf("exporting a snapshot through the pooler: %v", snapErr)
+		}
+		if relErr := src.Release(context.WithoutCancel(ctx)); relErr != nil {
+			t.Fatalf("releasing the snapshot: %v", relErr)
+		}
+		if violation := src.Violation(); violation != nil {
+			t.Fatalf("the allowlist refused a statement: %v", violation)
+		}
+	}()
+
+	// The neighbour: an unrelated application on the same pooler, with no
+	// tracer, no allowlist and no settings of its own.
+	cfg, err := pgxpool.ParseConfig(pooled)
+	if err != nil {
+		t.Fatalf("parsing the pooled connection string: %v", err)
+	}
+	cfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeExec
+	neighbour, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		t.Fatalf("opening the second client's pool: %v", err)
+	}
+	defer neighbour.Close()
+
+	// Read the setting first, so that a failure below reads as what it is rather
+	// than as some other reason CREATE TABLE could fail.
+	var readOnly string
+	if scanErr := neighbour.QueryRow(ctx, `SELECT current_setting('default_transaction_read_only')`).Scan(&readOnly); scanErr != nil {
+		t.Fatalf("reading default_transaction_read_only as the second client: %v", scanErr)
+	}
+	if readOnly != "off" {
+		t.Errorf("default_transaction_read_only is %q for an unrelated client on this pooler, want \"off\": "+
+			"the lazyslice run left a session GUC on the shared server connection (T-0076). "+
+			"The read-only setting is per transaction and never a session default", readOnly)
+	}
+
+	if _, err := neighbour.Exec(ctx, `CREATE TABLE neighbour_write (a int)`); err != nil {
+		t.Fatalf("an unrelated client on the same pooler could not write after a lazyslice run: %v\n"+
+			"this is the leak T-0076 fixed: a session GUC set on a pooled connection stays on the shared "+
+			"server connection for up to server_lifetime. Nothing lazyslice sends to the source may be "+
+			"session state; the read-only setting belongs in the transaction (pg.go, source.go)", err)
+	}
+}
+
+// The negative control, and the reason the read-only setting was never a
+// startup parameter: the same pooler, the same server, one parameter in the
+// startup packet, and no connection can be opened at all.
+//
+// Without this the decision in Connect is a comment. With it, answering the
+// leak above by moving the setting into RuntimeParams fails here — both doors
+// out of the transaction are shut, which is why the setting is in it.
 func TestAStartupParameterOutsideThePoolersListRefusesTheConnection(t *testing.T) {
 	ctx := context.Background()
 	testutil.SkipWithoutDocker(ctx, t)

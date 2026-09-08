@@ -9,7 +9,7 @@
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 5 | 0 | 19 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 7 | 0 | 0 | 0 | 0 |
+| E9 Later | later | 9 | 0 | 0 | 0 | 0 |
 
 ## Open and in progress
 
@@ -27,6 +27,8 @@
 - T-0078 [open] E9 · internal/load/ddl: drop the dangling back-reference to target.refused.start_timeout's deleted comment ()
 - T-0079 [open] E9 · Record the review pin outside internal/core: ARCHITECTURE.md entry points, cmd/CLAUDE.md, and ADR-005's exit 12 ()
 - T-0080 [open] E9 · Anchor /lazyslice in .gitignore so a bare go build cannot commit a 32MB binary ()
+- T-0081 [open] E9 · Stale default_transaction_read_only prose outside internal/pg after T-0076 ()
+- T-0082 [open] E9 · No mechanism detects a source statement sent outside a transaction ()
 
 ## Recently closed
 

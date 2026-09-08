@@ -344,9 +344,13 @@ const (
 	// THREAT_MODEL.md T9 describes the other way round — the transaction
 	// enforces, the tracer is the evidence — so the evidence was the layer that
 	// failed. And that transaction was not under every statement: Source.SystemID
-	// queries outside any BEGIN, so an autocommit path had this allowlist and
-	// nothing else until Connect began setting default_transaction_read_only=on
-	// (pg.go). The list is every word format_type puts after the first one;
+	// queried outside any BEGIN, so an autocommit path had this allowlist and
+	// nothing else. It opens a transaction of its own now, so the enforcement is
+	// under every statement this package sends (T-0076, source.go) — not under
+	// internal/discover's dial, which queries a pool from pg.Connect with no
+	// BEGIN and so is where this allowlist is still the whole defence (T-0081;
+	// T-0082 is the check that would notice). The list is every word
+	// format_type puts after the first one;
 	// a type spelling that needs another word is added here, once.
 	reTypeMod  = `(?:\( *[0-9]+ *(?:, *[0-9]+ *)?\))?`
 	reTypeWord = `(?:with|without|time|zone|varying|precision|double|to|year|month|day|hour|minute|second)`

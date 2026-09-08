@@ -17,8 +17,12 @@ host and `--allow-remote-target` (THREAT_MODEL.md T2's locality control), not
 for the privilege.
 
 **Rules.**
-- Every source transaction is `REPEATABLE READ READ ONLY`. All five pgx
-  tracers are registered on the source pool; a statement whose shape is not
+- Every source transaction is `REPEATABLE READ READ ONLY`, and **read-only is
+  set per transaction only — never as a session default and never in the
+  startup packet** (T-0076): a pooled endpoint shares its server connections
+  with other applications, so session state outlives the run and is theirs to
+  suffer. Nothing here may run an `AfterConnect` hook on the source. All five
+  pgx tracers are registered on the source pool; a statement whose shape is not
   registered gets a cancelled context from `TraceQueryStart` and a recorded
   violation that fails the run (THREAT_MODEL.md T9) — no first-keyword
   allowlist (`WITH x AS (DELETE ...)` defeats that).
@@ -160,10 +164,14 @@ for the privilege.
   near-miss above belongs in T9 as a recorded near-miss and not only as a fixed
   regex, because at the time the layer that caught it was not present on every
   path: `Connect` set no `default_transaction_read_only` on the source pool and
-  `Source.SystemID` sends its statement outside any `BEGIN`, so an autocommit
+  `Source.SystemID` sent its statement outside any `BEGIN`, so an autocommit
   path had the allowlist and nothing else. **Both amendments have since landed
-  in T9, and `Connect` now sets `default_transaction_read_only=on`** (see the
-  entry below), so the autocommit path is covered by the server as well.
+  in T9, and no statement this package sends is on an autocommit path any more:
+  `Source.SystemID` opens a `REPEATABLE READ READ ONLY` transaction of its own**
+  (T-0076, see the entry below), so the transaction is under every statement
+  *here* rather than a session setting being. It is not under every statement in
+  the binary: `internal/discover`'s dial queries a tracer-carrying pool with no
+  `BEGIN` (T-0081, and the entry below).
 - **A predicate that breaks the rule is refused at `--where`, not only here.**
   `internal/plan/where.go` checks the same characters and the same balance when
   the request arrives and returns exit 2 naming the character and its position.
@@ -261,24 +269,53 @@ for the privilege.
   rows for the rest — with the exit codes §9 assigns each — before any renderer
   can print these refusals. `catalogue.yml` is not a file this package's task
   may write; the missing rows are reported to the orchestrator as an open task.
-- **The source pool sets `default_transaction_read_only=on` at connect time**
-  (T-EXTRACT), as a session `SET` in `AfterConnect`, so it is on before the
-  first query of the run. ARCHITECTURE.md §2 makes every
-  source transaction `REPEATABLE READ READ ONLY`, and until this setting existed
-  that covered only statements *inside* one: `Source.SystemID` queries outside
-  any `BEGIN`, so on that autocommit path the allowlist was the whole defence —
-  which is the near-miss THREAT_MODEL.md T9 records (`SELECT t."a"::int INTO
-  evil FROM ...` matched a shape while a cast's type name could absorb any
-  word, and `SELECT ... INTO` is `CREATE TABLE AS`). With it, the implicit
-  transaction around such a statement is read-only too and the server refuses
-  the write with SQLSTATE 25006. T9 already carries the amendment. It is a
-  default and not a lock — an explicit `BEGIN ... READ WRITE` would override it
-  — and nothing here writes one; the tracer would refuse it.
-  `TestAWriteOutsideATransactionIsRefusedByTheServer` registers a write shape on
-  purpose, so that what refuses the write can only be the server.
-  **It is a `SET` and not a startup parameter, and that is a topology decision.**
-  It was written into `ConnConfig.RuntimeParams` first, which puts it in the
-  PostgreSQL startup packet; PgBouncer, Odyssey and Supavisor accept only
+- **Read-only is per transaction, never a session default** (T-0076, revising
+  T-EXTRACT). ARCHITECTURE.md §2 makes every source transaction `BEGIN
+  ISOLATION LEVEL REPEATABLE READ READ ONLY`, and that transaction is the
+  enforcement THREAT_MODEL.md T9 names — the tracer is the evidence. For a
+  while `Connect` also set `default_transaction_read_only=on` as a session
+  `SET` in an `AfterConnect` hook, because `Source.SystemID` was the one
+  statement issued outside any `BEGIN` and on that autocommit path the
+  allowlist was the whole defence (the `SELECT t."a"::int INTO evil FROM ...`
+  near-miss T9 records). **That hook is gone. `Source.SystemID` opens a
+  read-only transaction of its own instead**, so no statement this package sends
+  is left on an autocommit path and nothing is set on the session. Read that as
+  scoped to this package: what the hook gave was pool-wide, covering statements
+  written where this package cannot see them, and what replaced it is discipline
+  at each call site here. `internal/discover`'s dial is the caller that had been
+  relying on the pool-wide half and now has the allowlist alone (T-0081, and the
+  "Owed elsewhere" note below); T-0082 is the missing mechanism that would have
+  caught it — a rule enforced by a comment is the kind this package's own
+  history says gets broken.
+  **Why, measured:** a session GUC set through a transaction-pooling PgBouncer
+  is set on the *shared server connection* the pooler assigned, not on anything
+  lazyslice owns, and PgBouncer in transaction mode does not run
+  `server_reset_query` by default (`server_reset_query_always = 0`). So it
+  stayed on that server connection after lazyslice exited and every later
+  client assigned it inherited it — a second, unrelated client through the same
+  pooler read `on` back without issuing a `SET`, and its `CREATE TABLE` failed
+  with "cannot execute CREATE TABLE in a read-only transaction" — for up to
+  `server_lifetime` (3600 s by default). A run against a pooled source could
+  leave other applications on that pooler read-only after it finished. A rail
+  that protects the source by breaking its neighbours is damage, and this one
+  bought nothing the transactions did not already give.
+  `TestAPooledRunLeavesThePoolerWritableForOtherClients` is the proof: one
+  server connection for the whole pooler (`MAX_DB_CONNECTIONS=1`,
+  `DEFAULT_POOL_SIZE=1`), a whole source session on it, then an unrelated
+  client that must be given that same connection and must be able to
+  `CREATE TABLE`. Against the old `AfterConnect` exec it fails on SQLSTATE
+  25006. `TestConnectSetsNoSessionStateOnASourceConnection` is the unit half —
+  no `AfterConnect` hook at all, and no `SET` on the allowlist —
+  `TestSystemIDRunsInsideAReadOnlyTransaction` pins the `source.begin →
+  source.system_id → source.rollback` trace, and
+  `TestAWriteInsideASourceTransactionIsRefusedByTheServer` registers a write
+  shape on purpose so that what refuses the write can only be the server (25006).
+  THREAT_MODEL.md T9's read-only bullet carries the same wording; it listed the
+  session setting among T9's rails and now says the setting is per transaction
+  and why.
+  **The other door was already shut, and stays shut: not a startup parameter
+  either.** It was written into `ConnConfig.RuntimeParams` first, which puts it
+  in the PostgreSQL startup packet; PgBouncer, Odyssey and Supavisor accept only
   `client_encoding`, `DateStyle`, `TimeZone`, `standard_conforming_strings` and
   `application_name` there and **refuse the connection** for anything else
   unless it is listed in `ignore_startup_parameters`. A pooled endpoint is a
@@ -287,55 +324,58 @@ for the privilege.
   to open any connection at all through one — and because `pgxpool` connects
   lazily, as an opaque acquire failure rather than at `Connect`, with the
   serialised-extract fallback in `Source.Reader` unreachable behind it.
-  `Connect` therefore registers `source.read_only` (a literal template, narrower
-  than any shape with a placeholder) and execs the `SET` in `AfterConnect`.
-  `TestConnectAddsNoStartupParameterAPoolerWouldRefuse` and
-  `TestTheReadOnlySettingIsASessionStatementOnTheAllowlist` are the unit guard,
-  and it is over what we send rather than over what a pooler answers: it
-  compares `ConnConfig.RuntimeParams` against a hand-written list of what
-  PgBouncer documents it accepts, so it cannot fail on a list that has gone
-  stale. **`pooler_integration_test.go` is the half where PgBouncer answers**
-  (T-0050): `internal/testutil.PgBouncer` starts a real pooler in transaction
-  mode in front of a real server, `TestASourceOpensAndReadsThroughAPooler` opens
-  a `Source` through it and runs export/import/read, and
+  `TestConnectAddsNoStartupParameterAPoolerWouldRefuse` is the unit guard, over
+  what we send rather than over what a pooler answers: it compares
+  `ConnConfig.RuntimeParams` against a hand-written list of what PgBouncer
+  documents it accepts, so it cannot fail on a list that has gone stale.
+  **`pooler_integration_test.go` is the half where PgBouncer answers** (T-0050):
+  `internal/testutil.PgBouncer` starts a real pooler in transaction mode in
+  front of a real server, `TestASourceOpensAndReadsThroughAPooler` opens a
+  `Source` through it and runs identity/export/import/read, and
   `TestAStartupParameterOutsideThePoolersListRefusesTheConnection` is the
   negative control — the same parameter moved into the startup packet and no
-  connection can be opened at all, which is what makes the decision above a
-  test rather than a comment. That control now has a positive control in front
+  connection can be opened at all. That control has a positive control in front
   of it (the same pooled URL, the same pool, without the parameter) and asserts
   the *wording* of the refusal, so it can no longer pass on a pooler that was
-  never reachable.
-  **What the pooled test does not certify, and a defect it uncovered** (T-0050
-  fix round): the `SET` is a session setting on the *server* connection the
-  pooler assigned, and PgBouncer in transaction mode does not run
-  `server_reset_query` by default (`server_reset_query_always = 0`), so it stays
-  on that server connection after lazyslice is done with it and every later
-  client of that pooler inherits it — measured, not inferred: a second,
-  unrelated client through the same pooler read `on` back without issuing a
-  `SET`, and its `CREATE TABLE` failed with "cannot execute CREATE TABLE in a
-  read-only transaction". So a run against a pooled source can leave other
-  applications sharing that pooler read-only for up to `server_lifetime`
-  (3600s by default) after lazyslice exits. `TestASourceOpensAndReadsThroughAPooler`
-  is worded for what it can say — the `SET` reached this client's own server
-  connection — and says in its comment that it is not a certificate about the
-  pooler as a whole; `internal/invariants`'s I4 cannot see this either, because
-  it compares catalogs and row checksums and not server session state.
-  **This is an open defect, not a discharged one.** It has no tracker task and
-  no owner: the task that found it could write `internal/pg` but not `tracker/`
-  (orchestrator-only, root CLAUDE.md) and not THREAT_MODEL.md, and the fix needs
-  both. Until that changes this paragraph is the defect's only marker in the
-  tree, so do not delete it as stale prose — delete it with the fix.
-  The fix, for whoever takes it: every source transaction is already `BEGIN
-  ISOLATION LEVEL REPEATABLE READ READ ONLY`, so the session-wide default is
-  defence in depth for the autocommit path alone (`Source.SystemID`,
-  `source.go:160`, which queries outside any `BEGIN`). Either scope it per
-  transaction — put `SystemID` inside a read-only transaction and drop the
-  `AfterConnect` exec, which also retires the `source.read_only` shape and
-  `TestTheReadOnlySettingIsASessionStatementOnTheAllowlist` — or issue `RESET
-  default_transaction_read_only` before a connection goes back to the pooler.
-  Scoping it per transaction changes what THREAT_MODEL.md T9 claims (it lists
-  the session setting among T9's rails), so the fix carries that wording with
-  it; that is why it is a task of its own and not a test round's.
+  never reachable. Both doors being shut is why the setting lives in the
+  transaction: a pooler refuses it in the startup packet and cannot be trusted
+  to clear it from the session.
+  `internal/invariants`'s I4 cannot see server session state either — it
+  compares catalogs and row checksums — so the pooled integration test is the
+  only thing standing between this package and that leak. Do not answer a
+  future "one more thing to set on the source connection" with `AfterConnect`;
+  put it in the transaction, or it is a neighbour's outage.
+  **Owed elsewhere (T-0081).** Three comments outside this package still say the
+  setting is there: `internal/discover/probe.go`'s `dialShapes` doc,
+  `internal/discover/CLAUDE.md`'s dial bullet, and `internal/load/CLAUDE.md`'s
+  type-registration bullet, which points at "`internal/pg`'s `AfterConnect`" as
+  the place target type registration would go. None is this task's to write. The
+  substantive half of that task is `internal/discover`: its three catalog
+  statements are sent outside any transaction and were covered by this setting,
+  so they now have the allowlist alone — either open a read-only transaction
+  around the dial or record why three allowlisted catalog `SELECT`s do not need
+  one. That half is a rail restoration on a path that dials production
+  endpoints, not a comment rewrite, and it should be priced and scheduled as
+  one; the exact-match allowlist is what stands in for the transaction until it
+  lands (THREAT_MODEL.md T9 now says so rather than claiming the transaction is
+  universal). Nothing in this package blocks it: `SourceShapes` already exports
+  `source.begin` and `source.rollback` carrying the same two literals
+  `Source` sends, so the dial can register them next to `dialShapes()` and wrap
+  its three reads in that pair without a new export here — do not let it write
+  the `BEGIN` text out a second time, because two copies of an allowlisted
+  literal are two things to keep in step. Both tasks were filed in E9 (Later),
+  which is where a developer may file; a rail removed in phase 5 that is
+  restored in E9 outlives the phase that removed it, so the re-home is the
+  orchestrator's to make.
+  **The structural half is T-0082.** What the `AfterConnect` hook gave was a
+  pool-wide rail; what stands here now is per-call-site discipline plus
+  `TestSystemIDRunsInsideAReadOnlyTransaction`, which pins one function. Nothing
+  detects a source statement sent outside a transaction, which is why the
+  `internal/discover` regression was found by reading prose and not by a check.
+  `Tracer` is where the mechanism belongs — it already sees every statement on
+  the source pool and already refuses by cancelling the context — but tracking
+  `BEGIN`/`ROLLBACK` per connection there refuses the dial the moment it is
+  armed, so T-0082 sequences after T-0081 or lands with it.
 - `uuidV4` is local rather than a dependency: `go.mod` has no direct one, and
   this is the only UUID lazyslice makes.
 - **`Eligibility.Local` records whether the target is local, never whether the
@@ -406,10 +446,13 @@ for the privilege.
   above). This is a recorded debt, not an oversight.
 
 **Test.** `go test ./internal/pg/...`; the gate, tracer, identity,
-read-only-pool and pooler behaviour need
+read-only-transaction and pooler behaviour need
 `go test -tags integration ./internal/pg/...` (the `TestGate*` suite in
-THREAT_MODEL.md T2, `TestAWriteOutsideATransactionIsRefusedByTheServer` for T9,
-and `pooler_integration_test.go` for ADR-005's pooled endpoints). Every branch of the gate has a case there: the three
+THREAT_MODEL.md T2, `TestAWriteInsideASourceTransactionIsRefusedByTheServer`
+and `TestSystemIDRunsInsideAReadOnlyTransaction` for T9, and
+`pooler_integration_test.go` for ADR-005's pooled endpoints and for
+`TestAPooledRunLeavesThePoolerWritableForOtherClients`, which is the only test
+that can see the leak T-0076 fixed). Every branch of the gate has a case there: the three
 ARCHITECTURE.md §9 names them — `TestGateRefusesRLSTable`,
 `TestGateRefusesTargetAboveTableCap`, `TestGateRefusesRemoteTargetWithoutFlag` —
 plus `TestGateRefusesTheSourceUnderAnotherName` for the half of rule 1 that
@@ -418,4 +461,5 @@ cap builds 2,001 tables on purpose, against the real constant.
 
 **Never:** open a `pgxpool.Pool` for the source or target anywhere but here;
 let the gate return `Eligible` for a `NotProbed` table; add a rung to the
-identity ladder that treats "not probed" as safe.
+identity ladder that treats "not probed" as safe; leave session state on a
+source connection — no `AfterConnect`, no `SET` outside a transaction (T-0076).

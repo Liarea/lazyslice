@@ -19,3 +19,4 @@ coverage.out
 *.swp
 /docgen
 /tools/docgen/docgen
+/lazyslice
