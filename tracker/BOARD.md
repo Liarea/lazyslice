@@ -7,7 +7,7 @@
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 1 | 0 | 9 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
-| E5 Hardening | 5 | 9 | 1 | 11 | 0 | 0 |
+| E5 Hardening | 5 | 10 | 1 | 11 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
 | E9 Later | later | 4 | 0 | 0 | 0 | 0 |
 
@@ -29,6 +29,7 @@
 - T-0070 [open] E5 · T-PIN: the run that writes the target is pinned to the reviewed snapshot and endpoints (core.Request.Reviewed, core.refused.reviewed_changed) (opus)
 - T-0073 [open] E5 · T-0073: fixture email values out of the masker's documentation-domain output space (I2 intermittent collision) (sonnet)
 - T-0074 [in_progress] E5 · Unsafe-flag rail enforced over the registered flag set: main_test's forbidden list permits exactly unmask and rejects every other name containing it; make unsafe-flags runs that test (sonnet)
+- T-0075 [open] E5 · CI red from provisioning: password-file mode assertion on Windows; provisioned container not ready within 60 s on GitHub runners (image pull inside the deadline) (opus)
 
 ## Recently closed
 
