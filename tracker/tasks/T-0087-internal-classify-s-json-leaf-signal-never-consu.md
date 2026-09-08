@@ -25,6 +25,8 @@ internal/classify/classify.go's jsonSignal short-circuits every json/jsonb/hstor
 
 - 2026-09-08 created
 
+- 2026-09-08 Orchestrator 2026-09-08: deferred with reasoning. Every JSON string leaf is masked whole as free_text (ADR-010 note in §4), so a masked document column carries no leaf the dictionary could score; the gap is only a jsonb column classified none, which verify's second net still scans with the non-dictionary validators. Revisit with §14's one-level JSON key collection.
+
 ## Post-mortem
 
 _(filled on close: what went well, what went badly, what we change next time)_

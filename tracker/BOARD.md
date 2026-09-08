@@ -7,9 +7,9 @@
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 1 | 0 | 9 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
-| E5 Hardening | 5 | 5 | 0 | 22 | 0 | 0 |
+| E5 Hardening | 5 | 1 | 1 | 26 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 9 | 0 | 2 | 0 | 0 |
+| E9 Later | later | 5 | 0 | 5 | 0 | 0 |
 
 ## Open and in progress
 
@@ -18,16 +18,9 @@
 - T-0029 [open] E9 · Before going public: git-crypt the AI-specific paths and rewrite pre-encryption history (fable)
 - T-0031 [open] E9 · Licence for the lazyslice.yml schema and docs; confirm copyright holder statement (fable)
 - T-0048 [open] E9 · Explicit --key on an uncomparable column type surfaces a raw pgx error instead of a refusal (opus)
-- T-0055 [open] E5 · Shared leaf package for value validators including the name dictionary; register person_name and free_text in verify's second net with a verify-side false-positive threshold decision (opus)
 - T-0064 [open] E5 · Dogfood: two sessions against a real project of Gareth's choosing, logged in docs/DOGFOOD_LOG.md (human)
 - T-0065 [open] E6 · 20-second VHS GIF of the first run on Pagila (sonnet)
-- T-0078 [open] E5 · internal/load/ddl: drop the dangling back-reference to target.refused.start_timeout's deleted comment ()
-- T-0081 [open] E5 · Stale default_transaction_read_only prose outside internal/pg after T-0076 ()
-- T-0082 [open] E5 · No mechanism detects a source statement sent outside a transaction ()
-- T-0083 [open] E9 · Target type registration for CopyFrom: no owner since internal/load shipped ()
-- T-0084 [open] E9 · THREAT_MODEL.md T9 still says the discover dial sends its reads outside a transaction ()
-- T-0085 [open] E9 · ARCHITECTURE.md section 9 Discoverer contract still says three statements per dial ()
-- T-0086 [open] E9 · Name internal/textsig in internal/CLAUDE.md's import graph, ARCHITECTURE.md section 2 and section 12 (opus)
+- T-0083 [in_progress] E5 · Target type registration for CopyFrom: no owner since internal/load shipped ()
 - T-0087 [open] E9 · internal/classify's JSON leaf signal never consults the name dictionary, so verify's second net cannot score person_name or free_text over document leaves ()
 
 ## Recently closed
@@ -37,6 +30,7 @@
 - T-0050 [done] E5 · Extract and transform hand-offs from T-EXTRACT review (see T-0041 log): shape-template identifier escaping, KeySet chunk iterator, pgbouncer testcontainer, text-keyed big fixture → done: 2694a03; shape-template identifiers escaped, KeySet FirstChunk and EachChunk with extract and verify using them, pgbouncer testcontainer, text-keyed big fixture; §2 reconciled by the orchestrator
 - T-0052 [done] E5 · Flake: TestKillNineLeavesEveryTableEmptyOrComplete races container teardown (port 5432/tcp not found) → done: merged in the backlog run wf_e6bd43ea-99d (see git log for the hash)
 - T-0053 [done] E5 · pg gate follow-ups from T-FPR: regression test pinning the fingerprinter transaction (SAVEPOINT must not 25P01), rollback failure routed through endTx discipline, comment corrections; schema-only Introspector variant so the gate skips sampling → done: merged in the backlog run wf_e6bd43ea-99d (see git log for the hash)
+- T-0055 [done] E5 · Shared leaf package for value validators including the name dictionary; register person_name and free_text in verify's second net with a verify-side false-positive threshold decision → done: 654bfd4; internal/textsig leaf holds validators and the name dictionary; person_name and free_text in the second net with a multi-token or hit-rate threshold
 - T-0063 [done] E5 · Q1, the controlling terminal, and provisioning: widen pipeline.Provisioner to carry the generated POSTGRES_PASSWORD, then wire --create-target and the one blocking question → done: folded into T-PROVISION
 - T-0066 [done] E5 · T-TUI: Bubble Tea reasons and plan screens → done: reasons and plan screens from the event stream, every binding carries its flag, footer strikes unavailable keys, leaving echoes flags into scrollback; --tui only on a TTY
 - T-0067 [done] E5 · T-PROVISION: --create-target and rung 4 (T-0063) → done: provisioning, rung 4, Q1 prompter on the controlling terminal; the four core-side joins (Yes into Options, Provisioner interface, ArgContainer, unreachable args) are in a verified patch applied by the follow-up
@@ -50,10 +44,9 @@
 - T-0075 [done] E5 · CI red from provisioning: password-file mode assertion on Windows; provisioned container not ready within 60 s on GitHub runners (image pull inside the deadline) → done: merged in the backlog run wf_e6bd43ea-99d (see git log for the hash)
 - T-0076 [done] E5 · T-0076: source read-only setting per transaction, never a session GUC that leaks through a transaction-pooling PgBouncer; T9 reworded → done: 2d57b00; session GUC removed, SystemID in a read-only transaction, pgbouncer neighbour test proves a second client can CREATE TABLE after lazyslice exits, T9 reworded
 - T-0077 [done] E5 · T-0077: stream_docs lifted above the nasty.sql big gate; introspect table list updated; extract workaround removed → done: 7142c52; stream_docs declared beside stream_rows above the gate, only the fill is gated; introspect table list updated; extract workaround removed
+- T-0078 [done] E5 · internal/load/ddl: drop the dangling back-reference to target.refused.start_timeout's deleted comment → done: back-reference dropped in T-0081's commit
 - T-0079 [done] E9 · Record the review pin outside internal/core: ARCHITECTURE.md entry points, cmd/CLAUDE.md, and ADR-005's exit 12 → done: ARCHITECTURE.md §1 records the three entry points and the review pin; ADR README errata carries the fifth exit-12 cause; cmd/CLAUDE.md names core.Preview
 - T-0080 [done] E9 · Anchor /lazyslice in .gitignore so a bare go build cannot commit a 32MB binary → done: /lazyslice anchored in .gitignore (2d57b00)
-- T-0044 [done] E4 · T-CORE: core run, emit, render, repo, CLI end to end; integration job blocking again → done: core merged at 9bd9e24, blockers closed by T-0058
-- T-0045 [done] E4 · T-DISCOVER: discovery rungs 0-3 and the first-run ladder → done: 5381042; rungs 0 to 3, six-step Docker endpoint resolution, compose and .env as naming sources, one blocking question, headless asks nothing; unit tests green
-- T-0056 [done] E5 · Second net: weak threshold (0.5) plus neighbouring-column raise; the faithful reading is decorative, the alternative is a different control and needs a T1 review first → decided: the second net keeps the strong threshold only; recorded in THREAT_MODEL T1 and ARCHITECTURE §6
-- T-0058 [done] E4 · T-CORE-FIX: fail closed on low-cardinality columns (verify minValues, introspect full-read below the TABLESAMPLE floor), I6 pagila counted root, I2 derived_text exemption, event.go embeds the catalogue, drop the ci allowlist; then make integration must be fully green → done: tiny tables sampled by bounded read, verify fails closed below minValues, I6 counts a parent-free root, derived_text exempt from the loaded guard, event.go embeds the catalogue, CI allowlist and continue-on-error removed; make integration green end to end
-- T-0059 [done] E4 · Fixture inet values out of RFC 5737 so masked IPs cannot equal source values; remove the flake paragraphs; mask test pins the output space → done: 65ab0a3; fixture inet values are RFC 1918, flake paragraphs replaced by a pointer to §5, mask range test added
+- T-0081 [done] E5 · Stale default_transaction_read_only prose outside internal/pg after T-0076 → done: 3df6a22; dial inside a read-only transaction, shape miss beats the transaction rule, probe acts on its tracer verdict, stale prose rewritten
+- T-0082 [done] E5 · No mechanism detects a source statement sent outside a transaction → done: folded into T-0081; the tracer refuses any source statement outside a transaction, pinned by unit and real-server tests
+- T-0084 [done] E9 · THREAT_MODEL.md T9 still says the discover dial sends its reads outside a transaction → done: THREAT_MODEL T9 gained the dial bullet

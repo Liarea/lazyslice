@@ -14,7 +14,7 @@ depend on. See each subdirectory's own CLAUDE.md for which.
 
 **Rules.**
 - Import graph is fixed and acyclic (ARCHITECTURE.md §2 "Import graph"):
-  `ref` imports nothing; `event` imports only `ref`; `pipeline` imports `ref`,
+  `ref` imports nothing; `event` imports only `ref`; `textsig` imports only `ref` and `pipeline` (a leaf shared by classify and verify); `pipeline` imports `ref`,
   `event`, `dsn` and `mask`; the stage packages import `pipeline`. `event`
   never imports `pipeline`. `TestImportGraph` enforces this; do not add an
   edge that fails it.

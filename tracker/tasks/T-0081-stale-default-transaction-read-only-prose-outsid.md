@@ -3,12 +3,12 @@ id: T-0081
 title: "Stale default_transaction_read_only prose outside internal/pg after T-0076"
 epic: E5
 phase: 5
-status: open
+status: done
 owner: ""
 created: 2026-09-08
 started: ""
-closed: ""
-outcome: ""
+closed: 2026-09-08
+outcome: "done: 3df6a22; dial inside a read-only transaction, shape miss beats the transaction rule, probe acts on its tracer verdict, stale prose rewritten"
 ---
 
 # T-0081 · Stale default_transaction_read_only prose outside internal/pg after T-0076
@@ -29,6 +29,8 @@ T-0076 removed the AfterConnect exec that set default_transaction_read_only=on o
 
 - 2026-09-08 moved to E5 phase 5
 
+- 2026-09-08 closed: done: 3df6a22; dial inside a read-only transaction, shape miss beats the transaction rule, probe acts on its tracer verdict, stale prose rewritten
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+Went well: three reviewers, six findings, all landed. Went badly: an interrupted fix round had already landed everything on disk and the resumed agent only verified. Change: none.

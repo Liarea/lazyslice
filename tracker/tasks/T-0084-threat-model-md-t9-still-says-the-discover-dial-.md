@@ -3,12 +3,12 @@ id: T-0084
 title: "THREAT_MODEL.md T9 still says the discover dial sends its reads outside a transaction"
 epic: E9
 phase: ""
-status: open
+status: done
 owner: ""
 created: 2026-09-08
 started: ""
-closed: ""
-outcome: ""
+closed: 2026-09-08
+outcome: "done: THREAT_MODEL T9 gained the dial bullet"
 ---
 
 # T-0084 · THREAT_MODEL.md T9 still says the discover dial sends its reads outside a transaction
@@ -25,6 +25,8 @@ T-0081 and T-0082 landed: internal/discover/probe.go now wraps its three catalog
 
 - 2026-09-08 created
 
+- 2026-09-08 closed: done: THREAT_MODEL T9 gained the dial bullet
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+Went well: doc. Went badly: nothing. Change: none.
