@@ -59,8 +59,23 @@ const (
 	// section 9 says a *named* volume, so the data survives a docker stop and a
 	// second run finds the marker where it left it.
 	volumeSuffix = "-data"
-	// dataDir is where the postgres image keeps PGDATA.
-	dataDir = "/var/lib/postgresql/data"
+	// dataDir is where the postgres image keeps PGDATA below major 18, and
+	// dataDirV18 is the single mount point 18 and above require.
+	//
+	// postgres:18 moved PGDATA into a major-version-specific directory under
+	// /var/lib/postgresql and made a mount at /var/lib/postgresql/data a
+	// refusal rather than a layout it tolerates: the entrypoint prints "in 18+,
+	// these Docker images are configured to store database data in a format
+	// which is compatible with pg_ctlcluster" and exits 1
+	// (docker-library/postgres#1259). So the container was created, started and
+	// dead before the first dial, and the only thing this package noticed was
+	// that nothing ever answered — every provisioning test on the CI matrix's
+	// postgres:18 leg spent the whole budget and reported "did not accept a
+	// connection", which is what tracker T-0075 was opened about.
+	dataDir    = "/var/lib/postgresql/data"
+	dataDirV18 = "/var/lib/postgresql"
+	// firstOwnedLayout is the first major that owns /var/lib/postgresql itself.
+	firstOwnedLayout = 18
 
 	// postgresPort is the port inside the container's network namespace.
 	postgresPort = "5432/tcp"
@@ -71,11 +86,42 @@ const (
 	firstPort = 5433
 	lastPort  = 5632
 
-	// readyBudget is the 60 s ARCHITECTURE.md section 9 and ADR-008 section 6
-	// both give the container to accept a connection, and readyInterval is how
-	// often it is asked.
-	readyBudget   = 60 * time.Second
-	readyInterval = 500 * time.Millisecond
+	// defaultReadyBudget is how long a started container has to accept a
+	// connection, and readyInterval is how often it is asked.
+	//
+	// 60 s is what ARCHITECTURE.md section 9 and ADR-008 section 6 both say,
+	// and both are frozen: a different default would be a change to an accepted
+	// decision, which takes a superseding ADR and not a task. A CI runner that
+	// pulls the image cold and then runs several initdbs at once on a shared
+	// disk needs longer, and it asks for it through ReadyBudgetEnv
+	// (.github/workflows/ci.yml sets 3m) — an override is a new affordance
+	// rather than a changed decision.
+	defaultReadyBudget = 60 * time.Second
+	readyInterval      = 500 * time.Millisecond
+
+	// dialGrace is how long the wait defers to the container's own log before
+	// it dials anyway. It is a grace and never a gate: a server whose log this
+	// package cannot read the readiness line in — logging_collector on,
+	// log_destination csvlog or jsonlog, a non-English lc_messages, a log the
+	// daemon serves from somewhere other than the container's stdout — is
+	// still a server that answers, and a wait that never dialled it would
+	// refuse a run over the wording of a log line. It is capped at a quarter of
+	// the budget so a short budget still spends most of its polls dialling.
+	dialGrace = 3 * time.Second
+
+	// ReadyBudgetEnv overrides defaultReadyBudget with a Go duration
+	// ("90s", "3m"). It is read by the provisioner rather than passed on
+	// Request because the callers that build a Request — the ladder's Q1 and
+	// Q1' — have no opinion about how slow the machine underneath them is.
+	// A value that does not parse, or is not positive, is the default: a
+	// mistyped duration must not turn the wait off.
+	ReadyBudgetEnv = "LAZYSLICE_PROVISION_READY_TIMEOUT"
+
+	// readyLine is what the postgres entrypoint prints when the server is up.
+	// It is the same line internal/testutil/postgres.go waits on for the
+	// containers it starts; what differs is the occurrence, and bootWatch says
+	// why this one cannot ask for the second.
+	readyLine = "database system is ready to accept connections"
 
 	// role and database are the container's own POSTGRES_USER and POSTGRES_DB.
 	// They are written into the container environment rather than left implicit
@@ -181,8 +227,11 @@ type Provisioner interface {
 	Start(ctx context.Context, containerID string, req Request) (Result, error)
 }
 
-// NotReadyError is the 60 s budget running out (ADR-008 section 6 step 3). The
-// container is left running; lazyslice never removes one.
+// NotReadyError is the readiness budget running out (ADR-008 section 6 step 3),
+// or the container stopping before it ever answered. lazyslice never removes
+// one either way: a container that is still running is left running, and one
+// that exited during startup is left exited, which is what makes
+// `docker logs <name>` — the command that step names — still answerable.
 type NotReadyError struct {
 	Container string
 	Waited    time.Duration
@@ -190,7 +239,15 @@ type NotReadyError struct {
 }
 
 func (e *NotReadyError) Error() string {
-	return fmt.Sprintf("provision: %s did not accept a connection within %s", e.Container, e.Waited)
+	msg := fmt.Sprintf("provision: %s did not accept a connection within %s", e.Container, e.Waited)
+	if e.Err != nil {
+		// The reason the last attempt failed, which the wrapped error has always
+		// carried and this sentence never printed: a whole CI matrix leg read as
+		// "nothing answered for a minute" when what happened was a container
+		// that exited one second in (tracker T-0075).
+		msg += ": " + e.Err.Error()
+	}
+	return msg
 }
 
 func (e *NotReadyError) Unwrap() error { return e.Err }
@@ -206,6 +263,12 @@ type Docker interface {
 	ContainerInspect(ctx context.Context, id string, options client.ContainerInspectOptions) (client.ContainerInspectResult, error)
 	ContainerCreate(ctx context.Context, options client.ContainerCreateOptions) (client.ContainerCreateResult, error)
 	ContainerStart(ctx context.Context, id string, options client.ContainerStartOptions) (client.ContainerStartResult, error)
+	// ContainerLogs is how the wait learns that the server is up without
+	// dialling it, and it reads only. ADR-008 section 6 step 3 already tells the
+	// operator to run `docker logs <name>` when a container does not come up;
+	// this reads the same stream so that the wait can stop at the line the
+	// entrypoint prints instead of guessing from a refused connection.
+	ContainerLogs(ctx context.Context, id string, options client.ContainerLogsOptions) (client.ContainerLogsResult, error)
 	ImageList(ctx context.Context, options client.ImageListOptions) (client.ImageListResult, error)
 	ImagePull(ctx context.Context, ref string, options client.ImagePullOptions) (client.ImagePullResponse, error)
 	VolumeCreate(ctx context.Context, options client.VolumeCreateOptions) (client.VolumeCreateResult, error)
@@ -267,16 +330,24 @@ func (p *provisioner) Start(ctx context.Context, containerID string, req Request
 
 // adopt starts a container that already exists if it is not running, waits for
 // it, and builds the candidate.
+//
+// The readiness clock starts here, at the container start, and not in settle:
+// everything settle does before the first dial — reading the binding back,
+// spelling the connection string, parsing it — is work the container is already
+// booting through, and a budget that begins after it is a budget that shrinks
+// whenever the daemon is slow to answer an inspection.
 func (p *provisioner) adopt(ctx context.Context, req Request, id, name string, created bool) (Result, error) {
 	insp, err := p.api.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
 	if err != nil {
 		return Result{}, fmt.Errorf("provision: inspecting %s: %w", name, err)
 	}
+	startedAt, booting := time.Now(), false
 	if insp.Container.State == nil || !insp.Container.State.Running {
 		note(req.Progress, "lazyslice: starting "+displayName(insp, name))
 		if _, startErr := p.api.ContainerStart(ctx, id, client.ContainerStartOptions{}); startErr != nil {
 			return Result{}, fmt.Errorf("provision: starting %s: %w", name, startErr)
 		}
+		startedAt, booting = time.Now(), true
 		// The published port and the state are both only true after the start,
 		// so the inspection is redone rather than reused.
 		insp, err = p.api.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
@@ -284,7 +355,7 @@ func (p *provisioner) adopt(ctx context.Context, req Request, id, name string, c
 			return Result{}, fmt.Errorf("provision: inspecting %s after starting it: %w", name, err)
 		}
 	}
-	return p.settle(ctx, req, insp, displayName(insp, name), created)
+	return p.settle(ctx, req, insp, displayName(insp, name), created, startedAt, booting)
 }
 
 // create is the whole of ARCHITECTURE.md section 9's create path.
@@ -307,6 +378,9 @@ func (p *provisioner) create(ctx context.Context, req Request, name string) (Res
 		return Result{}, err
 	}
 
+	// Before anything is created, so that a cold image cache is paid for on its
+	// own progress line rather than out of the readiness budget the container
+	// has not started spending yet.
 	if pullErr := p.pull(ctx, image, req.Progress); pullErr != nil {
 		return Result{}, pullErr
 	}
@@ -345,7 +419,7 @@ func (p *provisioner) create(ctx context.Context, req Request, name string) (Res
 			Mounts: []mount.Mount{{
 				Type:   mount.TypeVolume,
 				Source: volume,
-				Target: dataDir,
+				Target: dataDirFor(req.Major),
 			}},
 		},
 	})
@@ -414,7 +488,16 @@ func (p *provisioner) volumeExists(ctx context.Context, name string) bool {
 
 // settle turns a running container into the candidate and the connection string
 // the run uses, once it answers.
-func (p *provisioner) settle(ctx context.Context, req Request, insp client.ContainerInspectResult, name string, created bool) (Result, error) {
+//
+// startedAt is when the container was started, which is where the budget runs
+// from; booting says whether this call is what started it, and therefore
+// whether the container's own log is worth reading. A container that was
+// already running has printed its readiness line at some point in the past and
+// the only question left about it is whether it answers now.
+func (p *provisioner) settle(
+	ctx context.Context, req Request, insp client.ContainerInspectResult,
+	name string, created bool, startedAt time.Time, booting bool,
+) (Result, error) {
 	host, port, ok := published(insp)
 	if !ok {
 		return Result{}, fmt.Errorf("provision: %s publishes no host port for %s", name, postgresPort)
@@ -423,9 +506,22 @@ func (p *provisioner) settle(ctx context.Context, req Request, insp client.Conta
 	connURL := ConnString(host, port, user, db, secret)
 
 	note(req.Progress, "lazyslice: waiting for "+name+" to accept connections")
-	started := time.Now()
-	if err := p.wait(ctx, connURL); err != nil {
-		return Result{}, &NotReadyError{Container: name, Waited: time.Since(started), Err: err}
+	budget := readyBudget()
+	deadline := startedAt.Add(budget)
+	// Only for a container this call started: one that was already running
+	// printed its startup line at some point in the past, and the only question
+	// left about it is whether it answers now.
+	var watch *bootWatch
+	if booting {
+		watch = &bootWatch{
+			p:        p,
+			id:       insp.Container.ID,
+			name:     name,
+			dialFrom: startedAt.Add(min(dialGrace, budget/4)),
+		}
+	}
+	if err := p.wait(ctx, connURL, deadline, watch); err != nil {
+		return Result{}, &NotReadyError{Container: name, Waited: time.Since(startedAt), Err: err}
 	}
 
 	d, ref, err := dsn.Parse(connURL)
@@ -447,24 +543,163 @@ func (p *provisioner) settle(ctx context.Context, req Request, insp client.Conta
 	}, nil
 }
 
+// readyBudget is how long a started container has to answer, from
+// ReadyBudgetEnv where that names a positive Go duration and defaultReadyBudget
+// otherwise. A value that does not parse is the default and not a failure: this
+// is a timeout, and a mistyped one must not be the thing that stops a run.
+func readyBudget() time.Duration {
+	raw := strings.TrimSpace(os.Getenv(ReadyBudgetEnv))
+	if raw == "" {
+		return defaultReadyBudget
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return defaultReadyBudget
+	}
+	return d
+}
+
+// bootWatch is the container's own log and liveness, read once per poll of the
+// readiness loop.
+//
+// It exists for the failure that has no other symptom: a container that exits
+// during startup — the entrypoint refusing the mount layout, a cluster whose
+// password does not match its data directory, an image that will not run on
+// this architecture — looks exactly like a slow one to a dial, because the
+// answer to "does the port answer yet" is no in both cases until the budget
+// runs out. ADR-008 section 6 step 3 then tells the operator to run
+// `docker logs <name>`; this reads it for them, at the moment it becomes true.
+type bootWatch struct {
+	p    *provisioner
+	id   string
+	name string
+	// dialFrom is when the loop stops waiting for the log and dials regardless.
+	// The log can bring the first dial forward; it can never hold it back past
+	// this instant, because a log that does not carry readyLine is a log this
+	// package cannot read the server's mind from and not a server that is down.
+	dialFrom time.Time
+	// listening is whether the server has printed readyLine at least once, and
+	// therefore whether a dial is worth making before dialFrom.
+	//
+	// At least once, and not twice, even though the second occurrence is the
+	// one that means TCP: the entrypoint pre-starts the server on a unix socket
+	// only when it has an initdb and init scripts to run, so a container coming
+	// back up on a volume that already holds a cluster prints the line exactly
+	// once, and gating on two waited out the whole budget in front of a server
+	// that had been accepting connections for the length of it. The first
+	// occurrence can still be the socket-only one, which costs this loop a
+	// refused connection or two and nothing else.
+	listening bool
+	// blind is a log this daemon will not serve — a logging driver other than
+	// json-file, typically. The wait then goes back to being the dial alone,
+	// which is what it was before this type existed.
+	blind bool
+}
+
+// step reads the container once. It returns an error only for the one thing the
+// dial cannot discover on its own: the container is not running any more.
+//
+// Every daemon call it makes is bounded, the way the dial already is. The
+// caller's context carries no deadline — internal/discover hands the run's
+// context straight through and the moby client sets no HTTP timeout of its own
+// — and the readiness budget is only ever checked between polls, so a daemon
+// that accepts a request and never answers would make the budget unenforceable
+// and this loop would block past it indefinitely. A poll that expires has
+// learned nothing, which is not a failure: the next one asks again.
+func (w *bootWatch) step(ctx context.Context) error {
+	poll, cancel := context.WithTimeout(ctx, readyInterval*4)
+	defer cancel()
+
+	insp, err := w.p.api.ContainerInspect(poll, w.id, client.ContainerInspectOptions{})
+	if err == nil && insp.Container.State != nil && !insp.Container.State.Running &&
+		insp.Container.State.Status != "created" {
+		return fmt.Errorf(
+			"the container exited with status %d during startup; `docker logs %s` says why",
+			insp.Container.State.ExitCode, w.name)
+	}
+	if w.blind || w.listening || poll.Err() != nil {
+		return nil
+	}
+	seen, readable := w.p.readyLines(poll, w.id)
+	if poll.Err() != nil {
+		// A poll that ran out of time says nothing about the logging driver.
+		return nil
+	}
+	w.blind = !readable
+	w.listening = seen > 0
+	return nil
+}
+
+// dialable is whether the loop should spend an attempt this time round. It is
+// true for every wait that has no watch, for a log that says the server is up
+// or that cannot be read at all, and — always, in the end — once the grace has
+// passed: the log brings the first dial forward and never holds it back.
+func (w *bootWatch) dialable(now time.Time) bool {
+	return w == nil || w.blind || w.listening || !now.Before(w.dialFrom)
+}
+
+// readyLines counts how many times the container has printed readyLine, and
+// reports whether the log could be read at all. A daemon whose logging driver
+// does not serve `docker logs` is not a failure here — it is a caller that goes
+// back to asking the port — so the second return is "readable" and not an error
+// nobody would act on.
+//
+// The stream is read raw rather than demultiplexed: the daemon frames it with
+// an eight-byte header per write, the entrypoint writes this line whole, and a
+// header that did land inside the phrase would cost one poll of the loop and
+// nothing else, because the count only ever decides whether to bring a dial
+// forward, never whether one is made at all.
+func (p *provisioner) readyLines(ctx context.Context, id string) (seen int, readable bool) {
+	stream, err := p.api.ContainerLogs(ctx, id, client.ContainerLogsOptions{
+		ShowStdout: true,
+		ShowStderr: true,
+	})
+	if err != nil {
+		return 0, false
+	}
+	defer func() { _ = stream.Close() }()
+	body, err := io.ReadAll(stream)
+	if err != nil {
+		return 0, false
+	}
+	return strings.Count(string(body), readyLine), true
+}
+
 // wait polls until the server answers a real startup handshake, which is what
 // pg_isready reports and what a TCP connect does not: docker-proxy binds the
 // host port the moment the container starts, and the postgres image runs initdb
 // against a unix socket for several seconds after that.
-func (p *provisioner) wait(ctx context.Context, connURL string) error {
-	deadline := time.Now().Add(readyBudget)
+//
+// deadline comes from the caller, because it runs from the container start and
+// not from the first dial.
+func (p *provisioner) wait(ctx context.Context, connURL string, deadline time.Time, w *bootWatch) error {
 	var last error
 	for {
-		attempt, cancel := context.WithTimeout(ctx, readyInterval*4)
-		last = p.ready(attempt, connURL)
-		cancel()
-		if last == nil {
-			return nil
+		if w != nil {
+			if err := w.step(ctx); err != nil {
+				// The container is gone. Waiting out the rest of the budget
+				// would add nothing but the wait.
+				return err
+			}
+		}
+		if w.dialable(time.Now()) {
+			attempt, cancel := context.WithTimeout(ctx, readyInterval*4)
+			last = p.ready(attempt, connURL)
+			cancel()
+			if last == nil {
+				return nil
+			}
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 		if time.Now().After(deadline) {
+			if last == nil {
+				// The budget ran out inside the grace, so no dial was ever
+				// spent and there is no connection error to report.
+				last = errors.New("the budget ran out before the first attempt; the server had not printed " +
+					strconv.Quote(readyLine))
+			}
 			return last
 		}
 		select {
@@ -498,7 +733,13 @@ func (p *provisioner) pull(ctx context.Context, image string, progress io.Writer
 	if err == nil && len(have.Items) > 0 {
 		return nil
 	}
+	// Its own line, and its own elapsed time on the way out: this is the one
+	// wait in the package that is measured in minutes on a cold cache, and a
+	// run that spent them has to be able to say so — otherwise the next slow
+	// thing gets the blame, which is how a container that died in one second
+	// was read as a sixty-second image pull (tracker T-0075).
 	note(progress, "lazyslice: pulling "+image)
+	begun := time.Now()
 	resp, err := p.api.ImagePull(ctx, image, client.ImagePullOptions{})
 	if err != nil {
 		return fmt.Errorf("provision: pulling %s: %w", image, err)
@@ -507,8 +748,25 @@ func (p *provisioner) pull(ctx context.Context, image string, progress io.Writer
 	if err := resp.Wait(ctx); err != nil {
 		return fmt.Errorf("provision: pulling %s: %w", image, err)
 	}
-	note(progress, "lazyslice: pulled "+image)
+	note(progress, "lazyslice: pulled "+image+" in "+time.Since(begun).Round(time.Second).String())
 	return nil
+}
+
+// dataDirFor is where a given major's cluster is mounted.
+//
+// postgres:18 owns /var/lib/postgresql itself — PGDATA is a
+// major-version-specific directory inside it, so that pg_upgrade --link does
+// not have to cross a mount boundary — and its entrypoint *refuses to start*
+// when anything is mounted at /var/lib/postgresql/data
+// (docker-library/postgres#1259). Below 18 the volume stays where it has always
+// been, because a mount point is not something a released version can move: the
+// volume outlives the container, and a second run that mounted it somewhere
+// else would find an empty PGDATA beside the developer's rows.
+func dataDirFor(major int) string {
+	if major >= firstOwnedLayout {
+		return dataDirV18
+	}
+	return dataDir
 }
 
 // byName finds the container ARCHITECTURE.md section 9 names for this project,
@@ -552,16 +810,28 @@ func published(insp client.ContainerInspectResult) (host string, port int, ok bo
 	if err != nil {
 		return "", 0, false
 	}
-	for _, b := range insp.Container.NetworkSettings.Ports[want] {
-		n, err := strconv.Atoi(b.HostPort)
-		if err != nil || n == 0 {
-			continue
+	// Two passes, IPv4 first. A daemon that publishes 5432 on both families
+	// lists both bindings, and an IPv4-only publish — which is what 0.0.0.0 and
+	// an explicit 127.0.0.1 both are — is not reachable on ::1 at all: the dial
+	// is refused rather than answered, and every attempt inside the budget was
+	// refused for the same reason. There is no name resolution here for the
+	// same reason: "localhost" is whichever family the resolver puts first,
+	// and 127.0.0.1 is the address this package asked the daemon to bind.
+	for _, ipv4Only := range []bool{true, false} {
+		for _, b := range insp.Container.NetworkSettings.Ports[want] {
+			n, err := strconv.Atoi(b.HostPort)
+			if err != nil || n == 0 {
+				continue
+			}
+			addr := b.HostIP
+			if !addr.IsValid() || addr.IsUnspecified() {
+				addr = netip.MustParseAddr("127.0.0.1")
+			}
+			if ipv4Only && !addr.Unmap().Is4() {
+				continue
+			}
+			return addr.String(), n, true
 		}
-		addr := b.HostIP
-		if !addr.IsValid() || addr.IsUnspecified() {
-			addr = netip.MustParseAddr("127.0.0.1")
-		}
-		return addr.String(), n, true
 	}
 	return "", 0, false
 }

@@ -7,11 +7,14 @@ import (
 	"errors"
 	"io"
 	"iter"
+	"net/netip"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/image"
@@ -101,12 +104,229 @@ func TestProvisionCreatesTheContainerSection9Describes(t *testing.T) {
 	if strings.TrimSpace(string(body)) != secret {
 		t.Errorf("state dir holds %q, want the container's own password", strings.TrimSpace(string(body)))
 	}
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatalf("stat: %v", err)
+	// Asserted where the guarantee exists. Windows has no POSIX mode bits and
+	// os.Chmod there sets only the read-only attribute, so a file written with
+	// 0o600 stats as -rw-rw-rw- and this assertion tests the operating system
+	// rather than this package. Restricting the file by ACL on Windows is a
+	// task of its own; see this package's CLAUDE.md.
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stat: %v", err)
+		}
+		if info.Mode().Perm() != 0o600 {
+			t.Errorf("password file is %v, want 0o600", info.Mode().Perm())
+		}
 	}
-	if info.Mode().Perm() != 0o600 {
-		t.Errorf("password file is %v, want 0o600", info.Mode().Perm())
+}
+
+// postgres:18 owns /var/lib/postgresql itself and its entrypoint exits 1 rather
+// than start when anything is mounted at /var/lib/postgresql/data
+// (docker-library/postgres#1259). Below 18 the mount point cannot move, because
+// the volume outlives the container and a run that mounted it somewhere else
+// would find an empty PGDATA beside the developer's rows.
+func TestTheClusterIsMountedWhereTheImageKeepsIt(t *testing.T) {
+	for _, tc := range []struct {
+		major int
+		want  string
+	}{
+		{major: 14, want: "/var/lib/postgresql/data"},
+		{major: 17, want: "/var/lib/postgresql/data"},
+		{major: 18, want: "/var/lib/postgresql"},
+	} {
+		t.Run(strconv.Itoa(tc.major), func(t *testing.T) {
+			stateDir(t)
+			d := newFakeDaemon()
+			p := &provisioner{api: d, ready: answersAt("")}
+
+			if _, err := p.Provision(t.Context(), Request{Project: "shop", Major: tc.major}); err != nil {
+				t.Fatalf("Provision: %v", err)
+			}
+			mounts := d.created.HostConfig.Mounts
+			if len(mounts) != 1 || mounts[0].Target != tc.want {
+				t.Errorf("postgres:%d mounts %+v, want the volume on %s", tc.major, mounts, tc.want)
+			}
+		})
+	}
+}
+
+// A container that dies during startup is a failure this run can name, not a
+// budget to sit out. Before this, the entrypoint refusing the mount layout and
+// a server that is merely slow were the same observation — nothing answers —
+// and the whole postgres:18 leg of the CI matrix reported "did not accept a
+// connection within 1m0s" about a container that had exited one second in
+// (tracker T-0075).
+func TestAContainerThatExitsDuringStartupSaysSo(t *testing.T) {
+	stateDir(t)
+	d := newFakeDaemon()
+	d.exitCode = 1
+	d.dieOnStart = true
+	// The dial would succeed; what ends the wait is the container being gone.
+	p := &provisioner{api: d, ready: answersAt("")}
+
+	_, err := p.Provision(t.Context(), Request{Project: "shop", Major: 18})
+	var notReady *NotReadyError
+	if !errors.As(err, &notReady) {
+		t.Fatalf("err = %v, want a NotReadyError", err)
+	}
+	if !strings.Contains(err.Error(), "exited with status 1") {
+		t.Errorf("err = %v, want the exit status the container stopped with", err)
+	}
+	if !strings.Contains(err.Error(), "docker logs lazyslice-target-shop") {
+		t.Errorf("err = %v, want the command ADR-008 section 6 step 3 names", err)
+	}
+}
+
+// The log brings the first dial forward; it never decides that one is made at
+// all. A server that does not print the readiness line where `docker logs` can
+// see it — logging_collector on, log_destination csvlog or jsonlog, a
+// non-English lc_messages, or simply somebody else's tuned postgresql.conf on
+// the container Q1' starts — is a server that answers, and a wait that read the
+// log as a precondition refused those runs after the whole budget without
+// spending a single attempt.
+func TestALogWithoutTheReadinessLineStillGetsDialled(t *testing.T) {
+	stateDir(t)
+	t.Setenv(ReadyBudgetEnv, "2s")
+	d := newFakeDaemon()
+	d.logs = "LOG:  Datenbanksystem ist bereit, um Verbindungen anzunehmen\n"
+	dialled := 0
+	p := &provisioner{api: d, ready: func(context.Context, string) error {
+		dialled++
+		return nil
+	}}
+
+	if _, err := p.Provision(t.Context(), Request{Project: "shop", Major: 16}); err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+	if dialled == 0 {
+		t.Error("no attempt was made: the readiness line, and not the server, decided whether to dial")
+	}
+}
+
+// The readiness budget is only ever checked between polls, so every daemon call
+// inside one is bounded on its own. The caller's context carries no deadline —
+// internal/discover hands the run's context straight through and the moby
+// client sets no HTTP timeout — so a daemon that accepts a request and never
+// answers would make the budget unenforceable and the wait would block past it
+// indefinitely, which is the hang the budget exists to prevent.
+func TestADaemonThatNeverAnswersDoesNotOutlastTheBudget(t *testing.T) {
+	stateDir(t)
+	d := newFakeDaemon()
+	d.add("existing", "lazyslice-target-shop", 5433, false, nil)
+	d.blockInspect = true
+	p := &provisioner{api: d, ready: func(context.Context, string) error { return errors.New("connection refused") }}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- p.wait(t.Context(), "postgres://postgres@127.0.0.1:5433/postgres?sslmode=disable",
+			time.Now().Add(readyInterval), &bootWatch{p: p, id: "existing", name: "lazyslice-target-shop"})
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("the wait succeeded against a server that never answered")
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("the wait outlasted its budget: an unbounded daemon call inside a poll")
+	}
+}
+
+// The budget is 60 s, which is the number ARCHITECTURE.md section 9 and ADR-008
+// section 6 both carry, and ReadyBudgetEnv is how a CI runner asks for longer.
+// A value that does not parse, or that is not positive, is the default: a
+// mistyped timeout must not be the thing that turns the wait off.
+func TestReadyBudgetIsSixtySecondsUnlessTheEnvironmentSaysOtherwise(t *testing.T) {
+	for _, tc := range []struct {
+		set  bool
+		env  string
+		want time.Duration
+	}{
+		{want: defaultReadyBudget},
+		{set: true, env: "", want: defaultReadyBudget},
+		{set: true, env: "3m", want: 3 * time.Minute},
+		{set: true, env: " 3m ", want: 3 * time.Minute},
+		{set: true, env: "banana", want: defaultReadyBudget},
+		{set: true, env: "0", want: defaultReadyBudget},
+		{set: true, env: "-5s", want: defaultReadyBudget},
+	} {
+		t.Run(tc.env, func(t *testing.T) {
+			// Unset rather than absent: the developer running the suite may
+			// have the variable in their own environment.
+			t.Setenv(ReadyBudgetEnv, "")
+			if tc.set {
+				t.Setenv(ReadyBudgetEnv, tc.env)
+			} else if err := os.Unsetenv(ReadyBudgetEnv); err != nil {
+				t.Fatalf("unsetting %s: %v", ReadyBudgetEnv, err)
+			}
+			if got := readyBudget(); got != tc.want {
+				t.Errorf("readyBudget() = %s, want %s", got, tc.want)
+			}
+		})
+	}
+	if defaultReadyBudget != 60*time.Second {
+		t.Errorf("the default is %s; ARCHITECTURE.md section 9 and ADR-008 section 6 say 60 s, and both are frozen",
+			defaultReadyBudget)
+	}
+}
+
+// A daemon that publishes 5432 on both families lists both bindings, and an
+// IPv4-only publish — which is what 0.0.0.0 and an explicit 127.0.0.1 both are
+// — is not reachable on ::1 at all: every attempt inside the budget is refused
+// for the same reason. So the IPv4 binding is preferred whichever order the
+// daemon lists them in, and an IPv6-only publish is still used.
+func TestPublishedPrefersTheIPv4Binding(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		bindings []network.PortBinding
+		wantHost string
+	}{
+		{
+			name: "ipv6 first",
+			bindings: []network.PortBinding{
+				{HostIP: netip.MustParseAddr("::1"), HostPort: "5433"},
+				{HostIP: netip.MustParseAddr("127.0.0.1"), HostPort: "5433"},
+			},
+			wantHost: "127.0.0.1",
+		},
+		{
+			name: "ipv4 first",
+			bindings: []network.PortBinding{
+				{HostIP: netip.MustParseAddr("127.0.0.1"), HostPort: "5433"},
+				{HostIP: netip.MustParseAddr("::1"), HostPort: "5433"},
+			},
+			wantHost: "127.0.0.1",
+		},
+		{
+			name:     "ipv6 only",
+			bindings: []network.PortBinding{{HostIP: netip.MustParseAddr("::1"), HostPort: "5433"}},
+			wantHost: "::1",
+		},
+		{
+			name:     "unspecified is loopback",
+			bindings: []network.PortBinding{{HostIP: netip.MustParseAddr("0.0.0.0"), HostPort: "5433"}},
+			wantHost: "127.0.0.1",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			insp := client.ContainerInspectResult{Container: container.InspectResponse{
+				NetworkSettings: &container.NetworkSettings{Ports: network.PortMap{
+					network.MustParsePort("5432/tcp"): tc.bindings,
+				}},
+			}}
+			host, port, ok := published(insp)
+			if !ok || port != 5433 {
+				t.Fatalf("published = %q, %d, %v; want the binding the daemon reports", host, port, ok)
+			}
+			if host != tc.wantHost {
+				t.Errorf("host = %q, want %q", host, tc.wantHost)
+			}
+			// An IPv6 literal has to survive into the connection string with
+			// its brackets, or the port becomes part of the address.
+			if strings.Contains(host, ":") &&
+				!strings.Contains(ConnString(host, port, "postgres", "postgres", ""), "["+host+"]:5433") {
+				t.Errorf("ConnString(%q) does not bracket the IPv6 literal", host)
+			}
+		})
 	}
 }
 
@@ -428,9 +648,21 @@ type fakeDaemon struct {
 	volume     string
 	volumes    map[string]bool
 	pulled     string
-	nextID     int
-	createFail error
+	logs       string
+	exitCode   int
+	dieOnStart bool
+	// blockInspect is a daemon that accepts the request and never answers it,
+	// which is the shape the readiness budget has to survive.
+	blockInspect bool
+	nextID       int
+	createFail   error
 }
+
+// fakeLogs is what ContainerLogs hands back: the daemon's stream is an
+// io.ReadCloser and nothing here needs to close anything.
+type fakeLogs struct{ io.Reader }
+
+func (fakeLogs) Close() error { return nil }
 
 func newFakeDaemon() *fakeDaemon {
 	return &fakeDaemon{
@@ -468,13 +700,35 @@ func (d *fakeDaemon) ContainerList(_ context.Context, _ client.ContainerListOpti
 	return client.ContainerListResult{Items: out}, nil
 }
 
-func (d *fakeDaemon) ContainerInspect(_ context.Context, id string, _ client.ContainerInspectOptions) (client.ContainerInspectResult, error) {
+func (d *fakeDaemon) ContainerInspect(ctx context.Context, id string, _ client.ContainerInspectOptions) (client.ContainerInspectResult, error) {
+	if d.blockInspect {
+		<-ctx.Done()
+		return client.ContainerInspectResult{}, ctx.Err()
+	}
 	c, ok := d.byID[id]
 	if !ok {
 		return client.ContainerInspectResult{}, errors.New("no such container")
 	}
-	c.State = &container.State{Running: d.running[id]}
+	c.State = &container.State{Running: d.running[id], Status: "running"}
+	if !d.running[id] {
+		c.State.Status = "exited"
+		c.State.ExitCode = d.exitCode
+	}
 	return client.ContainerInspectResult{Container: c}, nil
+}
+
+// ContainerLogs is the entrypoint's own output, which the wait reads to learn
+// that the server is up. logs is what a healthy postgres prints; a test that
+// wants a container that never comes up sets it to something else.
+func (d *fakeDaemon) ContainerLogs(_ context.Context, id string, _ client.ContainerLogsOptions) (client.ContainerLogsResult, error) {
+	if _, ok := d.byID[id]; !ok {
+		return nil, errors.New("no such container")
+	}
+	body := d.logs
+	if body == "" {
+		body = readyLine + "\n" + readyLine + "\n"
+	}
+	return fakeLogs{Reader: strings.NewReader(body)}, nil
 }
 
 func (d *fakeDaemon) ContainerCreate(_ context.Context, options client.ContainerCreateOptions) (client.ContainerCreateResult, error) {
@@ -500,7 +754,7 @@ func (d *fakeDaemon) ContainerStart(_ context.Context, id string, _ client.Conta
 		return client.ContainerStartResult{}, errors.New("no such container")
 	}
 	d.starts[id] = true
-	d.running[id] = true
+	d.running[id] = !d.dieOnStart
 	return client.ContainerStartResult{}, nil
 }
 

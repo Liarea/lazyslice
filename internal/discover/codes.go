@@ -62,8 +62,18 @@ const (
 	CodeTargetNone event.Code = "target.refused.none"
 
 	// CodeTargetStartTimeout is ADR-008 §6 step 3: the container was started
-	// and did not accept a connection inside the 60 s budget. Exit 4. The
-	// container is left running, because lazyslice never removes one.
+	// and did not accept a connection inside the readiness budget. Exit 4. The
+	// container is left as it was found — still running where it is still
+	// running, exited where it died during startup — because lazyslice never
+	// removes one, and that is what keeps `docker logs <name>` answerable
+	// either way. ADR-008 §6 step 3, ARCHITECTURE.md §9 and question.go's
+	// provisionRefusal still say "left running"; the amendment they need is
+	// owed and recorded in provision/CLAUDE.md.
+	//
+	// The budget is provision's, not this package's: 60 s by default and
+	// whatever $LAZYSLICE_PROVISION_READY_TIMEOUT names where it is set
+	// (T-0075), so the {seconds} the catalogue row renders is the elapsed wait
+	// the failure carries and not a constant written down twice.
 	//
 	// The catalogue row for this code cannot yet name the container or
 	// `docker logs <name>`, which ADR-008 §6 asks for: there is no event.ArgKey
