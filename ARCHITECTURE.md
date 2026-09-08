@@ -451,10 +451,19 @@ type Identity struct {
 // (the slice, doubled for overhead, which is the figure ADR-005 quotes); the
 // slab implementation returns its slab size × 2. Iteration order is the key
 // order, never Go map order.
+//
+// Chunks materialises a second copy of the whole set: every chunk is built
+// before any is returned, and each chunk holds its own typed arrays. EachChunk
+// builds one chunk at a time and drops it, and is what internal/extract walks
+// a keyed step with. FirstChunk returns the first chunk only, or nil for an
+// empty set, and is what internal/verify's sample compare takes. EachChunk
+// stops at the first error f returns and returns it (T-0050, 2026-09-08).
 type KeySet interface {
     Len() int
     Bytes() int64
     Chunks(n int) []Chunk // consecutive runs of at most n tuples, in key order
+    FirstChunk(n int) Chunk
+    EachChunk(n int, f func(Chunk) error) error
 }
 
 // Chunk is one unnest argument list: one typed array per identity column, so
