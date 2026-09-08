@@ -88,7 +88,7 @@ if (step === 'backlog') {
 if (step === 'harden') {
   phase('Harden')
   const results = []
-  for (const t of TASKS) {
+  for (const t of TASKS.slice(from)) {
     const r = await workflow({ scriptPath: IMPL }, { ...t, model: 'opus', effort: 'high' })
     results.push(r)
     if (!r || r.status !== 'merged') { log(`Stopped at ${t.id}`); return { results, stopped_at: t.id } }
