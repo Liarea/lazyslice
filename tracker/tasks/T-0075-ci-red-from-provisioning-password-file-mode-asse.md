@@ -3,10 +3,10 @@ id: T-0075
 title: "CI red from provisioning: password-file mode assertion on Windows; provisioned container not ready within 60 s on GitHub runners (image pull inside the deadline)"
 epic: E5
 phase: 5
-status: open
+status: in_progress
 owner: opus
 created: 2026-09-08
-started: ""
+started: 2026-09-08
 closed: ""
 outcome: ""
 ---
@@ -24,6 +24,8 @@ Run 34207236918: test (windows-latest) TestProvisionCreatesTheContainerSection9D
 ## Log
 
 - 2026-09-08 created
+
+- 2026-09-08 started
 
 ## Post-mortem
 
