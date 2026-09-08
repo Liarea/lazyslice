@@ -811,6 +811,8 @@ flowchart TD
 
 Both cycles are selected with no special case and loaded with no ordering. `employees` is reached only as a parent, so its own children (other orders it handled) are never pulled: that is the size and the privacy control (research/COMPLAINTS.md FK-14, Jailer #126).
 
+**§3.2 amendments after inference landed (2026-09-08, T-POLY):** (1) Type-value resolution tries, in order, the Rails form (underscore and pluralise), the demodulized form, and then the raw lower-cased and un-pluralised value; the last exists because hand-rolled polymorphism commonly stores bare table names (`people`, `projects`), which Rails rules would mangle to `peoples`; a value no form resolves is reported as unmapped, never guessed. (2) A discriminator column with more than 50 distinct sampled values is not inferred at all and the plan says so (`the sample carries more than 50 distinct <col> values`); a value longer than 64 bytes is truncated in messages (a T4 bound). (3) Every followed virtual edge is printed in the plan under `plan.polymorphic.inferred` before extraction, beside the detected-not-followed and unmapped lines; §14's cut line is updated: inference ships in phase 5.
+
 ## 4. Classification
 
 Names + types + validated samples + dictionaries + a reason string, biased to recall; no ML gate, no cloud model over values (research/HARD_PROBLEMS.md §3; research/SYNTHESIS.md §1 fact 6).
@@ -1280,7 +1282,7 @@ Everything above is specified so that one developer can build it without guessin
 
 **v1 after Gate 4 (phase 5), not deferred past v1:**
 - Provisioning (`--create-target`, Q1) and rung 4 (stopped containers). Gate 4's demo is Scenario A with a compose test database, so Q1 is not on its path. Touches no control; T2's gate runs on a provisioned target exactly as on any other.
-- Polymorphic inference (§3.2). Until it lands, a detected `_type`/`_id` pair prints `polymorphic pair detected, not followed: no constraint`, so research/COMPLAINTS.md FK-10's silent empty slice is still impossible. Touches T11 (provenance): virtual edges are parent-direction only, so enabling it later widens nothing the caps do not bound.
+- Polymorphic inference (§3.2): shipped in phase 5 (T-POLY). A pair the inference cannot resolve still prints `polymorphic pair detected, not followed`, so research/COMPLAINTS.md FK-10's silent empty slice is still impossible. Touches T11 (provenance): virtual edges are parent-direction only, so enabling it later widens nothing the caps do not bound.
 - The two Bubble Tea screens (ADR-002). Until they land, `?` at a prompt prints the same table through the line printer and `$PAGER`. Touches no control; ADR-002 already requires every TUI action to exist as a flag first.
 - The five-major CI matrix (ADR-003 says Gate 5), the ten torture schemas, the 2M-row fixture, the network-namespace test (T4), SBOM and `govulncheck` (T10), the multilingual name dictionaries and the one-level JSON key collection beyond the English rule pack.
 
