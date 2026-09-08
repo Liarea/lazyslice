@@ -7,7 +7,7 @@
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 1 | 0 | 9 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
-| E5 Hardening | 5 | 9 | 1 | 10 | 0 | 0 |
+| E5 Hardening | 5 | 9 | 1 | 11 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
 | E9 Later | later | 4 | 0 | 0 | 0 | 0 |
 
@@ -26,9 +26,9 @@
 - T-0055 [open] E5 · Shared leaf package for value validators including the name dictionary; register person_name and free_text in verify's second net with a verify-side false-positive threshold decision (opus)
 - T-0064 [open] E5 · Dogfood: two sessions against a real project of Gareth's choosing, logged in docs/DOGFOOD_LOG.md (human)
 - T-0065 [open] E6 · 20-second VHS GIF of the first run on Pagila (sonnet)
-- T-0069 [in_progress] E5 · T-CI5: five-major CI matrix, govulncheck, SBOM, docs drift, unsafe-flag grep (sonnet)
 - T-0070 [open] E5 · T-PIN: the run that writes the target is pinned to the reviewed snapshot and endpoints (core.Request.Reviewed, core.refused.reviewed_changed) (opus)
 - T-0073 [open] E5 · T-0073: fixture email values out of the masker's documentation-domain output space (I2 intermittent collision) (sonnet)
+- T-0074 [in_progress] E5 · Unsafe-flag rail enforced over the registered flag set: main_test's forbidden list permits exactly unmask and rejects every other name containing it; make unsafe-flags runs that test (sonnet)
 
 ## Recently closed
 
@@ -36,6 +36,7 @@
 - T-0066 [done] E5 · T-TUI: Bubble Tea reasons and plan screens → done: reasons and plan screens from the event stream, every binding carries its flag, footer strikes unavailable keys, leaving echoes flags into scrollback; --tui only on a TTY
 - T-0067 [done] E5 · T-PROVISION: --create-target and rung 4 (T-0063) → done: provisioning, rung 4, Q1 prompter on the controlling terminal; the four core-side joins (Yes into Options, Provisioner interface, ArgContainer, unreachable args) are in a verified patch applied by the follow-up
 - T-0068 [done] E5 · T-POLY: polymorphic association inference → done: inference of _type/_id and content_type/object_id pairs, virtual parent-direction edges under the caps, unmapped values reported once, over-cap pairs explained; full integration green
+- T-0069 [done] E5 · T-CI5: five-major CI matrix, govulncheck, SBOM, docs drift, unsafe-flag grep → done: 91eab92; Postgres 14 to 18 matrix, blocking govulncheck, SBOM and signing in the release, tools/docgen generating FLAGS.md, KEYBINDINGS.md, ERRORS.md with a drift job, unsafe-flag rail
 - T-0071 [done] E5 · Apply T-PROVISION's core patch: --yes reaches the ladder, delete the dead pipeline.Provisioner, ArgContainer in the not-ready refusal, unreachable-target args at all three sites, CodeTargetNone for the no-target refusal → done: 7a6b96d; --yes reaches the ladder, dead Provisioner interface removed, not-ready refusal names the container and a docker logs command, unreachable refusals carry host and cause at all three sites, no-target refusal has its own code
 - T-0072 [done] E5 · Print inferred polymorphic edges in the plan (plan.polymorphic.inferred in core, catalogue, tui); emit virtual_fks test and comments; fixture and README promises updated; Rails-spelled trap-6 row → done: inferred edges printed as plan.polymorphic.inferred in core, catalogue, and the TUI; emit test over virtual_fks; trap 6 fixture and README describe the shipped behaviour with a Rails-spelled row
 - T-0044 [done] E4 · T-CORE: core run, emit, render, repo, CLI end to end; integration job blocking again → done: core merged at 9bd9e24, blockers closed by T-0058
@@ -56,4 +57,3 @@
 - T-0042 [done] E4 · T-LOAD: load stage → done: load committed; ddl generation of §11.1 object classes, COPY in plan order, NOT VALID then validate, setval, marker, empty-or-complete on kill -9 proved by test
 - T-0043 [done] E4 · T-VERIFY: verify stage, includes T-0035 negative control → done: a57f584; FK validation, residual scan with capped confirmation, second net, sequences, row counts, sample compare, negative control (T-0035) exit 9 naming table and column; package suite green
 - T-0047 [done] E4 · T-PGSHAPES: statement-shape grammar placeholders for plan and extract; plan exports Shapes() → done: grammar gains select-list item, variable-arity cast list, --where predicate with exclusions; plan exports Shapes() and its suite runs through pg.Source; extract shapes staged
-- T-0051 [done] E4 · T-FPR: apply ADR-009, delete introspect fingerprint, core-side Schema.Fingerprint, pg gate runs fingerprinter in its own transaction → done: e85be26; introspect fingerprint deleted, pg gate runs the injected fingerprinter inside its own BEGIN/ROLLBACK, load's test workaround removed, marker binds end to end
