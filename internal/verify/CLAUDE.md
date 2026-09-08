@@ -22,23 +22,27 @@ statement allowlist this stage needs registered before `Verify` runs, as
   case-folded probe only if that's false, capped at
   `--residual-probe-cap` (THREAT_MODEL.md T4's value-egress note: a probe
   parameter can land in the source's own log).
-- The second net re-runs *eight of internal/classify's ten value validators*
+- The second net re-runs *all ten of internal/classify's value validators*
   over the whole contents of every unmasked, non-opted-out column of a family
   this package can name, and over the string leaves of every JSON column,
   masked or not (ARCHITECTURE.md §6 item 4). It catches what the 200-row
-  sample missed. **It is narrower than §6 item 4's own sentence, in three
+  sample missed. **It is still narrower than §6 item 4's own sentence, in three
   named ways, and this file says so in one place rather than claiming "every
-  unmasked column" here and listing holes further down**: no `person_name` and
-  no `free_text`, because both read internal/classify's embedded name
-  dictionary; no column of a family this package cannot name (`famOther`, so a
-  `tsvector` or an enum); and only the strong branch of §4's scoring, so a
-  column that the neighbouring-column rule would raise to `possible` is not
-  reached. Each is a decision below, with the tracker task that owes the fix.
-  Never a category outside the rule pack, which is what THREAT_MODEL.md T1
-  already says. A column carrying a `--unmask TABLE.COL=REASON` opt-out
-  (ARCHITECTURE.md §8) is deliberately outside the net — that is why the
-  opt-out requires a reason and expires on `TypeFP` change, not a scan the
-  opt-out would otherwise fail every time.
+  unmasked column" here and listing holes further down**: no column of a family
+  this package cannot name (`famOther`, so a `tsvector` or an enum); only the
+  strong branch of §4's scoring, so a column that the neighbouring-column rule
+  would raise to `possible` is not reached; and `person_name` and `free_text`
+  read narrower validators than the classifier's and are scored under **the
+  dictionary rule** rather than under its thresholds, so a one-word name column,
+  a name written surname-first and a document's leaves all pass this net
+  (T-0055 and its review). The first two are decisions below with the tracker
+  task that owes the fix; the third is a decision below with the reason it is
+  deliberate, and the leaves half of it owes **T-0087**. Never a category
+  outside the rule pack, which is what THREAT_MODEL.md T1 already says. A
+  column carrying a `--unmask TABLE.COL=REASON` opt-out (ARCHITECTURE.md §8) is
+  deliberately outside the net — that is why the opt-out requires a reason and
+  expires on `TypeFP` change, not a scan the opt-out would otherwise fail every
+  time.
 - A check's *passing* line is never appended beside a failure of the same name,
   in any of the seven checks: `Report.Checks` is what the run prints, and a
   green tick under the refusal that produced the exit code is the one thing a
@@ -65,7 +69,10 @@ statement allowlist this stage needs registered before `Verify` runs, as
   that carries a failing one. Each has a row in `internal/event/catalogue.yml`.
 - `reasons.go` — the fixed phrases a `Refusal.Reason` may hold.
 - `residual.go` — §6 items 1 to 3: the scan, the hit, the two probes, the cap.
-- `secondnet.go`, `validators.go` — §6 item 4.
+- `secondnet.go`, `validators.go` — §6 item 4: the scan and the scoring, and
+  the ten validators attached to their categories. The validators and the name
+  dictionary themselves are `internal/textsig`, which `internal/classify`
+  imports too (T-0055).
 - `fk.go`, `counts.go`, `sample.go` — §6 item 5.
 - `sql.go`, `shapes.go` — every statement, and the shapes the source ones match.
 - `columns.go`, `value.go` — the type families, the JSON leaf walk, and the
@@ -232,20 +239,89 @@ was chosen and is recorded here rather than only in a comment.
   canonicalise either, so a column of that family is left to the classifier's
   own signal. That is a recall hole and it is stated here and in the Rules
   above, not only here.
-- **The net has no `person_name` and no `free_text`, which is the largest hole
-  in it.** `internal/classify` registers ten value validators; the two missing
-  here are `looksLikeName` and `prose`, and both read that package's embedded
-  name dictionary. They are value validators over one string exactly like the
-  other eight — the omission is *not* "a category recognised only by its column
-  name", and an earlier version of `validators.go` said so wrongly. They are
-  missing because a dictionary is a rule pack and this package will not carry a
-  second copy of one (`internal/transform` refused a second rule pack for the
-  same reason). The cost is concrete: a target column holding real person names,
-  or a notes column carrying other rows' names (testdata/README.md trap 17),
-  passes this net, and THREAT_MODEL.md T1 names the net as one of exactly two
-  v1-blocking controls on classifier recall. **Owed: the shared home below has
-  to hold the dictionary too, and T1's wording has to name these two
-  categories**; reported in T-0043's return value.
+- **`person_name` and `free_text` are in the net, under the dictionary rule**
+  (T-0055). They used to be missing — the two of `internal/classify`'s ten
+  validators that read its embedded name dictionary, which this package could
+  not import and would not copy — so a target column of real person names, or a
+  notes column carrying other rows' names (testdata/README.md trap 17), passed
+  the net that THREAT_MODEL.md T1 names as one of exactly two v1-blocking
+  controls on classifier recall. The dictionary now lives in
+  `internal/textsig` with the validators and both packages import it, so both
+  are registered here.
+  - **The rule, by name.** A dictionary-backed validator fails a column only
+    when **the hit ratio is at or over `validatorThreshold` across at least
+    `minValues` distinct hitting values**, and only on a *shape* rather than a
+    word — and the shape is the same one for both: a given name immediately
+    followed by a surname. `person_name` counts `textsig.Dict.NameShape` — two
+    or three dictionary words carrying that pair — never the classifier's
+    `LooksLikeName`, which accepts one word, and never the plain multi-token
+    shape either. `free_text` counts `textsig.Dict.ProseName` — six words or
+    more carrying that pair somewhere inside — never the classifier's
+    `Dict.Prose`, which fires on one dictionary word. Neither runs over a
+    document's leaves at all (`applies`, in `secondnet.go`).
+  - **Why it is not the classifier's threshold, and not its validators
+    either.** Black, Brown, Hill, Green and Wood are all surnames, so
+    `product.colour` validates as `person_name` on 100% of its rows under
+    `LooksLikeName`. The classifier's answer to that is to mask the column,
+    which costs a lookup table; this net's answer would be exit 9 on a database
+    that is already loaded, with no green path short of `--unmask` on a column
+    holding no personal data — a refusal an operator cannot act on and would
+    learn to route around. It is the same asymmetry the classifier records from
+    its side: the two packages are answering different questions about the same
+    evidence.
+    - **Requiring a shape and not a word is what makes that true, and the
+      first version of this rule did not.** It asked for "two or three
+      dictionary words" and for the classifier's own `Prose`, and about two
+      hundred of `names.txt`'s surnames are ordinary English words — green,
+      lane, west, hill, stone, black, may, price, read, little, long — so a
+      column of street names (`green lane`, `marsh lane`) or of compound
+      colours (`hunter green`, `stone gray`) was still exit 9 as `person_name`,
+      and any column of English sentences carrying one such word was exit 9 as
+      `free_text` (T-0055's review). The given-then-surname pair is evidence a
+      street name, a colour and a contract clause cannot carry, and
+      `internal/textsig` keeps `names.txt`'s two sections apart so the question
+      can be asked.
+  - **The two dictionary validators do not run over a document's leaves, and
+    that is a hole with a task against it.** `internal/classify` decides every
+    `json`/`jsonb`/`hstore` column on its own leaf signal, which asks the rule
+    pack's key patterns plus email, phone, IP, IBAN and Luhn about a leaf and
+    never consults the dictionary. Scoring `person_name` or `free_text` over
+    leaves here would therefore refuse a loaded target on evidence the
+    classifier is structurally unable to have seen — a masked `jsonb` column of
+    ordinary notes at exit 9, with `--unmask` the only way past it — which is
+    the same refusal the rule exists to prevent, in the one place the
+    classifier cannot pre-empt it. **Owed: `tracker T-0087`** — give classify's
+    leaf signal a dictionary question and this exclusion comes off with it, in
+    the same commit. The other six validators do run over leaves, because they
+    are the classifier's own leaf questions.
+  - **The `minValues` branch above does not extend to these two.** For the six
+    validators that carry a parse, any hit below `minValues` is exit 9
+    (T-0058). A dictionary word is not a parse — one two-word value in a
+    two-row lookup table is not evidence of a person — so the strong ratio is
+    required here whatever the column's size, and the distinct-value floor
+    means one literal repeated down a column cannot reach it either.
+  - **What it costs, stated rather than hidden.** A one-word name column the
+    classifier did not mask — a `forename` the rule pack's patterns missed —
+    passes this net, and so do a name column written surname-first (`Hopper,
+    Grace`), a note naming a person the dictionary does not carry, and written
+    names inside a document's leaves. That is the direction this has to fail
+    in, and it is a narrowing of the net and not of the classifier:
+    `internal/classify` still scores `LooksLikeName` at one word and `Prose` at
+    one dictionary word, and still masks the column. **Owed:
+    THREAT_MODEL.md T1's gap list still says the net has no `person_name` and
+    no `free_text`; it now says the wrong thing in both directions and should
+    name the dictionary rule instead** — that file is not in this task's paths
+    and the edit is reported in T-0055's return value.
+  - `TestTheDictionaryRule` pins every half of it without a database: the four
+    columns that must not fail on a word (single dictionary words, two-word
+    street names, compound colours, and business prose whose only dictionary
+    word is an English one such as *may* or *price*), the two that must fail on
+    the shape (written names, and prose naming another row's person), the two
+    ways a dictionary hit is too thin to count (two distinct values, and one
+    value repeated), and the masked `jsonb` column whose leaves carry that same
+    failing prose and must pass. Every negative case there fails under the
+    validators this rule replaced, which is what makes them regression guards
+    and not decoration.
 - **The net implements only the strong branch of §4's scoring.** A column at
   ≥0.8 of non-NULL values validating fails. `internal/classify` has a second
   route to the mask threshold — a weak signal at ≥0.5 records the column at
@@ -259,25 +335,22 @@ was chosen and is recorded here rather than only in a comment.
   with a known hole in it. **Owed: the weak threshold and the neighbouring-column
   raise, in the same task as the shared home**; reported in T-0043's return
   value.
-- **The validators are a copy of `internal/classify`'s, and the JSON leaf walk,
-  the value rendering, the type families and the chunk-join SQL are copies of
-  `internal/transform`'s and `internal/extract`'s.** Stage packages may not
+- **The JSON leaf walk,
+  the value rendering, the type families and the chunk-join SQL are still copies
+  of `internal/transform`'s and `internal/extract`'s.** Stage packages may not
   import each other (internal/CLAUDE.md) and every one of those is unexported
   where it lives. What was copied is the value-only half in each case — a
-  validator over one string, a canonical rendering, a family table, an
-  identifier quoter — and never a rule pack: `internal/transform` refused a
-  second rule pack for the same reason and this package refuses one too. **The
-  fix is a shared home for each, not a third copy**; `internal/transform`'s
-  CLAUDE.md already owes the type families one. A change to
-  `internal/classify/validators.go` or to `internal/transform`'s residual-filter
-  contract has to be made here in the same commit, and the unit tests in this
-  package are what fail when it is not. About 480 of this package's lines are
-  those copies and the debt is now visible only in three package CLAUDE.md
-  files, which is not where a developer editing `internal/classify` reads;
-  **owed: one tracker task for a leaf package under `internal/` holding the
-  value-only halves — the validators *and the name dictionary*, the `textOf` /
-  `mask.Canonical` reproduction, the type-family table and the identifier
-  quoter**, reported in T-0043's return value.
+  canonical rendering, a family table, an identifier quoter — and never a rule
+  pack: `internal/transform` refused a second rule pack for the same reason and
+  this package refuses one too. **The fix is a shared home for each, not a third
+  copy**; `internal/transform`'s CLAUDE.md already owes the type families one.
+  T-0055 built the first of those homes and moved one copy into it: the
+  validators and the name dictionary are `internal/textsig` now, and this
+  package holds neither. The rest of the debt stands, and a change to
+  `internal/transform`'s residual-filter contract still has to be made here in
+  the same commit, with the unit tests in this package the thing that fails when
+  it is not. `internal/textsig`'s own CLAUDE.md records what may follow it there:
+  a value shape, never a rule pack, and never something that needs `pipeline`.
 - **The first chunk of a key set is asked for by name** (T-0050).
   `Chunks(n)` materialises the *whole* set as typed arrays; the sample compare
   needs 100 keys, so `Chunks(100)` on a step at the `--row-budget` ceiling
@@ -323,7 +396,8 @@ database: every statement this package sends to the source matches a shape it
 exports (through a real `pg.Tracer`), the canonical bytes it reproduces are
 `mask.Apply`'s own and are computed under a `Constraints` `mask.Canonical` does
 not read, the leaf spelling is `internal/transform`'s, a domain over an array is
-still an array, and a number leaf is not a hit.
+still an array, a number leaf is not a hit, and the second net's two thresholds
+hold (`TestAColumnBelowMinValuesFailsOnAnyHit`, `TestTheDictionaryRule`).
 
 Then `go test -tags integration ./internal/verify/...` for the green case and
 one case per failure §6 can produce, because a check nobody has ever seen fail

@@ -31,6 +31,7 @@ import (
 
 	"github.com/Liarea/lazyslice/internal/pipeline"
 	"github.com/Liarea/lazyslice/internal/ref"
+	"github.com/Liarea/lazyslice/internal/textsig"
 )
 
 type classifier struct{}
@@ -237,28 +238,18 @@ type valueSignal struct {
 var validators = []struct {
 	cat    pipeline.Category
 	phrase string
-	ok     func(*nameDict, string) bool
+	ok     func(*textsig.Dict, string) bool
 }{
-	{pipeline.CatEmail, phraseAddresses, func(_ *nameDict, s string) bool { return validEmail(s) }},
-	{pipeline.CatFinancial, phraseIBAN, func(_ *nameDict, s string) bool { return validIBAN(s) }},
-	{pipeline.CatFinancial, phraseLuhn, func(_ *nameDict, s string) bool { return validLuhn(s) }},
-	{pipeline.CatPhone, phraseE164, func(_ *nameDict, s string) bool { return validPhone(s) }},
-	{pipeline.CatNetworkID, phraseIP, func(_ *nameDict, s string) bool { return validIP(s) }},
-	{pipeline.CatNetworkID, phraseMAC, func(_ *nameDict, s string) bool { return validMAC(s) }},
-	{pipeline.CatCredential, phraseSecrets, func(_ *nameDict, s string) bool { return looksSecret(s) }},
-	{pipeline.CatPersonName, phraseNameDict, func(d *nameDict, s string) bool { return d.looksLikeName(s) }},
-	{pipeline.CatAddress, phraseAddrShape, func(_ *nameDict, s string) bool { return addressShape(s) }},
-	{pipeline.CatFreeText, phraseProse, prose},
-}
-
-// prose is the free-text value signal: a sentence or more with a dictionary
-// name in it. testdata/README.md trap 17's notes carry the names of people on
-// other rows, which is what a whole-value name match would miss.
-func prose(d *nameDict, s string) bool {
-	if len(strings.Fields(s)) < 6 {
-		return false
-	}
-	return d.containsName(s)
+	{pipeline.CatEmail, phraseAddresses, func(_ *textsig.Dict, s string) bool { return textsig.ValidEmail(s) }},
+	{pipeline.CatFinancial, phraseIBAN, func(_ *textsig.Dict, s string) bool { return textsig.ValidIBAN(s) }},
+	{pipeline.CatFinancial, phraseLuhn, func(_ *textsig.Dict, s string) bool { return textsig.ValidLuhn(s) }},
+	{pipeline.CatPhone, phraseE164, func(_ *textsig.Dict, s string) bool { return textsig.ValidPhone(s) }},
+	{pipeline.CatNetworkID, phraseIP, func(_ *textsig.Dict, s string) bool { return textsig.ValidIP(s) }},
+	{pipeline.CatNetworkID, phraseMAC, func(_ *textsig.Dict, s string) bool { return textsig.ValidMAC(s) }},
+	{pipeline.CatCredential, phraseSecrets, func(_ *textsig.Dict, s string) bool { return textsig.LooksSecret(s) }},
+	{pipeline.CatPersonName, phraseNameDict, func(d *textsig.Dict, s string) bool { return d.LooksLikeName(s) }},
+	{pipeline.CatAddress, phraseAddrShape, func(_ *textsig.Dict, s string) bool { return textsig.AddressShape(s) }},
+	{pipeline.CatFreeText, phraseProse, func(d *textsig.Dict, s string) bool { return d.Prose(s) }},
 }
 
 // signals is what the validators said about one column's samples.
@@ -278,7 +269,7 @@ type signals struct {
 
 // base gives every column its name, type and value decision.
 func (st *state) base() {
-	dict := dictionary()
+	dict := textsig.Dictionary()
 	for _, t := range st.schema.Tables {
 		for _, col := range t.Columns {
 			cref := ref.ColumnRef{Table: t.Ref, Column: col.Name}
@@ -332,7 +323,7 @@ func (st *state) samples(c ref.ColumnRef) []string {
 //
 // The gate is narrower than the rule pack's accepts: lists, because those lists
 // answer a slightly different question. See silencedByType.
-func bestSignal(dict *nameDict, values []string, p *compiledPack, family string) signals {
+func bestSignal(dict *textsig.Dict, values []string, p *compiledPack, family string) signals {
 	sig := signals{total: len(values)}
 	if sig.total == 0 {
 		return sig
@@ -588,7 +579,7 @@ func allTwoLetterCodes(values []string) bool {
 		return false
 	}
 	for _, v := range values {
-		if !twoLetterCode(v) {
+		if !textsig.TwoLetterCode(v) {
 			return false
 		}
 	}

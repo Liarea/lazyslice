@@ -9,7 +9,7 @@
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 5 | 0 | 22 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 7 | 0 | 2 | 0 | 0 |
+| E9 Later | later | 9 | 0 | 2 | 0 | 0 |
 
 ## Open and in progress
 
@@ -27,6 +27,8 @@
 - T-0083 [open] E9 · Target type registration for CopyFrom: no owner since internal/load shipped ()
 - T-0084 [open] E9 · THREAT_MODEL.md T9 still says the discover dial sends its reads outside a transaction ()
 - T-0085 [open] E9 · ARCHITECTURE.md section 9 Discoverer contract still says three statements per dial ()
+- T-0086 [open] E9 · Name internal/textsig in internal/CLAUDE.md's import graph, ARCHITECTURE.md section 2 and section 12 (opus)
+- T-0087 [open] E9 · internal/classify's JSON leaf signal never consults the name dictionary, so verify's second net cannot score person_name or free_text over document leaves ()
 
 ## Recently closed
 

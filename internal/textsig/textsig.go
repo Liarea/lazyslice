@@ -1,0 +1,262 @@
+// SPDX-License-Identifier: Apache-2.0
+
+// Package textsig holds the value-only half of ARCHITECTURE.md §4's validators:
+// a pure function over one string, and the embedded English name dictionary the
+// two dictionary-backed ones read.
+//
+// It exists because there were two copies. internal/classify has the validators
+// because §4's signals are its job, and internal/verify's second net (§6 item 4)
+// re-runs them over the loaded target — and a stage package may not import
+// another stage package (internal/CLAUDE.md), so verify carried a hand copy of
+// eight of the ten, which is how it came to be missing the two that need the
+// dictionary (tracker T-0055). A copy that must be kept in step and is not is a
+// second net that quietly stops agreeing with the classifier it is a second look
+// at, so both packages now import this one and neither owns a validator.
+//
+// What is here is only ever a value shape. There is no rule pack here: no name
+// pattern, no category, no confidence, no scoring, no threshold. A caller
+// decides what a `true` means — internal/classify scores it into a category at
+// a confidence, internal/verify decides whether a loaded column may keep it —
+// and the two decide differently on purpose (see internal/verify/CLAUDE.md, "the
+// dictionary rule"). Nothing here reads a column name, a neighbour, a schema or
+// a database.
+package textsig
+
+import (
+	"math"
+	"net"
+	"net/mail"
+	"regexp"
+	"strings"
+	"unicode"
+
+	"github.com/nyaruka/phonenumbers"
+)
+
+var (
+	// uuidRE is the UUID check ARCHITECTURE.md §4 puts *before* the entropy
+	// check for secrets: a column of UUIDs is high-entropy and is not a
+	// credential.
+	uuidRE = regexp.MustCompile(`\A[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\z`)
+	hexRE  = regexp.MustCompile(`\A[0-9a-fA-F]+\z`)
+)
+
+// PhoneRegionHint is the libphonenumber region ValidPhone parses under: "ZZ",
+// the unknown region, so only a number written in international form validates.
+// See internal/classify/CLAUDE.md, "Decisions made during implementation": v1
+// does not derive a region from a sibling country column.
+const PhoneRegionHint = "ZZ"
+
+// ValidEmail is net/mail.ParseAddress, tightened. ParseAddress accepts "a@b",
+// which every hostname-shaped identifier in a database would satisfy, so the
+// domain must also carry a dot.
+func ValidEmail(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" || len(s) > 320 || strings.ContainsAny(s, "<>") {
+		return false
+	}
+	addr, err := mail.ParseAddress(s)
+	if err != nil {
+		return false
+	}
+	at := strings.LastIndex(addr.Address, "@")
+	if at < 1 {
+		return false
+	}
+	domain := addr.Address[at+1:]
+	return strings.Contains(domain, ".") && !strings.HasSuffix(domain, ".")
+}
+
+// ValidPhone is libphonenumber's IsValidNumber under PhoneRegionHint. That is
+// the conservative half of the rule: a national-format column reaches the
+// classifier through its name, at `possible`, and is masked anyway.
+func ValidPhone(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" || len(s) > 40 {
+		return false
+	}
+	num, err := phonenumbers.Parse(s, PhoneRegionHint)
+	if err != nil {
+		return false
+	}
+	return phonenumbers.IsValidNumber(num)
+}
+
+// ValidIP reports whether a value is an IP address, with or without the prefix
+// length an inet renders.
+func ValidIP(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return false
+	}
+	if i := strings.IndexByte(s, '/'); i >= 0 {
+		s = s[:i]
+	}
+	return net.ParseIP(s) != nil
+}
+
+// ValidMAC reports whether a value is a hardware address.
+func ValidMAC(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return false
+	}
+	_, err := net.ParseMAC(s)
+	return err == nil
+}
+
+// ValidUUID reports whether a value is a UUID in the canonical form.
+func ValidUUID(s string) bool { return uuidRE.MatchString(strings.TrimSpace(s)) }
+
+// ValidLuhn is the payment-card check digit. It runs only on a value that is
+// twelve to nineteen digits after separators are removed, which is the range
+// ISO/IEC 7812 allows; without that bound every even-length numeric identifier
+// passes it about half the time.
+func ValidLuhn(s string) bool {
+	digits := make([]int, 0, 20)
+	for _, r := range s {
+		switch {
+		case r >= '0' && r <= '9':
+			digits = append(digits, int(r-'0'))
+		case r == ' ' || r == '-':
+		default:
+			return false
+		}
+	}
+	if len(digits) < 12 || len(digits) > 19 {
+		return false
+	}
+	sum, double := 0, false
+	for i := len(digits) - 1; i >= 0; i-- {
+		d := digits[i]
+		if double {
+			d *= 2
+			if d > 9 {
+				d -= 9
+			}
+		}
+		sum += d
+		double = !double
+	}
+	return sum%10 == 0
+}
+
+// ValidIBAN is the mod-97 check.
+func ValidIBAN(s string) bool {
+	s = strings.ToUpper(strings.NewReplacer(" ", "", "-", "").Replace(strings.TrimSpace(s)))
+	if len(s) < 15 || len(s) > 34 {
+		return false
+	}
+	for _, r := range s {
+		if (r < '0' || r > '9') && (r < 'A' || r > 'Z') {
+			return false
+		}
+	}
+	if !unicode.IsLetter(rune(s[0])) || !unicode.IsLetter(rune(s[1])) {
+		return false
+	}
+	rearranged := s[4:] + s[:4]
+	rem := 0
+	for _, r := range rearranged {
+		switch {
+		case r >= '0' && r <= '9':
+			rem = rem*10 + int(r-'0')
+		default:
+			rem = rem*100 + int(r-'A') + 10
+		}
+		rem %= 97
+	}
+	return rem == 1
+}
+
+// LooksSecret is the Shannon-entropy check, run after the UUID check exactly as
+// ARCHITECTURE.md §4 orders them. The guards before the entropy are what stop
+// an email address or a sentence from reading as a secret: a credential has no
+// whitespace, no "@", and mixes character classes or is long hex.
+func LooksSecret(s string) bool {
+	s = strings.TrimSpace(s)
+	if len(s) < 16 || len(s) > 512 {
+		return false
+	}
+	if ValidUUID(s) || strings.ContainsAny(s, " \t\n@") {
+		return false
+	}
+	if hexRE.MatchString(s) {
+		return len(s) >= 32 && shannon(s) >= 3.0
+	}
+	classes := 0
+	for _, in := range []func(rune) bool{
+		func(r rune) bool { return r >= 'a' && r <= 'z' },
+		func(r rune) bool { return r >= 'A' && r <= 'Z' },
+		func(r rune) bool { return r >= '0' && r <= '9' },
+	} {
+		for _, r := range s {
+			if in(r) {
+				classes++
+				break
+			}
+		}
+	}
+	return classes >= 2 && shannon(s) >= 3.2
+}
+
+// shannon is the entropy of a string in bits per byte.
+func shannon(s string) float64 {
+	if s == "" {
+		return 0
+	}
+	var counts [256]int
+	for i := 0; i < len(s); i++ {
+		counts[s[i]]++
+	}
+	n := float64(len(s))
+	h := 0.0
+	for _, c := range counts {
+		if c == 0 {
+			continue
+		}
+		p := float64(c) / n
+		h -= p * math.Log2(p)
+	}
+	return h
+}
+
+// AddressShape is ARCHITECTURE.md §10's "mixed digits and words": a street line
+// carries a number and at least two words.
+func AddressShape(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" || len(s) > 200 {
+		return false
+	}
+	digits, words := false, 0
+	for _, f := range strings.Fields(s) {
+		hasLetter := false
+		for _, r := range f {
+			switch {
+			case r >= '0' && r <= '9':
+				digits = true
+			case unicode.IsLetter(r):
+				hasLetter = true
+			}
+		}
+		if hasLetter {
+			words++
+		}
+	}
+	return digits && words >= 2
+}
+
+// TwoLetterCode is the low-confidence value shape ARCHITECTURE.md §10 records
+// for a column of ISO codes: it explains a column rather than masking one.
+func TwoLetterCode(s string) bool {
+	s = strings.TrimSpace(s)
+	if len(s) != 2 {
+		return false
+	}
+	for _, r := range s {
+		if !unicode.IsLetter(r) {
+			return false
+		}
+	}
+	return true
+}
