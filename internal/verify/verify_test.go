@@ -597,3 +597,170 @@ func TestAColumnBelowMinValuesFailsOnAnyHit(t *testing.T) {
 		})
 	}
 }
+
+// The dictionary rule (tracker T-0055 and its review): person_name and
+// free_text are the two validators backed by the name dictionary, and this net
+// reads narrower validators than internal/classify does and scores them under a
+// threshold of its own.
+//
+// The cases it exists for are the negative ones below. The dictionary's surname
+// section is about two hundred ordinary English words — black, green, hill,
+// wood, west, lane, stone, may, price, read, little, long — so under the
+// classifier's own two validators a colour column is 100% "person_name", a
+// column of street names is too, and any English sentence carrying one of those
+// words is "free_text". The classifier's answer to that is to mask the column,
+// which costs a lookup table; this net's answer would be exit 9 on a database
+// that is already loaded, over a column holding no personal data, with --unmask
+// the only way past it. So here a hit has to be a *shape*: a given name
+// immediately followed by a surname, over the whole value for person_name and
+// anywhere inside the sentence for free_text, and either way the strong ratio
+// across at least minValues distinct hitting values.
+//
+// The last case is the one path where the classifier cannot pre-empt such a
+// refusal at all. internal/classify decides a json/jsonb/hstore column on its
+// own leaf signal, which asks the key patterns plus email, phone, IP, IBAN and
+// Luhn and never consults the dictionary, so the two dictionary validators do
+// not run over leaves here either (applies, in secondnet.go): the same values
+// that fail as a text column pass as leaves.
+func TestTheDictionaryRule(t *testing.T) {
+	table := customers()
+	col := ref.ColumnRef{Table: table, Column: "note"}
+
+	// The prose that does carry a written name, used twice below: as a text
+	// column, where it is the trap-17 case this validator exists for, and
+	// inside a document, where it must not fail.
+	named := []any{
+		"Grace Hopper asked that the renewal be sent to finance.",
+		"Escalation contact for this account is Alan Turing.",
+		"Raised by Katherine Johnson on the second of March.",
+	}
+
+	cases := []struct {
+		name     string
+		typeName string // "" is a text column
+		masked   bool
+		vals     []any
+		wantFail string // the category the refusal names, empty for no refusal
+	}{
+		{
+			name: "a column of single dictionary words is not a person",
+			vals: []any{"black", "brown", "hill", "green", "wood"},
+		},
+		{
+			// Every one of these is two dictionary words, which is all the
+			// first version of this rule asked for; none is a given name
+			// followed by a surname, because green, lane, west, hill, long,
+			// marsh and stone are all in the surname section only.
+			name: "and neither is a column of two-word street names",
+			vals: []any{"green lane", "west hill", "long lane", "marsh lane", "stone hill"},
+		},
+		{
+			name: "nor a column of compound colours",
+			vals: []any{"hunter green", "stone gray", "berry rose", "black cherry", "hunter green"},
+		},
+		{
+			// Every word of every value is in the dictionary, and every value
+			// is a given name followed by a surname. "Ada Lovelace" is not,
+			// because "lovelace" is not a common surname and the dictionary is
+			// deliberately a list of common names (names.txt).
+			name:     "a column of written names is",
+			vals:     []any{"Grace Hopper", "Alan Turing", "Katherine Johnson", "Mary Taylor"},
+			wantFail: "person_name",
+		},
+		{
+			name: "two written names are not enough distinct values",
+			vals: []any{"Grace Hopper", "Alan Turing"},
+		},
+		{
+			name: "and neither is one written name repeated",
+			vals: []any{"Grace Hopper", "Grace Hopper", "Grace Hopper", "Grace Hopper"},
+		},
+		{
+			name:     "prose carrying other rows' names is free_text",
+			vals:     named,
+			wantFail: "free_text",
+		},
+		{
+			name: "prose with no name in it is not",
+			vals: []any{
+				"The renewal was sent to finance on the second.",
+				"This account is billed quarterly under the old terms.",
+				"Confirmed with the finance team on the second of March.",
+			},
+		},
+		{
+			// Ordinary business prose whose only dictionary words are the
+			// English ones — may, black, read, little, price. Under the
+			// classifier's Prose ("six words with a dictionary word inside")
+			// every one of these is a hit and the column is exit 9 on a loaded
+			// target holding no personal data.
+			name: "nor is business prose whose only dictionary word is an English one",
+			vals: []any{
+				"The supplier may terminate this agreement on thirty days notice.",
+				"Delivery is made in a matte black finish as standard.",
+				"Please read the enclosed instructions before first use.",
+				"The little pockets on either side hold a passport.",
+				"Any change to the price takes effect from the next invoice.",
+			},
+		},
+		{
+			// The one path where the classifier cannot have pre-empted this
+			// refusal: it decides a jsonb column on a leaf signal that never
+			// reads the dictionary, so these validators do not run over leaves.
+			// Same sentences as the failing free_text case above, one per
+			// document.
+			name:     "and prose in a masked jsonb column is outside these two validators",
+			typeName: "jsonb",
+			masked:   true,
+			vals: []any{
+				`{"note": "Grace Hopper asked that the renewal be sent to finance."}`,
+				`{"note": "Escalation contact for this account is Alan Turing."}`,
+				`{"note": "Raised by Katherine Johnson on the second of March."}`,
+				`{"note": "Mary Taylor confirmed the renewal on the second of March."}`,
+			},
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			typeName := c.typeName
+			if typeName == "" {
+				typeName = "text"
+			}
+			dec := pipeline.Decision{Col: col, Category: pipeline.CatNone, Source: pipeline.ByClassifier}
+			if c.masked {
+				dec.Category, dec.Masked = pipeline.CatSemiStruct, true
+			}
+			s := &state{
+				schema: &pipeline.Schema{},
+				target: oneColumn{vals: c.vals},
+				steps:  []pipeline.Step{{Table: table, Mode: pipeline.ChildOK}},
+				tables: map[ref.TableRef]*pipeline.Table{
+					table: {Ref: table, Columns: []pipeline.Column{{Name: col.Column, TypeName: typeName}}},
+				},
+				cls: &pipeline.Classification{Decisions: map[ref.ColumnRef]pipeline.Decision{col: dec}},
+			}
+			if err := s.secondNet(context.Background()); err != nil {
+				t.Fatalf("secondNet: %v", err)
+			}
+			if c.wantFail == "" {
+				if len(s.failures) != 0 {
+					t.Fatalf("the net failed %s on %v as %q; a dictionary word is a word an "+
+						"ordinary English column may hold, and this refusal has no green path "+
+						"short of --unmask", col, c.vals, s.failures[0].Reason)
+				}
+				return
+			}
+			if len(s.failures) != 1 {
+				t.Fatalf("the net recorded %d failures on %v, want one naming %s; a value nobody "+
+					"masked is in the target and both nets said yes", len(s.failures), c.vals, c.wantFail)
+			}
+			if got := s.failures[0].Reason; got != c.wantFail {
+				t.Errorf("the refusal names the category %q, want %q", got, c.wantFail)
+			}
+			if got := s.failures[0].Exit; got != exitResidual {
+				t.Errorf("the refusal exits %d, want %d", got, exitResidual)
+			}
+		})
+	}
+}

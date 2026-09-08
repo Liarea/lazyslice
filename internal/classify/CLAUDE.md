@@ -41,12 +41,13 @@ exemption; add a way for a category's confidence to be lowered by config.
 - `rules.yml` — the embedded rule pack: the categories with their maskers and
   accepted type families, the name patterns with their priorities, and the
   log-shaped table rule. Changing it changes `Classification.Fingerprint`.
-- `names.txt` — the English name dictionary, in a `# given` and a `# surname`
-  section.
-- `rulepack.go`, `dict.go` — loading and compiling those two.
+- `rulepack.go` — loading and compiling it.
 - `types.go` — `pg_catalog.format_type` output to a type family, resolving
   domains and enums.
-- `validators.go` — the §4 validators and the sample-to-string conversion.
+- `validators.go` — the thresholds and the sample-to-string conversion. The
+  validators themselves, and the name dictionary they read, are
+  `internal/textsig` (T-0055): `internal/verify`'s second net imports the same
+  package, so there is one copy of a value shape and not two.
 - `reasons.go` — the reason fragment set and `ParseReason`.
 - `classify.go` — the six passes: base signals, bytea in a person-shaped table,
   the neighbouring-column rule, FK propagation and shared names, the yml prior,
@@ -336,6 +337,34 @@ was chosen and is recorded here rather than only in a comment.
     the *domain* resolution (`domainBase`), which needs `pipeline.Schema` and so
     cannot live in `mask`; the one home for it is `internal/pipeline`, whose
     file T-0054's paths did not include.
+
+- **The validators and the name dictionary moved to `internal/textsig`**
+  (T-0055). `names.txt` and `dict.go` were here, and `internal/verify`'s second
+  net — which re-runs §4's value signals over the loaded target — could not
+  import them, because a stage package may not import another stage package
+  (internal/CLAUDE.md). So verify carried a hand copy of eight of the ten
+  validators and was missing exactly the two that read the dictionary,
+  `person_name` and `free_text`, which is the largest personal-data category and
+  half of one of THREAT_MODEL.md T1's two v1-blocking controls. What moved is
+  the value-only half — a `func(string) bool` and a word list. What did **not**
+  move, and must not: the rule pack, the categories, the confidences, the
+  thresholds (`validatorThreshold`, `weakThreshold`, `minSamples`) and the
+  scoring, all of which are still this package's. The dictionary is scored
+  differently on the two sides on purpose — `textsig.Dict.LooksLikeName` and
+  `Dict.Prose` here, `Dict.NameShape` and `Dict.ProseName` in verify, because
+  neither a single dictionary word (black, brown, hill, green, wood) nor a pair
+  of them (green lane, hunter green) nor an English sentence carrying one ("the
+  supplier may terminate...") may fail a loaded target at exit 9. Verify's two
+  ask for a given name immediately followed by a surname; this package's two do
+  not, and must not, because a `first_name` column holds one word per row.
+  Nothing about this package's decisions changed: `names.txt` is byte for byte
+  the file that was here, `Classification.Fingerprint` never covered it (it
+  covers the rule pack's `version`), and the precision and recall floors below
+  are unmoved. The dictionary's `Given` and `Surname` sets were deleted in
+  T-0055 as unused and came back unexported in its review, because verify's two
+  validators ask which section a word came from; nothing here reads them. The
+  two sections of `names.txt` are still parsed, so a line outside a section is
+  still ignored.
 
 ## Measured
 
