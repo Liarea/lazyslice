@@ -26,6 +26,28 @@ for the privilege.
   registered gets a cancelled context from `TraceQueryStart` and a recorded
   violation that fails the run (THREAT_MODEL.md T9) — no first-keyword
   allowlist (`WITH x AS (DELETE ...)` defeats that).
+- **A statement that reaches a source connection with no transaction open is a
+  violation** (T-0082): `check` reads the connection's transaction status and
+  refuses anything that is not itself a `BEGIN` on an idle one, with
+  `ErrOutsideTransaction` rather than `ErrRefused` so the failure says which
+  rule broke. This is the pool-wide half of what T-0076 removed, put back as a
+  check instead of a session GUC; a nil `*pgx.Conn` (status 0) is not idle, it
+  is a shape test with no connection at all. Do not answer "this one statement
+  does not need a transaction" by special-casing it here.
+  **The shape miss has priority over the transaction rule.** `outsideTx` is
+  asked only of a statement that matched a registered shape, so a statement that
+  is *both* unallowlisted and on an idle connection is `ErrRefused`. The T9 case
+  the allowlist exists for — an injected or hand-added write on the source — is
+  the one most likely to arrive with no transaction under it, and computing the
+  two independently reported `DROP TABLE users` as `ErrOutsideTransaction`,
+  whose own doc comment says the statement was ours and only its transaction was
+  missing. `TestAnUnallowlistedStatementOnAnIdleConnectionIsRefusedForItsShape`
+  holds that ordering.
+  `opensTransaction` is a prefix test over `sqlBeginReadOnly`'s spelling and
+  nothing wider: it is reached only by a statement that already matched one of
+  our shapes, and no shape admits `START TRANSACTION`, so the regexp that used
+  to also match that spelling was an alternative that could not be reached. A
+  shape for another opener is widened here in the same change that registers it.
 - `TestSourceNeverCopiesOrBatches` must keep passing: no `CopyFrom`,
   `SendBatch` or `Prepare` on a `Source` connection, ever.
 - The gate's `Eligibility.Verdict` is tri-state; `NotProbed` must never be
@@ -169,9 +191,11 @@ for the privilege.
   in T9, and no statement this package sends is on an autocommit path any more:
   `Source.SystemID` opens a `REPEATABLE READ READ ONLY` transaction of its own**
   (T-0076, see the entry below), so the transaction is under every statement
-  *here* rather than a session setting being. It is not under every statement in
-  the binary: `internal/discover`'s dial queries a tracer-carrying pool with no
-  `BEGIN` (T-0081, and the entry below).
+  *here* rather than a session setting being. It is under every statement in the
+  binary too, as of T-0081 and T-0082: `internal/discover`'s dial opens a
+  transaction around its three catalog reads, and `check` refuses a statement
+  that arrives on an idle source connection, so the claim is a check and not a
+  reading of every call site.
 - **A predicate that breaks the rule is refused at `--where`, not only here.**
   `internal/plan/where.go` checks the same characters and the same balance when
   the request arrives and returns exit 2 naming the character and its position.
@@ -279,14 +303,16 @@ for the privilege.
   allowlist was the whole defence (the `SELECT t."a"::int INTO evil FROM ...`
   near-miss T9 records). **That hook is gone. `Source.SystemID` opens a
   read-only transaction of its own instead**, so no statement this package sends
-  is left on an autocommit path and nothing is set on the session. Read that as
-  scoped to this package: what the hook gave was pool-wide, covering statements
-  written where this package cannot see them, and what replaced it is discipline
-  at each call site here. `internal/discover`'s dial is the caller that had been
-  relying on the pool-wide half and now has the allowlist alone (T-0081, and the
-  "Owed elsewhere" note below); T-0082 is the missing mechanism that would have
-  caught it — a rule enforced by a comment is the kind this package's own
-  history says gets broken.
+  is left on an autocommit path and nothing is set on the session. What the hook
+  gave was pool-wide, covering statements written where this package cannot see
+  them, and what replaced it at first was discipline at each call site here —
+  which is exactly the kind of rule this package's own history says gets broken:
+  `internal/discover`'s dial had been relying on the pool-wide half and was left
+  with the allowlist alone, and it was a person reading prose who noticed
+  (T-0081). Both halves have since landed: that dial opens a transaction around
+  its three catalog reads, and the pool-wide rail is back as a check rather than
+  a session GUC — `check` refuses any statement that reaches a source connection
+  with no transaction open (T-0082, and the entry below).
   **Why, measured:** a session GUC set through a transaction-pooling PgBouncer
   is set on the *shared server connection* the pooler assigned, not on anything
   lazyslice owns, and PgBouncer in transaction mode does not run
@@ -345,37 +371,47 @@ for the privilege.
   only thing standing between this package and that leak. Do not answer a
   future "one more thing to set on the source connection" with `AfterConnect`;
   put it in the transaction, or it is a neighbour's outage.
-  **Owed elsewhere (T-0081).** Three comments outside this package still say the
-  setting is there: `internal/discover/probe.go`'s `dialShapes` doc,
-  `internal/discover/CLAUDE.md`'s dial bullet, and `internal/load/CLAUDE.md`'s
-  type-registration bullet, which points at "`internal/pg`'s `AfterConnect`" as
-  the place target type registration would go. None is this task's to write. The
-  substantive half of that task is `internal/discover`: its three catalog
-  statements are sent outside any transaction and were covered by this setting,
-  so they now have the allowlist alone — either open a read-only transaction
-  around the dial or record why three allowlisted catalog `SELECT`s do not need
-  one. That half is a rail restoration on a path that dials production
-  endpoints, not a comment rewrite, and it should be priced and scheduled as
-  one; the exact-match allowlist is what stands in for the transaction until it
-  lands (THREAT_MODEL.md T9 now says so rather than claiming the transaction is
-  universal). Nothing in this package blocks it: `SourceShapes` already exports
-  `source.begin` and `source.rollback` carrying the same two literals
-  `Source` sends, so the dial can register them next to `dialShapes()` and wrap
-  its three reads in that pair without a new export here — do not let it write
-  the `BEGIN` text out a second time, because two copies of an allowlisted
-  literal are two things to keep in step. Both tasks were filed in E9 (Later),
-  which is where a developer may file; a rail removed in phase 5 that is
-  restored in E9 outlives the phase that removed it, so the re-home is the
-  orchestrator's to make.
-  **The structural half is T-0082.** What the `AfterConnect` hook gave was a
-  pool-wide rail; what stands here now is per-call-site discipline plus
-  `TestSystemIDRunsInsideAReadOnlyTransaction`, which pins one function. Nothing
-  detects a source statement sent outside a transaction, which is why the
-  `internal/discover` regression was found by reading prose and not by a check.
-  `Tracer` is where the mechanism belongs — it already sees every statement on
-  the source pool and already refuses by cancelling the context — but tracking
-  `BEGIN`/`ROLLBACK` per connection there refuses the dial the moment it is
-  armed, so T-0082 sequences after T-0081 or lands with it.
+  **The dial outside this package (T-0081, closed).** Three comments outside
+  this package described the session setting as present, and one of them sat on
+  top of a real gap: `internal/discover`'s dial sent its three catalog reads on
+  a source-mode pool with no transaction under them, on the path that dials
+  production candidates. That was a rail restoration and not a comment rewrite,
+  and it landed as one — `probe` acquires one connection and wraps the three
+  reads in `BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY` ... `ROLLBACK`,
+  taking both literals from `SourceShapes()` by name rather than writing them
+  out a second time (two copies of an allowlisted literal are two things to keep
+  in step). If a stage ever needs those literals in a form `SourceShapes` cannot
+  give, export them here; do not let a second copy of the `BEGIN` text exist.
+  **The structural half (T-0082, closed).** What the `AfterConnect` hook gave
+  was a pool-wide rail; per-call-site discipline plus
+  `TestSystemIDRunsInsideAReadOnlyTransaction` pinned one function and nothing
+  else, which is why the `internal/discover` regression was found by reading
+  prose. `Tracer` is where the mechanism belongs, because it already sees every
+  statement on the source pool and already refuses by cancelling the context, so
+  `check` now takes the connection's transaction status and refuses a non-`BEGIN`
+  statement on an idle one with `ErrOutsideTransaction`. It is a status pgx
+  tracks from every `ReadyForQuery`, not a count this package keeps, so it
+  cannot drift from what the server thinks. `TestASourceStatementOutsideATransactionIsRefused`
+  is the unit half; `internal/discover`'s
+  `TestTheDialRunsInsideAReadOnlyTransaction` is the half that proves the caller
+  this check was armed against passes it.
+  **`TestASourceStatementSentWithNoTransactionIsRefusedOnARealConnection` is
+  what pins the rail to a real server** (`readonly_integration_test.go`, beside
+  the positive half). The unit test hands `check` a status byte written out as a
+  constant, and `txStatus` fails *open* — 0 for a nil `*pgx.Conn` or a nil
+  `PgConn`, and 0 is deliberately not a violation — so nothing else in the tree
+  asserted that an idle connection really reports `I` at the moment
+  `TraceQueryStart` runs. Without it, a change in how pgx reports the status, or
+  a wrapper that hands the tracer a connection with no `PgConn`, would make this
+  rail a no-op with every test still green and this file still promising it. It refuses on status `I` only: `0`
+  means the tracer was called with no connection, which is how the shape tests
+  here and in `internal/plan`, `internal/extract` and `internal/verify` call
+  `TraceQueryStart`, and `E` is a failed transaction, which is still one — the
+  `ROLLBACK` that ends it must not be refused.
+  **Owed (T-0084).** THREAT_MODEL.md T9 still reads "that guarantee is
+  `internal/pg`'s, not yet the binary's" and names the dial as the uncovered
+  path; it was outside the paths of the task that covered it. It is the binary's
+  now.
 - `uuidV4` is local rather than a dependency: `go.mod` has no direct one, and
   this is the only UUID lazyslice makes.
 - **`Eligibility.Local` records whether the target is local, never whether the
@@ -436,14 +472,17 @@ for the privilege.
 - **No type registration on either pool, and this package does not owe it.**
   ARCHITECTURE.md §11.1 specifies load as "CopyFrom with explicit column lists
   excluding generated columns, types registered in AfterConnect", and §12 lists
-  type registration under this package. It is **deferred to the task that
+  type registration under this package. It was **deferred to the task that
   builds `internal/load`**, as the `CatalogFingerprinter` wiring was:
   registering the source's enum, domain, composite and user-defined array OIDs
   on each target connection needs the catalog `internal/introspect` reads, and
-  `Connect` has no access to it. Until it exists, a value of such a type has no
-  encode plan on the target and `CopyFrom` fails mid-table (THREAT_MODEL.md
-  T8); the failure is now at least printable (see the withheld-error entry
-  above). This is a recorded debt, not an oversight.
+  `Connect` has no access to it. That task shipped without taking it, so the
+  debt is now **T-0083** and not a deferral to a task that has closed. Until it
+  is done, a value of such a type has no encode plan on the target and
+  `CopyFrom` fails mid-table (THREAT_MODEL.md T8); the failure is at least
+  printable (see the withheld-error entry above). Whatever does it registers on
+  the **target** pool: an `AfterConnect` hook on the source is what T-0076
+  removed and what this file's Never list forbids.
 
 **Test.** `go test ./internal/pg/...`; the gate, tracer, identity,
 read-only-transaction and pooler behaviour need
@@ -462,4 +501,6 @@ cap builds 2,001 tables on purpose, against the real constant.
 **Never:** open a `pgxpool.Pool` for the source or target anywhere but here;
 let the gate return `Eligible` for a `NotProbed` table; add a rung to the
 identity ladder that treats "not probed" as safe; leave session state on a
-source connection — no `AfterConnect`, no `SET` outside a transaction (T-0076).
+source connection — no `AfterConnect`, no `SET` outside a transaction (T-0076);
+send a source statement outside a transaction, or teach `check` an exception
+that lets one through (T-0082).

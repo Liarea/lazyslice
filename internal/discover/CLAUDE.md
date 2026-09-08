@@ -16,10 +16,20 @@ why. `pipeline.Provisioner` is removed: it was dead, nothing implemented it.
 **Rules.**
 - 2s total listing budget, 1s per-candidate dial (ARCHITECTURE.md §9) — do not
   add a probe that can exceed either.
-- Inside the dial: at most three statements per candidate (version, the
-  `pg_class` count/hint, `to_regclass('lazyslice_meta')`). Never probe
+- Inside the dial: at most three *reads* per candidate (version, the
+  `pg_class` count/hint, `to_regclass('lazyslice_meta')`), inside one
+  `REPEATABLE READ READ ONLY` transaction — so five statements on the wire,
+  counting the `BEGIN` and the `ROLLBACK` that carry them (T-0081). Never probe
   emptiness table by table here; that is the gate's job, after discovery
   (THREAT_MODEL.md T2).
+  **This is drift from the spec, not a reading of it (T-0085).**
+  ARCHITECTURE.md §9's `Discoverer` contract says "at most three *statements*
+  per candidate" and names the three reads; the transaction T-0081 added makes
+  five. The rail stays and the amendment is owed — the sentence should read
+  "at most three reads per candidate, inside one `REPEATABLE READ READ ONLY`
+  transaction". ARCHITECTURE.md is outside this package's paths, so it is filed
+  rather than edited here; do not resolve the difference by rereading
+  "statements" as "reads".
 - `provision/` is the *only* code in the tree that creates or starts a
   container, and only behind `--create-target` or a "yes" to Q1/Q1′ — never
   called unconditionally. `Options.dial` builds a **read-only** Docker client
@@ -210,13 +220,48 @@ candidate.
   every candidate and then collapses, and `adoptReachable` gives the survivor
   the endpoint that answered while the lower rung keeps the printed name. The
   cost is one dial per duplicate, inside the same 1 s per-candidate budget.
-- **The dial runs under the source allowlist.** THREAT_MODEL.md T9's control is
-  that every statement lazyslice sends to the source is allowlisted and
-  read-only, and discovery dials the source like any other candidate. So
-  `probe` registers the three statements on a `pg.Tracer` and passes it to
-  `pg.Connect`, which is also what brings `default_transaction_read_only = on`
-  on the connection. Dialling with a nil tracer made the invariant false and
-  left invariant I4's trace with no record of the connection at all.
+- **The dial runs under the source allowlist, inside a read-only
+  transaction** (T-0081). THREAT_MODEL.md T9's control is that every statement
+  lazyslice sends to the source is allowlisted and read-only, and discovery
+  dials the source like any other candidate. So `probe` registers the three
+  statements on a `pg.Tracer` and passes it to `pg.Connect`; dialling with a nil
+  tracer made the invariant false and left invariant I4's trace with no record
+  of the connection at all. **Read-only is the transaction and not the
+  connection.** `pg.Connect` used to set `default_transaction_read_only = on` on
+  every source connection as it was opened, and T-0076 removed that: through a
+  transaction-pooling PgBouncer the setting stayed on the pooler's *shared*
+  server connection and left unrelated applications read-only after lazyslice
+  exited. For the interval between the two, this dial sent three catalog reads
+  to production candidates with no read-only rail at all — the allowlist alone.
+  So `probe` acquires **one** connection (a transaction lives on the connection
+  that opened it, and `pool.QueryRow` may acquire a different one each time),
+  wraps the three reads in `BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY` …
+  `ROLLBACK`, and takes both literals from `pg.SourceShapes()` by name rather
+  than writing them out a second time. `internal/pg`'s tracer refuses any
+  statement that reaches an idle source connection (T-0082), so a dial that
+  loses its `BEGIN` fails as an unreachable candidate instead of as a paragraph
+  nobody re-read; `TestTheDialRunsInsideAReadOnlyTransaction` is the proof, and
+  it is what `probe` returns its `*pg.Tracer` for.
+  **And the dial acts on that verdict rather than only carrying it.** The
+  tracer refuses a statement *by* cancelling the context pgconn checks before it
+  writes, so a broken rail reaches `connectErr` as "context canceled" — which
+  matched none of its arms and rendered as a driver line, or, from a pool
+  acquire, as words a reader takes for a timeout. A candidate whose dial lost
+  its `BEGIN` therefore came back `Reachable: false` with a message pointing at
+  the operator's database, and discovery moved on to another endpoint. `probe`
+  now asks `Tracer.Violation()` before it writes any `ConnectErr` and again
+  after the three reads answer (`dialErr`, `dialViolation`), and says a source
+  rail broke, in those words, naming which of the two. The candidate is still
+  left unreachable — that is the fail-safe direction, and it is the only lever
+  `probe` has, since it returns no error — but it is no longer fail-*silent*.
+  `connectErr` has a `context canceled` arm as the backstop, and it does not say
+  "did not answer".
+  **Shapes are looked up once.** `transactionShapes()` is `probe`'s call and
+  `probe`'s guard; `dialShapes(begin, rollback)` takes them as arguments. It
+  used to look them up a second time and carry a second branch for the missing
+  case, which `probe`'s own guard made unreachable — and the two disagreed about
+  what to do, one dialling under a three-shape allowlist that would refuse the
+  dial's own `BEGIN`.
 - **"No password" is reserved for having none.** SQLSTATE 28P01 renders as
   "password authentication failed for user ...", so matching the word alone
   reported a *wrong* password as a *missing* one and sent the operator to

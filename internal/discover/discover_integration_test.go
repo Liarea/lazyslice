@@ -203,6 +203,55 @@ func TestAStoppedContainerIsOfferedAndStarted(t *testing.T) {
 	}
 }
 
+// The dial's three catalog reads run inside one REPEATABLE READ READ ONLY
+// transaction, and the tracer that would refuse them otherwise is satisfied.
+//
+// Both halves matter. The transaction is the read-only rail: pg.Connect set
+// default_transaction_read_only on every source connection until T-0076 removed
+// it as a pooler-poisoning session GUC, and for as long as that took to notice,
+// this dial sent three statements to production candidates with no rail under
+// them at all (T-0081). internal/pg now refuses a statement on an idle source
+// connection outright (T-0082), so a dial that lost its BEGIN would fail here
+// as an unreachable candidate rather than as a paragraph nobody re-read.
+//
+// It is an integration test because pgx reports a transaction status only from
+// a real server's ReadyForQuery: a unit test can assert what the tracer does
+// with a status and not what the server actually said.
+func TestTheDialRunsInsideAReadOnlyTransaction(t *testing.T) {
+	ctx := t.Context()
+	testutil.SkipWithoutDocker(ctx, t)
+
+	f := &found{dsn: dsn.DSN(testutil.Postgres(ctx, t, ""))}
+	tracer := probe(ctx, f)
+	if tracer == nil {
+		t.Fatal("the dial did not get as far as an allowlist")
+	}
+	if !f.cand.Reachable {
+		t.Fatalf("the container did not answer inside the dial: %s", f.cand.ConnectErr)
+	}
+	if err := tracer.Violation(); err != nil {
+		t.Fatalf("the dial broke a source rail: %v", err)
+	}
+
+	var got []string
+	for _, s := range tracer.Trace() {
+		if s.Shape == "source.connect" {
+			continue
+		}
+		got = append(got, s.Shape)
+	}
+	want := []string{
+		"source.begin",
+		"discover.version",
+		"discover.tables",
+		"discover.marker",
+		"source.rollback",
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("the dial sent %v, want %v", got, want)
+	}
+}
+
 // The second run of a provisioned target, end to end against a real daemon.
 //
 // ARCHITECTURE.md section 9 says the container survives the run and is "the

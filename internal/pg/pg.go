@@ -62,16 +62,16 @@ import (
 // enforcement is that transaction; the tracer's shape allowlist is the other
 // layer and is unchanged (THREAT_MODEL.md T9).
 //
-// That is a guarantee about this package and not about every caller of
-// Connect. A caller that takes a tracer-carrying pool from here and queries it
-// without opening a transaction has the allowlist and nothing else, and one
-// does: internal/discover's dial sends three catalog reads on the pool
-// directly. Those three were covered by the AfterConnect exec while it existed.
-// T-0081 decides whether that dial opens a read-only transaction or records why
-// three exact-match catalog reads do not need one; nothing here can decide it
-// for a package this one must not import. If you add a source statement, open
-// the transaction at the call site — there is no pool-wide rail behind you any
-// more, and no check that would catch you (T-0082).
+// A caller that takes a tracer-carrying pool from here and queried it without
+// opening a transaction would have the allowlist and nothing else, and one did:
+// internal/discover's dial sent three catalog reads on the pool directly, which
+// the AfterConnect exec had covered while it existed. That dial opens a
+// transaction of its own now (T-0081), and the rule is no longer a convention:
+// the Tracer refuses any statement that reaches a source connection with no
+// transaction open, and the refusal fails the run (T-0082, tracer.go). So if
+// you add a source statement, open the transaction at the call site — there is
+// no pool-wide rail behind you, and the check will fail you rather than let the
+// statement go out uncovered.
 //
 // The setting was never a startup parameter either, and that half still holds:
 // PgBouncer and the other poolers accept only a fixed set of startup parameters

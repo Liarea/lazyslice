@@ -163,11 +163,13 @@ func (s *Source) Close() { s.pool.Close() }
 // exception: it was the only statement this package issued on an autocommit
 // path, which is part of why Connect once set default_transaction_read_only on
 // the session to cover it. The other part was internal/discover's dial, which
-// is outside this package and still sends three catalog reads with no BEGIN
-// (T-0081). That session GUC leaked through a transaction-pooling PgBouncer onto the
-// shared server connection and left other applications read-only after
-// lazyslice exited (T-0076, pg.go). Scoping it here costs a BEGIN and a
-// ROLLBACK on one statement and leaves nothing behind.
+// is outside this package and sent three catalog reads with no BEGIN until
+// T-0081 wrapped them in one. That session GUC leaked through a
+// transaction-pooling PgBouncer onto the shared server connection and left
+// other applications read-only after lazyslice exited (T-0076, pg.go). Scoping
+// it here costs a BEGIN and a ROLLBACK on one statement and leaves nothing
+// behind, and the Tracer refuses a statement that arrives on an idle source
+// connection, so the scoping is checked rather than remembered (T-0082).
 func (s *Source) SystemID(ctx context.Context) (string, error) {
 	if err := s.tr.Register(Shape{Name: "source.system_id", SQL: sqlSystemID}); err != nil {
 		return "", err

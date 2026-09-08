@@ -167,8 +167,14 @@ then after-data: indexes, FKs, setval, ANALYZE, bookkeeping tables).
   registration (an enum's binary form is its label; a domain is reported as its
   base type), while a composite fails 42804 and an enum array fails 54000 —
   loudly, in both cases. Registering the source's user types on each target
-  connection is `internal/pg`'s `AfterConnect` and its own recorded debt; it is
-  not reachable from `pipeline.Writer`.
+  connection is `internal/pg`'s, on the **target** pool, and it is not reachable
+  from `pipeline.Writer`. It is not an `AfterConnect` hook: the target pool has
+  never had one and the source pool may never have one again (T-0076 — a session
+  hook on a pooled source sets state on the pooler's shared server connection).
+  `internal/pg/CLAUDE.md` recorded the debt as deferred "to the task that builds
+  `internal/load`"; that task is this one and it did not take it, so the debt is
+  now filed as **T-0083** rather than left pointing at a hook that does not
+  exist.
 - **Unlogged tables are recreated logged.** §11.1 says "Unlogged tables are
   recreated unlogged" and `pipeline.Table` has no `relpersistence` field for
   `internal/introspect` to fill. Owed there.
