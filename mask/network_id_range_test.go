@@ -4,7 +4,7 @@ package mask
 
 import (
 	"fmt"
-	"net/netip"
+	"strconv"
 	"testing"
 )
 
@@ -21,55 +21,60 @@ func TestNetworkIDStaysInDocumentationRanges(t *testing.T) {
 	k := testKey(t)
 	const n = 10_000
 
-	v4Blocks := []netip.Prefix{
-		netip.MustParsePrefix("192.0.2.0/24"),
-		netip.MustParsePrefix("198.51.100.0/24"),
-		netip.MustParsePrefix("203.0.113.0/24"),
+	wantV4 := wantIPIn("192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24")
+	wantV6 := wantIPIn("2001:db8::/32")
+
+	// v4Sources spans real routable addresses across every octet (i itself,
+	// bit-rotated so all four bytes vary rather than only the low ones) and,
+	// deliberately, values already inside the three documentation blocks a
+	// source column can legitimately hold — network_id must still land those
+	// honestly rather than by an identity that only looks that way because the
+	// generator never saw anything else.
+	v4Sources := func(i int) string {
+		switch i % 4 {
+		case 0:
+			return "192.0.2." + strconv.Itoa(i%256)
+		case 1:
+			return "198.51.100." + strconv.Itoa(i%256)
+		case 2:
+			return "203.0.113." + strconv.Itoa(i%256)
+		default:
+			u := uint32(i)*2654435761 + 1 // Knuth's multiplicative hash, spreads i across all 32 bits
+			return fmt.Sprintf("%d.%d.%d.%d", u>>24|1, (u>>16)&0xff, (u>>8)&0xff, u&0xff)
+		}
 	}
-	v6Block := netip.MustParsePrefix("2001:db8::/32")
 
 	v4Constraints := Constraints{TypeTag: famInet}
+	v4Out := make(map[string]struct{}, n)
 	for i := 0; i < n; i++ {
-		in := Value{Text: fmt.Sprintf("%d.%d.%d.%d", (i>>24)&0xff|1, (i>>16)&0xff, (i>>8)&0xff, i&0xff)}
+		in := Value{Text: v4Sources(i)}
 		r, err := Apply(k, CatNetworkID, MaskerNetworkID, in, v4Constraints)
 		if err != nil {
 			t.Fatalf("input %d (%q): %v", i, in.Text, err)
 		}
-		addr, err := netip.ParseAddr(r.Out.Text)
-		if err != nil {
-			t.Fatalf("input %d (%q): output %q is not an address: %v", i, in.Text, r.Out.Text, err)
-		}
-		if !addr.Is4() {
-			t.Fatalf("input %d (%q): output %q is not IPv4", i, in.Text, r.Out.Text)
-		}
-		inAny := false
-		for _, b := range v4Blocks {
-			if b.Contains(addr) {
-				inAny = true
-				break
-			}
-		}
-		if !inAny {
-			t.Fatalf("input %d (%q): output %q is outside the three RFC 5737 blocks", i, in.Text, r.Out.Text)
-		}
+		wantV4(t, r.Out.Text)
+		v4Out[r.Out.Text] = struct{}{}
+	}
+	// The default network_id generator's own domain over an inet column is
+	// v4Domain = 768 (three /24 blocks), so 10,000 draws cannot produce more
+	// distinct outputs than that — the threshold checks that the generator
+	// actually varies, not that it is unique.
+	if len(v4Out) < 100 {
+		t.Fatalf("%d distinct IPv4 outputs from %d distinct inputs; the generator looks constant", len(v4Out), n)
 	}
 
 	v6Constraints := Constraints{TypeTag: famInet}
+	v6Out := make(map[string]struct{}, n)
 	for i := 0; i < n; i++ {
 		in := Value{Text: fmt.Sprintf("2a00:1450:4009:%x::%x", i, i+1)}
 		r, err := Apply(k, CatNetworkID, MaskerNetworkID, in, v6Constraints)
 		if err != nil {
 			t.Fatalf("input %d (%q): %v", i, in.Text, err)
 		}
-		addr, err := netip.ParseAddr(r.Out.Text)
-		if err != nil {
-			t.Fatalf("input %d (%q): output %q is not an address: %v", i, in.Text, r.Out.Text, err)
-		}
-		if !addr.Is6() || addr.Is4In6() {
-			t.Fatalf("input %d (%q): output %q is not IPv6", i, in.Text, r.Out.Text)
-		}
-		if !v6Block.Contains(addr) {
-			t.Fatalf("input %d (%q): output %q is outside 2001:db8::/32", i, in.Text, r.Out.Text)
-		}
+		wantV6(t, r.Out.Text)
+		v6Out[r.Out.Text] = struct{}{}
+	}
+	if len(v6Out) < n/2 {
+		t.Fatalf("%d distinct IPv6 outputs from %d distinct inputs; the generator looks constant", len(v6Out), n)
 	}
 }

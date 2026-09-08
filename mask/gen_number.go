@@ -3,6 +3,7 @@
 package mask
 
 import (
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -20,8 +21,8 @@ func pad(n int64, width int) string {
 }
 
 func satAdd(a, b int64) int64 {
-	if a > 1<<62 || b > 1<<62 {
-		return 1 << 62
+	if a > math.MaxInt64-b {
+		return math.MaxInt64
 	}
 	return a + b
 }

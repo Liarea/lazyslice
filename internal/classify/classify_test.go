@@ -479,6 +479,26 @@ func TestEveryCategoryHasAMasker(t *testing.T) {
 	}
 }
 
+// TestEveryRulePackMaskerResolves walks every masker id rules.yml names
+// against the mask registry. TestEveryCategoryHasAMasker only checks that a
+// category's masker field is non-empty; a typo'd id (or one for a generator
+// that was renamed or never registered) would still pass that test and only
+// fail at plan time, on whatever database happened to hit that category
+// first. mask.Get understands the one parametric id, "fixed:LITERAL", so this
+// walks the compiled ids as written rather than re-deriving the fixed: form.
+func TestEveryRulePackMaskerResolves(t *testing.T) {
+	t.Parallel()
+	p, err := pack()
+	if err != nil {
+		t.Fatalf("rule pack: %v", err)
+	}
+	for cat, id := range p.Masker {
+		if _, ok := mask.Get(id); !ok {
+			t.Errorf("category %q names masker %q, which does not resolve in the mask registry", cat, id)
+		}
+	}
+}
+
 // TestRulePackAgreesWithMaskAboutTypes walks the rule pack's accepts: lists
 // against mask's own declaration of which type tags each category's generators
 // can be written into (mask/writable.go).

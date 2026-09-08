@@ -167,6 +167,25 @@ func TestAUniqueColumnWithNoRowCountIsRefused(t *testing.T) {
 	}
 }
 
+// A unique column no generator fits at all must refuse by name — a
+// *NoRoomError — whatever the row count says, because no row count would ever
+// make it fit. Rows is left unset here (ErrRowCountUnknown's own trigger) to
+// pin that the "no generator fits" refusal is checked first: comparing bestD
+// against Required(0) (which is 0) would otherwise let a column with no
+// admissible generator at all pass silently, and printing "0 rows need 0"
+// would not even be the honest refusal either.
+func TestPickOnAUniqueColumnRefusesNoFitRegardlessOfRowCount(t *testing.T) {
+	var nre *NoRoomError
+	c := Constraints{TypeTag: famVarchar, MaxLen: 8, Unique: true}
+	_, err := Pick(CatEmail, c)
+	if !errors.As(err, &nre) {
+		t.Fatalf("a unique varchar(8) email column with no row count: %v, want a *NoRoomError", err)
+	}
+	if errors.Is(err, ErrRowCountUnknown) {
+		t.Fatalf("a column no generator fits must not be reported as an unknown row count: %v", err)
+	}
+}
+
 // A phone column typed integer is a shape the rule pack accepts, and eleven
 // digits do not fit one: the number the generator would emit is above int4's
 // maximum and the load fails with 22003. The refusal happens at plan instead.

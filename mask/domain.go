@@ -122,11 +122,30 @@ var (
 	reAny   = regexp.MustCompile(`(?is)=\s*ANY\s*\(\s*ARRAY\s*\[([^\]]*)\]`)
 	reLit   = regexp.MustCompile(`'((?:[^']|'')*)'`)
 	reLenEq = regexp.MustCompile(`(?is)\b(?:char_length|length|octet_length)\s*\([^()]*\)\s*=\s*(\d+)`)
+	// reNotIn and reNotAny recognise the negated form of the two shapes
+	// checkValues parses. "NOT IN (...)" and "NOT (col = ANY (ARRAY[...]))"
+	// name the values the column may *not* hold, not the values it may: a
+	// check_not_pending CHECK excluding 'pending' does not bound the column to
+	// {'pending'}, and reading it that way would hand the planner an allowed
+	// set with one member when the true admissible domain is everything else.
+	// Both match the whole negated clause, closing parens included, so
+	// checkValues can strip just that span rather than discard the entire
+	// CHECK — a CHECK can carry a positive list and a negated clause together
+	// (internal/introspect/sql.go attaches a multi-column CHECK to every
+	// column it names), and the positive list still bounds the column.
+	reNotIn  = regexp.MustCompile(`(?is)\bNOT\s+IN\s*\([^()]*\)`)
+	reNotAny = regexp.MustCompile(`(?is)\bNOT\s*\(\s*[^()]*=\s*ANY\s*\(\s*ARRAY\s*\[[^\]]*\]\s*\)\s*\)`)
 )
 
-// checkValues returns the allowed values a CHECK spells out, or nil.
+// checkValues returns the allowed values a CHECK spells out, or nil. A
+// negated span — "NOT IN (...)" or "NOT (col = ANY (ARRAY[...]))" — names a
+// forbidden set, not an allowed one, and is stripped out before the rest of
+// the CHECK is parsed, so a positive list sharing the CHECK with a negated
+// clause still bounds the column.
 func checkValues(c Constraints) []string {
 	for _, chk := range c.Checks {
+		chk = reNotAny.ReplaceAllString(chk, "")
+		chk = reNotIn.ReplaceAllString(chk, "")
 		var body string
 		if m := reAny.FindStringSubmatch(chk); m != nil {
 			body = m[1]

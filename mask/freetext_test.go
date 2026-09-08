@@ -55,6 +55,44 @@ func TestFreeTextLengthDoesNotSurvive(t *testing.T) {
 	}
 }
 
+// A char_length CHECK wider than the column's own varchar(n) is a
+// contradiction: no row could satisfy both, but freeTextExact must not read
+// the CHECK's length as the target anyway, because Mask would then emit a
+// value longer than the column holds. It falls back to the ranged filler
+// bounded by MaxLen instead, exactly as if there had been no CHECK.
+func TestFreeTextExactClampsToMaxLen(t *testing.T) {
+	c := Constraints{
+		TypeTag: famVarchar,
+		MaxLen:  20,
+		Checks:  []string{"CHECK ((char_length(bio) = 500))"},
+	}
+	if l := freeTextExact(c); l != 0 {
+		t.Fatalf("freeTextExact = %d for a CHECK length wider than MaxLen; want 0", l)
+	}
+	k := testKey(t)
+	for i := 0; i < 50; i++ {
+		r, err := Apply(k, CatFreeText, MaskerFreeText,
+			Value{Text: strings.Repeat("x", i+1)}, c)
+		if err != nil {
+			t.Fatalf("input %d: %v", i, err)
+		}
+		if len(r.Out.Text) > c.MaxLen {
+			t.Fatalf("input %d: output %q is %d bytes, wider than MaxLen %d",
+				i, r.Out.Text, len(r.Out.Text), c.MaxLen)
+		}
+	}
+
+	// A CHECK length that does fit is still honoured exactly.
+	fits := Constraints{
+		TypeTag: famVarchar,
+		MaxLen:  20,
+		Checks:  []string{"CHECK ((char_length(bio) = 12))"},
+	}
+	if l := freeTextExact(fits); l != 12 {
+		t.Fatalf("freeTextExact = %d for a CHECK length within MaxLen; want 12", l)
+	}
+}
+
 func pearson(xs, ys []float64) float64 {
 	n := float64(len(xs))
 	var sx, sy float64

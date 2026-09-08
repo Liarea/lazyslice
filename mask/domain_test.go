@@ -200,6 +200,72 @@ func TestRequiredAndMaxRowsInvertEachOther(t *testing.T) {
 	}
 }
 
+// satAdd must saturate rather than overflow into a negative number, including
+// at the boundary the naive `a > 1<<62` guard missed: two addends each exactly
+// 1<<62 sum to 1<<63, which wraps a signed 64-bit int negative and would read
+// as a domain smaller than zero — worse than merely wrong, since a negative
+// domain compares below d_required and would refuse a column that should have
+// been accepted.
+func TestSatAddSaturates(t *testing.T) {
+	const half = int64(1) << 62
+	if got := satAdd(half, half); got != math.MaxInt64 {
+		t.Fatalf("satAdd(1<<62, 1<<62) = %d, want math.MaxInt64", got)
+	}
+	if got := satAdd(math.MaxInt64, 1); got != math.MaxInt64 {
+		t.Fatalf("satAdd(MaxInt64, 1) = %d, want math.MaxInt64", got)
+	}
+	if got := satAdd(3, 4); got != 7 {
+		t.Fatalf("satAdd(3, 4) = %d, want 7", got)
+	}
+}
+
+// checkValues must read a negated CHECK as naming a forbidden set, not an
+// allowed one: "NOT IN (...)" and "NOT (col = ANY (ARRAY[...]))" exclude
+// values, they do not bound the column to them. Reading them as allowed would
+// let a masker substitute only over the excluded value(s) — a stable
+// substitution over a domain of one or two, exactly the small-domain failure
+// section 5 exists to catch, and never removed at load either.
+func TestCheckValuesIgnoresNegatedForms(t *testing.T) {
+	notIn := Constraints{TypeTag: famText,
+		Checks: []string{"CHECK ((status NOT IN ('deleted', 'banned')))"}}
+	if got := checkValues(notIn); got != nil {
+		t.Fatalf("checkValues(NOT IN) = %v, want nil", got)
+	}
+	notAny := Constraints{TypeTag: famText,
+		Checks: []string{"CHECK (NOT (status = ANY (ARRAY['deleted'::text, 'banned'::text])))"}}
+	if got := checkValues(notAny); got != nil {
+		t.Fatalf("checkValues(NOT (= ANY)) = %v, want nil", got)
+	}
+
+	// The un-negated forms still bound the column, so the fix must not have
+	// broken the case it exists beside.
+	in := Constraints{TypeTag: famText,
+		Checks: []string{"CHECK ((status IN ('active', 'pending')))"}}
+	if got := checkValues(in); len(got) != 2 {
+		t.Fatalf("checkValues(IN) = %v, want 2 values", got)
+	}
+	anyOf := Constraints{TypeTag: famText,
+		Checks: []string{"CHECK ((status = ANY (ARRAY['active'::text, 'pending'::text])))"}}
+	if got := checkValues(anyOf); len(got) != 2 {
+		t.Fatalf("checkValues(= ANY) = %v, want 2 values", got)
+	}
+
+	// A single CHECK can carry a positive list and a negated clause together
+	// (internal/introspect/sql.go attaches a multi-column CHECK to every
+	// column it names, so this shape is normal). The negated clause must not
+	// blank out the positive list beside it.
+	compound := Constraints{TypeTag: famText,
+		Checks: []string{"CHECK ((status = ANY (ARRAY['active'::text, 'pending'::text])) AND (NOT (kind = ANY (ARRAY['x'::text]))))"}}
+	if got := checkValues(compound); len(got) != 2 {
+		t.Fatalf("checkValues(compound = ANY + NOT ANY) = %v, want 2 values", got)
+	}
+	compoundIn := Constraints{TypeTag: famText,
+		Checks: []string{"CHECK ((status IN ('active', 'pending')) AND (kind NOT IN ('x')))"}}
+	if got := checkValues(compoundIn); len(got) != 2 {
+		t.Fatalf("checkValues(compound IN + NOT IN) = %v, want 2 values", got)
+	}
+}
+
 // Section 5's other domain rule, the one that runs on every masked column:
 // below twice the distinct sampled values, masking is a substitution that
 // frequency recovers, and the run says so rather than refusing.
