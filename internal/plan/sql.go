@@ -28,12 +28,16 @@ const chunkSize = 2000
 // 1,000-row lookup ceiling so that "1001" means "more than a lookup".
 const countProbeLimit = 1001
 
-// pseudoKeySample is how many rows the pseudo-key uniqueness probe aims to
-// read, and the seed it samples with. The seed is fixed so that two runs probe
-// the same pages.
+// probeSampleRows is how many rows a sampling probe aims to read, and
+// probeSampleSeed is the seed it samples with. Both probes that sample take
+// them: §3.4's pseudo-key uniqueness probe and §3.2's distinct `_type` read.
+// They are one pair of constants rather than two because they are one bound —
+// the most rows a probe may read inside the holder transaction (THREAT_MODEL.md
+// T9) — and the seed is fixed so that two runs probe the same pages, which is
+// what makes a sampled answer reproducible (ARCHITECTURE.md §3, determinism).
 const (
-	pseudoKeySample = 2000
-	pseudoKeySeed   = 1
+	probeSampleRows = 2000
+	probeSampleSeed = 1
 )
 
 // explicitKeyProbeRows bounds the --key uniqueness probe: a table whose
@@ -209,6 +213,60 @@ func childKeysSQL(child ref.TableRef, childCols []string, parentTypes []keyType,
 	return b.String()
 }
 
+// The distinct-value sample, §3.2's `_type` read and the django_content_type
+// read. Both forms are bounded in the template as well as here — a bare
+// `SELECT DISTINCT col FROM t` is not stopped by a LIMIT above it, since both
+// HashAggregate and Sort+GroupAggregate consume their whole input before they
+// emit a row, which is the unbounded read inside the holder transaction
+// THREAT_MODEL.md T9 forbids — and both are **reproducible**, which the prefix
+// alone was not: an unordered `LIMIT n` takes whichever rows the scan reaches
+// first, and synchronize_seqscans (on by default) starts a second scan of a
+// large table where a recent one left off. §3.2's sample decides which virtual
+// edges exist, hence which rows are selected, so a sample that moves between
+// two runs over one snapshot breaks §3's determinism rule and I3 with it.
+//
+// distinctSampleSQL is the form to prefer: TABLESAMPLE SYSTEM at a fraction
+// that reads about `limit` rows, REPEATABLE at the fixed seed, so two runs
+// visit the same pages — the same reproducibility §3.4's pseudo-key probe takes
+// it for. The outer LIMIT is the bound for a stale reltuples, and the sample
+// scan it truncates is a serial, ordered page walk, so what it cuts is
+// reproducible too.
+func distinctSampleSQL(t ref.TableRef, cols []string, types []keyType, num, den int64, limit int) string {
+	var b strings.Builder
+	b.WriteString("SELECT DISTINCT " + outList("t", cols, types))
+	b.WriteString(" FROM (SELECT " + quotedList(cols) + " FROM " + quoteTable(t) +
+		" TABLESAMPLE SYSTEM (" + strconv.FormatInt(num, 10) + "::float8 / " + strconv.FormatInt(den, 10) + ")" +
+		" REPEATABLE (" + strconv.Itoa(probeSampleSeed) + ")" +
+		" LIMIT " + strconv.Itoa(limit) + ") t")
+	b.WriteString(outOrder(len(cols)))
+	return b.String()
+}
+
+// distinctPrefixSQL is the fallback for the two relations TABLESAMPLE cannot be
+// taken on — a partitioned table, and one nothing has analysed, where a
+// fraction of an unknown row count is a full scan wearing a probe's name. The
+// prefix is ordered by the table's own identity columns, because that is what
+// makes *which* rows it reads a property of the data rather than of the plan
+// the server happened to choose.
+func distinctPrefixSQL(t ref.TableRef, cols []string, types []keyType, order []string, limit int) string {
+	var b strings.Builder
+	b.WriteString("SELECT DISTINCT " + outList("t", cols, types))
+	b.WriteString(" FROM (SELECT " + quotedList(cols) + " FROM " + quoteTable(t) +
+		" ORDER BY " + quotedList(order) +
+		" LIMIT " + strconv.Itoa(limit) + ") t")
+	b.WriteString(outOrder(len(cols)))
+	return b.String()
+}
+
+// quotedList renders a bare, quoted column list.
+func quotedList(cols []string) string {
+	quoted := make([]string, len(cols))
+	for i, c := range cols {
+		quoted[i] = quoteIdent(c)
+	}
+	return strings.Join(quoted, ", ")
+}
+
 // boundedCountSQL is §3's bounded lookup count: it reads at most 1,001 rows and
 // can therefore never scan a large table by accident (THREAT_MODEL.md T9).
 func boundedCountSQL(t ref.TableRef) string {
@@ -260,24 +318,24 @@ func pseudoKeyProbeSQL(t ref.TableRef, cols []string, bounded bool, num, den int
 	counts := "count(*), count(DISTINCT (" + list + "))"
 	if bounded {
 		return "SELECT " + counts + " FROM (SELECT " + list + " FROM " + quoteTable(t) +
-			" LIMIT " + strconv.Itoa(pseudoKeySample) + ") s"
+			" LIMIT " + strconv.Itoa(probeSampleRows) + ") s"
 	}
 	return "SELECT " + counts + " FROM " + quoteTable(t) +
 		" TABLESAMPLE SYSTEM (" + strconv.FormatInt(num, 10) + "::float8 / " + strconv.FormatInt(den, 10) + ")" +
-		" REPEATABLE (" + strconv.Itoa(pseudoKeySeed) + ")"
+		" REPEATABLE (" + strconv.Itoa(probeSampleSeed) + ")"
 }
 
 // samplePercent is the TABLESAMPLE fraction, as an integer numerator over an
-// integer denominator, that reads about pseudoKeySample rows. It is asked only
+// integer denominator, that reads about probeSampleRows rows. It is asked only
 // for a relation whose row count is known: a relation nothing has analysed
 // (reltuples -1) takes the bounded prefix instead, because sampling 100% of an
 // unknown row count is a full scan wearing a probe's name.
 func samplePercent(approx int64) (num, den int64) {
 	const den100 = 100 // hundredths of a percent, so the fraction has two decimals
-	if approx <= pseudoKeySample {
+	if approx <= probeSampleRows {
 		return 100 * den100, den100
 	}
-	num = (pseudoKeySample * 100 * den100) / approx
+	num = (probeSampleRows * 100 * den100) / approx
 	if num < 1 {
 		num = 1
 	}

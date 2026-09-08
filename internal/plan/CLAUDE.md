@@ -123,23 +123,208 @@ reason for each.
   rules themselves are not duplicated: `followsAsParent` and `followsAsChild`
   are the only statement of them and both walks call them, so the two can
   differ in scope (`staticReach` runs before the drops) and in nothing else.
-- **Polymorphic pairs are detected and reported, not followed.** §3.2's
-  mapping half (sampling the `_type` values, Rails/Django mapping, a `Virtual`
-  edge per mapping) is not implemented: `Plan.Virtual` is always empty and each
-  pair is one entry in `Plan.Unmapped`, spelled
-  `public.attachments (owner_type, owner_id)`. That is what
-  `testdata/README.md` trap 6 requires of v1 ("not followed: no constraint",
-  and no row selected because of the pair). Implementing the mapping is a
-  change to this file and to §3.2 together. Two consequences:
-  - A `Virtual` edge is followed in neither direction, so the empty field and
-    the walk agree. Following one would put rows in the slice through an
-    inferred edge §3.5 requires the plan to print.
-  - `Plan.Unmapped` is documented in §2 as `"_type values that map to no
-    table"`, and it now carries pair names instead. §2's comment is false as
-    written, and the field a renderer will read has a different contract from
-    the one it was given. The fix is a field of its own on `pipeline.Plan`
-    (`Polymorphic []string`) with §2 amended in the same change; neither file
-    is writable from this package's task.
+- **Polymorphic pairs are inferred and followed in the parent direction**
+  (`polymorphic.go`, §3.2, T-POLY). Detection is unchanged: `<x>_type`/`<x>_id`
+  and `content_type_id`/`object_id`, minus any pair whose id column a declared
+  foreign key already covers. What landed on top of it is the mapping half —
+  the distinct `_type` values are sampled over a bounded, repeatable sample,
+  each is mapped to a table (Rails: demodulize, underscore, pluralise; Django:
+  the `django_content_type` row the id names, whose default table is
+  `<app_label>_<model>`), and each mapping becomes one `pipeline.ForeignKey`
+  with `Virtual` set, in `Plan.Virtual`.
+  - **The inferred edges do not travel through `p.outgoing`, and
+    `followsAsParent` still refuses a `Virtual` edge.** §3's pseudo-code writes
+    the parent step as `fk.Validated ∨ fk.Virtual`, and this is the deviation:
+    a `pipeline.ForeignKey` has nowhere to carry the discriminator, and an
+    inferred polymorphic edge without its `_type` guard is
+    research/COMPLAINTS.md FK-10 — Greenmask's #396, the polymorphic reference
+    whose generated predicate lost its guard and selected almost nothing.
+    `virtualParents` is therefore its own step beside the declared parent loop,
+    reading the pair's two columns together, and `followsAsParent`/
+    `followsAsChild` stay the rule for the declared graph alone. A `Virtual`
+    edge arriving on `pipeline.Schema` from anywhere else (`Config.VirtualFKs`
+    is declared and unwired) is still followed in neither direction, because it
+    carries no discriminator either.
+  - **The discriminator is applied client-side, not in the statement.** The
+    walk reads `SELECT DISTINCT owner_type, owner_id FROM child JOIN chunk ...`
+    — the ordinary `plan.map_keys_not_null` shape with both columns of the pair
+    in its select list — and splits the result by value in Go. One read answers
+    every value of a pair, and no `_type` value is ever written into a
+    statement: `{keypred}` in `internal/pg`'s grammar admits identifiers and
+    equality, never a bound parameter or a literal, so a `WHERE owner_type =
+    $2` would have needed a new placeholder in the grammar for a predicate that
+    is not needed at all.
+  - **Two bounds, both load-bearing.** A virtual edge is parent-direction only,
+    so a row reached through one is `PARENT_ONLY` and never has its own children
+    pulled: the inference can widen the slice by the parents of rows already in
+    it and by nothing else, which is what ARCHITECTURE.md §14 means by "virtual
+    edges are parent-direction only, so enabling it later widens nothing the
+    caps do not bound". And a pair with more than `polymorphicValueCap` (50)
+    distinct values in its sample is not followed at all — a `_type` column
+    holding free text is not a discriminator, and one virtual edge per value
+    would be an unbounded fan-out of parent tables from one column. The cap is a
+    product decision this file introduced: ARCHITECTURE.md §3.2 does not state
+    it and no ADR carries it. It is owed a §3.2 amendment or an ADR, and until
+    it has one this bullet is the only record of it, which root CLAUDE.md
+    ("decisions live in docs/adr/") says is the wrong home. What it is no longer
+    is *silent*: a pair the cap stopped is reported as `public.attachments
+    (owner_type, owner_id), the sample carries more than 50 distinct owner_type
+    values`, so the one reason that is a threshold of ours rather than a
+    property of the schema is named. Every other reason a pair is not followed
+    keeps the bare sentence, because every other reason is the source's.
+  - **The sample is bounded *and* repeatable**, and it is two shapes because it
+    is two statements. `plan.distinct_sample` (`distinctSampleSQL`) is the one
+    to prefer: `TABLESAMPLE SYSTEM` at a fraction that reads about
+    `probeSampleRows` (2,000) rows, `REPEATABLE` at `probeSampleSeed`, under a
+    `LIMIT` for a stale `reltuples`. `plan.distinct_prefix`
+    (`distinctPrefixSQL`) is the fallback for the two relations `TABLESAMPLE`
+    cannot be taken on — a partitioned table, and one nothing has analysed,
+    where a fraction of an unknown row count is a full scan wearing a probe's
+    name — and it orders the prefix by the table's identity columns. Both
+    bounds are in the shape as well as in the builder, because a bare `SELECT
+    DISTINCT col FROM t` is not bounded by a `LIMIT` above it: the aggregate
+    consumes its whole input first, which is the unbounded read inside the
+    holder transaction THREAT_MODEL.md T9 forbids.
+
+    Repeatability is the half that was missing and it is not a nicety here.
+    An unordered `LIMIT 2000` reads whichever rows the scan reaches first, and
+    `synchronize_seqscans` (on by default) starts a second scan of a large table
+    where a recent one left off, so two runs over one snapshot could sample
+    different rows — and this sample decides which virtual edges exist, hence
+    which rows are selected. That is §3's determinism rule and I3 both. The
+    constants are `probeSampleRows`/`probeSampleSeed` in `sql.go`, shared with
+    §3.4's pseudo-key probe, because they are one bound and one seed rather than
+    two: this is the most rows a probe may read inside the holder transaction.
+
+    The known cost of the fallback: ordering by a *probed pseudo-key* on a table
+    nothing has analysed is a sort of the table rather than an index scan. It is
+    the narrow corner where a reproducible sample has nothing cheaper to offer,
+    and it is bounded in what it returns rather than in what it reads.
+  - **An edge is built only between one key space and the same one.** The
+    referenced columns are the parent's primary key; the key must be a single
+    column, and its `keyType.kind` must equal the `_id` column's, which must
+    itself be `kindInt`, `kindUUID` or `kindText`. `bpchar` is out because its
+    comparison strips padding and `kindOther` because its join carries a cast
+    back to a type no polymorphic id has.
+  - **The candidate names are §3.2's rule first, and Django's are §3.2's rule
+    only.** `railsCandidates` tries the underscored plural — of the value and of
+    the value without its module path — before anything else, because §3.2 says
+    "underscore and pluralise"; an earlier version put the raw and un-pluralised
+    forms first, which inverted the rule and resolved `User` to a `user` table
+    in preference to `users`. The un-pluralised forms are still tried *after*
+    it, and that is a deliberate deviation from §3.2: a `_type` column holding
+    the table name itself is the shape `testdata/nasty.sql` trap 6 carries and
+    the shape hand-rolled polymorphism takes, and without the fallback both
+    values of the only fixture this feature has would be unmapped. It is owed a
+    §3.2 amendment. `djangoCandidates` has no fallback at all — the bare model
+    name would bind an `auth`/`user` content type to any app's `public.user` —
+    so a model with an explicit `db_table` resolves to no table and is reported
+    as an unmapped value, which is the finding the feature already has for a
+    name it cannot place.
+  - **A dangling polymorphic id never enters the parent's key set.**
+    `pushVirtual` translates the referenced values through the parent with
+    `virtualIdentityKeys`, which always issues the `plan.map_keys` read;
+    `identityKeys` short-circuits when the referenced columns are already the
+    identity, and that short-circuit is sound only behind a *declared*
+    constraint, which is what guarantees the referenced row exists. Behind an
+    inferred edge nothing does. Taking it there put a key for a row that does
+    not exist into `selected`, which inflates `Estimate.Rows` and the printed
+    step count, makes extract return one row fewer than the plan promised, and
+    ends as `internal/verify`'s exit 7 with the target already dropped and
+    loaded — a planner defect reported as a load failure.
+    `TestPlanVirtualEdgeToADanglingRow` is the guard, over a fixture of its own
+    in `plan_integration_test.go`: `nasty.sql`'s dangling owner is on the one
+    attachment no declared edge reaches, so its pair is never read and the
+    assertion there could not fail.
+  - **Three findings, three lists, and the v1 sentence is kept for the third.**
+    `Plan.Virtual` is what was inferred and followed; `Plan.Unmapped` is a
+    sampled value that names no table, spelled `public.attachments.owner_type
+    value "widgets"`; `Plan.Polymorphic` is what inference could not resolve and
+    still prints `polymorphic pair detected, not followed: no constraint`. A
+    pair whose sample produced no followable value at all is listed whole
+    (`public.attachments (owner_type, owner_id)`), and a single unfollowable
+    value of an otherwise resolved pair is listed as `public.attachments
+    (owner_type, owner_id) where owner_type = "events"` — saying nothing about
+    it is the silence FK-10 exists to make impossible. A `_type` value is
+    admitted into a message because §14 says it identifies a class and not a
+    row, and it is quoted and truncated at 64 bytes for the column that turned
+    out to hold something else (THREAT_MODEL.md T4).
+  - **A fourth finding, and the walk is what produces it.** A `_type` value the
+    walk meets that the sample never produced has no edge, so its rows' parents
+    are not followed — and the first version of this file dropped it in silence
+    while reporting the pair as fully resolved, which is research/COMPLAINTS.md
+    FK-10 exactly. `noteUnknownType` records it during the walk and
+    `unknownFindings` appends it to `Plan.Polymorphic` in `assemble`, spelled
+    `public.attachments (owner_type, owner_id) where owner_type = "Widget", a
+    value the sample did not produce`, in pair order and then value order.
+    It is bounded by `polymorphicValueCap` per pair, and what is past the bound
+    is one further finding rather than a silence. `TestUnknownTypeValues\
+    AreReportedNotDropped` holds the bookkeeping; the integration suite cannot
+    reach it, since every fixture table is analysed and small enough that the
+    sample sees all of it.
+  - **Only a value the sample really did miss is reported that way.**
+    `pairPlan.sampled` is every value the sample produced, and `virtualParents`
+    consults it before `noteUnknownType`: a value with no edge that *is* in it
+    was already reported — under `Unmapped`, or as an unfollowable value — so
+    saying it again as "a value the sample did not produce" would print one
+    value twice under two reasons, the second false, pointing at a remedy
+    (widen the sample) that would change nothing. The `'Ghost'` row in
+    `plan_integration_test.go`'s `note_links` is the guard: the sample maps it
+    to no table and the walk then meets it on a selected row.
+  - **`Plan.Virtual`'s only reader is `internal/emit`, and no line of the
+    printed plan says a virtual edge was followed.** `internal/core` emits one
+    event per `Plan.Polymorphic` entry and one per `Plan.Unmapped` entry and has
+    no code for a followed virtual edge, so on `testdata/nasty.sql` — where both
+    values resolve — the run says less than it did before, not more: the "not
+    followed" warning is correctly gone and no "followed" line replaces it. §3.5
+    requires the plan to print every virtual FK. The fix is a
+    `plan.polymorphic.inferred` code in `internal/core/codes.go` and
+    `internal/event/catalogue.yml`, a loop over `p.Virtual` in
+    `internal/core/run.go`'s `planStage`, and the code added to
+    `internal/tui/collect.go`; none of those files is writable from this
+    package's task, and the feature is not finished until they are written. The
+    provenance is not entirely lost in the meantime — `Step.Why` says `parent of
+    public.attachments via the polymorphic pair public.attachments.owner_id
+    where owner_type = "projects"` and `plan.step` prints it — but only for a
+    table the virtual edge is the *first* thing to reach, since `noteWhy` keeps
+    the first reason. Two comments in that same unwritable half are now false
+    and belong in the same landing: `internal/emit/document.go`'s `virtualList`
+    ("section 3.2's mapping half is not in v1, so this list is empty") and
+    `internal/emit/CLAUDE.md`'s "`virtual_fks:` ... v1 follows no inferred
+    edge". So does ARCHITECTURE.md §14's line cutting §3.2 inference from v1,
+    and `testdata/nasty.sql` and `testdata/README.md` trap 6, which still
+    promise the "not followed" line the inference removed.
+  - **`ForeignKey.Name` carries identifiers and never the `_type` value.** It is
+    `public.attachments.owner_type`: the discriminator column the inference
+    read, and nothing else. `internal/emit` copies `Plan.Virtual` into
+    `lazyslice.yml`'s `virtual_fks:`, and ARCHITECTURE.md §10 says every value in
+    that file is an identifier, a count, a fingerprint or a flag value with
+    literals withheld — a sampled column value is none of those, and the yml is
+    the file the tool tells people to commit. The value stays where §14 does
+    admit it: the log, through `Step.Why` and through the unmapped and
+    unfollowable findings. The name stops at the discriminator because
+    `emit.virtualList` renders `Name Child (cols) -> Parent (cols)`: a name that
+    also carried the parent made that line print the arrow clause twice, and the
+    parent is already on the edge. What the name adds is the one thing the
+    reconstructed edge cannot say — which column the discriminator was. Two
+    edges of one pair therefore differ by parent rather than by name, so
+    `inferPolymorphic` dedupes on name *and* parent, and two values naming the
+    same table are still one edge reported once.
+  - **`staticReach` does not know about the inferred edges.** §3.6 runs before
+    the inference does, because the inference reads the source and the
+    privilege pass is what decides whether this role may. A table reachable only
+    through a virtual edge is therefore judged unreachable there, and an
+    unreadable one is dropped to `SchemaOnly` rather than refused with a
+    `GRANT`. That fails towards the quiet direction rather than the loud one,
+    which is the wrong way round for §3.6; `virtualEdgeTo` refuses to build an
+    edge into an out-of-scope table, so the walk cannot then read it, and the
+    value is reported as unfollowable instead. Closing it properly needs the
+    sample to move ahead of the privilege pass, which means reading a table
+    before knowing the role may — the reason it is where it is.
+  - **The Django half has no fixture.** Neither `testdata/nasty.sql` nor pagila
+    carries a `django_content_type` table, so `djangoContentTypes` is exercised
+    only by `TestDjangoCandidatesFollowTheDefaultTableName` over the name
+    mapping. A Django-shaped torture schema is owed (phase 5, ten schemas).
 - **Defaults are applied here.** A `PlanRequest` field left at zero takes §3's
   default (take 500, cap 100, depth 3, row budget 1,000,000, memory budget
   256 MiB). A caller that means an explicit zero — no root rows, no rows per

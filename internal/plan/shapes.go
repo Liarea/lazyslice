@@ -99,6 +99,26 @@ const (
 	// partitioned table and for a relation whose row count is unknown.
 	pseudoKeyProbeBoundedShape = `SELECT count(*), count(DISTINCT ({idents})) FROM ` +
 		`(SELECT {idents} FROM {ident} LIMIT {int}) s`
+
+	// distinctSampleShape is §3.2's sample: the distinct values a few columns
+	// carry over a bounded, reproducible sample of a table. It answers both the
+	// `_type` value sample and the django_content_type read, which differ only
+	// in arity. The bound is inside the template because a DISTINCT under a
+	// LIMIT is not a bounded read — the aggregate consumes its whole input
+	// first — so the subquery is the bound and not a formatting choice, and the
+	// REPEATABLE seed is in it because a sample that moved between two runs
+	// would move the slice with it (sql.go).
+	distinctSampleShape = `SELECT DISTINCT {selectlist} FROM ` +
+		`(SELECT {idents} FROM {ident} TABLESAMPLE SYSTEM ({int}::float8 / {int}) ` +
+		`REPEATABLE ({int}) LIMIT {int}) t ORDER BY {idents}`
+
+	// distinctPrefixShape is the same sample over an ordered prefix, which is
+	// what a partitioned table and an unanalysed one take: TABLESAMPLE is not
+	// accepted on the first, and a fraction of an unknown row count is a full
+	// scan on the second. The ORDER BY is in the template for the same reason
+	// the LIMIT is: a prefix without one is not reproducible.
+	distinctPrefixShape = `SELECT DISTINCT {selectlist} FROM ` +
+		`(SELECT {idents} FROM {ident} ORDER BY {idents} LIMIT {int}) t ORDER BY {idents}`
 )
 
 // Shapes is every statement shape internal/plan sends to the source. A caller
@@ -116,6 +136,8 @@ func Shapes() []Statement {
 		{Name: "plan.explicit_key_probe_bounded", SQL: explicitKeyProbeBoundedShape},
 		{Name: "plan.pseudo_key_probe", SQL: pseudoKeyProbeShape},
 		{Name: "plan.pseudo_key_probe_bounded", SQL: pseudoKeyProbeBoundedShape},
+		{Name: "plan.distinct_sample", SQL: distinctSampleShape},
+		{Name: "plan.distinct_prefix", SQL: distinctPrefixShape},
 		{Name: "plan.unreadable_partition_leaves", SQL: sqlUnreadablePartitionLeaves},
 	}
 }

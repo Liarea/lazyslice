@@ -75,13 +75,17 @@ func TestShapesAreNamedAndDistinct(t *testing.T) {
 		}
 		seen[s.Name] = true
 	}
-	// Eleven, since T-CORE: the whole-catalog unreadable-relation read and the
-	// current-role read are gone, because internal/core reads privileges once
-	// through Source.Privileges and hands them to the planner on
-	// PlanRequest.Priv — and one narrow read came back,
+	// Thirteen, since T-POLY: eleven after T-CORE — the whole-catalog
+	// unreadable-relation read and the current-role read are gone, because
+	// internal/core reads privileges once through Source.Privileges and hands
+	// them to the planner on PlanRequest.Priv, and one narrow read came back,
 	// plan.unreadable_partition_leaves, because that query excludes partition
-	// leaves and §3.3 makes an unreadable leaf the root's refusal (sql.go).
-	if got, want := len(Shapes()), 11; got != want {
+	// leaves and §3.3 makes an unreadable leaf the root's refusal (sql.go) —
+	// plus §3.2's bounded `_type` sample, which is two shapes and not one:
+	// plan.distinct_sample takes a REPEATABLE TABLESAMPLE, and
+	// plan.distinct_prefix is the ordered prefix a partitioned or unanalysed
+	// relation takes instead (polymorphic.go, sql.go).
+	if got, want := len(Shapes()), 13; got != want {
 		t.Errorf("Shapes() has %d entries, want %d; a new statement needs a shape", got, want)
 	}
 }
@@ -163,6 +167,30 @@ func TestEveryPlannerStatementMatchesItsShape(t *testing.T) {
 			sql:  pseudoKeyProbeSQL(items, []string{"a"}, true, 0, 0),
 			want: "plan.pseudo_key_probe_bounded",
 		},
+		{
+			name: "§3.2's _type sample over a TABLESAMPLE",
+			sql: distinctSampleSQL(items, []string{"owner_type"}, []keyType{bp},
+				100, 100, probeSampleRows),
+			want: "plan.distinct_sample",
+		},
+		{
+			name: "§3.2's _type sample over an ordered prefix",
+			sql: distinctPrefixSQL(items, []string{"owner_type"}, []keyType{bp},
+				[]string{"id"}, probeSampleRows),
+			want: "plan.distinct_prefix",
+		},
+		{
+			name: "§3.2's django_content_type read",
+			sql: distinctSampleSQL(orders, djangoContentTypeCols,
+				[]keyType{i8, bp, other}, 1, 100, probeSampleRows),
+			want: "plan.distinct_sample",
+		},
+		{
+			name: "§3.2's django_content_type read over a composite-ordered prefix",
+			sql: distinctPrefixSQL(orders, djangoContentTypeCols,
+				[]keyType{i8, bp, other}, []string{"id", "taken_at"}, probeSampleRows),
+			want: "plan.distinct_prefix",
+		},
 	}
 
 	for _, c := range cases {
@@ -193,10 +221,12 @@ func TestStatementsOutsideTheGrammarAreStillRefused(t *testing.T) {
 		`WITH x AS (DELETE FROM "public"."orders" RETURNING *) SELECT * FROM x`,
 		`SELECT lo_import('/etc/passwd')`,
 		// The planner's own shapes with a bound removed: an unbounded seed, an
-		// unbounded lookup count, an unbounded --key probe (THREAT_MODEL.md T9).
+		// unbounded lookup count, an unbounded --key probe, and §3.2's sample
+		// without the prefix that bounds it (THREAT_MODEL.md T9).
 		`SELECT t."id" AS o1 FROM "public"."orders" t ORDER BY t."id"`,
 		`SELECT count(*) FROM "public"."orders"`,
 		`SELECT count(*) FROM (SELECT 1 FROM "public"."orders" p GROUP BY "a" HAVING count(*) > 1) s`,
+		`SELECT DISTINCT t."owner_type" AS o1 FROM "public"."orders" t ORDER BY o1`,
 		// A second statement smuggled onto a statement that does match.
 		seedSQL(orders, []string{"id"}, []keyType{i8}, "", 500) + `; DROP TABLE "public"."orders"`,
 		// A chunk join whose ON is not a key predicate but a call.
@@ -217,7 +247,7 @@ func TestStatementsOutsideTheGrammarAreStillRefused(t *testing.T) {
 	}
 
 	if tr.Violation() == nil {
-		t.Error("Violation() = nil after the allowlist refused ten statements")
+		t.Error("Violation() = nil after the allowlist refused every statement above")
 	}
 }
 

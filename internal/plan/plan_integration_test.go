@@ -124,6 +124,16 @@ func analyse(ctx context.Context, t *testing.T, url string) {
 
 func tref(schema, name string) ref.TableRef { return ref.TableRef{Schema: schema, Name: name} }
 
+// containsKey says whether a step's integer key set holds one key.
+func containsKey(keys []int64, want int64) bool {
+	for _, k := range keys {
+		if k == want {
+			return true
+		}
+	}
+	return false
+}
+
 // stepsByTable indexes a plan's steps.
 func stepsByTable(p *pipeline.Plan) map[ref.TableRef]pipeline.Step {
 	out := make(map[ref.TableRef]pipeline.Step, len(p.Steps))
@@ -327,27 +337,81 @@ func TestPlanNasty(t *testing.T) {
 		}
 	})
 
-	// Trap 6: the polymorphic pair is detected, reported with both column names,
-	// and not followed. Nothing becomes a virtual edge in v1.
-	t.Run("Trap6_PolymorphicPairIsReportedNotFollowed", func(t *testing.T) {
-		want := "public.attachments (owner_type, owner_id)"
-		found := false
-		for _, u := range p.Polymorphic {
-			if u == want {
-				found = true
+	// Trap 6: the polymorphic pair is detected, both of its `_type` values are
+	// mapped, and each mapping is one parent-direction virtual edge (§3.2).
+	// attachments.owner_type holds 'people' and 'projects', which name
+	// public.people and public.projects, so nothing about this pair is left
+	// unresolved and neither the "not followed" line nor the unmapped list has
+	// anything to say.
+	t.Run("Trap6_PolymorphicPairIsInferredAndFollowed", func(t *testing.T) {
+		// The name is one identifier — the discriminator column the inference
+		// read — and never the `_type` value it resolved from, because
+		// internal/emit copies this list into lazyslice.yml and §10 admits an
+		// identifier, a count, a fingerprint or a flag value into that file and
+		// nothing else. It stops at the discriminator because emit renders the
+		// name in front of the reconstructed edge, so a name that also carried
+		// the parent printed the arrow clause twice; the parent is read off the
+		// edge, which is where the rendered line states it.
+		want := []string{
+			`public.attachments.owner_type -> public.people`,
+			`public.attachments.owner_type -> public.projects`,
+		}
+		var got []string
+		for _, fk := range p.Virtual {
+			if !fk.Virtual {
+				t.Errorf("Virtual carries %s with Virtual unset", fk.Name)
 			}
+			if fk.Validated {
+				t.Errorf("%s is Validated; there is no constraint behind an inferred edge", fk.Name)
+			}
+			if fk.Name != `public.attachments.owner_type` {
+				t.Errorf("Virtual carries the name %q, want the discriminator column alone", fk.Name)
+			}
+			if fk.Child != tref("public", "attachments") || fmt.Sprint(fk.ChildCols) != "[owner_id]" {
+				t.Errorf("%s is on %s %v, want public.attachments [owner_id]", fk.Name, fk.Child, fk.ChildCols)
+			}
+			got = append(got, fk.Name+" -> "+fk.Parent.String())
 		}
-		if !found {
-			t.Errorf("Polymorphic = %v, want it to name %s", p.Polymorphic, want)
+		sort.Strings(got)
+		if fmt.Sprint(got) != fmt.Sprint(want) {
+			t.Errorf("Virtual = %v, want %v", got, want)
 		}
-		// Unmapped is the other list: the sampled _type values that map to no
-		// table. v1 never samples them, so a pair name appearing there would be
-		// a pair printed under a heading that says it is a value.
+		if len(p.Polymorphic) != 0 {
+			t.Errorf("Polymorphic = %v, want none: both _type values resolved", p.Polymorphic)
+		}
 		if len(p.Unmapped) != 0 {
-			t.Errorf("Unmapped = %v, want none: v1 maps no _type value", p.Unmapped)
+			t.Errorf("Unmapped = %v, want none: both _type values name a table", p.Unmapped)
 		}
-		if len(p.Virtual) != 0 {
-			t.Errorf("Virtual = %v, want none: v1 detects the pair and does not follow it", p.Virtual)
+
+		// The edge is followed, and the row it reaches is in the slice.
+		// attachment 826 is `owner_type = 'projects'`, `owner_id = 700`, so
+		// public.projects holds project 700 through an edge PostgreSQL knows
+		// nothing about (research/COMPLAINTS.md FK-10 is the silent version of
+		// this, and the whole point of the trap).
+		projects := steps[tref("public", "projects")]
+		if !containsKey(intKeysOf(t, projects), 700) {
+			t.Errorf("public.projects = %v, want it to hold 700: attachment 826 points at it through the pair",
+				intKeysOf(t, projects))
+		}
+
+		// And it is followed in the parent direction only. attachment 839 is
+		// the dangling owner — `owner_type = 'people'`, `owner_id = 99999`,
+		// which is no person — and its uploaded_by_person_id is NULL, so no
+		// declared edge reaches it either. A virtual edge walked as a child
+		// would put it in the slice.
+		//
+		// What this cannot say is what happens to a dangling id that *is* read:
+		// 839 is outside the slice, so its pair never reaches the parent step
+		// at all. That case has a fixture of its own
+		// (TestPlanVirtualEdgeToADanglingRow); asserting it here would be an
+		// assertion that cannot fail.
+		attachments := steps[tref("public", "attachments")]
+		if attachments.Mode != pipeline.ChildOK {
+			t.Errorf("public.attachments mode = %v, want ChildOK", attachments.Mode)
+		}
+		if containsKey(intKeysOf(t, attachments), 839) {
+			t.Errorf("public.attachments = %v, want 839 left out: a virtual edge is never followed as a child",
+				intKeysOf(t, attachments))
 		}
 	})
 
@@ -784,7 +848,7 @@ func keyLen(s pipeline.Step) int {
 
 // ---------- two shapes nasty.sql does not carry ----------
 
-// extraSchema adds three schema shapes to nasty.sql for the length of one test.
+// extraSchema adds four schema shapes to nasty.sql for the length of one test.
 // All three are shapes the planner has code for and testdata/ has no table for,
 // and each fails silently or obscurely rather than loudly when that code is
 // wrong, which is the reason testdata/README.md gives for the key-kinds trap
@@ -804,6 +868,13 @@ func keyLen(s pipeline.Step) int {
 //     exit code and no remedy where §3.4 promises exit 12 naming --key and
 //     --skip-table. testdata/nasty.sql's click_stream is the same rung with
 //     only comparable columns, so it cannot catch this.
+//   - a polymorphic pair whose dangling `_type`/`_id` pair is on a row the
+//     slice actually holds. testdata/nasty.sql has a dangling owner
+//     (attachment 839) and it is on the one attachment no declared edge
+//     reaches, so the pair is never read and the dangling id never reaches the
+//     parent step: the assertion that the parent holds no phantom key cannot
+//     fail there, and it did not, while pushVirtual was pushing the referenced
+//     value straight into the parent's key set as if the row existed.
 //
 // The tables live here rather than in testdata/nasty.sql because that file is
 // shared with introspect, classify and the gate, and each of them counts its
@@ -858,6 +929,32 @@ CREATE TABLE public.page_views (
 INSERT INTO public.page_views (person_id, payload, viewed_at) VALUES
     (90000, '{"path": "/pricing"}', '2025-04-01 10:00:00+00'),
     (90000, '{"path": "/docs"}',    '2025-04-01 10:00:00+00');
+
+-- A polymorphic pair whose dangling owner is on a selected row. target_type
+-- holds the Rails class name, so §3.2's own rule -- underscore and pluralise --
+-- maps 'Note' to public.notes, and link 2 names a note that does not exist.
+--
+-- Link 3's 'Ghost' names no table in any spelling, so the sample reports it as
+-- an unmapped value. The walk then meets it again on a selected row, which is
+-- the case that must not be reported a second time as a value the sample never
+-- produced.
+CREATE TABLE public.notes (
+    note_id bigint PRIMARY KEY,
+    body    text NOT NULL
+);
+
+CREATE TABLE public.note_links (
+    link_id     bigint PRIMARY KEY,
+    target_type text NOT NULL,
+    target_id   bigint NOT NULL
+);
+
+INSERT INTO public.notes (note_id, body) VALUES (1, 'kept');
+
+INSERT INTO public.note_links (link_id, target_type, target_id) VALUES
+    (1, 'Note', 1),
+    (2, 'Note', 999999),
+    (3, 'Ghost', 5);
 `
 
 // nastyPlusRequest is nastyRequest with the second table extraSchema adds whose
@@ -978,6 +1075,73 @@ func TestPlanForeignKeyToNonPrimaryUniqueColumn(t *testing.T) {
 			t.Errorf("people = %s, want the two account owners", got)
 		}
 	})
+}
+
+// A polymorphic id that names no row, on a row the slice holds.
+//
+// There is no constraint behind an inferred edge, so nothing guarantees the
+// referenced row exists — which is exactly the assumption the parent step's
+// short-circuit makes for a declared one, and taking it here put a key for a
+// row that does not exist into the parent's selected set. What follows from a
+// phantom key is not a wrong number in a report: it inflates Estimate.Rows and
+// the printed step count, extract returns one row fewer than the plan promised,
+// and internal/verify refuses the finished run at exit 7 with the target
+// already dropped and loaded.
+func TestPlanVirtualEdgeToADanglingRow(t *testing.T) {
+	ctx := context.Background()
+	r, schema := fixture(ctx, t, loadNastyPlus)
+
+	links := tref("public", "note_links")
+	notes := tref("public", "notes")
+
+	req := nastyPlusRequest(links)
+	req.Take = 500
+	p, err := New().Plan(ctx, r, schema, nil, req)
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	steps := stepsByTable(p)
+
+	if got := fmt.Sprint(intKeysOf(t, steps[links])); got != "[1 2 3]" {
+		t.Fatalf("note_links = %s, want every row: the root is the table the pair is on", got)
+	}
+	want := `public.note_links.target_type -> public.notes`
+	var names []string
+	found := false
+	for _, fk := range p.Virtual {
+		names = append(names, fk.Name+" -> "+fk.Parent.String())
+		found = found || (fk.Name == `public.note_links.target_type` && fk.Parent == notes)
+	}
+	if !found {
+		t.Fatalf("Virtual = %v, want it to carry %q: 'Note' underscores and pluralises to notes", names, want)
+	}
+
+	// 'Ghost' names no table, so the sample reports it once, under Unmapped.
+	// The walk meets it again on link 3 — a selected row — and that must not
+	// become a second finding saying the sample never produced it: the sample
+	// did, the reason would be false, and the remedy it points at (widen the
+	// sample) would change nothing.
+	wantUnmapped := []string{`public.note_links.target_type value "Ghost"`}
+	if fmt.Sprint(p.Unmapped) != fmt.Sprint(wantUnmapped) {
+		t.Errorf("Unmapped = %v, want %v", p.Unmapped, wantUnmapped)
+	}
+	for _, f := range p.Polymorphic {
+		if strings.Contains(f, "Ghost") {
+			t.Errorf("Polymorphic carries %q; 'Ghost' is already reported as an unmapped value, and the "+
+				"sample did produce it", f)
+		}
+	}
+
+	// Link 1 names note 1, which exists. Link 2 names note 999999, which does
+	// not, and the key set is what the target will be checked against.
+	n := steps[notes]
+	if n.Mode != pipeline.ParentOnly {
+		t.Errorf("notes mode = %d, want ParentOnly: a virtual edge is followed as a parent only", n.Mode)
+	}
+	if got := fmt.Sprint(intKeysOf(t, n)); got != "[1]" {
+		t.Errorf("notes = %s, want [1]: 999999 is no note, and a key set that holds it promises a row "+
+			"the extract cannot produce", got)
+	}
 }
 
 // §3.4's fourth rung over a table whose NOT NULL columns include one the key
