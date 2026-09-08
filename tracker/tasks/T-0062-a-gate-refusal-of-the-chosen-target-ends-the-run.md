@@ -3,12 +3,12 @@ id: T-0062
 title: "A gate refusal of the chosen target ends the run instead of falling through to the runner-up: core.Request carries one target, not a list"
 epic: E5
 phase: ""
-status: open
+status: done
 owner: opus
 created: 2026-09-07
 started: ""
-closed: ""
-outcome: ""
+closed: 2026-09-07
+outcome: "done: one target per request, gate refusal ends the run at exit 4, pinned by an integration test; ARCHITECTURE.md §9 and ADR-008 §5 now say so"
 ---
 
 # T-0062 · A gate refusal of the chosen target ends the run instead of falling through to the runner-up: core.Request carries one target, not a list
@@ -25,6 +25,8 @@ Either the ranked candidate list reaches the gate so a refusal can fall through 
 
 - 2026-09-07 created
 
+- 2026-09-07 closed: done: one target per request, gate refusal ends the run at exit 4, pinned by an integration test; ARCHITECTURE.md §9 and ADR-008 §5 now say so
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+Went well: the safe behaviour was already the code's; the docs were the risk. Went badly: nothing. Change: none.

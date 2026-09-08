@@ -3,12 +3,12 @@ id: T-0061
 title: "Move firstRun from cmd/lazyslice into internal/core's discover stage, so cmd/ calls only core.Run again; update cmd/CLAUDE.md in the same change"
 epic: E5
 phase: ""
-status: in_progress
+status: done
 owner: opus
 created: 2026-09-07
 started: 2026-09-07
-closed: ""
-outcome: ""
+closed: 2026-09-07
+outcome: "done: first-run ladder lives in core's discover stage; cmd/ calls only core.Run; cmd/CLAUDE.md true again"
 ---
 
 # T-0061 · Move firstRun from cmd/lazyslice into internal/core's discover stage, so cmd/ calls only core.Run again; update cmd/CLAUDE.md in the same change
@@ -27,6 +27,8 @@ cmd/lazyslice no longer imports internal/discover. core.Run walks the ladder for
 
 - 2026-09-07 started
 
+- 2026-09-07 closed: done: first-run ladder lives in core's discover stage; cmd/ calls only core.Run; cmd/CLAUDE.md true again
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+Went well: clean move. Went badly: nothing. Change: discovery tasks always get internal/core in paths.
