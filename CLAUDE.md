@@ -14,7 +14,7 @@ Before saying something works: run the checks (lint, test, integration once they
 
 Decisions live in docs/adr/. An ADR is proposed until its phase gate closes, then accepted and frozen. To change an accepted decision, add a new ADR that supersedes it. Never edit an accepted ADR.
 
-Write only the files your task names. Do not fix nearby code, extend behaviour the task did not mention, or add tests beyond the task. If you see something else wrong, report it in your return value.
+Write only the files your task names. Do not fix nearby code, extend behaviour the task did not mention, or add tests beyond the task. If you see something else wrong, report it in your return value, and if it is work someone must do outside your paths, file it yourself with `python3 tools/tracker.py new --epic E9 --title "..." --goal "why, and which file"` (E9 is Later; the orchestrator re-homes it). That is the one write outside your paths a task allows; never edit tracker files by hand.
 
 Every factual claim in a research document links to its source. Recognizing a tool's name is not knowing its current state; search for it and verify as of the current date.
 
