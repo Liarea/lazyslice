@@ -6,7 +6,10 @@ used by classification. No masking, no classification decisions, no writing —
 this package only reads and shapes catalog metadata plus raw samples.
 
 **Contract.** ARCHITECTURE.md §2 "introspect": `Introspector.Introspect(ctx,
-Reader) (*Schema, error)`. Definition text (`Default`, `Checks`, index and
+Reader) (*Schema, error)`, plus `IntrospectSchema` with the same signature —
+the same catalog read without the samples, declared as
+`pipeline.SchemaOnlyIntrospector` and owed a line in §2 (see the decision
+below). Definition text (`Default`, `Checks`, index and
 constraint defs) must come from the catalog's own deparser (`pg_get_expr`,
 `pg_get_constraintdef`, `pg_get_indexdef`) — never a printer of our own,
 per §2's comment on `Column`/`Index`/`Constraint`.
@@ -239,13 +242,16 @@ per §2's comment on `Column`/`Index`/`Constraint`.
   fingerprinted equal to its source and §11.2's marker never bound. ADR-009
   settles it on the DDL text: `ddl.Fingerprint` is the only definition, and
   `fingerprint.go` and `TestSchemaFingerprintIsTheRecreatedObjectsOnly` are
-  gone. `Introspect` returns `Schema.Fingerprint` empty. **Owed: nothing fills
-  it.** Both ends of §11.2's binding compute their own value through
+  gone. `Introspect` and `IntrospectSchema` both return `Schema.Fingerprint`
+  empty, and `internal/core` fills it from `load.SchemaFingerprint` immediately
+  after introspection (`internal/core/run.go`, `dropMarkerTable` then
+  `SchemaFingerprint`), being the caller that has both halves of §11.2's
+  binding. Both ends of that binding still compute their own value through
   `internal/load` (`load.SchemaFingerprint` for the marker,
-  `load.GateFingerprint` for the gate), so the field is dead in the tree until
-  `internal/core` — the caller that has both halves, and still a scaffold —
-  fills it from `load.SchemaFingerprint`. The integration suite asserts the
-  field comes back empty rather than asserting a hash, because a value set here
+  `load.GateFingerprint` for the gate) rather than reading the field, so a
+  `Schema.Fingerprint` filled anywhere else reaches neither end. The
+  integration suite asserts the field comes back empty rather than asserting a
+  hash, because a value set here
   would be the second definition again; what it asserts instead is that two
   introspections of one snapshot describe it identically
   (`assertSameSchema`), which is the property §11.2's marker rests on and the
@@ -375,6 +381,33 @@ per §2's comment on `Column`/`Index`/`Constraint`.
   backslash: `internal/pg/tracer.go` records a statement containing one as its
   leading keyword alone, on the grounds that its literals cannot be shown to
   have been elided.
+- **`IntrospectSchema` is the same read with the sampler left out** (T-0053).
+  It is a second method on the same unexported type and a second interface in
+  `internal/pipeline` (`SchemaOnlyIntrospector`, which embeds `Introspector`),
+  not an option on `New` and not a second constructor: ARCHITECTURE.md §2
+  declares `Introspector` with one method and names no constructor, so this
+  adds a name beside §2's rather than changing it, and `New()`'s one value
+  satisfies both — there is no second introspector to keep straight and no
+  configuration that could be set wrong. The sampling flag is a parameter of
+  the shared `read` function rather than a field on `introspector`, so the zero
+  value of that struct cannot be an introspector that silently skips the
+  sampler. The caller is `load.GateFingerprint`, the target end of §11.2's
+  binding: that fingerprint is `sha256` over generated DDL and nothing in
+  `internal/load/ddl` reads `Table.Samples`, so a full read there is a
+  `TABLESAMPLE` per table whose rows are discarded — production values held in
+  memory (THREAT_MODEL.md T4), out of a database the gate has not yet agreed to
+  touch, with `internal/pg`'s `REPEATABLE READ` transaction open for the length
+  of it. The two ends still agree because they hash the same catalog through
+  the same function; `TestLoadPagilaIntoAMarkedTarget` is where they are shown
+  to, since it writes the marker from a full read of the source and binds it
+  from this read of the target. **What that test cannot see is which read ran**
+  — it passes identically on the sampling path, because the two hash equal
+  either way — so the property is pinned here instead:
+  `TestIntrospectSchemaIsTheSameReadWithoutTheSampler` drives both methods
+  through a reader that records its statements and fails when the schema-only
+  read sends a `TABLESAMPLE` or a `SAVEPOINT`, when a `Table.Samples` or
+  `SampledFrom` comes back filled, or when any other field of the two schemas
+  differs.
 
 **Test.** `go test ./internal/introspect/...`; catalog-shape correctness needs
 `go test -tags integration ./internal/introspect/...` against the fixtures in

@@ -187,3 +187,25 @@ type SchemaSummary struct {
 type Introspector interface {
 	Introspect(ctx context.Context, r Reader) (*Schema, error)
 }
+
+// SchemaOnlyIntrospector is an Introspector that can also read the catalog
+// without the samples: the same Schema with Table.Samples and
+// Table.SampledFrom left empty.
+//
+// It is an interface of its own rather than a second method on Introspector so
+// that Introspector stays the one ARCHITECTURE.md section 2 declares. A caller
+// that wants the cheaper read asserts for this one and falls back to
+// Introspect, which returns a superset and is therefore always a correct
+// answer to the question — never the reverse, because a caller that needs the
+// samples must not silently get a Schema without them.
+//
+// The one caller is load.GateFingerprint, the target end of section 11.2's
+// binding. That fingerprint is sha256 over generated DDL, which reads no
+// sample, so sampling there is a TABLESAMPLE per table whose result is
+// discarded — inside the REPEATABLE READ transaction internal/pg holds open
+// around the call, over rows in a database the gate has not yet agreed to
+// touch (THREAT_MODEL.md T4).
+type SchemaOnlyIntrospector interface {
+	Introspector
+	IntrospectSchema(ctx context.Context, r Reader) (*Schema, error)
+}

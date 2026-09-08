@@ -16,17 +16,19 @@
 // SELECT has no samples and does not end the run: ARCHITECTURE.md §3.6 answers
 // an unreadable table at plan.
 //
-// Table.Samples holds production values and is never serialised.
+// Table.Samples holds production values and is never serialised. The sampler is
+// also the one part of the read a caller can decline: IntrospectSchema returns
+// the same catalog without it, for the target end of §11.2's binding, which
+// hashes generated DDL and reads no sample.
 //
 // This package does not fingerprint a schema (ADR-009). Schema.Fingerprint is
-// sha256 over the DDL text internal/load/ddl generates for the schema, so
-// Introspect returns the field empty. Owed: nothing in the tree fills it —
-// both ends of §11.2's binding compute their own value through internal/load
-// (load.SchemaFingerprint for the marker, load.GateFingerprint for the gate),
-// so the field is dead until internal/core, the caller that has both halves
-// and still a scaffold, fills it from load.SchemaFingerprint (ADR-009).
+// sha256 over the DDL text internal/load/ddl generates for the schema, so both
+// entry points return the field empty; internal/core fills it after
+// introspection by calling load.SchemaFingerprint, being the caller that has
+// both halves of §11.2's binding (the loader writes the marker with that same
+// function and the gate recomputes it through load.GateFingerprint).
 // Column.Fingerprint, which is a different thing — ARCHITECTURE.md §5's
-// per-column value that expires an --unmask opt-out — is still computed here.
+// per-column value that expires an --unmask opt-out — is computed here.
 package introspect
 
 import (
@@ -46,10 +48,17 @@ import (
 
 type introspector struct{}
 
-// New returns the catalog introspector.
+// New returns the catalog introspector. The value it returns also satisfies
+// pipeline.SchemaOnlyIntrospector, so a caller that needs the catalog without
+// the samples — the gate's fingerprint, ARCHITECTURE.md §11.2 — asserts for
+// that interface rather than being handed a second, differently configured
+// introspector to keep straight.
 func New() pipeline.Introspector { return introspector{} }
 
-var _ pipeline.Introspector = introspector{}
+var (
+	_ pipeline.Introspector           = introspector{}
+	_ pipeline.SchemaOnlyIntrospector = introspector{}
+)
 
 // catalog is one run of Introspect. It holds the tables by reference while the
 // per-object statements are read into them, because every statement after the
@@ -82,6 +91,37 @@ type catalog struct {
 // transaction on one snapshot: every statement below sees the same database
 // (ARCHITECTURE.md §2).
 func (introspector) Introspect(ctx context.Context, r pipeline.Reader) (*pipeline.Schema, error) {
+	return read(ctx, r, true)
+}
+
+// IntrospectSchema is pipeline.SchemaOnlyIntrospector: the same catalog read
+// with the sampler left out. Table.Samples and Table.SampledFrom come back
+// empty and every other field is what Introspect returns, statement for
+// statement.
+//
+// It exists for the target end of ARCHITECTURE.md §11.2's binding
+// (load.GateFingerprint). That fingerprint is sha256 over the DDL text
+// internal/load/ddl generates, and the DDL is built from the catalog alone —
+// nothing in internal/load/ddl reads Table.Samples — so sampling the target
+// there is a TABLESAMPLE per table whose result is discarded, taken inside the
+// REPEATABLE READ transaction internal/pg holds open around the call, on a
+// database the gate has not yet agreed to touch. The samples are production
+// values in memory (THREAT_MODEL.md T4), and the target's are values of
+// whatever is already in it.
+//
+// The two ends of the binding still agree because they hash the same thing:
+// the marker's value is load.SchemaFingerprint over a full Introspect of the
+// source, the gate's is load.SchemaFingerprint over this read of the target,
+// and a field neither DDL generator reads cannot make them differ.
+func (introspector) IntrospectSchema(ctx context.Context, r pipeline.Reader) (*pipeline.Schema, error) {
+	return read(ctx, r, false)
+}
+
+// read is the catalog read both entry points run; withSamples is the only
+// difference between them. It is a function rather than a field on
+// introspector so that the zero value of that struct cannot be an introspector
+// that silently skips the sampler.
+func read(ctx context.Context, r pipeline.Reader, withSamples bool) (*pipeline.Schema, error) {
 	c := &catalog{
 		schema:      &pipeline.Schema{Enums: map[string][]string{}},
 		tables:      map[ref.TableRef]*pipeline.Table{},
@@ -124,8 +164,10 @@ func (introspector) Introspect(ctx context.Context, r pipeline.Reader) (*pipelin
 	// Table.Parent.
 	c.linkPartitions()
 	c.repointPartitionForeignKeys()
-	if err := c.readSamples(ctx, r); err != nil {
-		return nil, fmt.Errorf("introspect: reading the samples: %w", err)
+	if withSamples {
+		if err := c.readSamples(ctx, r); err != nil {
+			return nil, fmt.Errorf("introspect: reading the samples: %w", err)
+		}
 	}
 	c.markIndexedForeignKeys()
 	c.collect()

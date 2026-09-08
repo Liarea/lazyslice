@@ -186,6 +186,26 @@ for the privilege.
   had started. `READ ONLY` is the free half: recomputing a fingerprint reads,
   and the target pool has no tracer, so the server is what refuses a
   fingerprinter that tried to write.
+  **That `BEGIN` is now pinned in this package's own suite** (T-0053):
+  `TestGateRunsTheFingerprinterInsideATransaction` injects a fingerprinter that
+  takes a `SAVEPOINT` through the reader it is handed and fails the test by name
+  on 25P01, so the statement is guarded where it is written rather than in
+  `internal/load`'s suite, where the bug was found. `load.GateFingerprint` now
+  asks for a schema-only introspection, so the production fingerprinter takes no
+  savepoint of its own; the transaction is still owed to the contract
+  `CatalogFingerprinter` states — one version of the catalog for a read of many
+  statements, and a savepoint legal for any fingerprinter that needs one — and a
+  test is what keeps a contract nothing currently exercises.
+  **A `ROLLBACK` that fails discards the connection**, with `source.go`'s
+  `endTx` discipline through the shared `discard` helper: the connection is
+  closed, and `pgxpool` throws a closed connection away when the gate's own
+  deferred `Release` returns it, rather than handing an unknown transaction
+  state to whoever acquires next. It is still reported as well as acted on —
+  every caller turns the error into `CodeProbeFailed` and a refused run, which
+  is the fail-closed direction for a binding that could not be confirmed. The
+  comment that used to justify reporting it by saying "the gate has rules left
+  to run on this connection" was wrong in the other direction: rule 4 returning
+  an error is the end of the gate, and rule 5 is never reached on that path.
 - Locality is decided from the endpoint (`dsn.Ref.Loopback`) plus
   `--allow-remote-target`; `WithLocal` carries the case the connection string
   cannot show, a container whose compose `working_dir` is the cwd.

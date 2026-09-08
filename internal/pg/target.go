@@ -339,22 +339,37 @@ func (t *Target) markerBound(ctx context.Context, conn *pgxpool.Conn, m MarkerRo
 // catalogFingerprint runs the injected fingerprinter over the target's catalog
 // inside a transaction this package opens and ends itself.
 //
-// The transaction is not a nicety. The fingerprinter reads the whole catalog —
-// dozens of statements that must see one version of it — and introspect wraps
-// its sampling in a SAVEPOINT so that a table the role cannot read does not end
-// the run. Outside a transaction block a SAVEPOINT is 25P01, so on a pooled
-// connection in autocommit the fingerprinter failed every time, §11.2's binding
-// could never be confirmed, and a target lazyslice itself wrote was refused with
-// exit 4. It is opened here rather than by the caller because a BEGIN issued
-// from the other side of the injection would end a transaction it did not
-// start, and because this package owns the connection.
+// The transaction is not a nicety; it is what CatalogFingerprinter's contract
+// promises. A fingerprinter reads the whole catalog — dozens of statements that
+// must see one version of it — and a SAVEPOINT is legal for whichever
+// fingerprinter needs one, because outside a transaction block a SAVEPOINT is
+// 25P01. That was learned the hard way: the fingerprinter used to take a full
+// introspection, whose sampler wraps itself in a SAVEPOINT so that a table the
+// role cannot read does not end the run, and on a pooled connection in
+// autocommit it failed every time — §11.2's binding could never be confirmed
+// and a target lazyslice itself wrote was refused with exit 4. Today's
+// production fingerprinter (load.GateFingerprint, which asks introspect for the
+// schema-only read) takes no savepoint of its own, so nothing in the tree
+// currently exercises that half of the promise and
+// TestGateRunsTheFingerprinterInsideATransaction is what keeps it true. It is
+// opened here rather than by the caller because a BEGIN issued from the other
+// side of the injection would end a transaction it did not start, and because
+// this package owns the connection.
 //
 // READ ONLY, because recomputing a fingerprint reads: it makes a fingerprinter
 // that tried to write fail at the server rather than at review. REPEATABLE READ
-// for the one-version-of-the-catalog property. ROLLBACK ends it either way —
-// there is nothing to commit, and a rollback that fails leaves the connection in
-// an unknown transaction state, so it is reported rather than swallowed: the
-// gate has rules left to run on this connection.
+// for the one-version-of-the-catalog property.
+//
+// ROLLBACK ends it either way — there is nothing to commit. A rollback that
+// fails is both reported and acted on. Reported, because every caller of this
+// function turns an error into CodeProbeFailed and a refused run, which is the
+// fail-closed direction for a binding that could not be confirmed: rule 4 is the
+// last rule that runs on this connection before rule 5, and a run that returns
+// here does not reach rule 5 at all. Acted on, because a failed rollback leaves
+// the connection in an unknown transaction state and the pool would hand it to
+// whoever acquires next — so it is closed with the same discipline as
+// source.go's endTx, and pgxpool discards a closed connection when the gate's
+// own deferred Release returns it.
 func (t *Target) catalogFingerprint(ctx context.Context, conn *pgxpool.Conn) (string, error) {
 	if _, err := conn.Exec(ctx, sqlBeginReadOnly); err != nil {
 		return "", fmt.Errorf("pg: opening the transaction to read the target catalog: %w", err)
@@ -363,8 +378,11 @@ func (t *Target) catalogFingerprint(ctx context.Context, conn *pgxpool.Conn) (st
 	// ROLLBACK succeeds on an aborted transaction, so it runs whether or not the
 	// fingerprinter failed, and the fingerprinter's own error is the one
 	// returned when both go wrong.
-	if _, err := conn.Exec(ctx, sqlRollback); err != nil && fpErr == nil {
-		return "", fmt.Errorf("pg: ending the transaction that read the target catalog: %w", err)
+	if _, err := conn.Exec(ctx, sqlRollback); err != nil {
+		discard(context.WithoutCancel(ctx), conn)
+		if fpErr == nil {
+			return "", fmt.Errorf("pg: ending the transaction that read the target catalog: %w", err)
+		}
 	}
 	if fpErr != nil {
 		return "", fpErr

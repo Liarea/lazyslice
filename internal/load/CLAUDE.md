@@ -126,14 +126,14 @@ then after-data: indexes, FKs, setval, ANALYZE, bookkeeping tables).
   apart.** `ddl.Fingerprint` is over the DDL text, as §11.1 says, and ADR-009
   makes it the only definition: `internal/introspect`'s `schemaFingerprint`,
   which hashed the catalog fields that text is rendered from, is deleted, and
-  `Introspect` now returns `Schema.Fingerprint` empty. **Owed: nothing fills
-  `pipeline.Schema.Fingerprint`.** Both ends here compute their own value —
-  `Load` through `SchemaFingerprint`, the gate through `GateFingerprint` — so
-  the field is dead in the tree, and filling it from `SchemaFingerprint` is
-  owed to `internal/core`, which is still a scaffold whose `Run` returns
-  `pipeline.ErrNotImplemented`. Nothing may read that field as though it were
-  set. What is not left to a caller's memory is which one
-  each end uses: `load.SchemaFingerprint` is the single name, `Load` computes
+  `Introspect` now returns `Schema.Fingerprint` empty. **`internal/core` fills
+  `pipeline.Schema.Fingerprint`, from `SchemaFingerprint`, right after
+  introspection** (`internal/core/run.go`) — it is the caller that has both
+  halves — and nothing else may fill it. Both ends here still compute their own
+  value rather than reading that field: `Load` through `SchemaFingerprint`, the
+  gate through `GateFingerprint`. That is what makes a `Schema.Fingerprint`
+  which came from somewhere else unreachable from either end, whoever set it.
+  What is not left to a caller's memory is which one each end uses: `load.SchemaFingerprint` is the single name, `Load` computes
   the marker's value with it rather than taking a `Run.SchemaFingerprint`, and
   `load.GateFingerprint(introspector)` is the `pg.TargetOption` `core` wires
   into the gate. A marker written with one definition and recomputed with the
@@ -197,6 +197,33 @@ then after-data: indexes, FKs, setval, ANALYZE, bookkeeping tables).
   gate treat `running` and `complete` identically — both authorise truncation —
   so the marker never says more than "a compatible lazyslice wrote exactly this
   here".
+
+- **`GateFingerprint` reads the target's catalog without sampling it**
+  (T-0053). It asks the introspector it was handed for
+  `pipeline.SchemaOnlyIntrospector` and uses `IntrospectSchema` when it is
+  offered, falling back to `Introspect`. This end hashes generated DDL, and
+  nothing in `internal/load/ddl` reads `Table.Samples`, so the samples a full
+  read takes are discarded — a `TABLESAMPLE` per table over rows in a database
+  the gate has not yet agreed to touch, held in memory (THREAT_MODEL.md T4),
+  inside the `REPEATABLE READ` transaction `internal/pg` keeps open around the
+  call. The assertion is made here rather than at the call site because
+  `internal/core` passes `introspect.New()` and should not have to know which
+  read the gate wants; the fall-back is correct and only slower, since the
+  fields a full read adds are fields `SchemaFingerprint` does not hash, so both
+  spellings give the marker's end and this one the same value.
+  `TestLoadPagilaIntoAMarkedTarget` is what shows the two ends still agree: it
+  writes the marker from a full read of the source and binds it from this read
+  of the target.
+  **The branch itself is pinned by two unit tests**, because a type assertion
+  that misses degrades silently: an introspector that reaches the gate wrapped
+  — a decorator, a fake, a `core` refactor — satisfies `Introspector` and not
+  `SchemaOnlyIntrospector`, the sampling read comes back, and
+  `TestLoadPagilaIntoAMarkedTarget` passes exactly as before because both reads
+  hash the same. `TestGateFingerprintAsksForTheSchemaOnlyRead` and
+  `TestGateFingerprintFallsBackToTheFullRead` hand `gateFingerprint` fakes that
+  record which method was called; `gateFingerprint` is a named function rather
+  than a closure inside `GateFingerprint` only so that they can, since a
+  `pg.TargetOption` hides the fingerprinter in an unexported field.
 
 **Test.** `go test ./internal/load/...` for the DDL statement lists and the
 transaction contract against a fake `Writer`; `go test -tags integration
