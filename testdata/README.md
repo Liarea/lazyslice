@@ -429,7 +429,7 @@ empty array left empty. The five rows cover every edge exactly once:
 |---|---|---|
 | Ada 90000 | two addresses | the ordinary case, and "same length" |
 | Grace 90007 | one address | a one-element array |
-| Alan 90014 | `ARRAY[NULL, 'a.turing@example.org']` | a `NULL` **element**, which must stay `NULL` |
+| Alan 90014 | `ARRAY[NULL, 'a.turing@corp.invalid']` | a `NULL` **element**, which must stay `NULL` |
 | Katherine 90021 | `NULL` | a `NULL` **column**, which is a different thing |
 | Edsger 90028 | `'{}'` | an empty array, which must stay empty |
 
@@ -439,7 +439,7 @@ empty array left empty. The five rows cover every edge exactly once:
 — `people.contact`.
 
 ```json
-{"profile": {"contact": {"email": "ada.lovelace@example.com",
+{"profile": {"contact": {"email": "ada.lovelace@fixture.test",
                          "phone": "+44 20 7946 0958"}, "locale": "en-GB"},
  "tags": ["founder"]}
 ```
@@ -554,6 +554,14 @@ person without matching any email rule, over values that are unambiguous
 addresses. `billing.invoices.bill_to_email` is the easy case both signals agree
 on, and it is here so that "the name rule fired" and "the validator fired" can
 be told apart in the reasons output.
+
+The source addresses across `nasty.sql` (`people.ref`'s and every other email
+column's, including these two) use `fixture.test` and `corp.invalid`, chosen
+deliberately to stay outside `example.com`/`example.net`/`example.org`, which
+is the email masker's output space (ARCHITECTURE.md §5). A source address
+already inside that output space here would make I2's third half and the
+residual scan report a false hit — see the invariant in
+`internal/invariants/CLAUDE.md` and the CI check that pins it.
 
 #### Sequences and identity
 

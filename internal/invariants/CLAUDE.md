@@ -147,6 +147,10 @@ is output under test and not one of our types.
   network_id's documentation-range output space.** See ARCHITECTURE.md
   section 5's note: fixtures avoid documentation-range IPv4 source values for
   exactly this reason (T-0059).
+- **The same false-positive shape holds for `email`.** See ARCHITECTURE.md
+  section 5's note: `email` emits under `example.com`/`example.net`/
+  `example.org`, so fixtures keep source addresses off those three domains
+  for exactly this reason (T-0073).
 - **What I2's third half excludes is exactly what §5 says must reuse an
   admissible value, and nothing else.** `NULL` and `''` (§5 preserves both;
   `scanCells` drops them). An empty array and an empty JSON document, which are

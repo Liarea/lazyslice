@@ -294,9 +294,9 @@ func TestNeighbouringColumnRule(t *testing.T) {
 	}
 	samples := mapSampler{
 		ref.ColumnRef{Table: member, Column: "email"}: anyOf(
-			"a@example.com", "b@example.com", "c@example.com", "d@example.com"),
+			"a@fixture.test", "b@fixture.test", "c@fixture.test", "d@fixture.test"),
 		ref.ColumnRef{Table: member, Column: "contact_point"}: anyOf(
-			"e@example.com", "f@example.com", "unknown", "n/a"),
+			"e@fixture.test", "f@fixture.test", "unknown", "n/a"),
 		ref.ColumnRef{Table: member, Column: "nickname"}: anyOf(true, false, true, false),
 	}
 	cls, err := New().Classify(schema, samples, nil)
@@ -438,8 +438,8 @@ func TestReasonGrammarRejectsProse(t *testing.T) {
 	t.Parallel()
 	for _, s := range []string{
 		"",
-		"name matches email; 200/200 samples parse as ada.lovelace@example.com",
-		"values look like ada.lovelace@example.com",
+		"name matches email; 200/200 samples parse as ada.lovelace@fixture.test",
+		"values look like ada.lovelace@fixture.test",
 		"name matches email address of the customer",
 		"no name or value signal at all",
 		"opt-out recorded in lazyslice.yml: product catalogue text",
@@ -574,8 +574,8 @@ func TestValueSignalSurvivesATypeNothingCanJudge(t *testing.T) {
 	}
 	// Test data about five fictional people, as elsewhere in this package.
 	emails := anyOf(
-		"ada.lovelace@example.com", "grace.hopper@example.com", "alan.turing@example.com",
-		"katherine.johnson@example.com", "edsger.dijkstra@example.com")
+		"ada.lovelace@fixture.test", "grace.hopper@fixture.test", "alan.turing@fixture.test",
+		"katherine.johnson@fixture.test", "edsger.dijkstra@fixture.test")
 	samples := mapSampler{
 		col(tbl, "id"):    anyOf(int64(1), int64(2), int64(3), int64(4), int64(5)),
 		col(tbl, "ref_a"): emails,
