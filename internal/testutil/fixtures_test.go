@@ -57,10 +57,10 @@ var pagilaTables = map[string]int{
 }
 
 // nastyTables is every table a default load of nasty.sql creates, with the rows
-// the fixture inserts. public.stream_rows is empty unless LoadNasty is called
-// with big=true, which is the whole point of the gate; public.stream_docs is
-// not in this map at all, because the gate creates the table as well as its
-// rows (testdata/README.md trap 26).
+// the fixture inserts. public.stream_rows and public.stream_docs are both
+// empty unless LoadNasty is called with big=true, which is the whole point of
+// the gate (testdata/README.md trap 26); both tables themselves exist on every
+// load.
 var nastyTables = map[string]int{
 	"billing.invoices":            3,
 	"public.LegacyCustomer":       3,
@@ -82,6 +82,7 @@ var nastyTables = map[string]int{
 	"public.price_lists_us":       1,
 	"public.projects":             2,
 	"public.sites":                2,
+	"public.stream_docs":          0,
 	"public.stream_rows":          0,
 	"public.teams":                2,
 	"public.tenant_user_flags":    3,
@@ -192,10 +193,10 @@ func TestLoadNastyBig(t *testing.T) {
 		t.Errorf("stream_rows_stream_row_id_seq is at (%d, is_called=%v), want (%d, true)", last, called, StreamRows)
 	}
 
-	// The text-keyed half (README trap 26), whose table the gate creates as well
-	// as fills. Its keys have to be distinct as well as numerous: the primary key
-	// would refuse a collision, so a count that matches is also the proof that
-	// 'doc-' || md5(g::text) is injective over this range.
+	// The text-keyed half (README trap 26). Its keys have to be distinct as well
+	// as numerous: the primary key would refuse a collision, so a count that
+	// matches is also the proof that 'doc-' || md5(g::text) is injective over
+	// this range.
 	if n := scanInt(ctx, t, conn, `SELECT count(*) FROM public.stream_docs`); n != StreamDocs {
 		t.Errorf("public.stream_docs has %d rows, want %d", n, StreamDocs)
 	}
@@ -621,13 +622,10 @@ func assertNastyGateOff(ctx context.Context, t *testing.T, conn *pgx.Conn) {
 		               WHERE n.nspname = 'public' AND p.proname = 'fill_stream_rows')`) {
 		t.Error("public.fill_stream_rows is missing; the 2,000,000-row gate has nothing to call")
 	}
-	// The other half of the gate creates its own table and its own function
-	// (trap 26), so a default load must show neither. A stream_docs here would
-	// mean the gate has leaked above the \if.
-	if scanBool(ctx, t, conn, `
-		SELECT EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-		               WHERE n.nspname = 'public' AND c.relname = 'stream_docs')`) {
-		t.Error("public.stream_docs exists after a default load; trap 26's table is gated behind big")
+	if !scanBool(ctx, t, conn, `
+		SELECT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+		               WHERE n.nspname = 'public' AND p.proname = 'fill_stream_docs')`) {
+		t.Error("public.fill_stream_docs is missing; the 1,000,000-row gate has nothing to call")
 	}
 }
 

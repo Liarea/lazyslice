@@ -8,11 +8,12 @@
 --
 -- Loading it:
 --
---     psql -f testdata/nasty.sql            -- fast; public.stream_rows stays empty
---                                            -- and public.stream_docs is not created
---     psql -v big=1 -f testdata/nasty.sql   -- also fills stream_rows (2,000,000 rows)
---                                            -- and creates and fills stream_docs
---                                            -- (1,000,000)
+--     psql -f testdata/nasty.sql            -- fast; public.stream_rows and
+--                                            -- public.stream_docs are both
+--                                            -- created empty
+--     psql -v big=1 -f testdata/nasty.sql   -- also fills stream_rows
+--                                            -- (2,000,000 rows) and
+--                                            -- stream_docs (1,000,000)
 --
 -- or, from Go, internal/testutil.LoadNasty(ctx, url, big), which cuts the gate
 -- off the end of this file and issues the statements inside it itself when big
@@ -528,6 +529,59 @@ $fill$;
 
 
 --
+-- Trap 26: a million rows behind a text key.
+--
+-- stream_docs is stream_rows with the identity moved off bigint, and the two
+-- are not the same test. A bigint key set is a []int64 and costs eight bytes a
+-- row (ARCHITECTURE.md section 2, KeySet); a text key set is a slab of encoded
+-- tuples costing the key's own bytes, a terminator and an eight-byte span, and
+-- every chunk handed to the server is a []string of separately allocated
+-- strings -- about 64 bytes a key. So a stage that materialises a whole key set
+-- alongside the planner's pays about four times as much here per row as it does
+-- on stream_rows, and this is the table that can fail the claim "extract's peak
+-- is one chunk of keys and one batch of rows" while stream_rows still passes it
+-- on margin.
+--
+-- The key is 'doc-' plus an md5: 36 characters, deterministic, so two loads of
+-- this fixture produce the same keys in the same order. Every row hangs off the
+-- same one person, as stream_rows' do, so a slice rooted at anyone else pulls
+-- none of it.
+--
+-- The table and its fill function are declared here, beside stream_rows and
+-- above the ANALYZE, so the fixture's schema is constant regardless of the
+-- big flag: 26 tables either way, both unanalysed the same way until the
+-- gate's own ANALYZE runs. Only the fill itself -- the million-row INSERT,
+-- which costs seconds and tens of megabytes -- is gated, the same way
+-- stream_rows' is.
+--
+CREATE TABLE public.stream_docs (
+    doc_key   text   PRIMARY KEY,
+    person_id bigint NOT NULL REFERENCES public.people (person_id),
+    email     text   NOT NULL,
+    body      text   NOT NULL
+);
+
+CREATE FUNCTION public.fill_stream_docs(n bigint) RETURNS bigint
+    LANGUAGE plpgsql
+    AS $filldocs$
+DECLARE
+    owner_id bigint;
+BEGIN
+    SELECT min(person_id) INTO STRICT owner_id FROM public.people;
+
+    INSERT INTO public.stream_docs (doc_key, person_id, email, body)
+    SELECT 'doc-' || md5(g::text),
+           owner_id,
+           'doc.' || g || '@example.invalid',
+           repeat('y', 40) || g
+    FROM generate_series(1, n) AS g;
+
+    RETURN n;
+END;
+$filldocs$;
+
+
+--
 -- Trap: a partitioned root's own key is DEFERRABLE, a leaf carries a key the
 -- root cannot hold, and an edge references the leaf.
 --
@@ -854,60 +908,6 @@ ANALYZE;
 \if :{?big}
 SELECT public.fill_stream_rows(2000000);
 ANALYZE public.stream_rows;
-
---
--- Trap 26: a million rows behind a text key.
---
--- stream_docs is stream_rows with the identity moved off bigint, and the two
--- are not the same test. A bigint key set is a []int64 and costs eight bytes a
--- row (ARCHITECTURE.md section 2, KeySet); a text key set is a slab of encoded
--- tuples costing the key's own bytes, a terminator and an eight-byte span, and
--- every chunk handed to the server is a []string of separately allocated
--- strings -- about 64 bytes a key. So a stage that materialises a whole key set
--- alongside the planner's pays about four times as much here per row as it does
--- on stream_rows, and this is the table that can fail the claim "extract's peak
--- is one chunk of keys and one batch of rows" while stream_rows still passes it
--- on margin.
---
--- The key is 'doc-' plus an md5: 36 characters, deterministic, so two loads of
--- this fixture produce the same keys in the same order. Every row hangs off the
--- same one person, as stream_rows' do, so a slice rooted at anyone else pulls
--- none of it.
---
--- Unlike stream_rows, the *table* is inside the gate and not only its rows, so
--- this fixture's shape depends on a load flag: 25 tables by default, 26 with
--- big. That is a known workaround and not the intended permanent state -- it is
--- here because internal/introspect/introspect_integration_test.go asserts the
--- default table list and T-0050 could write testdata/ and not internal/. It has
--- no tracker task and no owner; README.md trap 26 carries the whole reasoning
--- and the closing move (lift these two statements above the gate and update
--- that table list in the same commit). Do not read this comment as a design.
---
-CREATE TABLE public.stream_docs (
-    doc_key   text   PRIMARY KEY,
-    person_id bigint NOT NULL REFERENCES public.people (person_id),
-    email     text   NOT NULL,
-    body      text   NOT NULL
-);
-
-CREATE FUNCTION public.fill_stream_docs(n bigint) RETURNS bigint
-    LANGUAGE plpgsql
-    AS $filldocs$
-DECLARE
-    owner_id bigint;
-BEGIN
-    SELECT min(person_id) INTO STRICT owner_id FROM public.people;
-
-    INSERT INTO public.stream_docs (doc_key, person_id, email, body)
-    SELECT 'doc-' || md5(g::text),
-           owner_id,
-           'doc.' || g || '@example.invalid',
-           repeat('y', 40) || g
-    FROM generate_series(1, n) AS g;
-
-    RETURN n;
-END;
-$filldocs$;
 
 SELECT public.fill_stream_docs(1000000);
 ANALYZE public.stream_docs;

@@ -11,10 +11,10 @@ being interesting should be deleted from both files in the same commit.
 
 ```
 psql -f testdata/pagila/pagila-schema.sql -f testdata/pagila/pagila-data.sql
-psql -f testdata/nasty.sql              # fast: stream_rows stays empty and
-                                        # stream_docs is not created at all
+psql -f testdata/nasty.sql              # fast: stream_rows and stream_docs
+                                        # both exist and stay empty
 psql -v big=1 -f testdata/nasty.sql     # also fills stream_rows (2,000,000 rows)
-                                        # and creates and fills stream_docs (1,000,000)
+                                        # and stream_docs (1,000,000 rows)
 ```
 
 From Go, `internal/testutil.LoadPagila(ctx, url)` and
@@ -119,7 +119,7 @@ the partitioned root, so its count is the sum of its seven leaves.
 
 ## nasty.sql
 
-25 tables on a default load (26 with `big`), 5 people, and one trap per thing
+26 tables, 5 people, and one trap per thing
 that goes wrong. It needs no
 extension and no superuser, and it loads unchanged on PostgreSQL 14, 16 and 18.
 
@@ -151,16 +151,12 @@ file can run without the flag.
 | `public.click_stream` | 3 | | `public.price_lists_us` | 1 |
 | `public.device_readings` | 4 | | `public.projects` | 2 |
 | `public.devices` | 3 | | `public.sites` | 2 |
-| `public.events` | 7 | | `public.stream_rows` | 0 (2,000,000 with `big`) |
-| `public.events_2024` | 5 | | `public.teams` | 2 |
-| `public.events_2025` | 2 | | `public.tenant_user_flags` | 3 |
-| `public.order_items` | 7 | | `public.tenant_user_sessions` | 5 |
-| `public.orders` | 5 | | `public.tenant_users` | 4 |
-| `public.organisations` | 2 | | | |
-
-`public.stream_docs` is not in that table because a default load does not create
-it: trap 26 gates the `CREATE TABLE` as well as the rows. With `big` it is a
-26th table holding 1,000,000 rows.
+| `public.events` | 7 | | `public.stream_docs` | 0 (1,000,000 with `big`) |
+| `public.events_2024` | 5 | | `public.stream_rows` | 0 (2,000,000 with `big`) |
+| `public.events_2025` | 2 | | `public.teams` | 2 |
+| `public.order_items` | 7 | | `public.tenant_user_flags` | 3 |
+| `public.orders` | 5 | | `public.tenant_user_sessions` | 5 |
+| `public.organisations` | 2 | | `public.tenant_users` | 4 |
 
 ### The traps
 
@@ -634,15 +630,14 @@ behaviour for the defaults and a bug for the run above; the entry has to name
 which one it is talking about, and this one is talking about the run above.
 
 The gate is a psql conditional at the very end of the file, and it carries
-trap 26's table, function and fill as well:
+trap 26's fill as well — both tables and both fill functions are declared
+above it, so the schema is the same whether or not `big` is set:
 
 ```sql
 \if :{?big}
 SELECT public.fill_stream_rows(2000000);
 ANALYZE public.stream_rows;
 
-CREATE TABLE public.stream_docs (...);
-CREATE FUNCTION public.fill_stream_docs(n bigint) ...;
 SELECT public.fill_stream_docs(1000000);
 ANALYZE public.stream_docs;
 \endif
@@ -662,12 +657,13 @@ fixture that grows a `\connect` fails loudly instead of loading half of itself.
 from a working one if only the off state is ever tested.
 
 **26. A million rows behind a text key, on demand** — `public.stream_docs`,
-created and filled by the same gate as trap 22.
+filled by the same gate as trap 22.
 
 Shaped like `stream_rows`: same four columns, same single owning person
 (`person_id bigint NOT NULL REFERENCES public.people`, so the path to the root
-is there), absent unless the file is loaded with `-v big=1`. The identity is
-what differs, and it is the whole trap. `stream_rows` is keyed on one `bigint`, which
+is there). Like `stream_rows`, the table itself exists on every load and only
+its fill is gated behind `-v big=1`. The identity is what differs between the
+two, and it is the whole trap. `stream_rows` is keyed on one `bigint`, which
 ARCHITECTURE.md §2 stores as a `[]int64` and hands to the server as a `[]int64`:
 eight bytes a key on both sides, 16 MiB for two million of them. `stream_docs`
 is keyed on `doc_key text` — `'doc-' || md5(g::text)`, 36 characters,
@@ -687,29 +683,16 @@ A run over it is trap 22's run with the table name changed, and the same warning
 applies: under §3's defaults `stream_docs` is a capped child of `people` and a
 default run pulls 100 rows, not a million.
 
-**The gate creates the table, not only its rows, and that is unlike trap 22.**
-`stream_rows` is declared above the gate so that every load sees its shape;
-`stream_docs` is declared inside it, so a default load has 25 tables and only a
-`big` load has 26. The reason is mechanical: the table list of a default load is
-asserted table by table in
-`internal/introspect/introspect_integration_test.go`, and the task that added
-this trap (T-0050) was authorised to write `testdata/` and not
-`internal/introspect`, so a 26th table on every load would have failed that
-assertion for every caller of `LoadNasty`. Nothing outside the two
-`internal/extract` memory tests wants this table. A later task that wants it
-present on every load moves the `CREATE TABLE` and `CREATE FUNCTION` above the
-gate and updates that table list in the same commit — and, because it would then
-be a table every run plans over, checks what `--skip-table`-free invariant runs
-do with it first. It would also remove the `nastyTables` hole and the
-`assertNastyGateOff` special case in `internal/testutil/fixtures_test.go`, and
-the paragraphs this one is referenced from in `nasty.sql`, `testdata/CLAUDE.md`,
-`internal/testutil/CLAUDE.md` and `internal/extract/CLAUDE.md`.
-
-**This is a workaround with no tracker task and no owner.** A fixture whose
-table list changes with a load flag is not a shape to keep; it is here because
-one task's write boundary stopped at `testdata/`, and T-0050 could not file the
-follow-up (`tracker/` is orchestrator-only, root CLAUDE.md). This paragraph is
-the only marker in the tree, so it survives until the move above happens.
+**The table and its fill function are declared above the gate, like `stream_rows`'.**
+So the fixture's schema is the same 26 tables on every load; only the
+million-row fill is gated (T-0077). Earlier, `stream_docs`'s `CREATE TABLE` sat
+inside the gate and a default load had 25 tables against 26 with `big`, which
+existed only because the task that added this trap (T-0050) was authorised to
+write `testdata/` and not `internal/introspect`, whose table list a default
+load's 26th table would have failed. That is resolved: the table list in
+`internal/introspect/introspect_integration_test.go` names `stream_docs`, and
+`nastyTables` and `assertNastyGateOff` in
+`internal/testutil/fixtures_test.go` no longer special-case it.
 
 #### Masking domains
 
