@@ -3,13 +3,14 @@ export const meta = {
   description: 'Phase 5: torture schemas, failure UX, performance, then a three-attacker red team with one fix round and re-attack',
   phases: [
     { title: 'Features', detail: 'section 14 phase-5 items: TUI screens, provisioning and rung 4, polymorphic inference, CI matrix and supply chain' },
+    { title: 'Backlog', detail: 'review follow-ups carried into phase 5, in dependency order' },
     { title: 'Harden', detail: 'torture, failure UX, performance, each through implement.js in sequence' },
     { title: 'Red team', detail: 'three attackers try to make the tool leak; fix; re-attack' },
   ],
 }
 const REPO = '/Users/gareth/personal_repos/lazyslice'
 const IMPL = `${REPO}/.claude/workflows/implement.js`
-// args: { step: 'features' | 'harden' | 'redteam' }  one step per usage window
+// args: { step: 'features' | 'backlog' | 'harden' | 'redteam' }  one step per usage window
 const step = (args && args.step) || 'features'
 
 const FEATURES = [
@@ -42,6 +43,32 @@ const TASKS = [
   { id: 'T-PERF', title: 'Performance baseline', stage: 'hardening', paths: ['internal/extract/', 'internal/load/', 'internal/transform/', 'docs/PERF.md', 'Makefile', '.github/'], integration: true,
     brief: `Profile a snapshot of 5,000 root rows from a source whose child table has 20,000,000 rows (extend the nasty.sql generator with a size parameter). Report where time goes per stage with pprof. Target: under 3 minutes on this machine against local containers. Optimise only the top two hotspots. Write the before and after numbers, the commands, and the flame summary into docs/PERF.md. Add a make bench target and a CI job that fails if extract throughput drops more than 20% from the recorded baseline stored in testdata/bench/baseline.json.` },
 ]
+
+const BACKLOG = [
+  { id: 'T-0052', title: 'testutil retries the mapped port instead of failing on the first miss', model: 'sonnet', reviewers: 1, stage: 'foundations', paths: ['internal/testutil/'], integration: './internal/testutil/... ./internal/load/...',
+    brief: `Read tracker/tasks/T-0052-*.md including its Log. internal/testutil.Postgres turns a transient PortEndpoint failure (mapped port 5432/tcp not found, seen in TestKillNineLeavesEveryTableEmptyOrComplete and TestI6RootHoldsTakeRows) into an immediate t.Fatalf. Retry PortEndpoint with a bounded backoff (about ten attempts over five seconds), then fail with a message that names the race. Also handle a stale testcontainers reaper: if container creation fails with a ryuk No such container error, retry once. Add a unit test with a fake that fails the first two calls.` },
+  { id: 'T-0046', title: 'Fixture: deferrable unique on a partitioned root, leaf-local key, edge referencing the leaf', model: 'sonnet', reviewers: 1, stage: 'foundations', paths: ['testdata/', 'internal/testutil/', 'internal/introspect/', 'internal/plan/'], integration: './internal/introspect/... ./internal/plan/...',
+    brief: `Read tracker/tasks/T-0046-*.md. Add to testdata/nasty.sql a partitioned root carrying a DEFERRABLE unique constraint, a leaf partition carrying its own non-deferrable unique key the root cannot hold, and a child table whose foreign key references the leaf's key. Document the trap in testdata/README.md. Add integration assertions: introspect leaves that edge un-re-pointed with ForeignKey.NotRecreatable set, and the planner refuses at plan time with exit 13 and target.schema.not_recreatable naming the edge, before anything in a target is touched. Update any fixture count assertion.` },
+  { id: 'T-0049', title: 'Mask module low findings and a registry test for rules.yml masker ids', model: 'sonnet', reviewers: 1, stage: 'mask', paths: ['mask/', 'internal/classify/', 'internal/transform/'], integration: false,
+    brief: `Read tracker/tasks/T-0049-*.md and the Log section of tracker/tasks/T-0040-*.md. Fix each recorded low finding in mask/ with a targeted edit and a test: the unique branch must refuse when no generator fits regardless of an unknown row count; freeTextExact clamps to MaxLen; satAdd saturates; checkValues treats NOT IN and NOT (= ANY) as forbidden sets, not allowed sets; the network_id range test generates honest inputs including documentation-range values and counts distinct outputs. Move internal/transform/writeback_test.go's two RFC 5737 probe values to RFC 1918. Add a test in internal/classify that every masker id named in rules.yml resolves in the mask registry. Do not change generator behaviour beyond what a finding names.` },
+  { id: 'T-0053', title: 'pg gate follow-ups: transaction pin, rollback discipline, schema-only introspection', model: 'opus', reviewers: 3, stage: 'pg', paths: ['internal/pg/', 'internal/introspect/', 'internal/pipeline/', 'internal/load/'], integration: './internal/pg/... ./internal/load/... ./internal/introspect/...',
+    brief: `Read tracker/tasks/T-0053-*.md. (1) In internal/pg's own integration suite add a case whose injected fingerprinter issues SAVEPOINT through the reader it is handed and fails on 25P01, so the BEGIN around the fingerprinter is pinned where it lives. (2) Route a failed ROLLBACK in catalogFingerprint through the same discipline as source.go's endTx (close the connection) and correct the doc comment that claims the gate has rules left to run. (3) Add a schema-only introspection path (an option on the Introspector or a second method, whichever ARCHITECTURE.md section 2 tolerates with the smallest change; report the deviation) so the gate's fingerprint over the target does not sample rows or hold a REPEATABLE READ transaction longer than the catalog read; use it from load.GateFingerprint. Fix the stale comments T-FPR's reviewer listed.` },
+  { id: 'T-0050', title: 'Extract and transform hand-offs: shape-template escaping, KeySet chunk iterator, pooler test, text-keyed big fixture', model: 'opus', reviewers: 3, stage: 'extract', paths: ['internal/extract/', 'internal/pg/', 'internal/pipeline/', 'internal/plan/', 'internal/verify/', 'internal/testutil/', 'testdata/'], integration: './internal/extract/... ./internal/plan/... ./internal/verify/... ./internal/pg/...',
+    brief: `Read tracker/tasks/T-0050-*.md including its Log. (1) lookupShapeFor interpolates a quoted table name into a shape template, so a table named with a {token} widens or breaks the allowlist; give the tracer a way to register a shape with a pre-quoted literal segment, or escape placeholder-shaped text in identifiers, with a test using a table named with braces. (2) Add FirstChunk(n int) Chunk to pipeline.KeySet and both internal/plan implementations, and a chunk-at-a-time iterator so extract's peak memory is one chunk, not a full copy of the key set; make internal/verify/sample.go use FirstChunk and drop its fallback; record the section 2 change in the package CLAUDE.md files. (3) Add a pgbouncer testcontainer helper to internal/testutil and one integration test proving the pooler-safe startup parameter list and the pooled single-connection fallback. (4) Add a text-keyed or uuid-keyed large table to the nasty generator and a memory-bound extract test over it.` },
+  { id: 'T-0055', title: 'Shared validators package with the name dictionary; person_name and free_text in the second net', model: 'opus', reviewers: 3, stage: 'verify', paths: ['internal/classify/', 'internal/verify/', 'internal/pipeline/', 'internal/textsig/'], integration: './internal/classify/... ./internal/verify/...',
+    brief: `Read tracker/tasks/T-0055-*.md. Create a leaf package internal/textsig holding the value-only halves of the classifier's validators and the embedded name dictionary, imported by both internal/classify and internal/verify (check internal/CLAUDE.md's import-graph rule: a leaf under internal/ that imports only ref and pipeline is allowed; say so in its CLAUDE.md). Register person_name and free_text in verify's second net. Decide the verify-side false-positive threshold: a single dictionary word (black, brown, hill, green, wood) in a column must not fail a target; require the classifier's own multi-token name shape or a dictionary hit rate over the strong threshold across at least minValues distinct values, and name the rule in internal/verify/CLAUDE.md. Update THREAT_MODEL.md T1's gap list only by reporting it; the orchestrator edits that file.` },
+]
+
+if (step === 'backlog') {
+  phase('Backlog')
+  const results = []
+  for (const t of BACKLOG) {
+    const r = await workflow({ scriptPath: IMPL }, { ...t, effort: t.model === 'opus' ? 'high' : 'medium' })
+    results.push(r)
+    if (!r || r.status !== 'merged') { log(`Stopped at ${t.id}`); return { results, stopped_at: t.id } }
+  }
+  return { results }
+}
 
 if (step === 'harden') {
   phase('Harden')
