@@ -659,6 +659,17 @@
   message: "not followed: no constraint — {reason} maps to no table"
   args: [reason]
 
+# §3.2 amendment (2026-09-08, T-POLY): one line per followed virtual edge,
+# printed beside the two findings above so the plan states every edge it will
+# actually walk. {column} is the bare discriminator column name, {table}
+# carries the child table and its id column, and {reason} carries the parent
+# table the value resolved to.
+- code: plan.polymorphic.inferred
+  kind: info
+  stage: plan
+  message: "{column}: inferred {table} -> {reason}, followed as a virtual parent edge"
+  args: [column, table, reason]
+
 # ARCHITECTURE.md §9 "The repository", one code per branch, because every branch
 # prints what it did. The stage is transform: the masking key is transform's
 # input, and the key is what these are about.

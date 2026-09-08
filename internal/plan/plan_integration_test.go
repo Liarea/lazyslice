@@ -413,6 +413,20 @@ func TestPlanNasty(t *testing.T) {
 			t.Errorf("public.attachments = %v, want 839 left out: a virtual edge is never followed as a child",
 				intKeysOf(t, attachments))
 		}
+
+		// attachment 845 is `owner_type = 'Person'`, the Rails-spelled class
+		// name, resolved through the first form tried — underscore and
+		// pluralise, 'Person' -> 'people' — rather than through the
+		// raw-table-name fallback 'people'/'projects' resolve through. It is
+		// selected through its own declared uploaded_by_person_id edge, so
+		// its presence alone does not prove the resolution; what proves it is
+		// the absence of a third finding: both Polymorphic and Unmapped are
+		// asserted empty above, and a 'Person' value neither form resolved
+		// would have added one.
+		if !containsKey(intKeysOf(t, attachments), 845) {
+			t.Errorf("public.attachments = %v, want 845 included: uploaded_by_person_id reaches it",
+				intKeysOf(t, attachments))
+		}
 	})
 
 	// The trap testdata/nasty.sql calls "keys that are not integers": one table

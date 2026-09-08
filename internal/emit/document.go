@@ -508,9 +508,11 @@ func sccList(cs [][]ref.TableRef) [][]string {
 	return out
 }
 
-// virtualList renders the inferred edges as text. They are a record and never an
-// input: section 3.2's mapping half is not in v1, so this list is empty, and a
-// run that produced one would print it rather than replay it.
+// virtualList renders the inferred edges as text. They are a record and never
+// an input: section 3.2's mapping half ships in v1 as of T-POLY (amended
+// 2026-09-08), and this list carries one entry per followed virtual edge, but
+// it is never read back — a run that produced one prints it rather than
+// replaying it.
 func virtualList(fks []pipeline.ForeignKey) []string {
 	out := make([]string, 0, len(fks))
 	for _, fk := range fks {

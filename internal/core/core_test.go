@@ -3,12 +3,15 @@
 package core
 
 import (
+	"bytes"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/Liarea/lazyslice/internal/event"
 	"github.com/Liarea/lazyslice/internal/pipeline"
 	"github.com/Liarea/lazyslice/internal/ref"
+	"github.com/Liarea/lazyslice/internal/render"
 )
 
 // ARCHITECTURE.md section 3's defaults are substituted here and nowhere else:
@@ -251,6 +254,68 @@ func TestMarkerWarningsFireAfterTheKeyAndTheClassification(t *testing.T) {
 		t.Errorf("an unbound marker emitted %v", quiet.codes)
 	}
 }
+
+// A followed virtual edge is printed under plan.polymorphic.inferred (§3.2
+// amended 2026-09-08, T-POLY): virtualEvents is the loop planStage calls for
+// every entry of Plan.Virtual, and this pins its one event, its args and that
+// the rendered line carries no unfilled placeholder.
+func TestVirtualEdgeIsPrintedAsInferred(t *testing.T) {
+	events := &eventCollector{}
+	r := &run{sink: events}
+	child := ref.TableRef{Schema: "public", Name: "attachments"}
+	parent := ref.TableRef{Schema: "public", Name: "people"}
+	p := &pipeline.Plan{
+		Virtual: []pipeline.ForeignKey{
+			{
+				Name:       "public.attachments.owner_type",
+				Child:      child,
+				ChildCols:  []string{"owner_id"},
+				Parent:     parent,
+				ParentCols: []string{"person_id"},
+				Virtual:    true,
+			},
+		},
+	}
+
+	r.virtualEvents(p)
+
+	var got []event.Event
+	for _, e := range events.events {
+		if e.Code == CodePlanPolymorphicInferred {
+			got = append(got, e)
+		}
+	}
+	if len(got) != 1 {
+		t.Fatalf("virtualEvents emitted %d plan.polymorphic.inferred events, want exactly 1: %v", len(got), got)
+	}
+	e := got[0]
+	if e.Args[event.ArgColumn] != "owner_type" {
+		t.Errorf("column arg = %q, want the bare discriminator column %q", e.Args[event.ArgColumn], "owner_type")
+	}
+	if e.Args[event.ArgTable] != "public.attachments (owner_id)" {
+		t.Errorf("table arg = %q, want the child table and column", e.Args[event.ArgTable])
+	}
+	if e.Args[event.ArgReason] != "public.people" {
+		t.Errorf("reason arg = %q, want the parent table %q", e.Args[event.ArgReason], "public.people")
+	}
+
+	var buf bytes.Buffer
+	render.NewLines(&buf).Send(e)
+	line := buf.String()
+	if strings.ContainsAny(line, "{}") {
+		t.Errorf("rendered %q, want no unfilled placeholder", line)
+	}
+	if !strings.Contains(line, "owner_type") || !strings.Contains(line, "public.attachments") ||
+		!strings.Contains(line, "public.people") {
+		t.Errorf("rendered %q, want the column, the child and the parent all named", line)
+	}
+}
+
+// eventCollector is an event.Sink that keeps every event it was sent, for
+// tests that need the args and not only the codes.
+type eventCollector struct{ events []event.Event }
+
+func (c *eventCollector) Send(e event.Event) { c.events = append(c.events, e) }
 
 // collector is an event.Sink that keeps the codes it was sent.
 type collector struct{ codes []event.Code }

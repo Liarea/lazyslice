@@ -143,7 +143,7 @@ file can run without the flag.
 |---|---:|---|---|---:|
 | `billing.invoices` | 3 | | `public.orders` | 5 |
 | `public."LegacyCustomer"` | 3 | | `public.organisations` | 2 |
-| `public.attachments` | 4 | | `public.people` | 5 |
+| `public.attachments` | 5 | | `public.people` | 5 |
 | `public.audit_log` | 4 | | `public.projects` | 2 |
 | `public.click_stream` | 3 | | `public.sites` | 2 |
 | `public.device_readings` | 4 | | `public.stream_rows` | 0 (2,000,000 with `big`) |
@@ -229,32 +229,44 @@ Introspection must report `confmatchtype` `f` here and `s` on
 different meanings.
 
 **6. Polymorphic association with no constraint** —
-`attachments.owner_type` (`'people'` or `'projects'`) and `attachments.owner_id`.
+`attachments.owner_type` (`'people'`, `'projects'`, or `'Person'`, the
+Rails-spelled form) and `attachments.owner_id`.
 
-PostgreSQL knows nothing about this pair, so lazyslice must not follow it, and
-must not be quiet about not following it. Until §3.2 lands the required output
-is the line
+PostgreSQL knows nothing about this pair, so lazyslice infers it instead of
+following a declared constraint (§3.2, amended 2026-09-08, T-POLY): the
+distinct `owner_type` values are sampled and each is mapped to a table —
+`'Person'` through the Rails form (underscore and pluralise: `Person` →
+`people`), `'people'` and `'projects'` through the raw-table-name fallback,
+since a value no Rails form resolves and that names a table directly is
+mapped to it rather than reported unmapped — and each mapping becomes one
+virtual, parent-direction foreign key that the plan follows. Every followed
+edge is printed under `plan.polymorphic.inferred`, one line per discriminator
+column and parent table pair, before extraction starts:
 
 ```
-polymorphic pair detected, not followed: no constraint
+owner_type: inferred public.attachments (owner_id) -> public.people, followed as a virtual parent edge
+owner_type: inferred public.attachments (owner_id) -> public.projects, followed as a virtual parent edge
 ```
 
-and **no row is selected because of the pair**. That is the correct wording,
-and an earlier version of this entry said "the rows stay out of the slice",
-which was both weaker and wrong: `attachments.uploaded_by_person_id` is a real
-declared edge into `public.people`, so three of the four rows are in the slice,
-pulled through the constraint PostgreSQL does know about. That makes the trap
-stronger. The row is present, the polymorphic parent is still not followed,
-`owner_type = 'projects'` on attachment 826 still selects no `projects` row
-through that pair, and the tool still has to say so. Without the declared edge
-the whole table was `SchemaOnly` and the required line was never printed by
-anything.
+and the rows the edge reaches are in the slice, pulled in as parents alongside
+the ones `attachments.uploaded_by_person_id` — a real declared edge into
+`public.people` — already reaches. `attachments.uploaded_by_person_id` is what
+makes the trap stronger even though every value resolves: four of the five
+rows (800, 813, 826 and 845; 839's `uploaded_by_person_id` is `NULL`) are
+already in the slice through the constraint PostgreSQL does know about, so
+the virtual edge is shown reaching a row (`public.projects` 700, through
+attachment 826) that no declared edge touches, not merely repeating what the
+declared edge already selected.
 
-research/COMPLAINTS.md FK-10 is the silently empty slice this trap exists to
-make impossible. Attachment 839 points at `people` 99999, which does not exist,
-and its `uploaded_by_person_id` is `NULL`, so the dangling polymorphic owner
-sits on the one row the declared edge does not reach: an implementation that
-does follow the pair one day still has to survive it rather than fail the load.
+A value no form resolves is never guessed; it is reported once as unmapped
+(`plan.polymorphic.unmapped`, §3.2), which is the finding that survives from
+before inference landed. research/COMPLAINTS.md FK-10 is the silently empty
+slice both this trap and that finding exist to make impossible. Attachment
+839 points at `people` 99999, which does not exist, and its
+`uploaded_by_person_id` is `NULL`, so the dangling polymorphic owner sits on
+the one row the declared edge does not reach: the virtual edge is followed in
+the parent direction only, so it never pulls a dangling id into the slice as
+a child, and the row stays out.
 
 **7. Partitioned table with two partitions** — `events`, with `events_2024`
 (5 rows) and `events_2025` (2 rows).
