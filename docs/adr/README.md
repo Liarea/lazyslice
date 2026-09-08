@@ -42,3 +42,7 @@ docs/BUILD_PLAN.md's phase 2 prompts numbered the ADRs differently (003 classifi
 - Interfaces, types, algorithms, flags, layout, dependencies: ARCHITECTURE.md.
 - Threats and the controls that block v1: THREAT_MODEL.md.
 - Anything not yet decided: research/OPEN_QUESTIONS.md, then the tracker.
+
+## Errata (frozen ADRs are not edited; corrections live here)
+
+- ADR-008 names `pipeline.Provisioner`. The interface was never implemented; the type that exists is `provision.Provisioner` in internal/discover/provision (T-0071, 2026-09-08). Behaviour as described is unchanged.
