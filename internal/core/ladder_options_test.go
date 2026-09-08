@@ -5,13 +5,17 @@ package core
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"go/types"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/Liarea/lazyslice/internal/discover"
 	"github.com/Liarea/lazyslice/internal/dsn"
@@ -33,7 +37,14 @@ import (
 //
 // The rule is structural and covers the next field as well as this one: every
 // exported discover.Options field whose name is also an exported core.Request
-// field must appear as a key in that composite literal.
+// field must appear in that composite literal *with the request's own value*.
+//
+// The key alone is not enough, which is T-0071's own post-mortem: a literal
+// that wrote `Yes: false` or `Yes: req.Yes` on some other request would carry
+// the key and still be the bug this exists to catch. So the value expression is
+// compared as text against "r.req.<Name>". And the literal is counted, because
+// a second discover.Options built somewhere else in run.go would be a ladder
+// call this test never looked at while it went on passing over the first.
 func TestEveryLadderOptionTheRequestCarriesIsCopied(t *testing.T) {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, filepath.Join(".", "run.go"), nil, 0)
@@ -41,8 +52,8 @@ func TestEveryLadderOptionTheRequestCarriesIsCopied(t *testing.T) {
 		t.Fatalf("parse run.go: %v", err)
 	}
 
-	set := map[string]bool{}
-	found := false
+	values := map[string]string{}
+	literals := 0
 	ast.Inspect(f, func(n ast.Node) bool {
 		lit, ok := n.(*ast.CompositeLit)
 		if !ok {
@@ -55,20 +66,25 @@ func TestEveryLadderOptionTheRequestCarriesIsCopied(t *testing.T) {
 		if pkg, ok := sel.X.(*ast.Ident); !ok || pkg.Name != "discover" {
 			return true
 		}
-		found = true
+		literals++
 		for _, elt := range lit.Elts {
 			kv, ok := elt.(*ast.KeyValueExpr)
 			if !ok {
 				continue
 			}
 			if key, ok := kv.Key.(*ast.Ident); ok {
-				set[key.Name] = true
+				values[key.Name] = types.ExprString(kv.Value)
 			}
 		}
 		return true
 	})
-	if !found {
+	switch literals {
+	case 1:
+	case 0:
 		t.Fatal("no discover.Options literal in run.go: this test no longer guards anything")
+	default:
+		t.Fatalf("run.go builds %d discover.Options literals; this test reads them as one, "+
+			"so a flag dropped from any but the last would pass unseen", literals)
 	}
 
 	opts, req := reflect.TypeOf(discover.Options{}), reflect.TypeOf(Request{})
@@ -80,9 +96,15 @@ func TestEveryLadderOptionTheRequestCarriesIsCopied(t *testing.T) {
 		if _, ok := req.FieldByName(name); !ok {
 			continue
 		}
-		if !set[name] {
+		got, ok := values[name]
+		if !ok {
 			t.Errorf("discover.Options.%s is a Request field the ladder reads and "+
 				"resolveEndpoints does not set: the flag does nothing", name)
+			continue
+		}
+		if want := "r.req." + name; got != want {
+			t.Errorf("discover.Options.%s is set to %s, want %s: the ladder reads this field "+
+				"and only the run's own request carries the operator's answer", name, got, want)
 		}
 	}
 }
@@ -125,7 +147,73 @@ func TestTheUnreachableTargetRefusalRendersWithNoPlaceholders(t *testing.T) {
 	if strings.HasSuffix(strings.TrimRight(line, "\n"), ":") {
 		t.Errorf("rendered %q, ends in a dangling colon that promises a reason and delivers none", line)
 	}
-	if strings.Contains(line, "hunter2") {
-		t.Errorf("rendered %q, which carries the password", line)
+}
+
+// The unreachable-target refusal's {reason} is redacted.
+//
+// {host} is a dsn.Ref and cannot carry a password, because Ref does not hold
+// one — asserting on the password in the DSN above proved nothing (T-0071
+// review). {reason} is the half that can leak: it is whatever error the dial
+// returned, and a *pgconn.PgError quotes the conflicting row in Detail, Where
+// and Hint. unreachableTarget renders it through pg.RenderAnyError with values
+// off, which drops all three (THREAT_MODEL.md T4), and this is what says so.
+func TestTheUnreachableTargetRefusalDropsAPgErrorsRowFields(t *testing.T) {
+	_, targetRef, err := dsn.Parse("postgres://app@127.0.0.1:5433/appdb")
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	pgErr := &pgconn.PgError{
+		Severity: "ERROR",
+		Code:     "23505",
+		Message:  "duplicate key value violates unique constraint \"people_email_key\"",
+		Detail:   "Key (email)=(alice@example.com) already exists.",
+		Where:    "COPY people, line 41: \"alice@example.com\"",
+		Hint:     "try alice@example.com",
+	}
+
+	s := unreachableTarget(targetRef, fmt.Errorf("pg: gate: connecting to the target: %w", pgErr), "the target would not open")
+
+	var buf bytes.Buffer
+	render.NewLines(&buf).Send(event.Event{Kind: event.Error, Code: s.Code, Args: s.Args})
+	line := buf.String()
+
+	if strings.Contains(line, "alice@example.com") {
+		t.Errorf("rendered %q, which carries the row value the server quoted in Detail, Where and Hint", line)
+	}
+	if !strings.Contains(line, "23505") {
+		t.Errorf("rendered %q, want the SQLSTATE, which is an identifier and the actionable half", line)
+	}
+	if strings.ContainsAny(line, "{}") {
+		t.Errorf("rendered %q, want no unfilled placeholder", line)
+	}
+}
+
+// openTarget with no target refuses under its own code and renders whole.
+//
+// It is reached with an empty --target and no ladder pick, and it used to be
+// miscoded as pg.CodeUnreachable — a dial failure for a flag that was never
+// given. The Stop carries {flag} because the catalogue row is "no target: pass
+// {flag} postgres://...", and a Stop built by wrap alone sets no Args and
+// reaches the operator with the placeholder raw (codes.go, CodeTargetUnset).
+func TestOpenTargetWithNoTargetNamesTheFlag(t *testing.T) {
+	r := &run{req: normalise(Request{Mode: ModeRun}), sink: event.Discard}
+
+	var stop *Stop
+	if err := r.openTarget(t.Context()); !errors.As(err, &stop) {
+		t.Fatalf("openTarget = %v, want a Stop", err)
+	}
+	if stop.Code != CodeTargetUnset || stop.Exit != exitTarget {
+		t.Fatalf("stop = %s/exit %d, want %s/exit %d",
+			stop.Code, stop.Exit, CodeTargetUnset, exitTarget)
+	}
+
+	var buf bytes.Buffer
+	render.NewLines(&buf).Send(event.Event{Kind: event.Error, Code: stop.Code, Args: stop.Args})
+	line := buf.String()
+	if strings.ContainsAny(line, "{}") {
+		t.Errorf("rendered %q, want no unfilled placeholder", line)
+	}
+	if !strings.Contains(line, "--target") {
+		t.Errorf("rendered %q, want the flag the operator has to pass", line)
 	}
 }

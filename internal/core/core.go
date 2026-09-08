@@ -142,6 +142,54 @@ type Request struct {
 	JSON  bool // --json
 	TUI   bool // --tui
 	Debug bool // --debug
+
+	// Reviewed pins this run to the snapshot an earlier pass showed the
+	// operator, and is nil for every run built from flags alone. There is no
+	// flag for it because it carries no operator intent: it is the identity of
+	// what was reviewed, and only a caller that ran the preview can fill it
+	// (Preview, cmd/lazyslice's runTUI). When it is set, Run compares the
+	// endpoints and the schema after introspect and the classification after
+	// classify, and refuses before the plan and before anything is written.
+	Reviewed *Reviewed
+}
+
+// Reviewed is the snapshot an operator approved, carried into the run that
+// writes.
+//
+// --tui runs the pipeline twice: once as far as the plan, to fill the reasons
+// and plan screens, and once for real. Nothing tied the two passes together, so
+// the review could be of a different schema read of a different pair of
+// databases from the one the second pass wrote — two snapshots and two walks of
+// the discovery ladder with no comparison between them (ADR-002, T-TUI's
+// review). This is the tie: Preview returns one of these, cmd/lazyslice puts it
+// on the request the operator built, and Run refuses rather than writing a
+// target the review never covered.
+//
+// It holds identifiers only. A schema fingerprint is a hash, and an endpoint is
+// a dsn.Ref rendered as text, which cannot carry a password because Ref does not
+// hold one (internal/dsn) and cannot carry a row value at all
+// (THREAT_MODEL.md T4).
+type Reviewed struct {
+	// SchemaFingerprint is pipeline.Schema.Fingerprint as the preview computed
+	// it: ADR-009's hash of the DDL internal/load/ddl generates, from
+	// load.SchemaFingerprint, which is the one definition of it in the tree.
+	SchemaFingerprint string
+	// ClassFingerprint is pipeline.Classification.Fingerprint as the classifier
+	// alone decided it, with this run's --unmask opt-outs left out
+	// (classifierFingerprint). It is what the reasons screen showed, and the
+	// half of the review a schema fingerprint cannot stand for: the classifier
+	// reads Table.Samples, so a second snapshot of a live source can move a
+	// column that was `possible` only from a value signal below the mask
+	// threshold and copy in clear what the operator was shown as masked
+	// (THREAT_MODEL.md T1). The run's own --unmask opt-outs are excluded
+	// because the reasons screen writes them: they are the operator changing
+	// the review, not the source changing under it.
+	ClassFingerprint string
+	// Source and Target are the endpoints the preview resolved, each rendered
+	// by dsn.Ref.String() as "user@host:port/database". Target is empty for the
+	// four modes that open none (Mode.needsTarget).
+	Source string
+	Target string
 }
 
 // NewRequest returns a Request carrying the v1 defaults. Flags overwrite fields

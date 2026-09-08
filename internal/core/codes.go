@@ -108,6 +108,21 @@ const (
 	// table of this source.
 	CodeUsage event.Code = "run.refused.usage"
 
+	// CodeReviewedChanged is exit 12: this run is not the run the operator
+	// reviewed. Request.Reviewed carries the schema fingerprint and the two
+	// endpoints a preview pass resolved, and --tui's second pass takes a fresh
+	// snapshot and walks the discovery ladder again, so the review could
+	// otherwise be of a different schema of a different database from the one
+	// that is written (core.go, Reviewed). The refusal names what changed and
+	// happens after introspect, before classify, the plan and every write.
+	//
+	// The exit is ADR-005's 12, which that table calls "plan refused": this is a
+	// refusal of the plan the operator approved, made before the planner runs,
+	// and it is not one of the four cases the table lists. ADR-005 is owed
+	// either a fifth case under 12 or an exit of its own; internal/core/CLAUDE.md
+	// records it.
+	CodeReviewedChanged event.Code = "core.refused.reviewed_changed"
+
 	// CodeInternal is exit 1: something failed that is not one of ADR-005's
 	// codes. It exists so that "something went wrong" is never printed as a
 	// code a CI job branches on.
@@ -139,5 +154,6 @@ const (
 	exitWritableRole = 6
 	exitExtractLoad  = 7
 	exitDrift        = 10
+	exitReviewed     = 12
 	exitInterrupted  = 130
 )

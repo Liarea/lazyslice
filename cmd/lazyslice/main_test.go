@@ -6,8 +6,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"go/types"
 	"io"
 	"os"
+	"path/filepath"
 	"reflect"
 	"regexp"
 	"slices"
@@ -757,9 +762,13 @@ func TestASecondPassRunsWhateverTheModeWhenTheScreensChangedTheRequest(t *testin
 // the artefact a developer pastes into a compliance ticket, and two copies of a
 // two-hundred-column classification is not a better one.
 //
-// The filter is keyed on the stage and not on whether the request changed,
-// because the run --tui exists for is the one where the operator retuned --take
-// and the plan is the only thing that differs.
+// The filter is keyed on the stage, and on the one question per stage that can
+// move that stage's output: --unmask for the classification, and nothing for
+// the plan, which is always reprinted. The review pin does not license dropping
+// it — a step's mode and the virtual edges the slice follows come from the
+// second pass's own sampled rows, not from the schema the pin holds still — and
+// the transcript ADR-002 calls the compliance artefact has to be the plan of
+// the pass that actually copied.
 func TestTheSecondPassDoesNotReprintTheFirstsTranscript(t *testing.T) {
 	stream := []event.Event{
 		{Stage: event.Discover, Kind: event.Info, Code: core.CodeConfigRead},
@@ -779,13 +788,18 @@ func TestTheSecondPassDoesNotReprintTheFirstsTranscript(t *testing.T) {
 
 	collect := func(unmaskChanged bool) []event.Event {
 		var seen []event.Event
-		sink := afterThePlan(event.SinkFunc(func(e event.Event) { seen = append(seen, e) }), unmaskChanged)
+		sink := afterThePlan(
+			event.SinkFunc(func(e event.Event) { seen = append(seen, e) }),
+			unmaskChanged)
 		for _, e := range stream {
 			sink.Send(e)
 		}
 		return seen
 	}
 
+	// The discover and introspect lines are the identical work; the plan, the
+	// warning and the two decision lines are what the pass that wrote is the
+	// only witness to.
 	want := []event.Code{
 		core.CodeSourceChosen,
 		core.CodeTargetChosen,
@@ -810,6 +824,83 @@ func TestTheSecondPassDoesNotReprintTheFirstsTranscript(t *testing.T) {
 	if !slices.Contains(got, event.Code("classify.masked.column")) {
 		t.Errorf("a second pass after --unmask changed printed %v, without the reclassification", got)
 	}
+}
+
+// The second pass runs the pinned request, and not the one the screens returned.
+//
+// pinned is one assignment, and an assignment is exactly what goes missing:
+// replacing it with `_ = reviewed` left every test in this package and in
+// internal/core green while the review pin ceased to exist. So the behaviour is
+// asserted here and the wiring — that runTUI hands *this* to core.Run — is
+// asserted structurally below, because runTUI itself needs two Postgres servers
+// and a terminal to reach.
+func TestTheSecondPassCarriesTheReviewPin(t *testing.T) {
+	before := core.NewRequest()
+	before.Mode = core.ModeRun
+	before.Root = "people"
+	reviewed := &core.Reviewed{SchemaFingerprint: "ddl-1", ClassFingerprint: "cls-1", Source: "app@db:5432/app"}
+
+	after := pinned(before, reviewed)
+	if after.Reviewed != reviewed {
+		t.Fatalf("pinned dropped the review pin (%v): the pass that writes would not be compared "+
+			"against what the operator approved", after.Reviewed)
+	}
+	after.Reviewed = nil
+	if !reflect.DeepEqual(after, before) {
+		t.Errorf("pinned changed the request the screens returned:\n got %+v\nwant %+v", after, before)
+	}
+}
+
+// The pin reaches core.Run, and core.Preview is what fills it.
+//
+// Structural, in the manner of internal/core's own wiring test: runTUI cannot
+// be driven without two databases and a terminal, and the two lines that make
+// --tui safe are both single expressions that a refactor can drop with nothing
+// failing.
+func TestRunTUIPinsTheSecondPassToThePreview(t *testing.T) {
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, filepath.Join(".", "main.go"), nil, 0)
+	if err != nil {
+		t.Fatalf("parse main.go: %v", err)
+	}
+
+	var body *ast.BlockStmt
+	for _, decl := range f.Decls {
+		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name.Name == "runTUI" {
+			body = fn.Body
+		}
+	}
+	if body == nil {
+		t.Fatal("no runTUI in main.go: this test no longer guards anything")
+	}
+
+	var calls []string
+	ast.Inspect(body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		calls = append(calls, types.ExprString(call.Fun)+"("+argList(call)+")")
+		return true
+	})
+
+	if !slices.ContainsFunc(calls, func(c string) bool { return strings.HasPrefix(c, "core.Preview(") }) {
+		t.Errorf("runTUI does not call core.Preview: nothing produces the pin. Calls: %v", calls)
+	}
+	want := "core.Run(ctx, pinned(result.Request, reviewed), afterThePlan(render.NewLines(stdout), unmaskChanged))"
+	if !slices.Contains(calls, want) {
+		t.Errorf("runTUI's call to core.Run is not %s.\nCalls: %v\n"+
+			"The pass that writes the target must be handed the pinned request.", want, calls)
+	}
+}
+
+// argList renders a call's arguments the way they are written.
+func argList(call *ast.CallExpr) string {
+	args := make([]string, 0, len(call.Args))
+	for _, a := range call.Args {
+		args = append(args, types.ExprString(a))
+	}
+	return strings.Join(args, ", ")
 }
 
 // TestTUIAsksForNothingIntrospectOrDoctorCanShow: those two produce no

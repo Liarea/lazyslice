@@ -242,9 +242,8 @@
 
 # {reason} carries the parent table of the edge. event.ArgKey has no key for the
 # other end of a foreign key (internal/event/event.go), and this message has to
-# name both ends and the columns to be actionable, so it borrows {reason} the
-# way target.refused.start_timeout above records its own missing key. Owed to
-# the task that adds an ArgKey for it (e.g. ArgParent): add the key and
+# name both ends and the columns to be actionable, so it borrows {reason}. Owed
+# to the task that adds an ArgKey for it (e.g. ArgParent): add the key and
 # re-template this message; do not leave a refusal that names one end of an edge.
 
 - code: target.schema.not_recreatable
@@ -304,8 +303,7 @@
 # name: event.ArgKey has no key for any of the three (internal/event/event.go),
 # and a refusal that could not name the object it failed on would not be
 # actionable. Owed to the task that adds those keys: add them and re-template
-# these messages, as target.refused.start_timeout above records its own missing
-# key. {reason} carries the server's five-character SQLSTATE, which is an
+# these messages. {reason} carries the server's five-character SQLSTATE, which is an
 # identifier and not a value: a PgError's Detail, Where and Hint quote the row
 # and are dropped before the refusal is built (THREAT_MODEL.md T4).
 
@@ -627,6 +625,24 @@
   stage: introspect
   message: "{count} tables on Postgres {version}: {reason}"
   args: [count, version, reason]
+
+# The review pin (internal/core's checkReviewed, Request.Reviewed). --tui runs
+# the pipeline twice -- once as far as the plan to fill the two screens, once
+# for real -- and the second pass takes its own snapshot and walks the discovery
+# ladder again. This is the refusal when the second pass is not the run the
+# operator reviewed. {reason} carries what changed: an endpoint as dsn.Ref
+# renders it, or the sentence saying the source schema is not the one that was
+# read. Neither is a value from either database (THREAT_MODEL.md T4).
+#
+# The exit is ADR-005's 12. That table calls 12 "plan refused" and lists four
+# cases, none of them this one; ADR-005 is owed a fifth case or an exit of its
+# own (internal/core/CLAUDE.md).
+- code: core.refused.reviewed_changed
+  kind: error
+  stage: introspect
+  exit: 12
+  message: "this run is not the one that was reviewed: {reason}"
+  args: [reason]
 
 # One line per step of the plan (§3.5). {reason} carries the step's mode and
 # its Why, both rendered from a fixed template set in internal/plan.
