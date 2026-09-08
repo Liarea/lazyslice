@@ -124,10 +124,8 @@ const StreamRows = 2_000_000
 // allocated strings, so a stage that copies a whole key set is caught here at
 // a million rows where stream_rows lets it pass at two.
 //
-// The gate creates that table as well as filling it, which stream_rows' half
-// does not: a default load has 25 tables and a big one 26. README trap 26 gives
-// the reason and names what a later task moving it above the gate has to update
-// with it.
+// public.stream_docs itself is declared above the gate, so it exists on every
+// load; only its million-row fill is gated, the same way stream_rows' is.
 const StreamDocs = 1_000_000
 
 // nastyGate is the first line of the psql conditional at the end of nasty.sql.
@@ -151,11 +149,11 @@ const nastyNotRecreatableGate = `\if :{?notrecreatable}`
 // connURL. Every object in that file is a trap and testdata/README.md states
 // the behaviour lazyslice must show for each one.
 //
-// big fills public.stream_rows with StreamRows rows, and creates and fills
-// public.stream_docs with StreamDocs rows. That costs some seconds and a few
-// hundred megabytes of table, and only the streaming tests want it, so every
-// other caller passes false and gets an empty stream_rows -- its fill function
-// and its constraints still in place -- and no stream_docs at all.
+// big fills public.stream_rows with StreamRows rows and public.stream_docs
+// with StreamDocs rows. That costs some seconds and a few hundred megabytes of
+// table, and only the streaming tests want it, so every other caller passes
+// false and gets both tables empty -- their fill functions and constraints
+// still in place.
 //
 // The fills are the tail of nasty.sql, gated there behind `\if :{?big}` so that
 // `psql -v big=1 -f testdata/nasty.sql` does the same thing. Nothing here

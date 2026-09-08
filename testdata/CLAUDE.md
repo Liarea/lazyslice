@@ -52,12 +52,10 @@ proven against.
   because the two key encodings cost different amounts to hold and only the
   second is expensive enough to catch a stage that copies a whole key set;
   `splitNastyGate` checks both fills are still called with the row counts
-  `StreamRows` and `StreamDocs` name. `stream_docs` is the one table whose
-  **`CREATE TABLE` is inside the gate** rather than only its rows, so a default
-  load has 25 tables and a `big` load 26; `README.md` trap 26 says why, and
-  moving it above the gate means updating
-  `internal/introspect/introspect_integration_test.go`'s table list in the same
-  commit. The same file has a second gate,
+  `StreamRows` and `StreamDocs` name. Both tables' `CREATE TABLE` and
+  `CREATE FUNCTION` sit above the gate, so the fixture is 26 tables on every
+  load and only the fills are gated (T-0077); `README.md` trap 26 has the
+  history. The same file has a second gate,
   `\if :{?notrecreatable}`, around trap 25's foreign key: that edge is
   `ForeignKey.NotRecreatable` and `internal/plan`'s `checkRecreatable` refuses
   any `Plan` call over a schema carrying it, unconditionally, before a root is

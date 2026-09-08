@@ -178,7 +178,7 @@ func TestIntrospectNasty(t *testing.T) {
 			"public.order_items", "public.orders", "public.organisations",
 			"public.people", "public.price_list_notes", "public.price_lists",
 			"public.price_lists_eu", "public.price_lists_us",
-			"public.projects", "public.sites", "public.stream_rows",
+			"public.projects", "public.sites", "public.stream_docs", "public.stream_rows",
 			"public.teams", "public.tenant_user_flags", "public.tenant_user_sessions",
 			"public.tenant_users",
 		}
@@ -705,7 +705,7 @@ func TestIntrospectNasty(t *testing.T) {
 		if def := legacy.Constraints[1].Def; def != `PRIMARY KEY ("CustomerID")` {
 			t.Errorf("the primary key def = %q", def)
 		}
-		// nasty.sql: one CHECK, 28 foreign keys, 20 primary keys and 4 unique
+		// nasty.sql: one CHECK, 29 foreign keys, 21 primary keys and 4 unique
 		// constraints (the partition clones included in every count, which
 		// sqlConstraints does not filter), on every supported major. Trap 25
 		// adds five of the foreign keys — price_list_notes.person_id ->
@@ -716,11 +716,14 @@ func TestIntrospectNasty(t *testing.T) {
 		// leaves — one primary key (price_list_notes) and all four unique
 		// constraints (price_lists' own DEFERRABLE key, its clone on each
 		// leaf, and price_lists_eu's own non-deferrable one) — the first
-		// contype 'u' rows this fixture has ever produced. Unfiltered,
+		// contype 'u' rows this fixture has ever produced. Trap 26's
+		// stream_docs, declared above the big gate so every load carries it
+		// (T-0077), adds one more foreign key (person_id -> people) and one
+		// more primary key (doc_key). Unfiltered,
 		// PostgreSQL 18 adds 79 more of contype 'n' — the NOT NULLs it now
 		// stores in pg_constraint — and the same schema would fingerprint
 		// differently per major (§11.2's marker could never bind across them).
-		assertConstraintKinds(t, s, map[byte]int{'c': 1, 'f': 28, 'p': 20, 'u': 4})
+		assertConstraintKinds(t, s, map[byte]int{'c': 1, 'f': 29, 'p': 21, 'u': 4})
 	})
 
 	t.Run("CatalogFieldsNothingElseReads", func(t *testing.T) {

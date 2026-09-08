@@ -21,9 +21,9 @@ possible to assert against after loading. `fixtures_test.go` (behind
   are checked, not only the first: the two tables exist to measure two key
   encodings (`bigint` and 36-character `text`), and a gate that quietly stopped
   filling one would leave the test that needs it measuring an empty table.
-  `stream_docs` is *created* by the gate as well as filled, so `nastyTables`
-  does not list it and `assertNastyGateOff` asserts it is absent after a default
-  load; `README.md` trap 26 says why it is gated that far.
+  `stream_docs`'s `CREATE TABLE` and `CREATE FUNCTION` sit above the gate, next
+  to `stream_rows`', so both tables exist on every load and `nastyTables` lists
+  both at 0 rows; only the million-row fill is gated.
 - **`PgBouncer` starts its own server**, on a Docker network the two containers
   share, and returns the pooled URL and the direct one. Load a fixture through
   the direct URL — the loader speaks psql constructs a pooler has no reason to

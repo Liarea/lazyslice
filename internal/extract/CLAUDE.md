@@ -144,8 +144,8 @@ tables are filled for either test and each pays for the other's fill (about 37s
 for the text-keyed one). A selective fill means a second gate variable in
 `testdata/nasty.sql`, which `psql -v big=1` and `splitNastyGate` both have to
 agree with, and is reported rather than done here.
-`stream_docs` exists only under `-v big=1` — the gate creates the table as well
-as filling it — so no other test in the tree sees a 26th table.
+`stream_docs`, like `stream_rows`, exists on every load and is empty unless
+`-v big=1` fills it (T-0077), so every test in the tree sees the same 26 tables.
 
 **Never:** buffer a whole table in memory; interleave batches from two tables
 on one channel; infer a table boundary from anything but `Last`; issue
