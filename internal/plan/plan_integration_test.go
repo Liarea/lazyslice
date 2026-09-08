@@ -254,11 +254,22 @@ func nastyRequest(root ref.TableRef) pipeline.PlanRequest {
 	}
 }
 
+// loadNasty is testutil.LoadNasty(ctx, url, false): trap 25's
+// price_list_notes.list_id -> price_lists_eu (list_id) edge is
+// ForeignKey.NotRecreatable by design, and checkRecreatable refuses any Plan
+// call over a schema carrying one — unconditionally, before a root is even
+// chosen (ARCHITECTURE.md §11.1, exit 13) — so testutil.LoadNasty leaves that
+// edge out of every load (testdata/nasty.sql's `notrecreatable` gate).
+// TestPlanNastyNotRecreatable is the one test that wants the edge present and
+// loads through testutil.LoadNastyNotRecreatable instead; every other
+// nasty.sql test here uses this loader.
+func loadNasty(ctx context.Context, url string) error {
+	return testutil.LoadNasty(ctx, url, false)
+}
+
 func TestPlanNasty(t *testing.T) {
 	ctx := context.Background()
-	r, schema := fixture(ctx, t, func(ctx context.Context, url string) error {
-		return testutil.LoadNasty(ctx, url, false)
-	})
+	r, schema := fixture(ctx, t, loadNasty)
 	people := tref("public", "people")
 
 	req := nastyRequest(people)
@@ -629,13 +640,74 @@ func TestPlanNasty(t *testing.T) {
 	})
 }
 
+// Trap 25: a partitioned root's own key is DEFERRABLE, a leaf carries a key
+// the root cannot hold, and public.price_list_notes.list_id references the
+// leaf. Introspect leaves that edge un-re-pointed with
+// ForeignKey.NotRecreatable set (asserted in
+// introspect_integration_test.go's TestIntrospectNasty/Trap25); this is the
+// planner's half, over the same catalog rather than a hand-built schema
+// (TestNotRecreatableForeignKeyIsRefusedBeforeAnyRead in plan_test.go is the
+// seam that has no fixture).
+//
+// The refusal must come before any statement reaches the source: schema is
+// already introspected, so the Plan call here is given refusingReader, which
+// fails the test if the walk sends anything at all (ARCHITECTURE.md §11.1:
+// "before the snapshot is used for keys and before anything in the target is
+// dropped").
+func TestPlanNastyNotRecreatable(t *testing.T) {
+	ctx := context.Background()
+	// LoadNastyNotRecreatable, not loadNasty: this is the one test that wants
+	// trap 25's edge present.
+	_, schema := fixture(ctx, t, testutil.LoadNastyNotRecreatable)
+
+	notes := tref("public", "price_list_notes")
+	leaf := tref("public", "price_lists_eu")
+	var fk *pipeline.ForeignKey
+	for i := range schema.FKs {
+		// price_list_notes also carries person_id -> public.people, an
+		// ordinary edge that connects it to the root independently of this
+		// trap (testdata/README.md trap 25); the trap edge is the one over
+		// list_id.
+		if schema.FKs[i].Child == notes && len(schema.FKs[i].ChildCols) == 1 && schema.FKs[i].ChildCols[0] == "list_id" {
+			fk = &schema.FKs[i]
+		}
+	}
+	if fk == nil {
+		t.Fatal("no edge from public.price_list_notes.list_id in the introspected schema")
+	}
+	if !fk.NotRecreatable {
+		t.Fatalf("%s.NotRecreatable = false, want true: price_lists' own key is DEFERRABLE and cannot back this edge", fk.Name)
+	}
+	if fk.Parent != leaf {
+		t.Errorf("%s parent = %s, want %s: an edge introspect cannot re-point stays on the leaf", fk.Name, fk.Parent, leaf)
+	}
+
+	req := nastyRequest(tref("public", "people"))
+	req.Take = 500
+	_, err := New().Plan(ctx, refusingReader{t}, schema, nil, req)
+	var refusal *Refusal
+	if !errors.As(err, &refusal) {
+		t.Fatalf("Plan returned %v (%T), want a *Refusal", err, err)
+	}
+	if refusal.Code != CodeNotRecreatable {
+		t.Errorf("Code = %q, want %q", refusal.Code, CodeNotRecreatable)
+	}
+	if refusal.Exit != 13 {
+		t.Errorf("Exit = %d, want 13", refusal.Exit)
+	}
+	if refusal.Table != notes {
+		t.Errorf("refusal names %s, want %s", refusal.Table, notes)
+	}
+	if !strings.Contains(refusal.Message, fk.Name) {
+		t.Errorf("refusal message = %q, want it to name %s", refusal.Message, fk.Name)
+	}
+}
+
 // Trap 1: the self-referencing foreign key. A walk with no visited set never
 // terminates here; lazyslice expands the manager chain once and stops.
 func TestPlanNastySelfReference(t *testing.T) {
 	ctx := context.Background()
-	r, schema := fixture(ctx, t, func(ctx context.Context, url string) error {
-		return testutil.LoadNasty(ctx, url, false)
-	})
+	r, schema := fixture(ctx, t, loadNasty)
 
 	people := tref("public", "people")
 	req := nastyRequest(people)
@@ -664,9 +736,7 @@ func TestPlanNastySelfReference(t *testing.T) {
 // must not pull tenant 2's other users in.
 func TestPlanNastyCompositeParentStep(t *testing.T) {
 	ctx := context.Background()
-	r, schema := fixture(ctx, t, func(ctx context.Context, url string) error {
-		return testutil.LoadNasty(ctx, url, false)
-	})
+	r, schema := fixture(ctx, t, loadNasty)
 
 	sessions := tref("public", "tenant_user_sessions")
 	req := nastyRequest(sessions)
@@ -984,7 +1054,7 @@ func nastyPlusRequest(root ref.TableRef) pipeline.PlanRequest {
 // loadNastyPlus loads nasty.sql and then extraSchema, before the snapshot the
 // planner reads is opened.
 func loadNastyPlus(ctx context.Context, url string) error {
-	if err := testutil.LoadNasty(ctx, url, false); err != nil {
+	if err := loadNasty(ctx, url); err != nil {
 		return err
 	}
 	conn, err := pgx.Connect(ctx, url)

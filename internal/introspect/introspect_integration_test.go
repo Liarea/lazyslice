@@ -162,9 +162,12 @@ func analyse(ctx context.Context, t *testing.T, url string) {
 
 func TestIntrospectNasty(t *testing.T) {
 	ctx := context.Background()
-	s := introspectFixture(ctx, t, func(ctx context.Context, url string) error {
-		return testutil.LoadNasty(ctx, url, false)
-	})
+	// LoadNastyNotRecreatable, not testutil.LoadNasty directly: trap 25's
+	// price_list_notes.list_id -> price_lists_eu (list_id) edge is what
+	// Trap25_DeferrableRootKeyLeafOnlyKey below is about, and LoadNasty leaves
+	// it out so that a Plan call over the default fixture does not refuse
+	// unconditionally on it (testdata/README.md trap 25).
+	s := introspectFixture(ctx, t, testutil.LoadNastyNotRecreatable)
 
 	t.Run("TableList", func(t *testing.T) {
 		want := []string{
@@ -173,7 +176,9 @@ func TestIntrospectNasty(t *testing.T) {
 			"public.click_stream", "public.device_readings", "public.devices",
 			"public.events", "public.events_2024", "public.events_2025",
 			"public.order_items", "public.orders", "public.organisations",
-			"public.people", "public.projects", "public.sites", "public.stream_rows",
+			"public.people", "public.price_list_notes", "public.price_lists",
+			"public.price_lists_eu", "public.price_lists_us",
+			"public.projects", "public.sites", "public.stream_rows",
 			"public.teams", "public.tenant_user_flags", "public.tenant_user_sessions",
 			"public.tenant_users",
 		}
@@ -336,6 +341,62 @@ func TestIntrospectNasty(t *testing.T) {
 		}
 		if edges != 1 {
 			t.Errorf("the events component has %d edges, want 1", edges)
+		}
+	})
+
+	// Trap 25: a partitioned root's own key is DEFERRABLE, a leaf carries a
+	// key the root cannot hold, and price_list_notes.list_id references the
+	// leaf directly. hasKeyOver must find no key on public.price_lists over
+	// (list_id) alone -- its only key is the DEFERRABLE (list_id, region),
+	// which Postgres refuses as a referenced key outright, and no key lacking
+	// region can ever exist on a table partitioned by it -- so the edge is
+	// left pointed at the leaf and marked ForeignKey.NotRecreatable rather
+	// than silently re-pointed at a root that cannot carry it.
+	t.Run("Trap25_DeferrableRootKeyLeafOnlyKey", func(t *testing.T) {
+		root := table(t, s, "public", "price_lists")
+		if !root.Partitioned {
+			t.Error("public.price_lists is not reported as partitioned")
+		}
+		if root.Parent != nil {
+			t.Errorf("the partitioned root reports a parent of %s", root.Parent)
+		}
+
+		leaf := table(t, s, "public", "price_lists_eu")
+		if leaf.Parent == nil || *leaf.Parent != tref("public", "price_lists") {
+			t.Errorf("public.price_lists_eu reports parent %v, want public.price_lists", leaf.Parent)
+		}
+
+		rootKey := index(t, root, "price_lists_list_id_region_key")
+		if rootKey.Immediate {
+			t.Error("price_lists_list_id_region_key reports Immediate; the constraint behind it is DEFERRABLE")
+		}
+		leafKey := index(t, leaf, "price_lists_eu_list_id_key")
+		if !leafKey.Immediate {
+			t.Error("price_lists_eu_list_id_key reports not Immediate; the constraint behind it is a plain, non-deferrable UNIQUE")
+		}
+		if !sameStrings(leafKey.Columns, []string{"list_id"}) {
+			t.Errorf("price_lists_eu_list_id_key columns = %q, want [list_id]: the root cannot hold a key missing its partition column region", leafKey.Columns)
+		}
+
+		fk := fkFrom(t, s, tref("public", "price_list_notes"), "list_id")
+		if fk.Parent != tref("public", "price_lists_eu") {
+			t.Errorf("price_list_notes.list_id points at %s, want public.price_lists_eu: introspect must leave an edge it cannot re-point on the leaf, never silently drop or re-point it", fk.Parent)
+		}
+		if !fk.NotRecreatable {
+			t.Error("price_list_notes.list_id's edge reports NotRecreatable = false, want true")
+		}
+
+		// The exception to "an edge in Schema.FKs never names a partition":
+		// only a NotRecreatable edge may still name price_lists_eu, and every
+		// other edge in the fixture must still be re-pointed at a root or name
+		// an ordinary table.
+		for _, other := range s.FKs {
+			if other.Name == fk.Name {
+				continue
+			}
+			if other.Parent == tref("public", "price_lists_eu") || other.Parent == tref("public", "price_lists_us") {
+				t.Errorf("%s points at a leaf partition (%s) and is not marked NotRecreatable", other.Name, other.Parent)
+			}
 		}
 	})
 
@@ -644,13 +705,22 @@ func TestIntrospectNasty(t *testing.T) {
 		if def := legacy.Constraints[1].Def; def != `PRIMARY KEY ("CustomerID")` {
 			t.Errorf("the primary key def = %q", def)
 		}
-		// nasty.sql: one CHECK, 23 foreign keys (the partition clones included,
-		// which sqlConstraints does not filter) and 19 primary keys, on every
-		// supported major. Unfiltered, PostgreSQL 18 adds 79 more of contype 'n'
-		// — the NOT NULLs it now stores in pg_constraint — and the same schema
-		// would fingerprint differently per major (§11.2's marker could never
-		// bind across them).
-		assertConstraintKinds(t, s, map[byte]int{'c': 1, 'f': 23, 'p': 19})
+		// nasty.sql: one CHECK, 28 foreign keys, 20 primary keys and 4 unique
+		// constraints (the partition clones included in every count, which
+		// sqlConstraints does not filter), on every supported major. Trap 25
+		// adds five of the foreign keys — price_list_notes.person_id ->
+		// people (unconditional, testdata/README.md trap 25's reachability
+		// fix) plus, loaded through LoadNastyNotRecreatable as this test is,
+		// the declared price_list_notes.list_id -> price_lists_eu edge and
+		// two clones of price_lists.owner_person_id -> people onto its
+		// leaves — one primary key (price_list_notes) and all four unique
+		// constraints (price_lists' own DEFERRABLE key, its clone on each
+		// leaf, and price_lists_eu's own non-deferrable one) — the first
+		// contype 'u' rows this fixture has ever produced. Unfiltered,
+		// PostgreSQL 18 adds 79 more of contype 'n' — the NOT NULLs it now
+		// stores in pg_constraint — and the same schema would fingerprint
+		// differently per major (§11.2's marker could never bind across them).
+		assertConstraintKinds(t, s, map[byte]int{'c': 1, 'f': 28, 'p': 20, 'u': 4})
 	})
 
 	t.Run("CatalogFieldsNothingElseReads", func(t *testing.T) {

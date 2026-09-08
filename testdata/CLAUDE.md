@@ -6,8 +6,8 @@ lives here — loaders are `internal/testutil`; this directory is data plus
 `README.md`.
 
 **Contract.** `README.md` in this directory is the spec: it names every table,
-every row count, and every one of the 24 numbered traps in `nasty.sql` (1 to
-24, with 16 split into 16a and 16b because §4 prescribes two different
+every row count, and every one of the 25 numbered traps in `nasty.sql` (1 to
+25, with 16 split into 16a and 16b because §4 prescribes two different
 behaviours for the two JSON columns) with the exact required behaviour.
 `internal/testutil/fixtures_test.go` (behind `integration`) is what checks the
 loaded databases against it. There is no type in ARCHITECTURE.md this directory
@@ -47,7 +47,13 @@ proven against.
   together.
 - `nasty.sql`'s `stream_rows` gate (`\if :{?big}`) is part of the fixture's
   contract with `internal/testutil.LoadNasty`; changing one without the other
-  breaks that package's own rule.
+  breaks that package's own rule. The same file has a second gate,
+  `\if :{?notrecreatable}`, around trap 25's foreign key: that edge is
+  `ForeignKey.NotRecreatable` and `internal/plan`'s `checkRecreatable` refuses
+  any `Plan` call over a schema carrying it, unconditionally, before a root is
+  even chosen, so `LoadNasty` always cuts it out and `LoadNastyNotRecreatable`
+  is the only loader that puts it back. Changing what that gate wraps without
+  updating both loaders breaks the same rule.
 
 **Test.** `psql -f testdata/pagila/pagila-schema.sql -f
 testdata/pagila/pagila-data.sql` and `psql -f testdata/nasty.sql` to load by

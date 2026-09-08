@@ -215,7 +215,9 @@ func TestPlanAndTransformPagila(t *testing.T) {
 // jsonb, an enum, a domain, a macaddr and every other trap the fixture carries.
 func TestPlanAndTransformNasty(t *testing.T) {
 	ctx := context.Background()
-	checkPlanAndTransform(ctx, t,
-		func(ctx context.Context, url string) error { return testutil.LoadNasty(ctx, url, false) },
-		nastyRequest, tref("public", "tenant_users"), 3)
+	// loadNasty, not testutil.LoadNastyNotRecreatable: trap 25's edge is
+	// ForeignKey.NotRecreatable and refuses any Plan call unconditionally
+	// (plan_integration_test.go's TestPlanNastyNotRecreatable is the test for
+	// that refusal); this test is about the walk and the transform, not it.
+	checkPlanAndTransform(ctx, t, loadNasty, nastyRequest, tref("public", "tenant_users"), 3)
 }

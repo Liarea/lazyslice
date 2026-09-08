@@ -122,6 +122,18 @@ const StreamRows = 2_000_000
 // LoadNasty does from Go when big is true.
 const nastyGate = `\if :{?big}`
 
+// nastyNotRecreatableGate is the first line of the psql conditional around
+// trap 25's foreign key, public.price_list_notes.list_id REFERENCES
+// public.price_lists_eu (list_id). That edge is ForeignKey.NotRecreatable by
+// design (testdata/README.md trap 25), and checkRecreatable
+// (internal/plan/plan.go) scans every edge in the schema before a root is even
+// chosen and refuses any Plan call over one carrying such an edge,
+// unconditionally -- so leaving the constraint in place on every load would
+// make nasty.sql refuse to plan for every caller, not only the two tests this
+// trap is for. LoadNasty always cuts the gated block out; LoadNastyNotRecreatable
+// puts it back.
+const nastyNotRecreatableGate = `\if :{?notrecreatable}`
+
 // LoadNasty loads testdata/nasty.sql, the hostile fixture, into the database at
 // connURL. Every object in that file is a trap and testdata/README.md states
 // the behaviour lazyslice must show for each one.
@@ -135,8 +147,17 @@ const nastyGate = `\if :{?big}`
 // `psql -v big=1 -f testdata/nasty.sql` does the same thing. Nothing here
 // interprets psql conditionals: the gate is cut off the script and, when big is
 // set, its two statements are issued directly.
+//
+// LoadNasty also cuts out trap 25's foreign key (nastyNotRecreatableGate),
+// unconditionally, so that every caller here -- and everything downstream that
+// calls Plan on the schema this loads -- gets a fixture that plans. Use
+// LoadNastyNotRecreatable to load the fixture with that edge present.
 func LoadNasty(ctx context.Context, connURL string, big bool) error {
 	script, err := readFixture("nasty.sql")
+	if err != nil {
+		return err
+	}
+	script, _, err = cutGate(script, nastyNotRecreatableGate)
 	if err != nil {
 		return err
 	}
@@ -163,8 +184,64 @@ func LoadNasty(ctx context.Context, connURL string, big bool) error {
 	return nil
 }
 
-// splitNastyGate returns nasty.sql without its trailing psql gate, and the SQL
-// that gate contains.
+// LoadNastyNotRecreatable loads testdata/nasty.sql exactly as
+// LoadNasty(ctx, connURL, false) does, plus trap 25's foreign key:
+// public.price_list_notes.list_id REFERENCES public.price_lists_eu (list_id).
+// introspect must report that edge NotRecreatable, and the planner must refuse
+// any Plan call over a schema carrying it (ARCHITECTURE.md section 11.1, exit
+// 13, target.schema.not_recreatable) before a root is even chosen. LoadNasty
+// leaves the edge out so every other caller gets a plannable fixture; only
+// tests about trap 25 itself want this loader.
+func LoadNastyNotRecreatable(ctx context.Context, connURL string) error {
+	script, err := readFixture("nasty.sql")
+	if err != nil {
+		return err
+	}
+	withoutFK, fk, err := cutGate(script, nastyNotRecreatableGate)
+	if err != nil {
+		return err
+	}
+	if !strings.Contains(fk, "price_list_notes") || !strings.Contains(fk, "price_lists_eu") {
+		return errors.New("testutil: nasty.sql's notrecreatable gate no longer adds the " +
+			"price_list_notes -> price_lists_eu foreign key; trap 25 and LoadNastyNotRecreatable have drifted apart")
+	}
+	body, _, err := splitNastyGate(withoutFK)
+	if err != nil {
+		return err
+	}
+
+	conn, err := pgconn.Connect(ctx, connURL)
+	if err != nil {
+		return fmt.Errorf("testutil: connecting to load nasty.sql: %w", err)
+	}
+	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
+
+	if err := execScript(ctx, conn, body); err != nil {
+		return fmt.Errorf("testutil: loading nasty.sql: %w", err)
+	}
+	if err := execScript(ctx, conn, fk); err != nil {
+		return fmt.Errorf("testutil: adding trap 25's foreign key: %w", err)
+	}
+	return nil
+}
+
+// cutGate returns script with the psql conditional opened by gate (and closed
+// by the next `\endif`) excised, and the SQL that conditional contains.
+func cutGate(script, gate string) (rest, inside string, err error) {
+	before, after, found := strings.Cut(script, gate)
+	if !found {
+		return "", "", fmt.Errorf("testutil: nasty.sql no longer contains the gate %q", gate)
+	}
+	inside, tail, found := strings.Cut(after, `\endif`)
+	if !found {
+		return "", "", fmt.Errorf("testutil: nasty.sql's %q gate is not closed by \\endif", gate)
+	}
+	return before + tail, inside, nil
+}
+
+// splitNastyGate returns nasty.sql (or the tail of it left after cutGate has
+// already removed an earlier gate) without its trailing `\if :{?big}` gate,
+// and the SQL that gate contains.
 //
 // The gate is required to be there and to fill StreamRows rows: a fixture edit
 // that renames it, removes it or changes the row count would otherwise leave
@@ -172,13 +249,9 @@ func LoadNasty(ctx context.Context, connURL string, big bool) error {
 // `psql -v big=1` does, and every streaming test downstream would be measuring
 // the wrong table.
 func splitNastyGate(script string) (body, fill string, err error) {
-	body, rest, found := strings.Cut(script, nastyGate)
-	if !found {
-		return "", "", fmt.Errorf("testutil: nasty.sql no longer contains the gate %q", nastyGate)
-	}
-	fill, _, found = strings.Cut(rest, `\endif`)
-	if !found {
-		return "", "", errors.New(`testutil: nasty.sql's gate is not closed by \endif`)
+	body, fill, err = cutGate(script, nastyGate)
+	if err != nil {
+		return "", "", err
 	}
 	want := "fill_stream_rows(" + strconv.Itoa(StreamRows) + ")"
 	if !strings.Contains(fill, want) {
