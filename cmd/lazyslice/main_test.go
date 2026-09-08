@@ -137,11 +137,6 @@ func TestExitCodes(t *testing.T) {
 		{"--cap with no table", []string{"--cap", "=10"}, ExitUsage},
 		{"--depth 0", []string{"--depth", "0"}, ExitUsage},
 		{"--memory-budget nonsense", []string{"--memory-budget", "lots"}, ExitUsage},
-		// A run that parses cleanly and names no source stops at exit 3 with
-		// the ladder's own message: discovery is not in this build, so
-		// --source is how a source is named (ADR-005's exit table, 3 "no
-		// source").
-		{"a clean run with no source", []string{"--unmask", "public.users.email=ticket 42"}, ExitNoSource},
 	}
 
 	for _, c := range cases {
@@ -450,5 +445,35 @@ func TestPerTableCapIsNotAGlobalCap(t *testing.T) {
 
 	if !bare.Explicit["cap"] || bare.Cap != 25 {
 		t.Errorf("--cap 25 gave Cap %d, explicit %v; want 25 and true", bare.Cap, bare.Explicit["cap"])
+	}
+}
+
+// `lazyslice` with no arguments walks the discovery ladder and, when nothing on
+// it answers, stops at exit 3 naming --source (ARCHITECTURE.md sections 8 and
+// 9). It is the whole of the first-run wiring in this file: the ladder fills in
+// the two endpoints of core.Request and nothing else.
+//
+// The environment is emptied first because every rung reads one: the
+// developer's own $DATABASE_URL or Docker context would otherwise decide what
+// this test asserts, and a test whose answer depends on the machine it runs on
+// is not a test of the ladder.
+func TestNoArgumentsWalksTheLadderAndStopsAtExitThree(t *testing.T) {
+	for _, n := range []string{
+		"DATABASE_URL", "POSTGRES_URL", "PG_URL", "DB_URL",
+		"PGSERVICE", "PGHOST", "PGHOSTADDR", "PGDATABASE", "PGPORT", "PGUSER",
+		"PGPASSWORD", "PGPASSFILE", "DOCKER_CONTEXT", "DOCKER_CONFIG",
+	} {
+		t.Setenv(n, "")
+	}
+	// A non-local endpoint yields no rung 3 candidate and makes no socket call
+	// (ADR-008 section 3), which is what keeps this test off the daemon.
+	t.Setenv("DOCKER_HOST", "tcp://staging.example:2375")
+
+	var stdout, stderr bytes.Buffer
+	if got := run(t.Context(), []string{"--yes"}, &stdout, &stderr); got != ExitNoSource {
+		t.Errorf("run() = %d, want %d\nstderr: %s", got, ExitNoSource, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "--source") {
+		t.Errorf("the refusal does not name the flag that fixes it: %s", stderr.String())
 	}
 }

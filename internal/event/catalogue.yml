@@ -764,3 +764,142 @@
   stage: emit
   message: "{count} progress event(s) were dropped: the renderer could not keep up with the pipeline"
   args: [count]
+
+# ---------- discovery (ARCHITECTURE.md §9, ADR-008) ----------
+#
+# The candidate list and the ladder's own decisions. Every value substituted
+# below is an identifier, a count or a provenance; a candidate's endpoint is
+# dsn.Ref.String(), which cannot carry a password because Ref does not hold one
+# (THREAT_MODEL.md T4, A3).
+
+- code: discover.candidate.found
+  kind: info
+  stage: discover
+  message: "{provenance}: {host} — postgres {version}, {count} table(s), {reason}"
+  args: [provenance, host, version, count, reason]
+
+# An unreachable candidate is printed, not swallowed: it is never selected as
+# source or target, and a developer whose database is missing from the run has
+# to be able to see why it was skipped.
+- code: discover.candidate.unreachable
+  kind: info
+  stage: discover
+  message: "{provenance}: {host} did not answer — {reason}"
+  args: [provenance, host, reason]
+
+- code: discover.docker.endpoint
+  kind: info
+  stage: discover
+  message: "docker: {host} ({provenance})"
+  args: [host, provenance]
+
+# ADR-008 §3 "Degradation": the message names the endpoint that was actually
+# resolved and the step it came from, never a hard-coded socket path. A Docker
+# failure never aborts the run; rungs 0 to 2 still answer.
+- code: discover.docker.unreachable
+  kind: warn
+  stage: discover
+  message: "docker: {host} {reason} — skipping container discovery; {flag}"
+  args: [host, reason, flag]
+
+# THREAT_MODEL.md T2: a container on a remote daemon publishes on the remote
+# host's interfaces, so it is never a local candidate and its binding is never
+# normalised to loopback (ADR-008 §3, §4).
+- code: discover.docker.not_local
+  kind: warn
+  stage: discover
+  message: "docker endpoint {host} ({provenance}) is not local — container discovery skipped; pass --source/--target, or set {flag} to a local socket"
+  args: [host, provenance, flag]
+
+# One case of the rule above with a reason of its own: tunnelling ssh:// needs a
+# third subprocess and ARCHITECTURE.md §8 fixes the set at two.
+- code: discover.docker.ssh
+  kind: warn
+  stage: discover
+  message: "docker endpoint {host} is ssh:// — container discovery skipped; pass --source/--target, or set --docker-host to a local socket"
+  args: [host]
+
+- code: discover.docker.context_unreadable
+  kind: warn
+  stage: discover
+  message: "{reason}"
+  args: [reason]
+
+# ADR-008 §4: the working_dir filter's stated fallback. It prints the provenance
+# it actually used, because the empty case is common rather than exotic.
+- code: discover.compose.no_project
+  kind: info
+  stage: discover
+  message: "docker: no compose project for this directory — showing all Postgres containers"
+  args: []
+
+# lazyslice never starts the developer's own compose services (ADR-008 §7): the
+# command is in this template and the service names are the substituted
+# identifiers, so no event carries a command line.
+- code: discover.compose.stopped
+  kind: info
+  stage: discover
+  message: "compose declares a Postgres service that is not running — start it with: docker compose up -d {provenance}"
+  args: [provenance]
+
+# ADR-008 §2: a .env value is used only when it parses whole as a Postgres URI.
+# The reason is a category and never any part of the value, because a .env line
+# can hold a production password (THREAT_MODEL.md A3).
+- code: discover.env.unusable
+  kind: warn
+  stage: discover
+  message: "{provenance} is not a whole postgres:// URI and was not used: {reason}"
+  args: [provenance, reason]
+
+# Rung 4 (stopped containers) and provisioning are phase 5 (ARCHITECTURE.md
+# §14). The count is printed so that a developer whose database is stopped is
+# told why it is not on the ladder.
+- code: discover.rung.not_implemented
+  kind: info
+  stage: discover
+  message: "{provenance}: {count} found, not in this build — pass {flag}"
+  args: [provenance, count, flag]
+
+- code: discover.source.chosen
+  kind: decision
+  stage: discover
+  message: "source {database} on {host} — {provenance}, {flag} names another"
+  args: [database, host, provenance, flag]
+
+- code: discover.target.chosen
+  kind: decision
+  stage: discover
+  message: "target {database} on {host} — {provenance}, {flag} names another"
+  args: [database, host, provenance, flag]
+
+# Q1's state: a source was found and nothing target-shaped was. Exit 4, naming
+# the flag that settles it (ADR-008 §6).
+- code: target.refused.none
+  kind: error
+  stage: discover
+  exit: 4
+  message: "no local postgres found to load into: pass {flag}"
+  args: [flag]
+
+# The not-implemented path ARCHITECTURE.md §14 leaves for provisioning:
+# --create-target lands here rather than on a silent no-op or a connection
+# string that does not connect. {flag} is --target, the flag that names a
+# database today, and never --create-target: telling an operator to pass the
+# flag they just passed is not a next step.
+- code: target.refused.not_implemented
+  kind: error
+  stage: discover
+  exit: 4
+  message: "starting a target container is not in this build: pass {flag} naming a database to load into"
+  args: [flag]
+
+# ADR-008 §3: --create-target against a docker endpoint that is not local, or
+# that does not answer, is a refusal before any container work — never a silent
+# no-op and never a container created on someone else's daemon
+# (THREAT_MODEL.md T2).
+- code: target.refused.docker_not_local
+  kind: error
+  stage: discover
+  exit: 4
+  message: "--create-target needs a local docker endpoint: {host} is {reason} — set {flag} to a local socket, or name a database with --target"
+  args: [host, reason, flag]
