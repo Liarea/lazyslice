@@ -1,6 +1,6 @@
 # ADR-008: First run — the discovery ladder, the one blocking question, and the endpoints they resolve
 
-Status: proposed, 2026-09-05
+Status: accepted, 2026-09-08 (frozen at the phase 4 gate; amended in place 2026-09-08 for the gate-then-refuse rule while still proposed)
 
 ## Context
 
