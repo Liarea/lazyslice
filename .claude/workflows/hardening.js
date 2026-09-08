@@ -10,7 +10,7 @@ export const meta = {
 }
 const REPO = '/Users/gareth/personal_repos/lazyslice'
 const IMPL = `${REPO}/.claude/workflows/implement.js`
-// args: { step: 'features' | 'backlog' | 'harden' | 'redteam' }  one step per usage window
+// args: { step: 'features' | 'backlog' | 'harden' | 'redteam', from?: index }  one step per usage window; from skips merged tasks in features or backlog
 const step = (args && args.step) || 'features'
 
 const FEATURES = [
@@ -24,10 +24,11 @@ const FEATURES = [
     brief: `Per ADR-003 and THREAT_MODEL T10: the integration job runs against Postgres 14, 15, 16, 17, and 18 via testcontainers; add govulncheck to CI; add SBOM generation and checksum signing to the goreleaser release if not already present. Write tools/docgen, a small Go program that generates docs/FLAGS.md from the registered cobra flag set of cmd/lazyslice (name, type, default, help, grouped as --help groups them), docs/KEYBINDINGS.md from internal/tui's exported Bindings() table (key, action, the flag it is), and docs/ERRORS.md from internal/event's Catalogue() (code, stage, exit code, message template); add a make docs target that regenerates them and a CI job that fails when the committed files differ from regenerated output (ADR-002's enforcement mechanism). Add the unsafe-flag grep job from CONCEPT.md's enforcement list (fail on --no-mask, --disable-mask, --skip-mask, or any flag whose name contains unmask other than the per-column --unmask TABLE.COL=REASON). Check the workflow files parse and run the docs and grep jobs locally.` },
 ]
 
+const from = (args && args.from) || 0
 if (step === 'features') {
   phase('Features')
   const results = []
-  for (const t of FEATURES) {
+  for (const t of FEATURES.slice(from)) {
     const r = await workflow({ scriptPath: IMPL }, { ...t, model: t.id === 'T-CI5' ? 'sonnet' : 'opus', effort: 'high' })
     results.push(r)
     if (!r || r.status !== 'merged') { log(`Stopped at ${t.id}`); return { results, stopped_at: t.id } }
@@ -55,6 +56,8 @@ const BACKLOG = [
     brief: `Read tracker/tasks/T-0053-*.md. (1) In internal/pg's own integration suite add a case whose injected fingerprinter issues SAVEPOINT through the reader it is handed and fails on 25P01, so the BEGIN around the fingerprinter is pinned where it lives. (2) Route a failed ROLLBACK in catalogFingerprint through the same discipline as source.go's endTx (close the connection) and correct the doc comment that claims the gate has rules left to run. (3) Add a schema-only introspection path (an option on the Introspector or a second method, whichever ARCHITECTURE.md section 2 tolerates with the smallest change; report the deviation) so the gate's fingerprint over the target does not sample rows or hold a REPEATABLE READ transaction longer than the catalog read; use it from load.GateFingerprint. Fix the stale comments T-FPR's reviewer listed.` },
   { id: 'T-0050', title: 'Extract and transform hand-offs: shape-template escaping, KeySet chunk iterator, pooler test, text-keyed big fixture', model: 'opus', reviewers: 3, stage: 'extract', paths: ['internal/extract/', 'internal/pg/', 'internal/pipeline/', 'internal/plan/', 'internal/verify/', 'internal/testutil/', 'testdata/'], integration: './internal/extract/... ./internal/plan/... ./internal/verify/... ./internal/pg/...',
     brief: `Read tracker/tasks/T-0050-*.md including its Log. (1) lookupShapeFor interpolates a quoted table name into a shape template, so a table named with a {token} widens or breaks the allowlist; give the tracer a way to register a shape with a pre-quoted literal segment, or escape placeholder-shaped text in identifiers, with a test using a table named with braces. (2) Add FirstChunk(n int) Chunk to pipeline.KeySet and both internal/plan implementations, and a chunk-at-a-time iterator so extract's peak memory is one chunk, not a full copy of the key set; make internal/verify/sample.go use FirstChunk and drop its fallback; record the section 2 change in the package CLAUDE.md files. (3) Add a pgbouncer testcontainer helper to internal/testutil and one integration test proving the pooler-safe startup parameter list and the pooled single-connection fallback. (4) Add a text-keyed or uuid-keyed large table to the nasty generator and a memory-bound extract test over it.` },
+  { id: 'T-PIN', title: 'The run that writes the target is pinned to the snapshot and endpoints the operator reviewed', model: 'opus', reviewers: 3, stage: 'core', paths: ['internal/core/', 'internal/pipeline/', 'internal/event/catalogue.yml', 'cmd/lazyslice/', 'internal/tui/'], integration: true,
+    brief: `From T-TUI's review. With --tui, cmd/lazyslice runs a preview core.Run (plan only) to fill the reasons and plan screens, then a second core.Run with the built request; nothing ties the two together, so the operator's review is of a different snapshot and a different discovery walk than the run that writes the target. Add to core.Request an optional Reviewed struct carrying the preview's pipeline.Schema.Fingerprint (ADR-009 definition) and the chosen source and target endpoints; when set, core compares after introspection and discovery and refuses with a new event code (core.refused.reviewed_changed, exit 12, naming what changed) before any write. cmd/lazyslice fills it from the preview; the plan lines printed by the preview are then not reprinted by the run. Tests in internal/core: identical snapshot passes; a schema change between passes refuses; a different resolved target refuses. Update the runTUI doc comment that records the limit.` },
   { id: 'T-0055', title: 'Shared validators package with the name dictionary; person_name and free_text in the second net', model: 'opus', reviewers: 3, stage: 'verify', paths: ['internal/classify/', 'internal/verify/', 'internal/pipeline/', 'internal/textsig/'], integration: './internal/classify/... ./internal/verify/...',
     brief: `Read tracker/tasks/T-0055-*.md. Create a leaf package internal/textsig holding the value-only halves of the classifier's validators and the embedded name dictionary, imported by both internal/classify and internal/verify (check internal/CLAUDE.md's import-graph rule: a leaf under internal/ that imports only ref and pipeline is allowed; say so in its CLAUDE.md). Register person_name and free_text in verify's second net. Decide the verify-side false-positive threshold: a single dictionary word (black, brown, hill, green, wood) in a column must not fail a target; require the classifier's own multi-token name shape or a dictionary hit rate over the strong threshold across at least minValues distinct values, and name the rule in internal/verify/CLAUDE.md. Update THREAT_MODEL.md T1's gap list only by reporting it; the orchestrator edits that file.` },
 ]
@@ -62,7 +65,7 @@ const BACKLOG = [
 if (step === 'backlog') {
   phase('Backlog')
   const results = []
-  for (const t of BACKLOG) {
+  for (const t of BACKLOG.slice(from)) {
     const r = await workflow({ scriptPath: IMPL }, { ...t, effort: t.model === 'opus' ? 'high' : 'medium' })
     results.push(r)
     if (!r || r.status !== 'merged') { log(`Stopped at ${t.id}`); return { results, stopped_at: t.id } }

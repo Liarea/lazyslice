@@ -1,4 +1,4 @@
-# Board · 2026-09-07
+# Board · 2026-09-08
 
 | Epic | Phase | Open | In progress | Done | Cancelled | Blocked |
 |---|---|---|---|---|---|---|
@@ -7,7 +7,7 @@
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 1 | 0 | 9 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
-| E5 Hardening | 5 | 11 | 1 | 4 | 0 | 0 |
+| E5 Hardening | 5 | 11 | 1 | 5 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
 | E9 Later | later | 4 | 0 | 0 | 0 | 0 |
 
@@ -27,13 +27,14 @@
 - T-0063 [open] E5 · Q1, the controlling terminal, and provisioning: widen pipeline.Provisioner to carry the generated POSTGRES_PASSWORD, then wire --create-target and the one blocking question (opus)
 - T-0064 [open] E5 · Dogfood: two sessions against a real project of Gareth's choosing, logged in docs/DOGFOOD_LOG.md (human)
 - T-0065 [open] E6 · 20-second VHS GIF of the first run on Pagila (sonnet)
-- T-0066 [in_progress] E5 · T-TUI: Bubble Tea reasons and plan screens (opus)
-- T-0067 [open] E5 · T-PROVISION: --create-target and rung 4 (T-0063) (opus)
+- T-0067 [in_progress] E5 · T-PROVISION: --create-target and rung 4 (T-0063) (opus)
 - T-0068 [open] E5 · T-POLY: polymorphic association inference (opus)
 - T-0069 [open] E5 · T-CI5: five-major CI matrix, govulncheck, SBOM, docs drift, unsafe-flag grep (sonnet)
+- T-0070 [open] E5 · T-PIN: the run that writes the target is pinned to the reviewed snapshot and endpoints (core.Request.Reviewed, core.refused.reviewed_changed) (opus)
 
 ## Recently closed
 
+- T-0066 [done] E5 · T-TUI: Bubble Tea reasons and plan screens → done: reasons and plan screens from the event stream, every binding carries its flag, footer strikes unavailable keys, leaving echoes flags into scrollback; --tui only on a TTY
 - T-0044 [done] E4 · T-CORE: core run, emit, render, repo, CLI end to end; integration job blocking again → done: core merged at 9bd9e24, blockers closed by T-0058
 - T-0045 [done] E4 · T-DISCOVER: discovery rungs 0-3 and the first-run ladder → done: 5381042; rungs 0 to 3, six-step Docker endpoint resolution, compose and .env as naming sources, one blocking question, headless asks nothing; unit tests green
 - T-0056 [done] E5 · Second net: weak threshold (0.5) plus neighbouring-column raise; the faithful reading is decorative, the alternative is a different control and needs a T1 review first → decided: the second net keeps the strong threshold only; recorded in THREAT_MODEL T1 and ARCHITECTURE §6
@@ -58,4 +59,3 @@
 - T-0002 [done] E1 · COMPETITORS.md teardown → done: 636-line teardown of 23 tools, 156 sources, critiqued and revised
 - T-0003 [done] E1 · POSTMORTEMS.md Snaplet and Neosync → done: Snaplet and Neosync post-mortems with founder quotes, pricing history, five do-not-copy and three must-copy
 - T-0004 [done] E1 · HARD_PROBLEMS.md technical survey → done: four hard problems surveyed with simplest-correct, refinement, and trap for each
-- T-0005 [done] E1 · COMPLAINTS.md user quotes → done: 25+ verbatim complaints ranked by theme; silent success is the top failure class
