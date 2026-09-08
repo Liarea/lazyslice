@@ -9,13 +9,9 @@
 // Request from keystrokes without duplicating anything: the TUI is a thin
 // layer, and every action it offers is a flag here first (ADR-002).
 //
-// It reaches exactly one stage package directly, and that is a deviation, not
-// the design: firstRun calls internal/discover, and report maps that package's
-// Refusal. cmd/CLAUDE.md says this file reaches no stage directly and its Never
-// list forbids it; that rule is right and this file is the exception to it
-// until T-0061 moves firstRun into internal/core's discover stage, where the
-// ladder belongs. Do not add a second one, and do not read the exception as
-// permission to call another internal/<stage> package from here.
+// It reaches no stage package: the discovery ladder that fills in the endpoints
+// the operator did not name runs in internal/core's discover stage, and its
+// refusals arrive here as a core.Stop like every other stage's (T-0061).
 //
 // A run connects to both databases, drops and recreates the target's schema,
 // loads the masked slice, and writes ./lazyslice.yml and (on a first run)
@@ -44,8 +40,6 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/Liarea/lazyslice/internal/core"
-	"github.com/Liarea/lazyslice/internal/discover"
-	"github.com/Liarea/lazyslice/internal/emit"
 	"github.com/Liarea/lazyslice/internal/event"
 	"github.com/Liarea/lazyslice/internal/pg"
 	"github.com/Liarea/lazyslice/internal/pipeline"
@@ -182,18 +176,11 @@ func newCommandTree(ctx context.Context, req *core.Request, stdout io.Writer) *c
 // on.
 func report(stderr io.Writer, err error, showValues bool) int {
 	var stop *core.Stop
-	switch refusal, isRefusal := discover.AsRefusal(err); {
-	case isRefusal:
-		// The ladder's own refusals: exit 3 with no source, exit 4 with no
-		// target. They are core.Stop's shape without being one, because core
-		// imports internal/discover and the dependency cannot go both ways.
-		// The line the user reads was already rendered from the catalogue by
-		// the sink, exactly as it is for a Stop.
-		fmt.Fprintf(stderr, "lazyslice: %s\n", renderSafe(err, showValues))
-		return refusal.Exit
+	switch {
 	case errors.As(err, &stop):
-		// Every stage refusal arrives as one of these, carrying the event code
-		// and the ADR-005 exit that go with it (internal/core). The line the
+		// Every stage refusal arrives as one of these, the discovery ladder's
+		// exit 3 and exit 4 included, carrying the event code and the ADR-005
+		// exit that go with it (internal/core). The line the
 		// user reads was already rendered from the catalogue by the sink; this
 		// is the developer-facing half and the exit code.
 		//
@@ -281,11 +268,7 @@ func newRootCmd(ctx context.Context, req *core.Request, raw *rawFlags, stdout io
 			if err := finish(cmd, req, raw); err != nil {
 				return err
 			}
-			sink := sinkFor(*req, stdout)
-			if err := firstRun(ctx, req, sink); err != nil {
-				return err
-			}
-			_, err := core.Run(ctx, *req, sink)
+			_, err := core.Run(ctx, *req, sinkFor(*req, stdout))
 			return err
 		},
 	}
@@ -340,77 +323,6 @@ func subcommand(
 			return err
 		},
 	}
-}
-
-// firstRun fills in the endpoints the operator did not name.
-//
-// It is the ARCHITECTURE.md §9 ladder. It runs here because internal/core was
-// outside T-DISCOVER's paths, not because this is where it belongs: core.Run
-// already calls Discover and then stops at exit 3 whatever it returns, and this
-// is where a core.Request is built, so filling two of its fields here was the
-// change that fit. That makes cmd/ reach a stage package directly, which
-// cmd/CLAUDE.md forbids — see this file's package comment and T-0061, which
-// moves this function into core.discover. Nothing about the ladder needs to be
-// here: the first-run half needs a flag set, a controlling terminal and an exit
-// code, none of which pipeline.Discoverer carries, and internal/core has all
-// three (internal/discover/CLAUDE.md).
-//
-// A run that named both endpoints walks no rung and makes no Docker call
-// (ADR-008 §1), which is every run in CI and every run the invariant suite
-// makes.
-//
-// It is called from the root command only. The five stage subcommands reach
-// internal/core's own discover stage, which walks the same ladder to print it
-// and stops at exit 3 without choosing; giving them a first run of their own is
-// a separate change with its own tests.
-func firstRun(ctx context.Context, req *core.Request, sink event.Sink) error {
-	needTarget := req.Mode == core.ModeRun || req.Mode == core.ModeVerify
-	if req.Source != "" && (!needTarget || req.Target != "") {
-		return nil
-	}
-
-	opts := discover.Options{
-		Workdir:      req.Workdir,
-		DockerHost:   req.DockerHost,
-		Config:       priorConfig(*req),
-		Source:       req.Source,
-		Target:       req.Target,
-		NeedTarget:   needTarget,
-		CreateTarget: req.CreateTarget,
-	}
-	res, err := discover.Resolve(ctx, opts, sink)
-	if err != nil {
-		return err
-	}
-	req.Source, req.Target = res.Source, res.Target
-	return nil
-}
-
-// priorConfig reads the committed lazyslice.yml for rung 0, or returns nil.
-//
-// A file that cannot be read is not an error here: internal/core reads the same
-// file a moment later and refuses it with exit 2 and the path, which is the one
-// place that refusal belongs.
-//
-// Known loss, T-0060: rung 0 keeps the file's `source_label:` inside the
-// ladder, but core.Request has no field for a provenance or a label, so
-// internal/core rebuilds both endpoints as pipeline.FromFlag with no label and
-// internal/emit writes that back. A directory whose committed file says
-// `source: compose` / `source_label: db` therefore has those two lines
-// rewritten as `source: flag` on the next argument-free run — the file still
-// names the right endpoint, and the rung it came from is lost. Before this
-// function existed such a run stopped at exit 3 and never reached emit, so the
-// ladder is what made the loss reachable; the fix needs internal/core, which is
-// why it is a task and not a patch here.
-func priorConfig(req core.Request) *pipeline.Config {
-	if req.Reconfigure {
-		return nil
-	}
-	cfg, err := emit.New(emit.Options{}).Read(req.ConfigPath)
-	if err != nil {
-		return nil
-	}
-	return cfg
 }
 
 // introspect runs `lazyslice introspect`. With --json it prints the
@@ -683,7 +595,7 @@ func checkCounts(req *core.Request) error {
 				errUsage, c.flag, c.what, c.value)
 		}
 	}
-	if _, err := emit.ParseSize(req.MemoryBudget); err != nil {
+	if _, err := core.ParseMemoryBudget(req.MemoryBudget); err != nil {
 		return fmt.Errorf("%w: --memory-budget wants a size such as 256MiB, got %q",
 			errUsage, req.MemoryBudget)
 	}

@@ -107,6 +107,22 @@ func TestWriteReadRoundTrip(t *testing.T) {
 	if got.Root != want.Root {
 		t.Errorf("root = %v, want %v", got.Root, want.Root)
 	}
+	// The rung each endpoint came from, and the name that goes with it. They
+	// are what an argument-free re-run reads back at rung 0 and writes out
+	// again, so a round trip that loses them turns a committed
+	// `from: compose` / `service: db` into `from: flag` on the next run
+	// (T-0060).
+	if got.Source != want.Source || got.SourceLabel != want.SourceLabel {
+		t.Errorf("source provenance/label = %v/%q, want %v/%q",
+			got.Source, got.SourceLabel, want.Source, want.SourceLabel)
+	}
+	if got.Target != want.Target || got.TargetLabel != want.TargetLabel {
+		t.Errorf("target provenance/label = %v/%q, want %v/%q",
+			got.Target, got.TargetLabel, want.Target, want.TargetLabel)
+	}
+	if got.SourceRef != want.SourceRef || got.TargetRef != want.TargetRef {
+		t.Errorf("refs = %v/%v, want %v/%v", got.SourceRef, got.TargetRef, want.SourceRef, want.TargetRef)
+	}
 	if got.Take != want.Take || got.Cap != want.Cap || got.Depth != want.Depth {
 		t.Errorf("take/cap/depth = %d/%d/%d, want %d/%d/%d",
 			got.Take, got.Cap, got.Depth, want.Take, want.Cap, want.Depth)

@@ -86,22 +86,33 @@ type Options struct {
 	dial func(dockerctx.Endpoint) (dockerAPI, error)
 }
 
-// Result is what the ladder decided, in the form core.Request takes.
+// Result is what the ladder decided, in the form internal/core takes.
 //
 // Source and Target are connection strings and therefore credentials: hand them
-// to core.Request and to nothing else (THREAT_MODEL.md A3).
+// to the run and to nothing else (THREAT_MODEL.md A3).
 //
-// It carries the two endpoints and nothing else. The rung each came from, and
-// the label that goes with it, have no carrier on core.Request — internal/core
-// builds its own pipeline.Candidate with pipeline.FromFlag — so a field here
-// would be read by nobody while suggesting the provenance reaches the emitted
-// yml. It does not: internal/emit writes `source: flag` with no service name
-// for every discovered run, and a committed `source: compose` / `source_label:
-// db` is rewritten to that on the next argument-free run. T-0060 adds the
-// carrier and is where the two fields come back; until it lands, do not add
-// them here unread (internal/discover/CLAUDE.md).
+// The provenance and label of each side travel with it. internal/core builds
+// its pipeline.Candidate from them and internal/emit writes them into
+// lazyslice.yml, so the file records the rung the endpoint actually came from
+// (ARCHITECTURE.md §10). Three cases, and they are the whole of the rule:
+//
+//   - named on the command line: pipeline.FromFlag with no label;
+//   - supplied by the committed yml (rung 0): the file's own provenance and
+//     label, not pipeline.FromYml — the file records where the endpoint was
+//     found, and a re-run that rewrote `compose` as `yml` would lose that on
+//     the second run instead of the first;
+//   - chosen from the ladder: the winning candidate's own provenance and label.
 type Result struct {
 	Source, Target string
+
+	// SourceProvenance and SourceLabel describe the source: the rung, and the
+	// compose service, container or environment variable name that goes with
+	// it. Both are identifiers, never a credential.
+	SourceProvenance pipeline.Provenance
+	SourceLabel      string
+	// TargetProvenance and TargetLabel are the same two facts about the target.
+	TargetProvenance pipeline.Provenance
+	TargetLabel      string
 }
 
 // Refusal is a stop with the event code and the ADR-005 exit it carries.
@@ -155,18 +166,33 @@ func (ladder) Discover(ctx context.Context, workdir string, sink event.Sink) ([]
 // short-circuits its own side, and a run that named both walks no rung and
 // makes no Docker call at all (ADR-008 §1).
 func Resolve(ctx context.Context, o Options, sink event.Sink) (Result, error) {
-	res := Result{Source: o.Source, Target: o.Target}
+	var res Result
+	// An endpoint the operator named is FromFlag, and the provenance is set
+	// here rather than left at its zero value: pipeline.FromYml is that zero,
+	// so an unset field would tell internal/emit the file named a database
+	// nothing named.
+	if o.Source != "" {
+		res.Source, res.SourceProvenance = o.Source, pipeline.FromFlag
+	}
+	if o.Target != "" {
+		res.Target, res.TargetProvenance = o.Target, pipeline.FromFlag
+	}
 	if o.Config != nil {
 		// Rung 0. The yml short-circuits the same way a flag does, for whichever
-		// of the two sides it supplies (ADR-008 §1).
+		// of the two sides it supplies (ADR-008 §1). It carries its own
+		// provenance forward — `from: compose` stays `compose` — because the
+		// file records where the endpoint was found and not that it was read
+		// back from a file (ARCHITECTURE.md §10).
 		if res.Source == "" {
 			if d, ok := refDSN(o.Config.SourceRef); ok {
 				res.Source = d
+				res.SourceProvenance, res.SourceLabel = o.Config.Source, o.Config.SourceLabel
 			}
 		}
 		if res.Target == "" && o.NeedTarget {
 			if d, ok := refDSN(o.Config.TargetRef); ok {
 				res.Target = d
+				res.TargetProvenance, res.TargetLabel = o.Config.Target, o.Config.TargetLabel
 			}
 		}
 	}
@@ -187,6 +213,7 @@ func Resolve(ctx context.Context, o Options, sink event.Sink) (Result, error) {
 			return res, refuseNoSource(sink)
 		}
 		res.Source = string(source.dsn)
+		res.SourceProvenance, res.SourceLabel = source.cand.Provenance, source.cand.Label
 		send(sink, event.Decision, CodeSourceChosen, event.Args{
 			event.ArgDatabase:   source.cand.Ref.Database,
 			event.ArgHost:       source.cand.Ref.Host,
@@ -203,6 +230,7 @@ func Resolve(ctx context.Context, o Options, sink event.Sink) (Result, error) {
 		return res, refuseNoTarget(o, dock, sink)
 	}
 	res.Target = string(target.dsn)
+	res.TargetProvenance, res.TargetLabel = target.cand.Provenance, target.cand.Label
 	prov := provenanceOf(*target)
 	if runnerUp != nil {
 		prov += " (runner-up " + runnerUp.cand.Ref.String() + ")"
@@ -567,8 +595,15 @@ var targetNamePattern = regexp.MustCompile(`(test|local|dev|snapshot|scratch)$`)
 // Eligibility is internal/pg's Target.Gate, which ARCHITECTURE.md §9 runs after
 // discovery and never inside the 1 s dial; where §5 says "among eligible
 // targets", this applies the same order among the candidates the gate will
-// judge, and the gate's own refusal stands verbatim if the winner does not
-// pass.
+// judge. Only the winner is handed on — core.Request carries one target and not
+// a list — so when the gate refuses it the gate's own refusal stands verbatim
+// and the run ends there. The runner-up is never tried, and no future change
+// should make it fall through: that would load into a database the operator was
+// never shown a decision line for (THREAT_MODEL.md T2). ADR-008 §5 and
+// ARCHITECTURE.md §9 are owed the matching amendment (T-0062); until they carry
+// it, this comment and internal/core's
+// TestAGateRefusalEndsTheRunInsteadOfTryingTheRunnerUp are the statement of the
+// rule.
 //
 // EmptyHint is not a filter here and must never become one. It is
 // coalesce(bool_and(relpages = 0), true) over pg_class, and relpages is a
@@ -722,20 +757,29 @@ func provenanceOf(f found) string {
 	return name
 }
 
-func provenanceName(c pipeline.Candidate) string {
-	switch c.Provenance {
+func provenanceName(c pipeline.Candidate) string { return ProvenanceName(c.Provenance, c.Label) }
+
+// ProvenanceName is the rung an endpoint came from, in the words the candidate
+// list and the decision header print it in.
+//
+// It takes the two fields rather than a Candidate because internal/core prints
+// the header from what Resolve handed it and has no candidate to rebuild: a run
+// whose source came from a compose service must not print "flag" there any more
+// than the emitted yml may record it (ARCHITECTURE.md §9 "Decision header").
+func ProvenanceName(p pipeline.Provenance, label string) string {
+	switch p {
 	case pipeline.FromYml:
 		return "lazyslice.yml"
 	case pipeline.FromEnvVar:
-		return envProvenance(c)
+		return envProvenance(label)
 	case pipeline.FromLibpq:
 		return "libpq environment"
 	case pipeline.FromContainer:
-		return containerProvenance(c)
+		return containerProvenance(label)
 	case pipeline.FromStoppedContainer:
-		return "stopped container " + c.Label
+		return "stopped container " + label
 	case pipeline.FromCompose:
-		return "compose service " + c.Label
+		return "compose service " + label
 	case pipeline.FromFlag:
 		return "flag"
 	default:
@@ -743,18 +787,18 @@ func provenanceName(c pipeline.Candidate) string {
 	}
 }
 
-func envProvenance(c pipeline.Candidate) string {
-	if c.Label == "" {
+func envProvenance(label string) string {
+	if label == "" {
 		return "environment"
 	}
-	return "$" + c.Label
+	return "$" + label
 }
 
-func containerProvenance(c pipeline.Candidate) string {
-	if c.Label == "" {
+func containerProvenance(label string) string {
+	if label == "" {
 		return "container"
 	}
-	return "container " + c.Label
+	return "container " + label
 }
 
 func send(sink event.Sink, kind event.Kind, code event.Code, args event.Args) {

@@ -252,6 +252,18 @@ func TestBothEndpointsGivenSkipsDiscovery(t *testing.T) {
 	if res.Source != opts.Source || res.Target != opts.Target {
 		t.Errorf("the given endpoints were not carried through: %+v", res)
 	}
+	// Both sides are stamped FromFlag rather than left at Provenance's zero
+	// value, which is pipeline.FromYml: an unset field would tell internal/emit
+	// that the committed file named a database the operator named on the command
+	// line, and the next run would read it back as rung 0's (T-0060).
+	if res.SourceProvenance != pipeline.FromFlag || res.SourceLabel != "" {
+		t.Errorf("source provenance/label = %v/%q, want flag with no label",
+			res.SourceProvenance, res.SourceLabel)
+	}
+	if res.TargetProvenance != pipeline.FromFlag || res.TargetLabel != "" {
+		t.Errorf("target provenance/label = %v/%q, want flag with no label",
+			res.TargetProvenance, res.TargetLabel)
+	}
 	if len(events) != 0 {
 		t.Errorf("the ladder ran anyway and emitted %d event(s)", len(events))
 	}

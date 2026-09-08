@@ -103,10 +103,40 @@ each one is a deviation a reviewer should see rather than discover.
   second pool on the target through `pg.Connect` and hands verify a writer with
   `Query` on it. A `Query` method on `internal/pg`'s writer is the proper home
   and is owed there (`internal/verify/CLAUDE.md` records the same deviation).
-- **Discovery is not wired.** `internal/discover` is a scaffold (T-0045), so a
-  run that names neither database stops at exit 3 naming `--source`. A run that
-  names both needs no ladder, which is every run in CI and in
-  `internal/invariants`.
+- **The first-run ladder runs here** (`resolveEndpoints`, T-0061). `cmd/`
+  reaches no stage package, so §9's ladder is walked by the discover stage:
+  `discover.Resolve` for `lazyslice` with no arguments, and for the five stage
+  subcommands only `Discoverer.Discover`, which prints the ladder and chooses
+  nothing before exit 3 names `--source`. A run that names both endpoints walks
+  no rung and makes no Docker call (ADR-008 §1), which is every run in CI and in
+  `internal/invariants`. `discover.Refusal` becomes a `Stop` (`refusalStop`)
+  because `core` imports `discover` and the dependency cannot go the other way;
+  the `Stop` is marked `sent`, since the ladder already put its own `Error`
+  event on the sink and one refusal is one line.
+- **The provenance of each endpoint is kept** (`sourceProv`, `targetProv` and
+  their labels). §10's `source:` block records the rung an endpoint came from,
+  and the run is the only place that knows it: an endpoint named on the command
+  line is `FromFlag`, one from the committed yml keeps that file's own
+  provenance and label, and one the ladder chose keeps the winning candidate's.
+  Building both candidates as `FromFlag` — which is what this did before
+  T-0060 — rewrote a committed `from: compose` / `service: db` as `from: flag`
+  on every argument-free re-run. They are fields on `run` and not on `Request`
+  because `Request` mirrors the §8 flag surface and there is no flag for either.
+- **A gate refusal ends the run.** `internal/discover` ranks the target-shaped
+  candidates and hands over one; when `Target.Gate` refuses it, the run stops at
+  exit 4 with the gate's own refusal and never tries the runner-up, because
+  `Request` carries one target and not a list. That is the behaviour ADR-008 §5
+  gets in this build and `TestAGateRefusalEndsTheRunInsteadOfTryingTheRunnerUp`
+  is what pins it (T-0062). ADR-008 §5 and ARCHITECTURE.md §9 still describe the
+  tie-break as running "among eligible targets" and are owed the correction;
+  both files were outside the paths of the tasks that built this.
+- **`ParseMemoryBudget` is exported.** §1 gives this package `Run`, `Request`
+  and `Report`, and `Introspect` and this are the two entry points beyond them.
+  It exists because `cmd/lazyslice` refuses a misspelled `--memory-budget` at the
+  flag surface and did that by importing `internal/emit` — the one stage package
+  a file that may reach none still reached (cmd/CLAUDE.md). It is a one-line call
+  of `emit.ParseSize`, the same function `planRequest` uses, so the flag and the
+  planner cannot disagree about a size (T-0060's review round).
 - **The plan print is partial.** §3.5 lists eleven things the plan prints; this
   build emits one line per step, the polymorphic pairs, the unmapped values and
   the estimate. The SCCs, the unindexed edges, the not-recreated counts and the

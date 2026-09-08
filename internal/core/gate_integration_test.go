@@ -1,0 +1,204 @@
+// SPDX-License-Identifier: Apache-2.0
+
+//go:build integration
+
+package core
+
+import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/jackc/pgx/v5"
+
+	"github.com/Liarea/lazyslice/internal/event"
+	"github.com/Liarea/lazyslice/internal/pg"
+	"github.com/Liarea/lazyslice/internal/testutil"
+)
+
+// A gate refusal of the chosen target ends the run; the runner-up is never
+// tried (T-0062).
+//
+// ADR-008 section 5's tie-break is written "among eligible targets", and
+// eligibility is Target.Gate's verdict — which needs a live connection the
+// ladder's 1 s dial budget does not allow for. So internal/discover ranks the
+// target-shaped candidates, hands internal/core the winner, and Request carries
+// that one target and not a list: when the gate says no, the run stops at exit 4
+// with the gate's own refusal rather than falling through to the next candidate.
+//
+// This is the behaviour, and this test is what pins it. Two databases on the
+// cluster are target-shaped: app_test, which the name rule ranks first and which
+// holds a row, and app_spare, which is empty and would pass. The run must refuse
+// app_test and leave app_spare untouched — not silently load into the runner-up,
+// which is a write to a database the operator was never shown.
+func TestAGateRefusalEndsTheRunInsteadOfTryingTheRunnerUp(t *testing.T) {
+	ctx := t.Context()
+	testutil.SkipWithoutDocker(ctx, t)
+
+	admin := testutil.Postgres(ctx, t, "")
+	// One cluster, three databases. A second database on the same cluster is
+	// eligible by ARCHITECTURE.md section 9 rule 1 — it is the common compose
+	// setup — so the refusal this test asserts is the emptiness rule and not
+	// the identity one.
+	source := createDatabase(ctx, t, admin, "app_source")
+	refused := createDatabase(ctx, t, admin, "app_test")
+	spare := createDatabase(ctx, t, admin, "app_spare")
+
+	// The source carries the most tables, which is what makes it the source
+	// (section 9: the most-local reachable candidate with the most tables).
+	execOn(ctx, t, source,
+		`CREATE TABLE customer (id int PRIMARY KEY, email text)`,
+		`CREATE TABLE address (id int PRIMARY KEY, line text)`,
+		`CREATE TABLE city (id int PRIMARY KEY, name text)`,
+		`INSERT INTO customer VALUES (1, 'a@example.com')`,
+	)
+	// The winner: a database with a row in it, which the gate's rule 5 refuses.
+	execOn(ctx, t, refused,
+		`CREATE TABLE leftovers (id int PRIMARY KEY)`,
+		`INSERT INTO leftovers VALUES (1)`,
+	)
+
+	dir := t.TempDir()
+	quietRungs(t)
+	// Rung 1 is where all three candidates come from, so that the ladder has a
+	// runner-up to fall through to without this test depending on what else is
+	// running on the machine's Docker daemon.
+	envFile := "DATABASE_URL=" + source + "\nPOSTGRES_URL=" + refused + "\nPG_URL=" + spare + "\n"
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(envFile), 0o600); err != nil {
+		t.Fatalf("writing .env: %v", err)
+	}
+
+	var codes []event.Code
+	sink := event.SinkFunc(func(e event.Event) { codes = append(codes, e.Code) })
+
+	req := Request{
+		Mode:    ModeRun,
+		Workdir: dir,
+		// A non-local endpoint yields no rung 3 candidate and makes no socket
+		// call (ADR-008 section 3), which keeps the containers this suite starts
+		// off the ladder and this test off the daemon.
+		DockerHost: "tcp://staging.example:2375",
+		ConfigPath: filepath.Join(dir, "lazyslice.yml"),
+		SecretFile: filepath.Join(dir, "lazyslice.secret"),
+		NoConfig:   true,
+		Yes:        true,
+	}
+
+	_, err := Run(ctx, req, sink)
+
+	var stop *Stop
+	if !errors.As(err, &stop) {
+		t.Fatalf("Run = %v, want the gate's refusal", err)
+	}
+	if stop.Exit != exitTarget || stop.Code != pg.CodeNotEmpty {
+		t.Errorf("stop = %s/exit %d, want %s/exit %d — the gate's own rule 5 refusal",
+			stop.Code, stop.Exit, pg.CodeNotEmpty, exitTarget)
+	}
+	if got := stop.Args[event.ArgDatabase]; got != "app_test" {
+		t.Errorf("the refusal names %q, want app_test — the candidate the tie-break ranked first", got)
+	}
+	// One refusal, not two: a run that tried the runner-up would have refused
+	// twice, or refused once and then loaded.
+	if n := count(codes, pg.CodeNotEmpty); n != 1 {
+		t.Errorf("%s was emitted %d time(s), want once", pg.CodeNotEmpty, n)
+	}
+
+	// The runner-up was never opened, never truncated and never loaded. A
+	// fall-through would have created the schema and the marker table in it.
+	if n := userTables(ctx, t, spare); n != 0 {
+		t.Errorf("app_spare holds %d table(s): the run fell through to the runner-up "+
+			"and wrote to a database it never showed the operator", n)
+	}
+}
+
+// count is how many times a code reached the sink.
+func count(codes []event.Code, want event.Code) int {
+	n := 0
+	for _, got := range codes {
+		if got == want {
+			n++
+		}
+	}
+	return n
+}
+
+// createDatabase makes one more database on the cluster admin points at and
+// returns a connection URL for it.
+func createDatabase(ctx context.Context, t *testing.T, admin, name string) string {
+	t.Helper()
+
+	conn, err := pgx.Connect(ctx, admin)
+	if err != nil {
+		t.Fatalf("connecting to create %s: %v", name, err)
+	}
+	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
+
+	if _, execErr := conn.Exec(ctx, `CREATE DATABASE `+pgx.Identifier{name}.Sanitize()); execErr != nil {
+		t.Fatalf("creating %s: %v", name, execErr)
+	}
+
+	u, err := testutil.URL(admin)
+	if err != nil {
+		t.Fatalf("parsing the container URL: %v", err)
+	}
+	u.Path = "/" + name
+	return u.String()
+}
+
+// execOn runs statements against one database, in order.
+func execOn(ctx context.Context, t *testing.T, connURL string, statements ...string) {
+	t.Helper()
+
+	conn, err := pgx.Connect(ctx, connURL)
+	if err != nil {
+		t.Fatalf("connecting: %v", err)
+	}
+	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
+
+	for _, sql := range statements {
+		if _, err := conn.Exec(ctx, sql); err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+	}
+}
+
+// userTables counts the ordinary and partitioned tables in a database, the same
+// way the ladder's own dial does.
+func userTables(ctx context.Context, t *testing.T, connURL string) int {
+	t.Helper()
+
+	conn, err := pgx.Connect(ctx, connURL)
+	if err != nil {
+		t.Fatalf("connecting: %v", err)
+	}
+	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
+
+	var n int
+	const sql = `SELECT count(*)::int
+  FROM pg_class c
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+ WHERE c.relkind IN ('r', 'p')
+   AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+   AND n.nspname NOT LIKE 'pg\_toast%'`
+	if err := conn.QueryRow(ctx, sql).Scan(&n); err != nil {
+		t.Fatalf("counting tables: %v", err)
+	}
+	return n
+}
+
+// quietRungs empties the environment every rung of the ladder reads, so that
+// the developer's own $DATABASE_URL or libpq settings cannot decide what this
+// test asserts. The Docker endpoint is set by the request, not here.
+func quietRungs(t *testing.T) {
+	t.Helper()
+
+	for _, name := range []string{
+		"DATABASE_URL", "POSTGRES_URL", "PG_URL", "DB_URL",
+		"PGSERVICE", "PGHOST", "PGHOSTADDR", "PGDATABASE", "PGPORT", "PGUSER",
+		"PGPASSWORD", "PGPASSFILE",
+	} {
+		t.Setenv(name, "")
+	}
+}

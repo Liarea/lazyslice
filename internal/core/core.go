@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/Liarea/lazyslice/internal/emit"
 	"github.com/Liarea/lazyslice/internal/event"
 	"github.com/Liarea/lazyslice/internal/ref"
 )
@@ -162,6 +163,16 @@ func NewRequest() Request {
 	}
 }
 
+// ParseMemoryBudget reads a --memory-budget value and returns the byte count.
+//
+// It is here so that cmd/lazyslice can refuse a misspelled size at the flag
+// surface without reaching a stage package: that file builds a Request and
+// calls Run, and importing internal/emit for one parser was the single
+// exception to it (cmd/CLAUDE.md, T-0061). The parse itself is internal/emit's
+// and planRequest calls the same function, so the flag and the planner can
+// never disagree about what "256MiB" means.
+func ParseMemoryBudget(s string) (int64, error) { return emit.ParseSize(s) }
+
 // set reports whether the operator passed a flag by that name.
 func (r Request) set(flag string) bool { return r.Explicit[flag] }
 
@@ -187,6 +198,11 @@ type Stop struct {
 	// internal/event/catalogue.yml by Code.
 	Message string
 	err     error
+	// sent records that the Error event for this refusal has already reached
+	// the sink. The discovery ladder sends its own (internal/discover's
+	// Refusal), and Run's report would otherwise print a second line under the
+	// same code and the same exit.
+	sent bool
 }
 
 func (s *Stop) Error() string {
