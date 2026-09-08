@@ -164,7 +164,7 @@ reason for each.
     holding free text is not a discriminator, and one virtual edge per value
     would be an unbounded fan-out of parent tables from one column. The cap is a
     product decision this file introduced: ARCHITECTURE.md §3.2 does not state
-    it and no ADR carries it. It is owed a §3.2 amendment or an ADR, and until
+    it and ARCHITECTURE.md §3.2's amendment of 2026-09-08 now records it; until
     it has one this bullet is the only record of it, which root CLAUDE.md
     ("decisions live in docs/adr/") says is the wrong home. What it is no longer
     is *silent*: a pair the cap stopped is reported as `public.attachments
@@ -215,7 +215,7 @@ reason for each.
     it, and that is a deliberate deviation from §3.2: a `_type` column holding
     the table name itself is the shape `testdata/nasty.sql` trap 6 carries and
     the shape hand-rolled polymorphism takes, and without the fallback both
-    values of the only fixture this feature has would be unmapped. It is owed a
+    values of the only fixture this feature has would be unmapped. ARCHITECTURE.md §3.2's amendment of 2026-09-08 admits the fallback; it was owed a
     §3.2 amendment. `djangoCandidates` has no fallback at all — the bare model
     name would bind an `auth`/`user` content type to any app's `public.user` —
     so a model with an explicit `db_table` resolves to no table and is reported
@@ -271,29 +271,15 @@ reason for each.
     (widen the sample) that would change nothing. The `'Ghost'` row in
     `plan_integration_test.go`'s `note_links` is the guard: the sample maps it
     to no table and the walk then meets it on a selected row.
-  - **`Plan.Virtual`'s only reader is `internal/emit`, and no line of the
-    printed plan says a virtual edge was followed.** `internal/core` emits one
-    event per `Plan.Polymorphic` entry and one per `Plan.Unmapped` entry and has
-    no code for a followed virtual edge, so on `testdata/nasty.sql` — where both
-    values resolve — the run says less than it did before, not more: the "not
-    followed" warning is correctly gone and no "followed" line replaces it. §3.5
-    requires the plan to print every virtual FK. The fix is a
-    `plan.polymorphic.inferred` code in `internal/core/codes.go` and
-    `internal/event/catalogue.yml`, a loop over `p.Virtual` in
-    `internal/core/run.go`'s `planStage`, and the code added to
-    `internal/tui/collect.go`; none of those files is writable from this
-    package's task, and the feature is not finished until they are written. The
-    provenance is not entirely lost in the meantime — `Step.Why` says `parent of
-    public.attachments via the polymorphic pair public.attachments.owner_id
-    where owner_type = "projects"` and `plan.step` prints it — but only for a
-    table the virtual edge is the *first* thing to reach, since `noteWhy` keeps
-    the first reason. Two comments in that same unwritable half are now false
-    and belong in the same landing: `internal/emit/document.go`'s `virtualList`
-    ("section 3.2's mapping half is not in v1, so this list is empty") and
-    `internal/emit/CLAUDE.md`'s "`virtual_fks:` ... v1 follows no inferred
-    edge". So does ARCHITECTURE.md §14's line cutting §3.2 inference from v1,
-    and `testdata/nasty.sql` and `testdata/README.md` trap 6, which still
-    promise the "not followed" line the inference removed.
+  - **Every followed virtual edge is printed before extraction.** `internal/core`
+    emits `plan.polymorphic.inferred` per `Plan.Virtual` entry beside the
+    `Plan.Polymorphic` and `Plan.Unmapped` lines (T-0072: `internal/core/codes.go`,
+    `internal/event/catalogue.yml`, `planStage` in `run.go`, `internal/tui/collect.go`).
+    `internal/emit`'s `virtualList` comment and its `virtual_fks:` bullet were
+    corrected in the same landing, ARCHITECTURE.md §3.2 and §14 were amended by
+    the orchestrator on 2026-09-08, and `testdata/nasty.sql` and `testdata/README.md`
+    trap 6 now describe the inferred-and-followed behaviour with a Rails-spelled
+    row. Nothing here is owed.
   - **`ForeignKey.Name` carries identifiers and never the `_type` value.** It is
     `public.attachments.owner_type`: the discriminator column the inference
     read, and nothing else. `internal/emit` copies `Plan.Virtual` into
