@@ -3,10 +3,10 @@ id: T-0069
 title: "T-CI5: five-major CI matrix, govulncheck, SBOM, docs drift, unsafe-flag grep"
 epic: E5
 phase: 5
-status: open
+status: in_progress
 owner: sonnet
 created: 2026-09-07
-started: ""
+started: 2026-09-08
 closed: ""
 outcome: ""
 ---
@@ -24,6 +24,8 @@ outcome: ""
 ## Log
 
 - 2026-09-07 created
+
+- 2026-09-08 started
 
 ## Post-mortem
 
