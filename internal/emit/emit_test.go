@@ -192,6 +192,40 @@ func TestWrittenFileIsReadable(t *testing.T) {
 	}
 }
 
+// A followed virtual edge (§3.2 amended 2026-09-08, T-POLY) is rendered into
+// `virtual_fks:` as text, never replayed as an input: Name Child (cols) ->
+// Parent (cols).
+func TestVirtualFKsLineForAnInferredEdge(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "lazyslice.yml")
+	cfg := sample()
+	cfg.Plan.VirtualFKs = []pipeline.ForeignKey{
+		{
+			Name:       "public.attachments.owner_type",
+			Child:      tbl("public", "attachments"),
+			ChildCols:  []string{"owner_id"},
+			Parent:     tbl("public", "people"),
+			ParentCols: []string{"person_id"},
+			Virtual:    true,
+		},
+	}
+	if err := New(Options{}).Write(path, cfg); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading it back: %v", err)
+	}
+	text := string(body)
+
+	if !strings.Contains(text, "virtual_fks:") {
+		t.Fatalf("the emitted file does not contain a virtual_fks: key:\n%s", text)
+	}
+	want := "public.attachments.owner_type public.attachments (owner_id) -> public.people (person_id)"
+	if !strings.Contains(text, want) {
+		t.Errorf("the emitted file does not contain the virtual_fks line %q:\n%s", want, text)
+	}
+}
+
 // A --where predicate holding a literal is withheld and recorded only as a
 // fingerprint (THREAT_MODEL.md T5). The writer refuses a config that carries
 // one anyway, because the file is committed.

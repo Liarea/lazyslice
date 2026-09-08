@@ -64,8 +64,8 @@ the file; let a re-read narrow a prior decision instead of only tightening it.
   place a prior can change a decision.
 - **`plan:`, `small_domain:` and `virtual_fks:` do not come back.** They are a
   record; nothing reads them as an input. `virtual_fks:` is written as text
-  because v1 follows no inferred edge and a structured form would be a shape
-  nobody produces.
+  rather than a structured form because the one thing it exists to say is the
+  rendered edge itself, not a shape a reader parses back.
 - **`pipeline.PlanSummary.Unreadable` was added.** §10's plan block carries
   `unreadable:` and §2's `PlanSummary` did not name it.
 - **`pipeline.Config.SourceLabel`/`TargetLabel` were added**, for §10's

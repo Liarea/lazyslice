@@ -69,6 +69,14 @@ const (
 	// impossible (ARCHITECTURE.md section 14).
 	CodePlanPolymorphic event.Code = "plan.polymorphic.detected"
 
+	// CodePlanPolymorphicInferred names one followed virtual edge: a
+	// discriminator column whose sampled _type values resolved and whose
+	// mapping the plan followed in the parent direction (ARCHITECTURE.md
+	// section 3.2, amended 2026-09-08). Printed for every entry of
+	// plan.Plan.Virtual, so the plan states every virtual edge it will
+	// actually walk and not only the pairs it declined.
+	CodePlanPolymorphicInferred event.Code = "plan.polymorphic.inferred"
+
 	// CodePlanUnmapped names a sampled _type value that maps to no table. It is
 	// the other half of section 3.2 and stays unemitted until the mapping half
 	// ships; it is declared because the planner's Unmapped list is what feeds

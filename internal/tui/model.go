@@ -185,7 +185,7 @@ func (m model) apply(e event.Event) model {
 		})
 	case core.CodePlanEstimate:
 		m.estimate = catalogueLine(e)
-	case core.CodePlanPolymorphic, core.CodePlanUnmapped:
+	case core.CodePlanPolymorphicInferred, core.CodePlanPolymorphic, core.CodePlanUnmapped:
 		m.notes = append(m.notes, catalogueLine(e))
 	default:
 		// Every other code belongs to the transcript, which the line printer

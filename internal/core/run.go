@@ -831,6 +831,26 @@ func (r *run) classifyPrior() (*pipeline.Config, error) {
 
 // ---------- plan ----------
 
+// virtualEvents prints one plan.polymorphic.inferred line per entry of
+// p.Virtual: §3.5 requires the plan to state every virtual edge it will
+// actually follow, not only the pairs it declined (ARCHITECTURE.md §3.2,
+// amended 2026-09-08, T-POLY). fk.Name is "child.column" — the discriminator
+// column the inference read, table-qualified by fk.Child — so the bare column
+// name is read off the last segment.
+func (r *run) virtualEvents(p *pipeline.Plan) {
+	for _, fk := range p.Virtual {
+		col := fk.Name
+		if i := strings.LastIndex(fk.Name, "."); i >= 0 {
+			col = fk.Name[i+1:]
+		}
+		r.send(event.Plan, event.Info, CodePlanPolymorphicInferred, event.Args{
+			event.ArgColumn: col,
+			event.ArgTable:  fmt.Sprintf("%s (%s)", fk.Child, strings.Join(fk.ChildCols, ", ")),
+			event.ArgReason: fk.Parent.String(),
+		})
+	}
+}
+
 func (r *run) planStage(ctx context.Context) error {
 	r.start(event.Plan)
 	defer r.done(event.Plan)
@@ -857,6 +877,7 @@ func (r *run) planStage(ctx context.Context) error {
 			},
 		})
 	}
+	r.virtualEvents(p)
 	for _, pair := range p.Polymorphic {
 		r.send(event.Plan, event.Warn, CodePlanPolymorphic, event.Args{event.ArgReason: pair})
 	}

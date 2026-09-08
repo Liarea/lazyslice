@@ -34,6 +34,7 @@ var screenCodes = []event.Code{
 	codeColumnCopied,
 	core.CodePlanStep,
 	core.CodePlanEstimate,
+	core.CodePlanPolymorphicInferred,
 	core.CodePlanPolymorphic,
 	core.CodePlanUnmapped,
 }
