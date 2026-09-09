@@ -98,27 +98,35 @@ patterns:
   # The second half of this alternation is the spellings a real authentication
   # schema uses (T-0104). docs/TORTURE.md's hand-labelled truth set over
   # supabase-auth measured recall 0.800 and every one of the ten misses was a
-  # name this pattern did not cover: an OAuth authorization code, a one-time
+  # name this pattern did not cover (it is 0.980 there now, one miss left, and
+  # precision moved up rather than down: 0.645 to 0.671): an OAuth authorization code, a one-time
   # code, a recovery code's hash, the secret half of PKCE and a WebAuthn
   # credential id. A bare `codes?` is deliberately NOT here: it would match
   # country_code, postal_code, currency_code and status_code, and at priority 80
   # it would take a postal code away from the address rule and mask it to the
   # fixed literal.
   #
-  # `public_?keys?` is NOT here either, and its absence is a decision deferred
-  # rather than taken (T-0121). T-0104 named it one of two columns that "deserve
-  # a decision rather than a pattern", and the two readings pull opposite ways: a
-  # public key is published by design -- mastodon puts it in the actor document
-  # and WebAuthn hands it to every relying party -- so it is not a secret, and
-  # masking it to the credential fixed literal at priority 80 outranks every
-  # rule that could say otherwise; but it is also a stable identifier for
-  # exactly one person, which is the online_id argument. Whichever way it is
-  # settled, it moves a hand label in names_test.go, and the rule and the label
-  # it is scored against must not be moved by the same change.
+  # `public_?keys?` IS here, and that is a decision taken rather than a pattern
+  # widened (T-0121, settled 2026-09-09; T-0104 named it one of two columns that
+  # "deserve a decision rather than a pattern"). The two readings pull opposite
+  # ways: a public key is published by design -- mastodon puts it in the actor
+  # document and WebAuthn hands it to every relying party -- so it is not a
+  # secret; but it is also a stable identifier for exactly one person, which is
+  # the online_id argument. It goes to credential because *a key that identifies
+  # a person is personal data, and masking it costs nothing a development
+  # database needs*: nothing local verifies a WebAuthn assertion or fetches an
+  # actor document, so a per-account key replaced by the unusable literal breaks
+  # no local flow, while copying it ships a per-person identifier that outlives
+  # every other value in the row. Under a unique index it escalates to
+  # credential_unique (mask/gen_credential.go) rather than refusing, which is
+  # why the wide-domain online_id argument no longer buys anything the plan
+  # needs. The hand labels this rule is scored against moved with it, in
+  # names_test.go and supabase_misses_test.go, and the rates are recorded in
+  # docs/TORTURE.md.
   - name: credential
     category: credential
     priority: 80
-    match: '(^|_)(passwords?|passwd|pwd|password_?hash|password_?digest|encrypted_?password|salts?|secrets?|api_?keys?|access_?tokens?|refresh_?tokens?|auth_?tokens?|tokens?|token_?digests?|private_?keys?|client_?secrets?|otp_?secrets?|totp_?secrets?|recovery_?codes?|signing_?keys?|encryption_?keys?|auth_?codes?|otp_?codes?|authorization_?codes?|code_?verifiers?|code_?challenges?|code_?hash(es)?|credential_?ids?)(_|$)'
+    match: '(^|_)(passwords?|passwd|pwd|password_?hash|password_?digest|encrypted_?password|salts?|secrets?|api_?keys?|access_?tokens?|refresh_?tokens?|auth_?tokens?|tokens?|token_?digests?|private_?keys?|client_?secrets?|otp_?secrets?|totp_?secrets?|recovery_?codes?|signing_?keys?|encryption_?keys?|auth_?codes?|otp_?codes?|authorization_?codes?|code_?verifiers?|code_?challenges?|code_?hash(es)?|credential_?ids?|public_?keys?)(_|$)'
 
   - name: national_id
     category: national_id

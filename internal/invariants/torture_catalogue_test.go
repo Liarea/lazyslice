@@ -217,15 +217,27 @@ var tortureSchemas = []tortureSchema{
 		root: "public.accounts",
 		take: 100,
 		flags: []string{
-			"--unmask", "public.accounts.uri=the account's federation URI, a URL the classifier reads as a secret",
+			"--unmask", "public.accounts.uri=the account's federation URI, the public address the account is known by",
 			"--unmask", "public.session_activations.session_id=an opaque session id",
 			"--unmask", "public.statuses.uri=the status's federation URI",
 			// `public.users.confirmation_token` and `public.users.reset_password_token`
 			// were the fourth and fifth flags until T-0112: unique credential
 			// columns no masker could fill (T-0098). `credential_unique` fills
-			// them now. The three that remain are T-0100, not T-0098: the two
-			// federation URIs and the session id are values `textsig.LooksSecret`
-			// reads as credentials and the operator has to say are not personal.
+			// them now.
+			//
+			// The three that remain were T-0100, not T-0098: all three are
+			// values `textsig.LooksSecret` read as credentials, which under a
+			// unique index meant the fixed literal and a refusal. **T-0100 is
+			// fixed** (T-HARD-B): a URL is no longer a secret to that validator
+			// and `internal/classify` asks `textsig.ValidURL` ahead of it, so
+			// the two federation URIs are `online_id` — a category whose
+			// generator has a domain a unique column can use — and only
+			// `session_id` is still read as a credential. Whether either URI
+			// flag is still *needed* is not something this run can say: mastodon
+			// refuses at exit 13 before the plan, so no masker is ever chosen
+			// here (the same reason T-0112 could remove the other two without
+			// measuring anything). They stay, and the count stays honest,
+			// until the exit-13 refusal is something a run can get past.
 		},
 		// The tenth. ARCHITECTURE.md §11.1 does not recreate functions, and
 		// Mastodon's primary keys default to `timestamp_id('accounts')`, which

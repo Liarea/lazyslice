@@ -302,18 +302,22 @@ differs subtly from the invariant of the same name is worse than no assertion.
   forty-five and thirty-seven `--unmask` until T-0112 removed the eighteen that
   existed only because `CatCredential` had no generator wide enough for a unique
   column (T-0098, fixed by `mask/gen_credential.go`) and re-ran the suite.
-  `mask/CLAUDE.md` and `mask/gen_credential.go` still say that re-run has not
-  happened; `mask/` was outside T-0112's paths and correcting them is **T-0114**.
-- **`make torture` does not exit 0 today, and the failure is not in this
-  package.** `testdata/regressions/004-composite-unique-index-all-masked.sql`
-  and `007-partial-unique-index-masked-column.sql` both carry
-  `expect: exit 12 plan.refused.unique_domain` over a *credential* column;
-  `credential_unique` escalates both now, so both exit 0 with the column masked
-  and `TestTortureRegressions` fails them against their own headers. Measured at
-  ecc42ae with T-0112's catalogue changes stashed, so it predates T-0112. What
-  those two reductions should assert instead is a decision about
-  `testdata/regressions/`, which is outside this package: **T-0113**. All ten
-  schemas and both catalogue guards pass.
+  T-0114 carried the same correction into `mask/`, which was outside T-0112's
+  paths, and T-HARD-C's run re-counted the split unchanged.
+- **`make torture` exits 0** (T-HARD-C, 2026-09-09: all four `TestTorture*`
+  functions report `--- PASS`, 57 s). It did not between `credential_unique`
+  landing and T-0113: `testdata/regressions/004-composite-unique-index-all-masked.sql`
+  and `007-partial-unique-index-masked-column.sql` both carried
+  `expect: exit 12 plan.refused.unique_domain` over a *credential* column, and
+  the escalation made both exit 0 with the column masked, so
+  `TestTortureRegressions` failed them against their own headers. Both are
+  re-cut to `expect: ok` plus the optional **`unique-masked:`** header key this
+  package now parses: it names `schema.table.column` entries the loaded target
+  must hold masked to distinct `mask.CredentialUniquePrefix` values
+  (`assertTortureColumnIsUniquelyMasked`), because `expect: ok` alone would pass
+  a run that copied the tokens verbatim. `testdata/regressions/README.md`
+  defines the key; `plan.refused.unique_domain` losing its only reduction is
+  **T-0124**.
 - **Every run in this package masks under a fixed key** (`fixedSecret`, written
   into the working directory by `start` before the first invocation). It is not a
   convenience: the residual scan fails a run when a masked value equals a value

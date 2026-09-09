@@ -20,14 +20,25 @@ package mask
 // mastodon, one each in calcom and discourse. An authentication schema is
 // nothing but unique credentials.
 //
-// That eighteen counts the flags still standing in the catalogue; it is not a
-// re-run measurement. This change makes them unnecessary, but stripping them and
-// re-running `make torture` needs internal/invariants/ and docs/TORTURE.md,
-// which were outside this task's paths. Until tracker T-0112 does that, the
-// thirty-seven/seven/one split in docs/TORTURE.md and the flags-by-kind
-// assertion in internal/invariants/torture_test.go both still quote the pre-fix
-// numbers, and credential_unique has no end-to-end torture coverage — only the
-// unit tests in this package.
+// That eighteen counted the flags standing in the catalogue when this was
+// written and was not a re-run measurement. It is one now (T-0112, re-checked by
+// T-HARD-C's run): the eighteen flags are gone, the split is nineteen --unmask,
+// seven --skip-table and one --key over twenty-seven flags, and that is what
+// docs/TORTURE.md, ROADMAP.md's gate-5 line and the flags-by-kind assertion in
+// internal/invariants/torture_test.go all carry.
+//
+// credential_unique does have end-to-end torture coverage now, and it is worth
+// stating precisely rather than generously. Of the eighteen columns whose flag
+// went, four hold masked values in a target — auth.refresh_tokens.token 136/136,
+// auth.users.confirmation_token 100/100, auth.users.recovery_token 100/100 and
+// public.user_security_keys.credential_id 100/100, every one carrying
+// CredentialUniquePrefix with a distinct count equal to the row count. Two are
+// the empty string mask.Apply passes through, ten are NULL in their fixture, and
+// mastodon's two are in the run that refuses at exit 13 before the plan. The
+// second end-to-end evidence is testdata/regressions/004 and 007, whose headers
+// T-0113 re-cut from the exit-12 refusal this generator removed to `expect: ok`
+// plus a `unique-masked:` assertion that reads the columns out of the target.
+// docs/TORTURE.md's "Flags" section carries the same breakdown.
 //
 // So this is the alternate Pick escalates to, the same shape phone_unique and
 // ip_unique already have for CatPhone and CatNetworkID: registered *after* the

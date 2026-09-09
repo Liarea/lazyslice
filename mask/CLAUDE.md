@@ -306,16 +306,25 @@ next change to this module argues with a decision rather than rediscovering it.
   to; a narrower column shortens the suffix and `Domain()` shrinks with it, and
   a column with no room for the prefix and one symbol has `Domain() == 0` and
   returns `ErrNoRoom` like every other generator. Nothing is truncated.
-  **`docs/TORTURE.md`'s counts are stale until somebody re-runs `make torture`**
-  — the eighteen flags, the thirty-seven/seven/one split, the per-schema table
+  **`docs/TORTURE.md`'s counts were re-measured** (T-0112, and again in
+  T-HARD-C's run): the eighteen flags are out of the catalogue, the split is
+  **nineteen `--unmask`, seven `--skip-table`, one `--key`** over twenty-seven
+  flags, and `docs/TORTURE.md`, ROADMAP.md's gate-5 line, the per-schema table
   and the flags-by-kind assertion in `internal/invariants/torture_test.go` all
-  quote a number this change moves, and none of those files was in this task's
-  paths: tracker **T-0112**. Two consequences hold until it lands, and both are
-  live: the eighteen flags are still in the catalogue, so `make torture` still
-  copies eighteen credential columns into the target in clear; and because
-  every unique credential column in the ten schemas is opted out,
-  `credential_unique` has **no end-to-end coverage** on any real schema — the
-  tests in this package are all of it.
+  carry that. `make torture` no longer copies eighteen credential columns into a
+  target in clear, and it exits 0.
+  **`credential_unique` has end-to-end coverage now**, and it is worth stating
+  precisely rather than generously. Of the eighteen columns whose flag went,
+  **four** hold masked values in a target — `auth.refresh_tokens.token` 136/136,
+  `auth.users.confirmation_token` 100/100, `auth.users.recovery_token` 100/100
+  and `public.user_security_keys.credential_id` 100/100, every value prefixed
+  `lazyslice-invalid-` with a distinct count equal to the row count. Two are the
+  empty string `mask.Apply` passes through, ten are NULL in their fixture, and
+  mastodon's two are in the run that refuses at exit 13 before the plan. Beside
+  those, `testdata/regressions/004` and `007` reduce a unique credential column
+  each and assert the same thing directly: T-0113 re-cut them from the exit-12
+  refusal this generator removed to `expect: ok` plus a `unique-masked:` header
+  the harness checks against the loaded target.
 - **`Register(id, category, masker)`**, and order within a category is
   meaningful: the first registration is the category's default and the rest are
   the alternates `Pick` considers for a unique column. `Get` understands the

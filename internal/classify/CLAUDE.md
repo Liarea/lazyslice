@@ -518,18 +518,23 @@ by deleting a name pattern fails the test that matters first. Run
 schemas: T-0104 added Supabase's auth columns and GitLab's `identities.extern_uid`
 beside the original fifty, because every spelling the credential and online_id
 rules gained has to be scored in the same matrix as everything else. It reads
-precision 0.957 / recall 0.978.
+precision 0.958 / recall 0.979 (T-0121; it was 0.957 / 0.978 with both
+`public_key` columns copied and labelled not-personal).
 
-**No hand label moved in the change that widened the rules scored against it.**
+**No hand label moves in the change that widens the rules scored against it.**
 Relabelling a column turns a false positive into a true positive without the
 classifier doing anything, so it is not the rule author's call to make in the
 same commit — and this fixture's whole value is that the rates are over a set
-nobody trimmed. Both `public_key` columns are labelled not-personal, which is
-where the label has always been, and T-0121 is the decision that may move them
-together. `supabase.refresh_tokens.parent` is left as a false negative on
-purpose (see below).
+nobody trimmed. Exactly one label has ever moved: both `public_key` columns,
+from not-personal to personal, under **T-0121**'s own decision that a
+`public_key` column is a credential, taken by the orchestrator and applied in a
+task that wrote none of the T-0104 patterns it is scored against. The movement
+it caused is the two lines above: 44 → 46 true positives, 17 → 15 true
+negatives, and the false positives and the one false negative unchanged.
+`supabase.refresh_tokens.parent` is left as that false negative on purpose (see
+below).
 
-Three rules were **not** widened, and all three refusals are load-bearing:
+Two rules were **not** widened, and both refusals are load-bearing:
 
 - **A bare `codes?` is not in the credential pattern.** At priority 80 it would
   take `postal_code`, `country_code`, `currency_code` and `status_code` away
@@ -542,14 +547,18 @@ Three rules were **not** widened, and all three refusals are load-bearing:
   "parent, in a table called refresh_tokens" is not expressible; T-0119 carries
   the table-scoped-pattern question. `supabase_misses_test.go` pins the column as
   still copied and says why.
-- **`public_?keys?` is not in the credential pattern**, and its absence is a
-  decision deferred rather than taken (T-0121). It is the other of the two
-  columns T-0104 said "deserve a decision rather than a pattern": a public key
-  is published by design, so masking it to the credential fixed literal at
-  priority 80 replaces a value that is not secret and outranks every rule that
-  could say otherwise, and yet it is a stable identifier for exactly one person,
-  which is the `online_id` argument. Two categories, two maskers, and a hand
-  label that moves with the answer.
+
+**`public_?keys?` used to be the third of these, and it is now in the credential
+pattern** (T-0121, settled 2026-09-09). It is the other of the two columns
+T-0104 said "deserve a decision rather than a pattern". A public key is
+published by design, which is the argument for leaving it alone or for calling
+it an `online_id`; what decided it is that a key identifying exactly one person
+is a per-person identifier that outlives every other value in the row, and
+nothing a development database does verifies a WebAuthn assertion or serves an
+actor document, so the real value buys nothing there. Under a unique index it
+escalates to `credential_unique` rather than refusing, which is what removed the
+practical objection to a masker whose domain is one. The hand labels moved with
+it, in the same task and by an author who wrote none of the rules they score.
 
 **The IdP names are their own rule, and it is anchored** (`online_id_idp`,
 T-0104). `external_id`, `provider_id` and `extern_uid` are the identifier an
@@ -603,19 +612,21 @@ are approximations and both are argued at their site:
 
 Both err towards raising. Raising wrongly costs a plan refusal that prints three
 escapes; not raising costs a loader that dies with every row already moved.
-T-0099 is the task that would replace them with a rule the architecture states.
 
-**These are behaviour rules, not repairs, and they shipped ahead of the
-architecture.** `Decision.UniqueIndex` feeds `internal/plan`'s exit-12 refusal,
-`internal/transform`'s `Constraints.Unique` and the emitted `lazyslice.yml`, so
-what is written above changes what every user's run does — and root CLAUDE.md
-says a decision lives in `docs/adr/`. No ADR and no ARCHITECTURE.md §5 edit came
-with them, because T-TORTURE's paths reached neither file. **T-0099 is the
-record until one does**, and it states both approximations precisely enough to
-be the ADR's text. Do not treat the paragraphs above as the specification.
-**T-0107** is the action that settles it before gate 5 closes: land the ADR with
-T-0099's text as its Decision, or record in the tracker that T-TORTURE was
-authorised to decide these rules and that T-0099 only tightens them later.
+**These are behaviour rules, and they are decided.** `Decision.UniqueIndex`
+feeds `internal/plan`'s exit-12 refusal, `internal/transform`'s
+`Constraints.Unique` and the emitted `lazyslice.yml`, so what is written above
+changes what every user's run does — and root CLAUDE.md says a decision lives in
+`docs/adr/`. They shipped ahead of that: T-TORTURE's paths reached neither
+`docs/adr/` nor ARCHITECTURE.md, and T-0099 was the record in the meantime.
+**`docs/adr/011-unique-index-domain-rule.md` is the decision now** — accepted
+2026-09-08, clause (a) the composite rule and clause (b) the partial one, with
+T-0099's text as its Decision and ARCHITECTURE.md §5 amended to state both
+(T-0099 and T-0107 are closed). The paragraphs above describe the code; **the
+ADR is the specification**, and a change to either of these rules is a
+superseding ADR and not an edit here. ADR-011's reversal condition is the one
+open thread: when introspect collects the largest-agreeing-group statistic,
+clause (a) becomes exact.
 
 ## A rejected name hit never leaves a column worse off than no name (T-TORTURE)
 

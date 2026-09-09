@@ -12,7 +12,7 @@ import (
 
 // The second net (ARCHITECTURE.md section 6 item 4).
 //
-// All ten of the classifier's value validators, folded into the eight entries
+// All eleven of the classifier's value validators, folded into the nine entries
 // in validators.go (its two financial validators share one entry here, and so
 // do its two network ones), run over the full contents of
 // every column of the loaded target that is not fully masked by a category
@@ -246,9 +246,16 @@ func (s *state) netColumn(ctx context.Context, col ref.ColumnRef, mode netMode) 
 // person_name or free_text refusal over leaves would be this net refusing a
 // loaded target on evidence the classifier is structurally unable to have seen,
 // with no green path short of --unmask on a column the classifier had no reason
-// to mask. The other six validators are the classifier's own leaf questions and
-// stay. When classify's leaf signal reads the dictionary, this exclusion comes
-// off with it (tracker T-0087).
+// to mask. The other seven entries stay — email, phone, network_id,
+// financial_account, online_id (T-0122), credential and address — and five of
+// the shapes they ask about are the classifier's own leaf questions exactly:
+// email, phone, IP, IBAN and Luhn. Four are not — MAC, URL, LooksSecret and
+// AddressShape — and they stay because the argument above does not reach them:
+// every one is a *parse* rather than a dictionary word, so a leaf that hits one
+// is a value of that shape and not an ordinary English sentence, and a document
+// is not a safer place to keep an address than the scalar column of the same
+// table the classifier would have masked. When classify's leaf signal reads the
+// dictionary, the dict exclusion comes off with it (tracker T-0087).
 func applies(v validator, mode netMode) bool {
 	if v.dict && mode.leaves {
 		return false

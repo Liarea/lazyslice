@@ -9,7 +9,7 @@
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 14 | 2 | 36 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 7 | 0 | 13 | 1 | 0 |
+| E9 Later | later | 11 | 0 | 13 | 1 | 0 |
 
 ## Open and in progress
 
@@ -38,6 +38,10 @@
 - T-0119 [open] E9 · A table-scoped name rule, for refresh_tokens.parent and its kind ()
 - T-0121 [open] E5 · Decide public_key: credential, online_id, or neither ()
 - T-0122 [open] E5 · internal/verify: the second net lost URL coverage when T-0100 narrowed textsig.LooksSecret ()
+- T-0123 [open] E9 · ARCHITECTURE.md section 2: Writer has four methods now, and pipeline.TypeRegistrar is gone ()
+- T-0124 [open] E9 · testdata/regressions covers plan.refused.unique_domain no longer ()
+- T-0125 [open] E9 · Makefile's vet-tagged comment still says .golangci.yml does not lint the torture tag ()
+- T-0126 [open] E9 · internal/textsig/CLAUDE.md still says internal/verify has no URL entry (T-0122 has landed) ()
 
 ## Recently closed
 

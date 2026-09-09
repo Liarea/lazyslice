@@ -22,11 +22,22 @@ statement allowlist this stage needs registered before `Verify` runs, as
   case-folded probe only if that's false, capped at
   `--residual-probe-cap` (THREAT_MODEL.md T4's value-egress note: a probe
   parameter can land in the source's own log).
-- The second net re-runs *all ten of internal/classify's value validators*
+- The second net re-runs *all eleven of internal/classify's value validators*
   over the whole contents of every unmasked, non-opted-out column of a family
   this package can name, and over the string leaves of every JSON column,
-  masked or not (ARCHITECTURE.md §6 item 4). It catches what the 200-row
-  sample missed. **It is still narrower than §6 item 4's own sentence, in three
+  masked or not (ARCHITECTURE.md §6 item 4). Eleven, not ten: the eleventh is
+  `textsig.ValidURL`, which `internal/classify` gained at T-0100 when
+  `textsig.LooksSecret` stopped reading a URL as a credential, and which this
+  package only gained at **T-0122** — between those two tasks a URL was a shape
+  *neither* net could see, and a profile URI that reached the target unmasked
+  passed every validator here. None of the eleven is missing now; two are
+  answered by narrower validators on purpose (the dictionary rule, below).
+  `internal/textsig/CLAUDE.md` still describes that hole as open, because
+  `internal/textsig` was outside T-0122's paths; correcting it is tracker
+  **T-0126**, and the rule it teaches stands either way: a validator narrowed in
+  that package is narrowed for both nets, and both need an answer in the same
+  change. It
+  catches what the 200-row sample missed. **It is still narrower than §6 item 4's own sentence, in three
   named ways, and this file says so in one place rather than claiming "every
   unmasked column" here and listing holes further down**: no column of a family
   this package cannot name (`famOther`, so a `tsvector` or an enum); only the
@@ -70,7 +81,7 @@ statement allowlist this stage needs registered before `Verify` runs, as
 - `reasons.go` — the fixed phrases a `Refusal.Reason` may hold.
 - `residual.go` — §6 items 1 to 3: the scan, the hit, the two probes, the cap.
 - `secondnet.go`, `validators.go` — §6 item 4: the scan and the scoring, and
-  the ten validators attached to their categories. The validators and the name
+  the eleven validators attached to their categories, in nine entries. The validators and the name
   dictionary themselves are `internal/textsig`, which `internal/classify`
   imports too (T-0055).
 - `fk.go`, `counts.go`, `sample.go` — §6 item 5.
@@ -240,7 +251,7 @@ was chosen and is recorded here rather than only in a comment.
   own signal. That is a recall hole and it is stated here and in the Rules
   above, not only here.
 - **`person_name` and `free_text` are in the net, under the dictionary rule**
-  (T-0055). They used to be missing — the two of `internal/classify`'s ten
+  (T-0055). They used to be missing — the two of `internal/classify`'s
   validators that read its embedded name dictionary, which this package could
   not import and would not copy — so a target column of real person names, or a
   notes column carrying other rows' names (testdata/README.md trap 17), passed

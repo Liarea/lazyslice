@@ -107,7 +107,12 @@ each one is a deviation a reviewer should see rather than discover.
 - **`readableWriter` (run.go).** §2's `pipeline.Writer` has no read method and
   every check `internal/verify` makes is a read of the target, so core opens a
   second pool on the target through `pg.Connect` and hands verify a writer with
-  `Query` on it. A `Query` method on `internal/pg`'s writer is the proper home
+  `Query` on it. It embeds the `Writer` *interface*, so it forwards
+  `RegisterTypes` — `Writer`'s fourth method since T-0093 — to the real writer
+  rather than dropping it. That embedding is exactly why the method is on
+  `Writer` at all: while registration was an optional `pipeline.TypeRegistrar`,
+  this wrapper was not a registrar, and putting it one line earlier in `run.go`
+  would have turned every run's type registration off with no compile error. A `Query` method on `internal/pg`'s writer is the proper home
   and is owed there (`internal/verify/CLAUDE.md` records the same deviation).
 - **The first-run ladder runs here** (`resolveEndpoints`, T-0061). `cmd/`
   reaches no stage package, so §9's ladder is walked by the discover stage:

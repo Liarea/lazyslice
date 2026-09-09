@@ -89,15 +89,19 @@ var heldOutNames = []namedColumn{
 	{"mastodon", "accounts", "note", "text", true},
 	{"mastodon", "accounts", "domain", "character varying(255)", false},
 	{"mastodon", "accounts", "private_key", "text", true},
-	// Labelled not-personal, which is where it has always been, and the label
-	// does not move in the change that widens a rule scored against it (T-0121
-	// carries the decision; see rules.yml's credential comment). A per-account
-	// public key is published in the actor document, so it is not a secret, and
-	// whether "a stable identifier for exactly one person" makes it personal is
-	// the question T-0104 reserved. Whoever settles it moves this label and
-	// supabase.webauthn_credentials.public_key below together, and records what
-	// the rates did.
-	{"mastodon", "accounts", "public_key", "text", false},
+	// Relabelled personal by T-0121 (settled 2026-09-09), together with
+	// supabase.webauthn_credentials.public_key below and with the credential
+	// rule in rules.yml that now matches both. It sat at not-personal from the
+	// day this fixture was written until then, on the argument that a
+	// per-account public key is published in the actor document and so is not a
+	// secret; what settled it is the other half of T-0104's question, that it is
+	// a stable identifier for exactly one person and nothing a development
+	// database does needs the real one. Moving a label and the rule scored
+	// against it in one change is normally what this file forbids; it is the
+	// exception the decision itself asked for, the two labels and the rule were
+	// moved by a task that did not write the T-0104 patterns, and the movement
+	// is recorded in docs/TORTURE.md rather than only here.
+	{"mastodon", "accounts", "public_key", "text", true},
 	{"mastodon", "users", "email", "character varying(255)", true},
 	{"mastodon", "users", "encrypted_password", "character varying(255)", true},
 	{"mastodon", "users", "sign_up_ip", "inet", true},
@@ -111,7 +115,8 @@ var heldOutNames = []namedColumn{
 	{"gitlab", "identities", "extern_uid", "character varying(255)", true},
 
 	// Supabase auth (T-0104). These are the ten columns docs/TORTURE.md's
-	// hand-labelled truth set recorded as missed at recall 0.800;
+	// hand-labelled truth set recorded as missed at recall 0.800, which is 0.980
+	// there now with one of the ten left;
 	// supabase_misses_test.go pins each one's decision individually, and this is
 	// where they are scored beside everything else.
 	{"supabase", "flow_state", "auth_code", "text", true},
@@ -123,7 +128,7 @@ var heldOutNames = []namedColumn{
 	{"supabase", "identities", "provider_id", "text", true},
 	{"supabase", "webauthn_credentials", "credential_id", "bytea", true},
 	// Labelled to agree with mastodon's above, for the reason written there.
-	{"supabase", "webauthn_credentials", "public_key", "bytea", false},
+	{"supabase", "webauthn_credentials", "public_key", "bytea", true},
 	// Still a false negative, and deliberately left as one: a rule matching
 	// `parents?` would mask every parent_id join key in every schema there is.
 	// See supabase_misses_test.go.
@@ -177,8 +182,13 @@ func namesSchema() (*pipeline.Schema, map[string]bool) {
 // moved in the change that widened the rules scored against it (T-HARD-B): a
 // relabelled column turns a false positive into a true positive without the
 // classifier doing anything, and it is not the rule author's call to make in
-// the same commit. The one label that is genuinely open is public_key, and
-// T-0121 carries it.
+// the same commit. Exactly one label has ever moved — public_key, both rows,
+// under T-0121's own decision that the column is a credential — and it moved in
+// a task that wrote none of the patterns it is scored against. What that
+// movement did to the rates, measured either side of it: 44 → 46 true
+// positives, 17 → 15 true negatives, two false positives and one false negative
+// unchanged, precision 0.957 → 0.958 and recall 0.978 → 0.979. No label here is
+// open now.
 func TestFiftyNamesFromThreeSchemas(t *testing.T) {
 	t.Parallel()
 	if len(heldOutNames) != 64 {

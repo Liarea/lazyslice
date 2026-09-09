@@ -17,25 +17,32 @@ never quoted here without them. A stranger pointing lazyslice at GitLab types
 three `--unmask` flags before it runs. The tenth, Mastodon, refuses at exit 13
 for a reason ARCHITECTURE.md §11.1 states, and the suite asserts that refusal by
 name. Between them the ten found **twelve defects**, every one of which is now a
-fix in `internal/`, `mask/` or ARCHITECTURE.md §5, and **five more** that are
-filed rather than fixed because the change belongs somewhere this task could not
-reach.
+fix in `internal/`, `mask/` or ARCHITECTURE.md §5, and **five more findings**
+that were filed rather than fixed because the change belonged somewhere
+T-TORTURE could not reach. Four of those five have since been fixed as well
+(T-0100, T-0103, T-0104, T-0105) and are described where their fixes are; the
+one still open is T-0102.
 
 It was forty-five flags — thirty-seven `--unmask` — when this file was first
 written. Eighteen of those `--unmask` flags were one defect, T-0098, and the
 `credential_unique` masker (`mask/gen_credential.go`) removed the need for every
 one of them; T-0112 stripped them one schema at a time and re-ran the suite,
-which is the measurement above. **`make torture` does not currently exit 0**:
-two of its eight regressions, `004` and `007`, still assert the exit-12 refusal
-that T-0098's fix removed, and re-cutting them is **T-0113**. All ten schemas
-and both catalogue guards pass.
+which is the measurement above. **`make torture` exits 0** (T-HARD-C,
+2026-09-09), which it did not between T-0098's fix and T-0113: two of the eight
+regressions, `004` and `007`, still asserted the exit-12 refusal that fix
+removed. Both are re-cut to `expect: ok` plus a `unique-masked:` assertion that
+reads the columns out of the target, so what they pin is the masking and not
+merely the exit code.
 
-One thing the nine clean runs do **not** say, measured below and carrying a
-task: supabase-auth's classifier misses ten of the fifty columns the
-hand-labelling calls personal, and each of those is copied into the target in
-cleartext under exit 0 (recall 0.800, T-0104). A second one used to stand beside
-it — `credential`'s only masker had a domain of one — and that is the T-0098
-defect the count above no longer carries.
+One thing the nine clean runs do **not** say, measured below: supabase-auth's
+classifier misses **one** of the fifty columns the hand-labelling calls personal
+— `refresh_tokens.parent`, a quarter populated in this fixture — and it is
+copied into the target in cleartext under exit 0 (recall 0.980). It missed **ten** at recall
+0.800 when this file was written; T-0104's name rules took eight of them and
+T-0121's `public_key` decision the ninth, and the re-measurement is in the truth
+sets below. A second finding used to stand beside it — `credential`'s only
+masker had a domain of one — and that is the T-0098 defect the count above no
+longer carries.
 
 The fixtures are `testdata/torture/`; the catalogue that runs them is
 `internal/invariants/torture_catalogue_test.go`; the reduced defects are
@@ -71,21 +78,22 @@ unlucky under this key.
 
 | Schema | Tables | FKs | Columns | Root | Flags | Time | Result |
 |---|---:|---:|---:|---|---:|---:|---|
-| [rails-activestorage](../testdata/torture/rails-activestorage/README.md) | 7 | 3 | 36 | `public.active_storage_blobs` | 1 | 3.6 s | clean |
-| [django](../testdata/torture/django/README.md) | 10 | 9 | 44 | `public.auth_user` | 1 | 2.2 s | clean |
-| [supabase-auth](../testdata/torture/supabase-auth/README.md) | 27 | 24 | 271 | `auth.users` | 1 | 3.0 s | clean |
-| [plausible](../testdata/torture/plausible/README.md) | 42 | 40 | 294 | `public.sites` | 2 | 2.6 s | clean |
-| [gitlab](../testdata/torture/gitlab/README.md) | 43 | 116 | 968 | `public.namespaces` | 3 | 4.7 s | clean |
-| [metabase](../testdata/torture/metabase/README.md) | 100 | 130 | 892 | `public.core_user` | 4 | 3.5 s | clean |
+| [rails-activestorage](../testdata/torture/rails-activestorage/README.md) | 7 | 3 | 36 | `public.active_storage_blobs` | 1 | 4.0 s | clean |
+| [django](../testdata/torture/django/README.md) | 10 | 9 | 44 | `public.auth_user` | 1 | 2.3 s | clean |
+| [supabase-auth](../testdata/torture/supabase-auth/README.md) | 27 | 24 | 271 | `auth.users` | 1 | 3.1 s | clean |
+| [plausible](../testdata/torture/plausible/README.md) | 42 | 40 | 294 | `public.sites` | 2 | 2.7 s | clean |
+| [gitlab](../testdata/torture/gitlab/README.md) | 43 | 116 | 968 | `public.namespaces` | 3 | 4.5 s | clean |
+| [metabase](../testdata/torture/metabase/README.md) | 100 | 130 | 892 | `public.core_user` | 4 | 3.6 s | clean |
 | [calcom](../testdata/torture/calcom/README.md) | 102 | 179 | 1,092 | `public.users` | 1 | 4.4 s | clean |
 | [mastodon](../testdata/torture/mastodon/README.md) | 118 | 156 | 1,018 | `public.accounts` | 3 | 2.5 s | **exit 13** |
-| [odoo](../testdata/torture/odoo/README.md) | 204 | 622 | 2,048 | `public.res_users` | 3 | 5.6 s | clean |
-| [discourse](../testdata/torture/discourse/README.md) | 370 | 29 | 3,372 | `public.users` | 8 | 7.4 s | clean |
-| **total** | **1,023** | **1,308** | **10,035** | | **27** | **39.6 s** | 9 clean, 1 refused |
+| [odoo](../testdata/torture/odoo/README.md) | 204 | 622 | 2,048 | `public.res_users` | 3 | 5.4 s | clean |
+| [discourse](../testdata/torture/discourse/README.md) | 370 | 29 | 3,372 | `public.users` | 8 | 7.5 s | clean |
+| **total** | **1,023** | **1,308** | **10,035** | | **27** | **40.0 s** | 9 clean, 1 refused |
 
-The whole `make torture` target is 56 seconds: the 39.6 above, plus 15 for the
-eight regressions and a second for the two catalogue guards and the image
-check.
+The whole `make torture` target is 57 seconds: the 40.0 above, plus 15.6 for the
+eight regressions and a second for the two catalogue guards and the image check.
+That is the T-HARD-C run, the first one in which every one of the four
+`TestTorture*` functions reported `--- PASS`.
 
 "Clean" means exit 0 with every check in `TestTortureSchemas` passing: the
 tables the slice had to reach hold rows and, where a correct run cannot reach
@@ -224,10 +232,15 @@ shortens the suffix and `Domain()` shrinks with it; nothing is truncated.
 Two consequences are recorded rather than hidden. The first is that
 `testdata/regressions/004-composite-unique-index-all-masked.sql` and
 `007-partial-unique-index-masked-column.sql` both reduce a credential column and
-both say `expect: exit 12 plan.refused.unique_domain`; both now exit 0 with the
-column masked, so `make torture` fails them and **T-0113** owes the decision
-about what those two files should assert instead. The second is in the "Flags"
-section above: of the eighteen columns whose flag this removed, four are actually
+both said `expect: exit 12 plan.refused.unique_domain`; both exit 0 with the
+column masked now, so `make torture` failed them until **T-0113** re-cut both to
+`expect: ok` plus a `unique-masked:` header that reads the columns out of the
+target — every value carrying `lazyslice-invalid-`, one distinct value per row —
+which is the assertion an exit code alone cannot make. What that costs is
+recorded too: `plan.refused.unique_domain` is a real refusal that nothing in
+`testdata/regressions/` exercises any more, and **T-0124** owes a reduction that
+does. The second is in the "Flags" section above: of the eighteen columns whose
+flag this removed, four are actually
 masked end to end, two are the empty string, ten are NULL in their fixture and
 two are in the run that refuses before the plan.
 
@@ -273,19 +286,53 @@ defects this exercise found *and* got fixed:
 
 ## Found and not fixed
 
-Five, each with a tracker task, because the change belongs in a file this task
-could not write (`mask/` is ADR-006's own module; `.golangci.yml` is neither) or
-is a decision rather than a repair. It was eight: T-0097, T-0099 and T-0101 had
-a row here until T-HARD-A and ADR-011 fixed them, and they are in "Defects found
-and fixed" above.
+One, with a tracker task. It was eight when this file was written, and seven of
+the eight are now fixes rather than findings: T-0097, T-0099 and T-0101 went
+first (T-HARD-A and ADR-011), then T-0100, T-0103 and T-0104 (T-HARD-B), then
+T-0105 (T-HARD-C). Each is described where its fix is, above and below.
 
 | Task | Finding |
 |---|---|
-| T-0100 | `textsig.LooksSecret` classifies a **URL** as a credential — `https://home.social.test/users/bea_donnelly1` clears its entropy test — which is safe but wrong, and under a unique index becomes a flag the operator has to type. Two of mastodon's three. |
 | T-0102 | A **text column holding a JSON document** is invisible to §4's JSON rule: the scalar validators do not match a document and the column is copied. |
-| T-0103 | An **array of an extension type** is sampled as one opaque string, so the classifier never sees the addresses inside a `citext[]`; and if it does decide to mask it, the masked scalar cannot be encoded into the array column at all. |
-| T-0105 | `.golangci.yml`'s `run.build-tags` lists `integration` alone, so the 821 lines behind `integration && torture` are linted by nothing. `make check` now runs `vet-tagged`, which type-checks and vets them under both tag sets; linting them is one line in a file outside this task's paths. |
-| T-0104 | The `credential` and `online_id` name rules miss the spellings an auth schema uses — `auth_code`, `otp_code`, `code_verifier`, `credential_id`, `public_key`, `external_id`, `provider_id`. That is every one of the ten misses in the supabase-auth truth set below. |
+
+The four that closed after the first writing of this file, in the order they
+landed, because each changes a number quoted here:
+
+* **T-0100 — `textsig.LooksSecret` classified a URL as a credential.**
+  `https://home.social.test/users/bea_donnelly1` cleared its entropy test, so
+  mastodon's `accounts.uri` and `statuses.uri` were `credential` on every row,
+  masked to a fixed literal under a unique index and therefore two of that
+  schema's three flags. T-HARD-B excluded a URL from `LooksSecret` and put
+  `textsig.ValidURL` into `internal/classify`'s validator list **ahead of** the
+  secrets one, so such a column is `online_id`, whose generator has a domain a
+  unique column can use. **T-0122 is the other half and landed in T-HARD-C**:
+  `internal/verify`'s second net had the credential entry and no URL entry at
+  all, so between the two tasks a profile URI that reached the target unmasked
+  was seen by neither net — the second net is one of THREAT_MODEL.md T1's two
+  blocking controls on classifier recall, and the two packages score
+  independently.
+* **T-0103 — an array of an extension type.** Fixed in T-HARD-B; defect 5's row
+  above carries the loader half.
+* **T-0104 — the `credential` and `online_id` name rules missed the spellings an
+  auth schema uses.** `auth_code`, `otp_code`, `code_hash`,
+  `authorization_code`, `code_verifier`, `code_challenge`, `credential_id`,
+  `external_id`, `provider_id`, `extern_uid`. That was every one of the ten
+  misses in the supabase-auth truth set below; T-HARD-B widened the two rules
+  and the truth set is re-measured against them here.
+* **T-0105 — `.golangci.yml` did not lint the torture build tag.** `run.build-tags`
+  listed `integration` alone, so the ~820 lines behind `integration && torture`
+  were linted by nothing; `make check`'s `vet-tagged` type-checked and vetted
+  them but ran no linter over them. T-HARD-C added `torture` to that list. The
+  suite was clean under the full linter set on the first run.
+
+One decision was taken rather than a rule widened, and it moves a hand label
+below: **T-0121 — a `public_key` column is `credential`** (2026-09-09), masked
+to the unusable literal, or `credential_unique` under a unique index. A public
+key is published by design, which is the argument the other way, but it is a
+stable identifier for exactly one person and nothing a development database does
+needs the real one. T-0104 had named it one of two columns that deserve a
+decision rather than a pattern; the other, `refresh_tokens.parent`, is still
+open and is the one remaining false negative below.
 
 ## PII truth sets
 
@@ -309,12 +356,32 @@ threshold. An operator's `--unmask` does not change the prediction — it is a
 decision about a column the classifier flagged, and folding it in would score the
 flags rather than the classifier.
 
+Re-measured 2026-09-09 (T-HARD-C), after T-0104's name rules and T-0121's
+`public_key` decision, by the method under "Reproducing it" below: each schema
+loaded from its pin, sliced with the catalogue's own root, `--take` and flags,
+and every entry of the emitted `lazyslice.yml`'s `columns:` block scored against
+the labels at the end of this file.
+
 | Schema | Columns | Labelled personal | Predicted | TP | FP | FN | Precision | Recall |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | django | 44 | 9 | 12 | 9 | 3 | 0 | **0.750** | **1.000** |
 | rails-activestorage | 36 | 7 | 15 | 7 | 8 | 0 | **0.467** | **1.000** |
-| supabase-auth | 271 | 50 | 62 | 40 | 22 | 10 | **0.645** | **0.800** |
-| all three | 351 | 66 | 89 | 56 | 33 | 10 | **0.629** | **0.848** |
+| supabase-auth | 271 | 50 | 73 | 49 | 24 | 1 | **0.671** | **0.980** |
+| all three | 351 | 66 | 100 | 65 | 35 | 1 | **0.650** | **0.985** |
+
+The first measurement of this table, before T-0104, was supabase-auth 62
+predicted, 40 TP, 22 FP, 10 FN — precision 0.645, recall 0.800 — and all three
+89/56/33/10, precision 0.629, recall 0.848. django and rails-activestorage did
+not move at all: neither schema has a column any of the widened names match.
+Recall moved 0.800 → 0.980 on supabase-auth and precision moved *up* with it,
+0.645 → 0.671, which is not what widening a rule usually does — the two new
+false positives are `flow_state.code_challenge` and
+`oauth_authorizations.code_challenge`, the public half of PKCE, matched by
+T-0104's `code_?challenges?`, against nine columns that stopped being missed.
+T-0121 added exactly one prediction, `webauthn_credentials.public_key`, and it
+is a true positive: measured with the same fixture and the `public_key` rule
+removed, supabase-auth is 72 predicted, 48 TP, 24 FP, 2 FN, precision 0.667,
+recall 0.960.
 
 ### django — precision 0.750, recall 1.000
 
@@ -344,39 +411,45 @@ Nothing personal was missed, including the one that matters:
 `active_storage_blobs.filename` — `ana-aluko-passport-3.pdf` — is caught at
 `likely` with no name signal at all.
 
-### supabase-auth — precision 0.645, recall 0.800
+### supabase-auth — precision 0.671, recall 0.980
 
-The one with false negatives, and they are the reason it is in the set. All ten
-are columns no name rule covers:
+The one with a false negative, and it is the reason this schema is in the set.
+It had ten, and nine of them were names no rule covered:
 
-| Missed column | Rows in the fixture | What it holds |
-|---|---|---|
-| `flow_state.auth_code` | 100, column NULL | the OAuth authorization code |
-| `identities.provider_id` | 300, populated | the provider's subject id for the person |
-| `refresh_tokens.parent` | 400, a quarter populated | another refresh token |
-| `mfa_challenges.otp_code` | 0 | the one-time code |
-| `mfa_recovery_codes.code_hash` | 0 | a recovery code |
-| `oauth_authorizations.authorization_code` | 0 | the authorization code |
-| `oauth_client_states.code_verifier` | 0 | the secret half of PKCE |
-| `scim_users.external_id` | 0 | the IdP's id for the person |
-| `webauthn_credentials.credential_id` | 0 | the authenticator's credential id |
-| `webauthn_credentials.public_key` | 0 | a stable per-person identifier |
+| Was missed | Rows in the fixture | What it holds | Now |
+|---|---|---|---|
+| `flow_state.auth_code` | 100, column NULL | the OAuth authorization code | masked (T-0104) |
+| `identities.provider_id` | 300, populated | the provider's subject id for the person | masked (T-0104) |
+| `mfa_challenges.otp_code` | 0 | the one-time code | masked (T-0104) |
+| `mfa_recovery_codes.code_hash` | 0 | a recovery code | masked (T-0104) |
+| `oauth_authorizations.authorization_code` | 0 | the authorization code | masked (T-0104) |
+| `oauth_client_states.code_verifier` | 0 | the secret half of PKCE | masked (T-0104) |
+| `scim_users.external_id` | 0 | the IdP's id for the person | masked (T-0104) |
+| `webauthn_credentials.credential_id` | 0 | the authenticator's credential id | masked (T-0104) |
+| `webauthn_credentials.public_key` | 0 | a stable per-person identifier | masked (T-0121) |
+| `refresh_tokens.parent` | 400, a quarter populated | another refresh token | **still copied** |
 
-**Seven of the ten are columns with nothing in them**, where only the name could
+**Seven of the ten were columns with nothing in them**, where only the name could
 have decided — which is precisely the case a name rule exists for, and precisely
-where the rule pack is thin: it matches `tokens?`, `secrets?`, `passwords?` and
+where the rule pack was thin: it matched `tokens?`, `secrets?`, `passwords?` and
 `api_keys?`, and none of `code`, `verifier`, `credential_id` or `public_key`.
-That is T-0104, and this table is the measurement a fix should be scored against.
+That was T-0104, and the `Now` column is the fix scored against the same table.
 
-The three with data are worth separating out. `refresh_tokens.parent` is the
-sharpest: a refresh token in a column named after a tree edge, populated, and
-missed by name and by value alike.
+The one that remains is the sharpest of the ten and the only one with data in
+it: `refresh_tokens.parent` is a refresh token in a column named after a tree
+edge, populated, and missed by name and by value alike. There is no pattern to
+write — `parents?` would mask the join keys of half a database at priority 80,
+and this rule pack sees a column name without its table — so the fix is a
+table-scoped pattern, which is a rule-pack feature and not a rule. It is pinned
+by `TestSupabaseAuthMissesArePinned`.
 
-The twenty-two false positives are mostly one table — `custom_oauth_providers`,
+The twenty-four false positives are mostly one table — `custom_oauth_providers`,
 nine of them, where a deployment's OAuth endpoints (`token_url`, `discovery_url`,
-`userinfo_url`) read as secrets — plus `provider_type` and
+`userinfo_url`) read as secrets or as an `online_id` — plus `provider_type` and
 `authentication_method`, which are short enum-ish strings that clear the entropy
-threshold, and `sso_domains.domain`, which is an organisation's.
+threshold, `sso_domains.domain`, which is an organisation's, four `jsonb`
+columns masked on their type alone, and the two `code_challenge` columns T-0104
+added.
 
 **What the recall number does not measure.** These are the classifier's
 decisions, not the run's outcome. A column the classifier misses is copied
@@ -384,26 +457,24 @@ verbatim, so a miss here *is* a leak — which is why the grep half of I2 runs o
 every torture target as well, and why defect 8 was found by that and not by
 this table.
 
-**So phase 5 closes with a measured, reproducible leak of ten of the fifty
+**So phase 5 closes with a measured, reproducible leak of one of the fifty
 labelled columns on one of the ten schemas**, and that belongs in the gate's
-evidence rather than in this paragraph alone. Three of the ten are populated in
-the fixture — `identities.provider_id` (300 rows, the provider's subject id for
-the person), `refresh_tokens.parent`, `flow_state.auth_code` — and I2's grep
-half cannot see any of them: it knows email addresses and phone numbers, and a
-subject id is neither. The fix is T-0104 and it is a *scored* change: widening
-`credential` and `online_id` to match `code`, `verifier`, `credential_id`,
-`public_key`, `external_id` and `provider_id` will move precision as well, and
-the number to beat is the row above.
+evidence rather than in this paragraph alone. It was ten when this file was
+written, and two of those ten were populated in the fixture that I2's grep half
+cannot see — `identities.provider_id` (300 rows, the provider's subject id for
+the person) and `flow_state.auth_code`: that half knows email addresses and
+phone numbers, and a subject id is neither. Both are masked now. The one that
+remains, `refresh_tokens.parent`, is a quarter populated and needs a
+table-scoped pattern rather than a name.
 
-Until it lands the ten are pinned by
-`TestSupabaseAuthMissesArePinned` (`internal/classify/supabase_misses_test.go`),
-which runs in `make test` on every change and asserts each of them exactly as it
-is: a name-only classification, below the mask threshold. It fails in **both**
-directions — an eleventh miss, or one of these ten becoming masked without this
-table being re-measured — so the number cannot get quietly worse, and cannot get
-better without the doc being updated with it. A test that asserts a leak is an
-uncomfortable thing to write and a worse thing to lose track of; that is why it
-names T-0104 in its own failure message.
+All ten are still pinned, one by one, by `TestSupabaseAuthMissesArePinned`
+(`internal/classify/supabase_misses_test.go`), which runs in `make test` on
+every change: nine assert the masking and one asserts the leak. It fails in
+**both** directions — an eleventh miss, or one of these ten changing side
+without this table being re-measured — so the number cannot get quietly worse,
+and cannot get better without the doc being updated with it. A test that asserts
+a leak is an uncomfortable thing to write and a worse thing to lose track of;
+that is why it names its own tracker task in its failure message.
 
 ## Reproducing it
 
@@ -415,9 +486,23 @@ testdata/torture/build.sh gitlab                    # rebuild one schema.sql fro
 
 `testdata/torture/README.md` is the fixtures' spec, each schema's own
 `README.md` is its pin and its deviations, and
-`internal/invariants/torture_catalogue_test.go` is the catalogue of runs. The
-truth sets above were produced by reading the `columns:` block of each run's
-emitted `lazyslice.yml` and scoring it against the labels below.
+`internal/invariants/torture_catalogue_test.go` is the catalogue of runs.
+
+The truth sets above were produced by reading the `columns:` block of each run's
+emitted `lazyslice.yml` and scoring it against the labels below. A column counts
+as predicted-personal when its `confidence:` is `possible`, `likely` or
+`certain`; anything else, and any column the block does not name, counts as
+predicted not-personal. The three runs are the catalogue's own — root, `--take`
+and flags exactly as `torture_catalogue_test.go` lists them, against a source
+loaded with `schema.sql`, `_common/fill.sql`, `generate.sql` and
+`_common/cleanup.sql` in that order — so the yml is the same one `make torture`
+writes into a temporary directory and throws away. Score it by hand, or with the
+run's own emitted file:
+
+```
+lazyslice --source ... --target ... --root auth.users --take 100 \
+  --unmask 'auth.mfa_factors.friendly_name=...' --config ./lazyslice.yml --yes
+```
 
 ## The labels
 
@@ -479,6 +564,8 @@ and `oauth_clients.client_secret_hash` are the deployment's secrets rather than 
 person's, and are labelled personal on the reading that the truth set is "what
 must not leave production" — the same reading `credential` is a category under.
 `webauthn_credentials.public_key` is public by name and a stable per-person
-identifier by use. `raw_app_meta_data` is labelled *not* personal, because what
-GoTrue puts there is the provider list — but a deployment that put anything else
-there would move it.
+identifier by use; **T-0121 settled it as `credential`** (2026-09-09) on the
+second reading, and the label stayed where it had always been — personal in this
+list, and now predicted personal too. `raw_app_meta_data` is labelled *not*
+personal, because what GoTrue puts there is the provider list — but a deployment
+that put anything else there would move it.

@@ -33,6 +33,21 @@ run must fail *in that exact way* — some of these are refusals lazyslice is
 right to make, and the regression is that it made them badly (no code, exit 1,
 "run with --debug") rather than that it made them at all.
 
+There is one optional sixth key, and it exists because `expect: ok` is a weak
+assertion for a defect that was a *collision*:
+
+```
+-- unique-masked: public.t.col, public.t.other   columns the target must hold
+                                                masked, distinct and unusable
+```
+
+Every column it names is read out of the loaded target and must be non-empty,
+carry `lazyslice-invalid-` (`mask.CredentialUniquePrefix`) on every non-NULL
+value, and hold no two rows alike. It is what 004 and 007 assert since **T-0113**
+made their runs exit 0: a run that copied the tokens verbatim also exits 0, and
+the prefix half is what tells the two apart, while the distinctness half is the
+original collision restated against the target instead of against an exit code.
+
 ## Files
 
 | File | From | Defect |
@@ -53,3 +68,16 @@ email address or phone number of the source's may survive anywhere in the target
 (the grep half of invariant I2). Some of these defects never changed an exit code
 at all — 008 exited 0 before the fix and after it — so a suite that compared only
 exit codes would have had nothing to say about the one that mattered most.
+
+004 and 007 add the `unique-masked:` check described above. Both reduce a
+`credential` column under a unique index, and both said `expect: exit 12
+plan.refused.unique_domain` until T-0113: with the fixed literal as
+`credential`'s only masker, `Domain()` was 1, ARCHITECTURE.md §5's `d_required`
+could not be met at any row count, and the plan refused. `credential_unique`
+(`mask/gen_credential.go`, T-0098) gave the category a generator wide enough for
+a unique column, so both runs load and the header moved with the behaviour. The
+classifier rules they pin — `raiseCompositeUnique` and the single-column
+partial-index raise — are unchanged, which is why the schemas did not move with
+the headers. One thing was lost and is recorded rather than papered over:
+`plan.refused.unique_domain` is a real refusal that nothing here exercises any
+more, and tracker **T-0124** owes a reduction that does.

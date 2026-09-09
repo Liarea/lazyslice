@@ -177,25 +177,28 @@ then after-data: indexes, FKs, setval, ANALYZE, bookkeeping tables).
   shipped this package without taking it.
   **It is a hook on the target pool now, and only the target pool.** The
   registration itself is `internal/pg`'s (`writer.RegisterTypes`,
-  `internal/pg/types.go`); this package reaches it through
-  `pipeline.TypeRegistrar`, a second interface `pg`'s `writer` implements,
-  because `pipeline.Writer` is §2's three methods and a fourth would touch every
-  implementation of it, two of them in `internal/verify`. The source pool still
+  `internal/pg/types.go`); this package reaches it through `pipeline.Writer`
+  itself, whose fourth method it is since T-0093. The source pool still
   may never have an `AfterConnect` (T-0076), and `pg.Connect` refuses one.
   **The ordering is the whole of it.** Before item 3 the target has none of the
   source's types; after the first `CopyFrom` is too late. A registration that
   fails fails the load before any row moves, rather than surfacing later as a
   driver error that quotes a value (THREAT_MODEL.md T4).
-  **A `Writer` that is not a `TypeRegistrar` fails the load, named**, and does
-  not skip the step. It used to `return nil`, justified by this package's own
-  fake; a review pointed out that `internal/core` wraps this same writer in a
-  `readableWriter` for verify — which embeds the `Writer` *interface* and so is
-  not a registrar — so one refactor stands between a silent skip and a run that
+  **A `Writer` that cannot register types no longer compiles** (T-0093), which
+  is why `registerTypes` is four lines. It went through three shapes: a silent
+  `return nil` on a missed `w.(pipeline.TypeRegistrar)` assertion, justified by
+  this package's own fake; then a run-time refusal naming the writer's type,
+  after a review pointed out that `internal/core` wraps this same writer in a
+  `readableWriter` for verify — which embeds the `Writer` *interface* and so was
+  not a registrar — so one refactor stood between a silent skip and a run that
   fails mid-copy on a composite column, in the integration suite and nowhere
-  else. `fakeWriter` implements `RegisterTypes` now; `plainWriter` is the double
-  that does not, and `TestALoadWhoseWriterCannotRegisterTypesIsRefused` is what
-  holds the refusal. The compiler-checked version of this — `RegisterTypes` on
-  `pipeline.Writer` — is T-0093.
+  else; then the method on `Writer`, which is the only one of the three the
+  compiler checks. The refusal and its `plainWriter` double and
+  `TestALoadWhoseWriterCannotRegisterTypesIsRefused` are gone with the assertion
+  that needed them; `fakeWriter` implements `RegisterTypes` and
+  `registeringWriter` records *when* the loader called it, which is the part the
+  compiler still does not check. ARCHITECTURE.md §2 owes the fourth method
+  (T-0123).
   `TestLoadRegistersTheSourcesUserTypesBeforeTheFirstCopy` and
   `TestALoadWhoseTypeRegistrationFailsCopiesNothing` are the rest of the unit
   half;

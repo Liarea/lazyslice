@@ -13,8 +13,17 @@ version: "2"
 
 run:
   timeout: 5m
+  # Both tags, because a file behind one is invisible to the linter without it:
+  # `integration` covers internal/invariants and the *_integration_test.go files,
+  # and `torture` covers internal/invariants/torture_test.go and
+  # torture_catalogue_test.go, which sit behind `integration && torture` and were
+  # linted by nothing until T-0105. The Makefile's vet-tagged target type-checks
+  # and vets the same two sets; this is the half that runs the linters. That
+  # target's own comment still says this file lists `integration` alone — the
+  # Makefile was outside T-0105's paths and correcting it is tracker T-0125.
   build-tags:
     - integration
+    - torture
 
 linters:
   default: none

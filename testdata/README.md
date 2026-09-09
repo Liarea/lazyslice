@@ -1,9 +1,37 @@
 # testdata
 
-Two PostgreSQL fixtures. Between them they are the definition of correct for
-this repository: `pagila/` is the friendly schema a person would plausibly have
-designed, and `nasty.sql` is every shape that has ever broken a subsetting tool,
-put in one place on purpose.
+Two PostgreSQL fixtures, ten real schemas, and the reductions of what those ten
+found.
+
+The two fixtures are the definition of correct for this repository, and this
+file is their spec: `pagila/` is the friendly schema a person would plausibly
+have designed, and `nasty.sql` is every shape that has ever broken a subsetting
+tool, put in one place on purpose. Both are ours, and everything below this
+paragraph is about them.
+
+The other two directories are not ours and have their own specs:
+
+* **`torture/`** — ten open-source schemas at a pinned commit or image digest
+  (rails-activestorage, django, supabase-auth, plausible, gitlab, metabase,
+  calcom, mastodon, odoo, discourse: 1,023 tables and 1,308 foreign keys nobody
+  chose for our convenience), each with the generated rows that make it a
+  database. Phase 5's gate. `testdata/torture/README.md` is the spec — the table
+  of tables, roots and runs, what each directory's three files are, and why
+  mastodon is expected to refuse at exit 13 — and `testdata/torture/build.sh`
+  is how a `schema.sql` is rebuilt from its pin (`./build.sh <name>` or
+  `./build.sh all`; it needs Docker and network access and is not run in CI, and
+  `make torture` does not call it). Never hand-edit a checked-in `schema.sql`.
+* **`regressions/`** — one small `.sql` file per defect one of those ten schemas
+  found and no fixture did, reduced to the smallest schema that still fails.
+  `testdata/regressions/README.md` is the spec: the header grammar the harness
+  parses (`root`, `take`, `expect`, `found`, `why`) and what each file asserts
+  beyond its exit code.
+
+Both are run by `make torture` (`internal/invariants`, behind the `integration`
+and `torture` build tags), which is a manual gate no CI job runs; `docs/TORTURE.md`
+is what came of them. A new fixture belongs in `nasty.sql` if you are inventing
+a shape, in `torture/` if you are copying a real project whole, and in
+`regressions/` if you are reducing a torture failure.
 
 Nothing in `nasty.sql` is decoration. Every object in it appears in the table
 below with the behaviour lazyslice must show for it, and a trap that stops

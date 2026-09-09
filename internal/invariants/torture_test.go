@@ -6,6 +6,7 @@ package invariants
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -17,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Liarea/lazyslice/internal/testutil"
+	"github.com/Liarea/lazyslice/mask"
 )
 
 // TestTortureSchemas is `make torture`: ten real open-source schemas, each
@@ -235,8 +237,9 @@ func assertTortureNoLiteralSurvives(ctx context.Context, t *testing.T, source, t
 
 // ---------- the regressions ----------
 
-// regressionHeader parses the five keys testdata/regressions/README.md defines.
-var regressionHeader = regexp.MustCompile(`(?m)^--\s+(root|take|expect|found|why):\s+(.*?)\s*$`)
+// regressionHeader parses the five required keys and the one optional key
+// testdata/regressions/README.md defines.
+var regressionHeader = regexp.MustCompile(`(?m)^--\s+(root|take|expect|found|why|unique-masked):\s+(.*?)\s*$`)
 
 // TestTortureRegressions runs every file in testdata/regressions/ and asserts it
 // still behaves the way its header says.
@@ -251,6 +254,12 @@ var regressionHeader = regexp.MustCompile(`(?m)^--\s+(root|take|expect|found|why
 // `expect: exit N code` must exit N with that code in its message — several of
 // these are refusals lazyslice is right to make, and what was wrong was how it
 // made them.
+//
+// `expect: ok` on its own is a weak assertion for a file whose defect was a
+// *collision*, because a run that copied the column verbatim would also exit 0.
+// That is what the optional `unique-masked:` key is for (T-0113): it names the
+// columns whose whole point is that they mask to a distinct, unusable value, and
+// the target is read for exactly that.
 func TestTortureRegressions(t *testing.T) {
 	ctx := context.Background()
 
@@ -309,6 +318,9 @@ func TestTortureRegressions(t *testing.T) {
 			if r.exit != 0 {
 				return
 			}
+			for _, col := range r.uniqueMasked {
+				assertTortureColumnIsUniquelyMasked(ctx, t, connect(ctx, t, db.target), col)
+			}
 			// Every regression that is expected to succeed is also expected not
 			// to leak. Some of these defects never changed an exit code at all:
 			// 008 exited 0 both before and after, and the only thing that told
@@ -322,12 +334,17 @@ func TestTortureRegressions(t *testing.T) {
 
 // regression is one file's header.
 type regression struct {
-	root  string
-	take  int
-	exit  int
-	code  string
-	why   string
-	image string
+	root string
+	take int
+	exit int
+	code string
+	why  string
+	// uniqueMasked are the schema.table.column names the `unique-masked:` key
+	// lists: columns the target must hold masked to distinct
+	// mask.CredentialUniquePrefix values. Empty for every file that does not
+	// carry the key.
+	uniqueMasked []string
+	image        string
 }
 
 // parseRegression reads the header block. A missing or malformed key is a hard
@@ -358,6 +375,19 @@ func parseRegression(t *testing.T, path string) regression {
 	}
 	r := regression{root: fields["root"], take: take, why: fields["why"]}
 
+	// The one optional key: a comma-separated list of schema.table.column.
+	for _, spec := range strings.Split(fields["unique-masked"], ",") {
+		spec = strings.TrimSpace(spec)
+		if spec == "" {
+			continue
+		}
+		if len(strings.Split(spec, ".")) != 3 {
+			t.Fatalf("torture: %s: unique-masked: %q is not schema.table.column",
+				filepath.Base(path), spec)
+		}
+		r.uniqueMasked = append(r.uniqueMasked, spec)
+	}
+
 	// pgvector is not needed by any regression today; the field exists so that
 	// one reduced from discourse can say so without a second mechanism.
 	if strings.Contains(string(text), "CREATE EXTENSION IF NOT EXISTS vector") {
@@ -381,6 +411,48 @@ func parseRegression(t *testing.T, path string) regression {
 		t.Fatalf("torture: %s: expect: %q is not `ok` or `exit <n> <event.code>`", filepath.Base(path), expect)
 	}
 	return r
+}
+
+// assertTortureColumnIsUniquelyMasked reads one column of the loaded target and
+// asserts what a `unique-masked:` header claims: every non-NULL value carries
+// mask.CredentialUniquePrefix, no two rows share one, and there is at least one
+// row to say it about.
+//
+// It exists because of T-0113. Regressions 004 and 007 reduce a *credential*
+// column under a unique index, and their whole defect was a collision: before
+// mask.credentialUniqueMasker there was one credential generator, the fixed
+// literal, whose Domain() is 1, so the plan could not satisfy ARCHITECTURE.md
+// §5's d_required and refused at exit 12 — which is what those two files
+// asserted. The escalation removed the refusal and both runs now exit 0, so the
+// header had to move; but `expect: ok` alone would pass a run that copied the
+// tokens into the target verbatim, which is the very thing --unmask does and
+// the very thing the defect is about. This is the half of the assertion that
+// exit code cannot carry.
+func assertTortureColumnIsUniquelyMasked(ctx context.Context, t *testing.T, target *pgx.Conn, spec string) {
+	t.Helper()
+
+	parts := strings.Split(spec, ".")
+	table := pgx.Identifier{parts[0], parts[1]}.Sanitize()
+	column := pgx.Identifier{parts[2]}.Sanitize()
+
+	var values, prefixed, distinct int64
+	q := fmt.Sprintf(`SELECT count(%[1]s), count(*) FILTER (WHERE %[1]s LIKE $1), count(DISTINCT %[1]s) FROM %[2]s`,
+		column, table)
+	if err := target.QueryRow(ctx, q, mask.CredentialUniquePrefix+"%").Scan(&values, &prefixed, &distinct); err != nil {
+		t.Fatalf("torture: reading %s in the target: %v", spec, err)
+	}
+	switch {
+	case values == 0:
+		t.Errorf("torture: %s holds no non-NULL value in the target, so masking it distinctly proves "+
+			"nothing; the regression is supposed to load rows", spec)
+	case prefixed != values:
+		t.Errorf("torture: %d of %s's %d values in the target do not start with %q; a credential column "+
+			"under a unique index masks to that prefix, and anything else is the value the source held "+
+			"or the fixed literal that collides", values-prefixed, spec, values, mask.CredentialUniquePrefix)
+	case distinct != values:
+		t.Errorf("torture: %s holds %d distinct values over %d rows in the target; the column is under a "+
+			"unique index and a repeat is the collision this regression exists for", spec, distinct, values)
+	}
 }
 
 // ---------- the catalogue's own guards ----------

@@ -22,8 +22,11 @@
 //
 // # Reading the target
 //
-// ARCHITECTURE.md section 2's pipeline.Writer has Exec, CopyFrom and Begin and
-// no way to read, and every check below is a read of the target. Verify
+// pipeline.Writer writes and registers types (Exec, CopyFrom, Begin and, since
+// T-0093, RegisterTypes — internal/pipeline/source.go; ARCHITECTURE.md section 2
+// still prints the three it had before that, and the edit is owed as T-0123) and
+// has no way to read, while every check below
+// is a read of the target. Verify
 // therefore asks the Writer it is handed for a Query method and refuses to run
 // without one, rather than reporting a green tick over checks that did not
 // happen. internal/pg's writer does not have that method yet; adding it is owed
