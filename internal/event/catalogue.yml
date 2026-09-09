@@ -232,6 +232,21 @@
 # list -- and neither is a row (THREAT_MODEL.md T4). Owed to the task that can
 # write internal/event/event.go: an ArgCategory and an ArgType, and this message
 # re-templated onto them. T-0054's paths did not include that file.
+#
+# One column reaches this code by type alone and its {reason} reads differently:
+# a **composite** (T-0094). No masker can write a record, so a masked composite
+# is refused here rather than copied verbatim or discovered in the loader, and
+# its {reason} names the composite type and the two escapes -- --skip-table for
+# the table, or a reasoned --unmask for the column. Both are identifiers and a
+# flag spelling built from them, the same borrowing plan.refused.no_identity
+# makes in {flag}, and neither is a row.
+#
+# A second {reason} of the same shape is temporary: an **array whose values
+# arrive from the source as one text literal** (T-0118). internal/transform
+# masks an array element-wise only when the driver decoded it into a slice, so
+# such a column would be masked as one scalar and die in the loader; the plan
+# refuses it here instead and names the same two escapes. It goes when the
+# element-wise masking of a literal lands.
 
 - code: plan.refused.unwritable
   kind: error

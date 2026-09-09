@@ -41,6 +41,9 @@ exemption; add a way for a category's confidence to be lowered by config.
 - `rules.yml` — the embedded rule pack: the categories with their maskers and
   accepted type families, the name patterns with their priorities, and the
   log-shaped table rule. Changing it changes `Classification.Fingerprint`.
+- `literal.go` — reading a Postgres array or composite output literal back into
+  the values inside it (T-0103, T-0094). A reader, not a parser: liberal in what
+  it accepts, and what it cannot read stays one opaque value.
 - `rulepack.go` — loading and compiling it.
 - `types.go` — `pg_catalog.format_type` output to a type family, resolving
   domains and enums.
@@ -50,8 +53,8 @@ exemption; add a way for a category's confidence to be lowered by config.
   package, so there is one copy of a value shape and not two.
 - `reasons.go` — the reason fragment set and `ParseReason`.
 - `classify.go` — the six passes: base signals, bytea in a person-shaped table,
-  the neighbouring-column rule, FK propagation and shared names, the yml prior,
-  then the threshold.
+  the neighbouring-column rule, the two foreign-key passes (`keyChildren`, then
+  FK propagation and shared names), the yml prior, then the threshold.
 - `codes.go` — the five `event.Code`s the classify stage renders; each has a row
   in `internal/event/catalogue.yml`.
 
@@ -179,6 +182,32 @@ was chosen and is recorded here rather than only in a comment.
   category the child's type family does not accept, which would put a masker on a
   column that cannot hold what it returns; the child keeps its own decision and
   the conflict is named on its line.
+- **A key child whose parent is copied takes the exemption back** (`keyChildren`,
+  T-0120). The gate above reads the column's own signals in the other direction
+  too: an integer or uuid FK child that reaches `possible` on a *name* hit alone
+  loses the exemption while the primary key it references — the same values, no
+  name hit — keeps it. `auth.identities.provider_id uuid` is the shape real auth
+  schemas carry. Masking that end alone buys nothing, because a child's values
+  are a subset of the parent key's and the parent shipped them verbatim, and it
+  costs the edge: the load adds the constraint NOT VALID, `internal/verify/fk.go`
+  counts the orphans and the run fails at exit 8 (T8). ARCHITECTURE.md §4's
+  wording is the child's side of this — the exemption is for "surrogate keys
+  (`id bigint` and the FK columns that reference them)", with no condition on
+  what the child is called. So `keyChildren` runs **before** `foreignKeys()` and
+  hands the exemption back, naming the parent column on the child's line and
+  keeping the name signal's category there beside it; §4's direction still wins,
+  because `propagateKeys` lifts and blanks what this granted through the same
+  `keyFrag`, and a column with two parents, one copied and one masked, ends
+  masked. Two gates keep the argument honest. The parent must be exempt by its
+  own **key fragment**, not merely unmasked: a *generated* parent is `neverMask`
+  for a different reason and is recomputed by the target from columns that may
+  themselves be masked, so it is no evidence that the child's values are copied
+  anywhere. And the edge must be **validated and real**: an unvalidated
+  constraint is a hint over rows Postgres never checked and a virtual one is a
+  line in the yml, so a child of either can hold a value the parent does not, and
+  `internal/plan` does not follow it to fetch the parent row (`followsAsParent`).
+  Propagation runs over every edge because it only ever masks more; this pass
+  masks less, so it takes the narrow set.
 - **FK propagation sweeps until nothing moves.** A key chain — a natural key, a
   child referencing it, a grandchild referencing the child — is one propagation
   per edge, and `Schema.FKs` is in no order relative to the chain, so a single
@@ -378,6 +407,104 @@ was chosen and is recorded here rather than only in a comment.
   two sections of `names.txt` are still parsed, so a line outside a section is
   still ignored.
 
+## A composite is refused, not copied and not masked (T-0094, T-HARD-B)
+
+`types.go` gives a composite its own family (`famComposite`, resolved against
+`Schema.Composites`, which is the catalog's own list of `typtype` 'c' with
+`relkind` 'c' and so excludes a view's row type), and `decideComposite` is the
+whole of its decision. Before it, a composite was `famOther`: a name hit on it
+was recorded at `low` and the column was **copied verbatim** with whatever was
+in the record, and a value hit could decide a category whose masker
+`internal/transform` then tried to write into a record, dying mid-load. Both
+are THREAT_MODEL.md T1.
+
+The decision has two outcomes and no third:
+
+- **A hit is `possible`.** The name rules run as they do everywhere, and
+  `compositeSignal` runs the validators over **the whole sample and over the
+  record's fields**, taking a hit from either — `splitCompositeLiteral` in
+  `literal.go` reads the server's output form, since the source pool registers
+  no user types and a record arrives as the string `(1234.50,GBP)`. Any field of
+  any sample that validates is a hit, which is `jsonSignal`'s shape and not the
+  scalar ratio: a `(street, city, email)` record is one third addresses and one
+  third email, both under the weak threshold, so ratio scoring would decide
+  `none` and copy the address. **Scoring the fields alone was a fail-open of its
+  own** and is the case `TestCompositeAddressAcrossFieldsFailsClosed` holds: a
+  record can carry personal data that exists only as the concatenation of its
+  fields, and `(9,"Rue de Rivoli",Paris)` is an address no field of which is one,
+  because `AddressShape` wants a digit and two words in a single value and the
+  house number lives in a field by itself.
+  `possible` is above §4's mask threshold, and `internal/plan`'s write-back
+  check turns it into exit 12 naming the column, `--skip-table` and a reasoned
+  `--unmask` (`internal/plan/writeback.go`). **No masker can write a record**,
+  so a refusal is the only fail-closed answer available; masking a composite
+  field-wise would need a masker per field and a way to re-render the literal,
+  which is a feature and not a fix.
+- **No hit is a copy that says so.** The reason carries `composite type: its
+  fields were read and none is personal data`, so a green run over a composite
+  is a claim somebody can read rather than a silence. `testdata/nasty.sql` trap
+  27's `money_amount` is this case and stays copied. **A copy reached with
+  nothing to read says that instead** (`composite_no_sample`): the fragment above
+  claims a check that ran, and on a composite in a table nothing could be
+  sampled from — seven of supabase-auth's ten misses are columns with no rows at
+  all — appending it beside `no samples` produced a line that contradicted
+  itself on precisely the branch that leaks.
+
+The category on a hit is the first validator in precedence order that matched.
+It is what the refusal names and nothing masks with it.
+
+## An array whose sample arrives as one string (T-0103, T-HARD-B)
+
+`scalarsOf` splits a Postgres array literal when the column's type says array
+and the sample is a string. `scalars` flattens an array only when the driver
+handed back a slice, and pgx does that only for an array type its map knows:
+the source pool runs in `QueryExecModeExec` and registers no user types
+(T-0076), so a `citext[]` of addresses arrives as `{a@b.test,c@d.test}`, no
+validator matched it, and the column was decided `none` and copied. Plausible's
+`monthly_reports.recipients` is that column.
+
+It is a fallback and never a replacement: a literal the splitter cannot read
+falls through to `scalars`, which treats it as one opaque value — the behaviour
+before it existed, and never worse than it. `rawSamples` is the *unsplit*
+flattening, and the two callers that use it (`tableWasSampled`,
+`sampleDistinct`) want it: a unique index is over the whole array, not over the
+strings inside it.
+
+**The transform half is still owed (T-0118), and `internal/plan` refuses in
+front of it.** `internal/transform`'s `maskArray` fires only on a `[]any`, so
+such a column would be masked as one scalar string and `CopyFrom` would fail
+with "cannot find encode plan" at exit 7 mid-load, with the tables before it
+already committed. Landing this half alone would therefore have turned a silent
+leak into a half-loaded target, so `internal/plan/writeback.go`
+(`arrayArrivesAsLiteral`) refuses such a column at exit 12 with `--skip-table`
+and `--unmask`, asking the samples rather than the type because the samples are
+the only place the driver's answer is recorded. When T-0118 lands, that refusal
+goes.
+
+## A URL is online_id and never credential (T-0100, T-HARD-B)
+
+`textsig.ValidURL` is in the ordered validator list **ahead of** the secrets
+one, under `CatOnlineID`, and `textsig.LooksSecret` now excludes a URL. The two
+halves ship together on purpose: `LooksSecret` matched any 16-to-512-character
+value with two character classes, entropy at or above 3.2, no space and no `@`,
+so mastodon's `accounts.uri` was `credential` on every row — masked to the fixed
+literal, which is safe and wrong, and a plan refusal under the unique index that
+column carries. Excluding it from `LooksSecret` alone would drop a
+username-bearing URL to `none` and copy it, which is T1's direction; `online_id`
+catches it, and its generator's domain is wide enough for a unique column.
+
+Order is precedence in that list, so the URL rule sits after the email, IBAN,
+Luhn, phone, IP and MAC validators and before the secrets one: nothing that is
+already a stronger shape becomes a URL.
+
+**Only this package got the replacement — T-0122.** `internal/verify`'s second
+net imports the same `textsig` and reads `LooksSecret`, and it has no
+`online_id` or URL validator at all, so the narrowing took coverage away from a
+THREAT_MODEL.md T1 blocking control that this package's new validator does not
+give back: the two nets score independently. `internal/verify` was outside
+T-HARD-B's paths; T-0122 carries the entry and the "all ten of
+internal/classify's value validators" sentence there, which is eleven now.
+
 ## Measured
 
 `TestPagilaPrecisionAndRecall` and `TestFiftyNamesFromThreeSchemas` print a
@@ -386,6 +513,60 @@ one — a false negative is cleartext in the target under a green tick
 (THREAT_MODEL.md T1) — and precision's is deliberately loose, so that raising it
 by deleting a name pattern fails the test that matters first. Run
 `go test -v -run 'TestPagila|TestFiftyNames' ./internal/classify/` to read them.
+
+`TestFiftyNamesFromThreeSchemas` keeps its name and is now 64 names from four
+schemas: T-0104 added Supabase's auth columns and GitLab's `identities.extern_uid`
+beside the original fifty, because every spelling the credential and online_id
+rules gained has to be scored in the same matrix as everything else. It reads
+precision 0.957 / recall 0.978.
+
+**No hand label moved in the change that widened the rules scored against it.**
+Relabelling a column turns a false positive into a true positive without the
+classifier doing anything, so it is not the rule author's call to make in the
+same commit — and this fixture's whole value is that the rates are over a set
+nobody trimmed. Both `public_key` columns are labelled not-personal, which is
+where the label has always been, and T-0121 is the decision that may move them
+together. `supabase.refresh_tokens.parent` is left as a false negative on
+purpose (see below).
+
+Three rules were **not** widened, and all three refusals are load-bearing:
+
+- **A bare `codes?` is not in the credential pattern.** At priority 80 it would
+  take `postal_code`, `country_code`, `currency_code` and `status_code` away
+  from the address rule and mask them to the fixed literal. What is in the
+  pattern is the compound spellings: `auth_code`, `otp_code`,
+  `authorization_code`, `code_verifier`, `code_challenge`, `code_hash`.
+- **`parent` is not a name rule.** `refresh_tokens.parent` holds another refresh
+  token, and a rule matching `parents?` would mask every `parent_id` join key in
+  every schema there is. This package's name rules see the column name alone, so
+  "parent, in a table called refresh_tokens" is not expressible; T-0119 carries
+  the table-scoped-pattern question. `supabase_misses_test.go` pins the column as
+  still copied and says why.
+- **`public_?keys?` is not in the credential pattern**, and its absence is a
+  decision deferred rather than taken (T-0121). It is the other of the two
+  columns T-0104 said "deserve a decision rather than a pattern": a public key
+  is published by design, so masking it to the credential fixed literal at
+  priority 80 replaces a value that is not secret and outranks every rule that
+  could say otherwise, and yet it is a stable identifier for exactly one person,
+  which is the `online_id` argument. Two categories, two maskers, and a hand
+  label that moves with the answer.
+
+**The IdP names are their own rule, and it is anchored** (`online_id_idp`,
+T-0104). `external_id`, `provider_id` and `extern_uid` are the identifier an
+identity provider issues for a person, so they are `online_id`; but every other
+name rule in `rules.yml` is a *word* rule, `(^|_)word(_|$)`, and under that
+spelling `provider_?ids?` also takes `sso_provider_id`, `oauth_provider_id` and
+`identity_provider_id`, which are join keys. `testdata/torture/supabase-auth` has
+five uuid `sso_provider_id` foreign keys, `online_id` accepts uuid (for
+`device_id` and `cookie_id`), so a compound spelling reaches `possible` on the
+name alone and the report calls a join key an `online_id`. Anchoring keeps the
+three names T-0104 asked for and leaves the compound ones `none`.
+
+Anchoring was a narrowing, not the orphan fix; the fix is `keyChildren` above
+(**T-0120**). What the anchor is still for is the *category on the
+line*: `sso_provider_id` is not an identifier an IdP issued for a person whether
+or not it ends up masked, and a compound spelling on a column carrying no
+foreign key at all is the case no reconciliation can reach.
 
 ## What `Decision.UniqueIndex` means (T-TORTURE)
 

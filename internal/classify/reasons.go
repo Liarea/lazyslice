@@ -37,6 +37,7 @@ const (
 	phraseLuhn      = "pass the Luhn check"
 	phraseIBAN      = "pass the IBAN check"
 	phraseSecrets   = "look like secrets"
+	phraseURL       = "parse as URLs"
 	phraseProse     = "hold prose with dictionary names"
 	phraseJSONLeaf  = "hold personal data at a JSON leaf"
 )
@@ -52,6 +53,7 @@ var validatorPhrases = []string{
 	phraseLuhn,
 	phraseIBAN,
 	phraseSecrets,
+	phraseURL,
 	phraseProse,
 	phraseJSONLeaf,
 }
@@ -188,6 +190,15 @@ var fragments = []*fragment{
 		pattern: `foreign key to ` + reQualified + `: preserved verbatim`,
 	},
 	{
+		// The child end of tracker T-0120's reconciliation (keyChildren). It
+		// names the parent column, because "this column looks personal and is
+		// copied anyway" is only answerable by pointing at the key that is
+		// copied too.
+		name:    "key_child_exempt",
+		format:  "foreign key to %s, a copied surrogate key: preserved verbatim",
+		pattern: `foreign key to ` + reQualified + `, a copied surrogate key: preserved verbatim`,
+	},
+	{
 		name:    "unmask_yml",
 		format:  "opt-out recorded in lazyslice.yml",
 		pattern: `opt-out recorded in lazyslice.yml`,
@@ -254,6 +265,29 @@ var fragments = []*fragment{
 		name:    "derived_text",
 		format:  "tsvector is derived from text that may be masked",
 		pattern: `tsvector is derived from text that may be masked`,
+	},
+	{
+		// T-0094. The fragment names the type family and not the column,
+		// because the rule is about the type: no category accepts a composite
+		// and no masker can write one, so a composite that carries personal
+		// data is a refusal at plan and never a copy.
+		name:    "composite_refused",
+		format:  "composite type: no masker can write into one, so the plan refuses rather than copy it",
+		pattern: `composite type: no masker can write into one, so the plan refuses rather than copy it`,
+	},
+	{
+		name:    "composite_no_signal",
+		format:  "composite type: its fields were read and none is personal data",
+		pattern: `composite type: its fields were read and none is personal data`,
+	},
+	{
+		// The same copy decision reached without a single value to read. The
+		// fragment above claims a check that ran; this one says the check did
+		// not, so the audit line for an empty table does not read "its fields
+		// were read and none is personal data; no samples" (T-HARD-B).
+		name:    "composite_no_sample",
+		format:  "composite type: no field value was read, so only its name was checked",
+		pattern: `composite type: no field value was read, so only its name was checked`,
 	},
 	{
 		name:    "json_log_shaped",

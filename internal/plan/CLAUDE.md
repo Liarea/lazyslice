@@ -493,6 +493,45 @@ reason for each.
     `internal/pipeline`, whose file T-0054's paths did not include.
     `internal/verify/columns.go` has a fourth copy of the quoting as well, and
     is outside those paths too.
+  - **A composite is refused by type** (`compositeType`, T-0094, T-HARD-B), and
+    it is the one type this check refuses on the type alone. Everything else
+    `constraintsOf` declines to judge is a type `mask` has no tag for and might
+    still load — an ltree, a PostGIS geometry — but a record can hold nothing
+    any generator emits, so declining there was a masked composite handed to
+    `internal/transform`, masked as if it were a scalar, dying in the loader
+    with rows already moving; and a composite the classifier left below the
+    threshold was copied verbatim with the personal data inside it
+    (THREAT_MODEL.md T1). `internal/classify` now reaches `possible` on a
+    composite whenever its name or any field of any sample says personal data
+    (`decideComposite`), so the two halves are one decision: classify fails
+    closed, and this is where the run stops. The refusal reuses
+    `plan.refused.unwritable` and exit 12 rather than adding a code — the
+    sentence "cannot be masked in place" is exactly true of a record — and its
+    `{reason}` carries the composite type and the two escapes, `--skip-table
+    TABLE` or `--unmask TABLE.COL=REASON`. A distinct code would want a
+    `catalogue.yml` row and a `docs/ERRORS.md` regeneration, and `docs/` was
+    outside T-HARD-B's paths; if one is wanted later, the message text is here.
+    `TestMaskedCompositeIsRefusedAtPlan` and
+    `TestUnmaskedCompositeIsNotRefusedAtPlan` hold both sides, including that an
+    ltree is still not refused.
+  - **An array whose samples arrive as a text literal is refused too, and only
+    until T-0118 lands** (`arrayArrivesAsLiteral`, T-HARD-B).
+    `internal/transform`'s `maskArray` masks element-wise only when the driver
+    handed the value back as a `[]any`, and pgx does that only for an array type
+    its map knows: the source pool registers no user types (T-0076), so a
+    `citext[]` arrives as the single string `{a@b.test,c@d.test}`, is masked as
+    one scalar, and `CopyFrom` dies with "cannot find encode plan" at exit 7 with
+    rows already moving and the earlier tables committed. `internal/classify`
+    reads inside such a literal now, so the column is decided rather than copied
+    — which is what makes this reachable — and this refusal is what keeps that
+    from being a half-loaded target instead of a silent leak. It asks the
+    **samples** and not the type on purpose: `mask.TypeTag` knows citext, so the
+    type says nothing about whether the driver can decode an array of it, and a
+    list of the arrays pgx registers would be a fourth copy of the type table
+    T-0054 spent a task removing. A `text[]` comes back as a slice and is not
+    refused (`TestArrayTheDriverDecodesIsNotRefusedAtPlan`). **Delete this branch
+    when T-0118 lands** — it is a stand-in for a masker, not a property of the
+    type.
   - **The refusal is held by a unit test as well as by the fixture suite**
     (`writeback_test.go`). `writeback_integration_test.go` asserts that the real
     classifier over both fixtures produces nothing this check refuses, but it

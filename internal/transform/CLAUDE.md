@@ -194,6 +194,26 @@ Every leaf entry goes through one function, `addLeaf`, so the table above has
 one implementation and not five call sites. Changing a row of it changes a
 contract another package is written against: change both in one commit.
 
+**An array whose value arrives as a text literal is not masked element-wise
+yet — T-0118.** `maskArray` fires on a `[]any`, which is what pgx hands back for
+an array type its map knows. The source pool registers no user types (T-0076),
+so an array of an *extension* type — a `citext[]` — arrives as the single string
+`{a@b.test,c@d.test}`, falls through to the scalar path, is masked as one
+string, and `CopyFrom` then fails with "cannot find encode plan" at exit 7 with
+rows already moving. `internal/classify` reads inside such a literal now
+(T-0103, `literal.go` there), so a `citext[]` of real addresses is *decided*
+`email` and reaches this package, where it used to be decided `none` and copied
+silently. That is the fail-closed direction and it is not the end state: the
+owed change is to split the literal here, mask element-wise, and re-render it.
+**Until it lands the run does not reach this package at all for such a column**:
+`internal/plan`'s write-back check refuses it at exit 12 with `--skip-table` and
+`--unmask` (`arrayArrivesAsLiteral` in `internal/plan/writeback.go`), because
+landing the classify half alone would have turned a silent leak into a target
+half-loaded behind exit 7. That refusal is a stand-in for the masker below and
+goes when T-0118 does.
+`testdata/regressions/005` keeps its `citext[]` values short and dull to steer
+around both halves and says so.
+
 **Test.** `go test ./internal/transform/...`: determinism across two runs
 under one key, difference across two keys, distinct values staying distinct
 under a unique column, every JSON leaf replaced with its kind and its key name

@@ -9,7 +9,7 @@
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 13 | 1 | 31 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 8 | 0 | 11 | 1 | 0 |
+| E9 Later | later | 16 | 0 | 11 | 1 | 0 |
 
 ## Open and in progress
 
@@ -37,6 +37,14 @@
 - T-0112 [open] E5 · Re-measure docs/TORTURE.md's flag counts and the catalogue's flags-by-kind after the credential_unique masker ()
 - T-0113 [open] E9 · Regressions 004 and 007 expect exit 12 and now exit 0: credential_unique made their headers stale ()
 - T-0114 [open] E9 · mask/CLAUDE.md and gen_credential.go still say the torture counts are un-re-measured ()
+- T-0115 [open] E9 · docs/TORTURE.md: re-measure supabase-auth recall after T-0104's name rules ()
+- T-0116 [open] E9 · Re-measure the torture flag counts after T-0100 and T-0104 ()
+- T-0117 [open] E9 · THREAT_MODEL.md T1 and ARCHITECTURE.md owe the composite decision (T-0094 closed) ()
+- T-0118 [open] E9 · internal/transform: mask an array whose sample arrives as a text literal element-wise ()
+- T-0119 [open] E9 · A table-scoped name rule, for refresh_tokens.parent and its kind ()
+- T-0120 [open] E9 · internal/classify: a masked FK child whose parent is copied orphans the row ()
+- T-0121 [open] E9 · Decide public_key: credential, online_id, or neither ()
+- T-0122 [open] E9 · internal/verify: the second net lost URL coverage when T-0100 narrowed textsig.LooksSecret ()
 
 ## Recently closed
 

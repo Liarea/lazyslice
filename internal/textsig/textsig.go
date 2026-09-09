@@ -26,6 +26,7 @@ import (
 	"math"
 	"net"
 	"net/mail"
+	"net/url"
 	"regexp"
 	"strings"
 	"unicode"
@@ -169,16 +170,51 @@ func ValidIBAN(s string) bool {
 	return rem == 1
 }
 
+// ValidURL reports whether a value is a URL with both a scheme and a host.
+//
+// Both halves are required, and that is the whole of the shape: "mailto:a@b",
+// "a:b" and "//host/path" are not URLs to this function, because an opaque
+// scheme and a scheme-relative reference are not the thing a person's profile
+// link is. A timestamp ("2017-02-15T09:34:33Z") cannot reach it either, because
+// a URL scheme must begin with a letter.
+//
+// It exists because LooksSecret used to answer for these values (tracker
+// T-0100): a URL is 16 to 512 characters, has no space and no "@", mixes
+// character classes and clears the entropy floor, so mastodon's accounts.uri
+// (https://home.social.test/users/bea_donnelly1) was `credential` on every row
+// and was masked to the fixed literal — safe, and wrong, and a plan refusal
+// under the unique index it usually carries. A URL that names a person is an
+// online_id: internal/classify runs this validator ahead of the secrets one, so
+// the column is masked under a category whose generator emits a URL-shaped
+// value out of a domain large enough for a unique column.
+func ValidURL(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" || len(s) > 2048 || strings.ContainsAny(s, " \t\n\r") {
+		return false
+	}
+	u, err := url.Parse(s)
+	if err != nil {
+		return false
+	}
+	return u.Scheme != "" && u.Host != ""
+}
+
 // LooksSecret is the Shannon-entropy check, run after the UUID check exactly as
 // ARCHITECTURE.md §4 orders them. The guards before the entropy are what stop
 // an email address or a sentence from reading as a secret: a credential has no
 // whitespace, no "@", and mixes character classes or is long hex.
+//
+// A URL is excluded for the same reason a UUID is: it clears every one of those
+// guards and is not a secret (tracker T-0100). Excluding it here would be a
+// fail-open on its own — a URL that carries a username would drop to `none` and
+// be copied verbatim (THREAT_MODEL.md T1) — so it is only half of the change,
+// and ValidURL above is the other half.
 func LooksSecret(s string) bool {
 	s = strings.TrimSpace(s)
 	if len(s) < 16 || len(s) > 512 {
 		return false
 	}
-	if ValidUUID(s) || strings.ContainsAny(s, " \t\n@") {
+	if ValidUUID(s) || ValidURL(s) || strings.ContainsAny(s, " \t\n@") {
 		return false
 	}
 	if hexRE.MatchString(s) {

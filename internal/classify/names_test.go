@@ -9,14 +9,23 @@ import (
 	"github.com/Liarea/lazyslice/internal/ref"
 )
 
-// Fifty column names taken from three open-source schemas — Discourse, GitLab
-// and Mastodon — with a hand label for each and a printed confusion matrix.
+// Column names taken from four open-source schemas — Discourse, GitLab,
+// Mastodon and Supabase's auth schema — with a hand label for each and a
+// printed confusion matrix.
 //
-// Why these three: they are large, public, unrelated to each other, and none of
-// them was consulted while the rule pack was written, so the names below are
-// the closest thing this package has to a held-out set. They are names and
-// types only: no row of anyone's data is in this repository, and none is needed
-// to measure a name-based classifier.
+// Why these: they are large, public, unrelated to each other, and none of them
+// was consulted while the rule pack was written, so the names below are the
+// closest thing this package has to a held-out set. They are names and types
+// only: no row of anyone's data is in this repository, and none is needed to
+// measure a name-based classifier.
+//
+// The first three were the fifty-name fixture. The Supabase block is T-0104:
+// every spelling the credential and online_id rules gained is measured here,
+// beside the names that were already scored, so that widening a pattern is
+// scored against the same matrix as everything else rather than only against
+// the ten columns it was written for. The held-out claim is weaker for that
+// block — those rules were written *from* those columns — which is why the
+// block is named and not folded in silently.
 //
 // The label answers one question — "in that application, does this column hold
 // personal data about an identifiable person?" — and it is a judgement, so the
@@ -32,7 +41,7 @@ type namedColumn struct {
 	personal bool
 }
 
-var fiftyNames = []namedColumn{
+var heldOutNames = []namedColumn{
 	// Discourse.
 	{"discourse", "users", "username", "text", true},
 	{"discourse", "users", "name", "text", true},
@@ -80,6 +89,14 @@ var fiftyNames = []namedColumn{
 	{"mastodon", "accounts", "note", "text", true},
 	{"mastodon", "accounts", "domain", "character varying(255)", false},
 	{"mastodon", "accounts", "private_key", "text", true},
+	// Labelled not-personal, which is where it has always been, and the label
+	// does not move in the change that widens a rule scored against it (T-0121
+	// carries the decision; see rules.yml's credential comment). A per-account
+	// public key is published in the actor document, so it is not a secret, and
+	// whether "a stable identifier for exactly one person" makes it personal is
+	// the question T-0104 reserved. Whoever settles it moves this label and
+	// supabase.webauthn_credentials.public_key below together, and records what
+	// the rates did.
 	{"mastodon", "accounts", "public_key", "text", false},
 	{"mastodon", "users", "email", "character varying(255)", true},
 	{"mastodon", "users", "encrypted_password", "character varying(255)", true},
@@ -88,6 +105,34 @@ var fiftyNames = []namedColumn{
 	{"mastodon", "users", "locale", "character varying(255)", false},
 	{"mastodon", "statuses", "text", "text", true},
 	{"mastodon", "statuses", "spoiler_text", "text", true},
+
+	// GitLab, the identity half (T-0104). extern_uid is the id the external
+	// identity provider issues for this person.
+	{"gitlab", "identities", "extern_uid", "character varying(255)", true},
+
+	// Supabase auth (T-0104). These are the ten columns docs/TORTURE.md's
+	// hand-labelled truth set recorded as missed at recall 0.800;
+	// supabase_misses_test.go pins each one's decision individually, and this is
+	// where they are scored beside everything else.
+	{"supabase", "flow_state", "auth_code", "text", true},
+	{"supabase", "mfa_challenges", "otp_code", "text", true},
+	{"supabase", "mfa_recovery_codes", "code_hash", "text", true},
+	{"supabase", "oauth_authorizations", "authorization_code", "text", true},
+	{"supabase", "oauth_client_states", "code_verifier", "text", true},
+	{"supabase", "scim_users", "external_id", "text", true},
+	{"supabase", "identities", "provider_id", "text", true},
+	{"supabase", "webauthn_credentials", "credential_id", "bytea", true},
+	// Labelled to agree with mastodon's above, for the reason written there.
+	{"supabase", "webauthn_credentials", "public_key", "bytea", false},
+	// Still a false negative, and deliberately left as one: a rule matching
+	// `parents?` would mask every parent_id join key in every schema there is.
+	// See supabase_misses_test.go.
+	{"supabase", "refresh_tokens", "parent", "character varying(255)", true},
+	// The negatives of the same schema, so that the block is not all-positive
+	// and a pattern that widened too far is visible here as a false positive.
+	{"supabase", "users", "created_at", "timestamp with time zone", false},
+	{"supabase", "mfa_factors", "factor_type", "text", false},
+	{"supabase", "sessions", "not_after", "timestamp with time zone", false},
 }
 
 // namesSchema turns the fixture into a schema, keeping each source's tables
@@ -98,7 +143,7 @@ func namesSchema() (*pipeline.Schema, map[string]bool) {
 	order := []key{}
 	cols := map[key][]pipeline.Column{}
 	truth := map[string]bool{}
-	for _, n := range fiftyNames {
+	for _, n := range heldOutNames {
 		k := key{n.source, n.table}
 		if _, ok := cols[k]; !ok {
 			order = append(order, k)
@@ -109,7 +154,7 @@ func namesSchema() (*pipeline.Schema, map[string]bool) {
 			Column: n.column,
 		}).String()] = n.personal
 	}
-	schema := &pipeline.Schema{Fingerprint: "fifty-names"}
+	schema := &pipeline.Schema{Fingerprint: "held-out-names"}
 	for _, k := range order {
 		schema.Tables = append(schema.Tables, tt(k.source, k.table, nil, cols[k]...))
 	}
@@ -120,10 +165,25 @@ func namesSchema() (*pipeline.Schema, map[string]bool) {
 // rates to a floor. The floor on recall is the strict one, for the reason
 // THREAT_MODEL.md T1 gives: a column this classifier misses is cleartext in the
 // target under a green tick.
+//
+// The name is kept from when the fixture was fifty names from three schemas
+// (T-0104 added the fourth), because it is the name internal/classify/CLAUDE.md
+// and internal/textsig/CLAUDE.md tell a reader to run.
+//
+// The exact count is asserted rather than a minimum: a fixture that quietly
+// shrinks is a measurement that quietly stops covering something, and the whole
+// value of this file is that the rates below are over a set nobody trimmed to
+// make them look better. That cuts both ways, and it is why no *label* here
+// moved in the change that widened the rules scored against it (T-HARD-B): a
+// relabelled column turns a false positive into a true positive without the
+// classifier doing anything, and it is not the rule author's call to make in
+// the same commit. The one label that is genuinely open is public_key, and
+// T-0121 carries it.
 func TestFiftyNamesFromThreeSchemas(t *testing.T) {
 	t.Parallel()
-	if len(fiftyNames) != 50 {
-		t.Fatalf("the fixture holds %d names, and it is called the fifty-name fixture", len(fiftyNames))
+	if len(heldOutNames) != 64 {
+		t.Fatalf("the fixture holds %d names, and it held 64: adding one is a decision, "+
+			"and removing one is a measurement that stopped covering something", len(heldOutNames))
 	}
 	schema, truth := namesSchema()
 	cls, err := New().Classify(schema, mapSampler{}, nil)
@@ -131,7 +191,7 @@ func TestFiftyNamesFromThreeSchemas(t *testing.T) {
 		t.Fatalf("Classify: %v", err)
 	}
 	s := score(t, cls, truth)
-	s.print(t, "Fifty columns from Discourse, GitLab and Mastodon, names and types only:")
+	s.print(t, "Columns from Discourse, GitLab, Mastodon and Supabase auth, names and types only:")
 
 	if s.recall() < 0.95 {
 		t.Errorf("recall = %.3f, want at least 0.95 (THREAT_MODEL.md T1)", s.recall())

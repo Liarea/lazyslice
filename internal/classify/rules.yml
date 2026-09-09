@@ -95,10 +95,30 @@ patterns:
     priority: 90
     match: '(^|_)(marital(_?status)?|ethnicity|ethnic(_?origin)?|race|religion|religious(_?belief)?|sexual(_?orientation)?|sexuality|gender(_?identity)?|health(_?condition)?|diagnos[ei]s|disabilit(y|ies)|biometrics?|genetics?|dna|trade_?union|union_?membership|political(_?(views?|affiliation|party))?|criminal(_?record)?|convictions?|pregnan(t|cy)|hiv|medical(_?history)?|blood_?type|allerg(y|ies)|medications?|prescriptions?|immigration_?status|asylum|refugee)(_|$)'
 
+  # The second half of this alternation is the spellings a real authentication
+  # schema uses (T-0104). docs/TORTURE.md's hand-labelled truth set over
+  # supabase-auth measured recall 0.800 and every one of the ten misses was a
+  # name this pattern did not cover: an OAuth authorization code, a one-time
+  # code, a recovery code's hash, the secret half of PKCE and a WebAuthn
+  # credential id. A bare `codes?` is deliberately NOT here: it would match
+  # country_code, postal_code, currency_code and status_code, and at priority 80
+  # it would take a postal code away from the address rule and mask it to the
+  # fixed literal.
+  #
+  # `public_?keys?` is NOT here either, and its absence is a decision deferred
+  # rather than taken (T-0121). T-0104 named it one of two columns that "deserve
+  # a decision rather than a pattern", and the two readings pull opposite ways: a
+  # public key is published by design -- mastodon puts it in the actor document
+  # and WebAuthn hands it to every relying party -- so it is not a secret, and
+  # masking it to the credential fixed literal at priority 80 outranks every
+  # rule that could say otherwise; but it is also a stable identifier for
+  # exactly one person, which is the online_id argument. Whichever way it is
+  # settled, it moves a hand label in names_test.go, and the rule and the label
+  # it is scored against must not be moved by the same change.
   - name: credential
     category: credential
     priority: 80
-    match: '(^|_)(passwords?|passwd|pwd|password_?hash|password_?digest|encrypted_?password|salts?|secrets?|api_?keys?|access_?tokens?|refresh_?tokens?|auth_?tokens?|tokens?|token_?digests?|private_?keys?|client_?secrets?|otp_?secrets?|totp_?secrets?|recovery_?codes?|signing_?keys?|encryption_?keys?)(_|$)'
+    match: '(^|_)(passwords?|passwd|pwd|password_?hash|password_?digest|encrypted_?password|salts?|secrets?|api_?keys?|access_?tokens?|refresh_?tokens?|auth_?tokens?|tokens?|token_?digests?|private_?keys?|client_?secrets?|otp_?secrets?|totp_?secrets?|recovery_?codes?|signing_?keys?|encryption_?keys?|auth_?codes?|otp_?codes?|authorization_?codes?|code_?verifiers?|code_?challenges?|code_?hash(es)?|credential_?ids?)(_|$)'
 
   - name: national_id
     category: national_id
@@ -149,6 +169,38 @@ patterns:
     category: online_id
     priority: 40
     match: '(^|_)(usernames?|user_?names?|nicknames?|screen_?names?|handles?|logins?|account_?names?|twitter|facebook|instagram|linkedin|skype|telegram|discord|mastodon|websites?|urls?|homepages?|profile_?urls?|device_?ids?|advertising_?ids?|imei|imsi|cookie_?ids?)(_|$)'
+
+  # external_id, provider_id and extern_uid are the identifiers an identity
+  # provider issues for a person -- Supabase's identities.provider_id and
+  # scim_users.external_id, GitLab's identities.extern_uid (T-0104). They are
+  # online_id and not credential because they are not secret: they name a person
+  # at the IdP, and online_id's masker has a domain wide enough for the unique
+  # index they usually carry.
+  #
+  # **This rule is anchored to the whole name** and is the only one in this file
+  # that is, which is why it is a separate row rather than three more
+  # alternatives above. Every other name rule is a word rule -- `(^|_)word(_|$)`
+  # -- and under that spelling `provider_?ids?` also matches `sso_provider_id`,
+  # `oauth_provider_id` and `identity_provider_id`, which are join keys and not
+  # people: testdata/torture/supabase-auth has five uuid `sso_provider_id`
+  # columns, each a foreign key to `sso_providers(id)`. online_id accepts uuid
+  # (for device_id and cookie_id), so a compound name reaches `possible` on the
+  # name alone and the report would call a join key an online_id. Anchoring keeps
+  # the three names T-0104 asked for and leaves the compound spellings `none`.
+  #
+  # The orphan this rule used to cause is fixed elsewhere and not here (T-0120,
+  # keyChildren in classify.go): a key-family child whose parent end is an exempt
+  # surrogate key takes the exemption back, so a column called exactly
+  # `provider_id` on a uuid foreign key is copied with both the name signal and
+  # the parent key on its reason line. This anchor is therefore about the
+  # *category on the line*, not about masking: `sso_provider_id` is not an
+  # identifier an IdP issued for a person, whether or not it is masked, and a
+  # compound spelling on a column with no foreign key at all is the case no
+  # reconciliation can reach.
+  - name: online_id_idp
+    category: online_id
+    priority: 40
+    match: '^(external_?ids?|provider_?ids?|extern_?uids?)$'
 
   - name: person_name
     category: person_name

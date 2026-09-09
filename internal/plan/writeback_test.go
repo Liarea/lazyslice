@@ -143,3 +143,171 @@ func TestWritableColumnIsNotRefusedAtPlan(t *testing.T) {
 		t.Fatalf("Plan: %v", err)
 	}
 }
+
+// compositeTable is testdata/nasty.sql trap 27's shape: a table with a column
+// of a user-defined composite type, and the CREATE TYPE line introspect reads
+// out of the catalog. Schema.Composites is the only thing that tells a
+// composite from an ltree or a PostGIS geometry, and this check refuses one and
+// passes the others.
+func compositeTable() (ref.TableRef, *pipeline.Schema) {
+	t := ref.TableRef{Schema: "public", Name: "settlements"}
+	return t, &pipeline.Schema{
+		Composites: []pipeline.NamedDef{{
+			Name: "public.postal_address",
+			Def:  "CREATE TYPE public.postal_address AS (line1 text, city text, email text)",
+		}},
+		Tables: []pipeline.Table{{
+			Ref: t,
+			Columns: []pipeline.Column{
+				{Name: "settlement_id", TypeName: "bigint", TypeOID: 20},
+				{Name: "billing", TypeName: "public.postal_address"},
+				{Name: "route", TypeName: "public.ltree"},
+			},
+			PK: []string{"settlement_id"},
+		}},
+	}
+}
+
+// TestMaskedCompositeIsRefusedAtPlan is T-0094's decision, on the plan side: no
+// masker can write a record, so a composite the classifier reached `possible`
+// on is exit 12 here, naming the column and the two escapes, and never a
+// verbatim copy of a record with personal data in it (THREAT_MODEL.md T1).
+//
+// Before it, `constraintsOf` declined to judge a composite — mask.TypeTag has
+// no tag for one — and the column was handed to internal/transform, which
+// masked the record as if it were a scalar and died in the middle of the load.
+func TestMaskedCompositeIsRefusedAtPlan(t *testing.T) {
+	t.Parallel()
+	tbl, schema := compositeTable()
+	cls := masking(tbl, "billing", pipeline.CatEmail, mask.MaskerEmail)
+
+	r := &countingReader{}
+	_, err := New().Plan(context.Background(), r, schema, cls, pipeline.PlanRequest{Root: &tbl})
+	var refusal *Refusal
+	if !errors.As(err, &refusal) {
+		t.Fatalf("Plan returned %v, want a *plan.Refusal", err)
+	}
+	if refusal.Code != CodeUnwritable {
+		t.Errorf("Code = %q, want %q", refusal.Code, CodeUnwritable)
+	}
+	if refusal.Exit != 12 {
+		t.Errorf("Exit = %d, want 12", refusal.Exit)
+	}
+	if refusal.Column != "billing" {
+		t.Errorf("Column = %q, want %q", refusal.Column, "billing")
+	}
+	for _, want := range []string{"public.settlements.billing", "composite", "public.postal_address"} {
+		if !strings.Contains(refusal.Error(), want) {
+			t.Errorf("message %q does not name %q", refusal.Error(), want)
+		}
+	}
+	// The refusal is only useful if it prints the way out. Both escapes are in
+	// the rendered reason, because event.ArgKey has no key for a category or a
+	// type and the message has to carry them (catalogue.yml, plan.refused.unwritable).
+	for _, want := range []string{"--skip-table public.settlements", "--unmask public.settlements.billing=REASON"} {
+		if !strings.Contains(refusal.Args[event.ArgReason], want) {
+			t.Errorf("args[reason] = %q does not offer %q", refusal.Args[event.ArgReason], want)
+		}
+	}
+	if r.queries > 1 {
+		t.Errorf("the planner sent %d statements before refusing; only the privilege pass should run", r.queries)
+	}
+}
+
+// TestUnmaskedCompositeIsNotRefusedAtPlan, and neither is a type that merely has
+// no tag. The refusal is on the composite *and* on the decision to mask it: a
+// composite the classifier found nothing in is copied, which is the other half
+// of T-0094's decision, and an ltree is still the "nothing here knows enough to
+// refuse" case constraintsOf describes.
+func TestUnmaskedCompositeIsNotRefusedAtPlan(t *testing.T) {
+	t.Parallel()
+	tbl, schema := compositeTable()
+
+	t.Run("CompositeThatIsNotMasked", func(t *testing.T) {
+		cls := &pipeline.Classification{Decisions: map[ref.ColumnRef]pipeline.Decision{
+			{Table: tbl, Column: "billing"}: {
+				Col:      ref.ColumnRef{Table: tbl, Column: "billing"},
+				Category: pipeline.CatNone,
+			},
+		}}
+		if _, err := New().Plan(context.Background(), &countingReader{}, schema, cls, pipeline.PlanRequest{Root: &tbl}); err != nil {
+			t.Fatalf("Plan: %v", err)
+		}
+	})
+
+	t.Run("UnknownTypeThatIsNotAComposite", func(t *testing.T) {
+		cls := masking(tbl, "route", pipeline.CatEmail, mask.MaskerEmail)
+		if _, err := New().Plan(context.Background(), &countingReader{}, schema, cls, pipeline.PlanRequest{Root: &tbl}); err != nil {
+			t.Fatalf("Plan refused an ltree, which nothing here knows enough to refuse: %v", err)
+		}
+	})
+}
+
+// arrayTable is plausible's monthly_reports shape: the list of addresses a
+// site's report is emailed to, held in a citext[]. The samples are what tell
+// the two array columns apart — pgx decodes a text[] into a slice and hands an
+// array of an extension type back as the server's own literal, because the
+// source pool registers no user types (T-0076).
+func arrayTable() (ref.TableRef, *pipeline.Schema) {
+	t := ref.TableRef{Schema: "public", Name: "monthly_reports"}
+	return t, &pipeline.Schema{
+		Tables: []pipeline.Table{{
+			Ref: t,
+			Columns: []pipeline.Column{
+				{Name: "id", TypeName: "bigint", TypeOID: 20},
+				{Name: "recipients", TypeName: "extensions.citext[]"},
+				{Name: "tags", TypeName: "text[]"},
+			},
+			PK: []string{"id"},
+			Samples: [][]any{
+				{int64(1), `{bea.donnelly@example.test,cai.osei@example.test}`, []any{"weekly"}},
+				{int64(2), `{dee.abara@example.test}`, []any{"monthly"}},
+			},
+		}},
+	}
+}
+
+// TestArrayThatArrivesAsALiteralIsRefusedAtPlan is T-0118's half of T-0103,
+// held here until the transform half lands. internal/classify reads inside such
+// a literal now, so a citext[] of addresses is decided `email` instead of being
+// copied verbatim; internal/transform's maskArray fires only on a []any, so
+// without this refusal the column is masked as one scalar string and CopyFrom
+// dies with "cannot find encode plan" at exit 7, mid-load, with the tables
+// before it already committed. Exit 12 with the two escapes is the difference
+// between a refusal and a half-loaded target.
+func TestArrayThatArrivesAsALiteralIsRefusedAtPlan(t *testing.T) {
+	t.Parallel()
+	tbl, schema := arrayTable()
+	cls := masking(tbl, "recipients", pipeline.CatEmail, mask.MaskerEmail)
+
+	_, err := New().Plan(context.Background(), &countingReader{}, schema, cls, pipeline.PlanRequest{Root: &tbl})
+	var refusal *Refusal
+	if !errors.As(err, &refusal) {
+		t.Fatalf("Plan returned %v, want a *plan.Refusal", err)
+	}
+	if refusal.Exit != 12 || refusal.Code != CodeUnwritable {
+		t.Errorf("Exit/Code = %d/%q, want 12/%q", refusal.Exit, refusal.Code, CodeUnwritable)
+	}
+	if refusal.Column != "recipients" {
+		t.Errorf("Column = %q, want %q", refusal.Column, "recipients")
+	}
+	for _, want := range []string{"--skip-table public.monthly_reports", "--unmask public.monthly_reports.recipients=REASON"} {
+		if !strings.Contains(refusal.Args[event.ArgReason], want) {
+			t.Errorf("args[reason] = %q does not offer %q", refusal.Args[event.ArgReason], want)
+		}
+	}
+}
+
+// TestArrayTheDriverDecodesIsNotRefusedAtPlan: the refusal is on the driver's
+// answer and not on the column being an array. A text[] comes back as a slice,
+// internal/transform masks it element-wise as it always has, and refusing it
+// would turn every masked array column in every schema into a plan refusal.
+func TestArrayTheDriverDecodesIsNotRefusedAtPlan(t *testing.T) {
+	t.Parallel()
+	tbl, schema := arrayTable()
+	cls := masking(tbl, "tags", pipeline.CatFreeText, mask.MaskerFreeText)
+
+	if _, err := New().Plan(context.Background(), &countingReader{}, schema, cls, pipeline.PlanRequest{Root: &tbl}); err != nil {
+		t.Fatalf("Plan refused a text[] the driver decodes: %v", err)
+	}
+}
