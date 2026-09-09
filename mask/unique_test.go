@@ -120,6 +120,77 @@ func TestPickChoosesTheAlternateOnlyForAUniqueColumn(t *testing.T) {
 	if id, err := Pick(CatEmail, text); err != nil || id != MaskerEmail {
 		t.Fatalf("a unique email column: Pick = %q, %v", id, err)
 	}
+
+	// credential: the fixed literal is the default and stays it, and the
+	// alternate is reached only under a unique index (T-0098).
+	token := Constraints{TypeTag: famVarchar, MaxLen: 255}
+	if id, err := Pick(CatCredential, token); err != nil || id != CredentialMasker {
+		t.Fatalf("a plain credential column: Pick = %q, %v; want %s", id, err, CredentialMasker)
+	}
+	token.Unique, token.Rows = true, 1_000_000
+	if id, err := Pick(CatCredential, token); err != nil || id != MaskerCredentialUnique {
+		t.Fatalf("a unique credential column: Pick = %q, %v; want %s", id, err, MaskerCredentialUnique)
+	}
+}
+
+// T-0098, the whole of it: before the second generator, every unique credential
+// column was refused at exit 12 whatever the row count — MaxRows(1) is zero, so
+// the refusal could not even name a --take that would work, and the operator's
+// only escapes were --unmask (which copies the credential verbatim) and
+// mapping_file:. Eighteen of the thirty-seven --unmask flags the ten torture
+// schemas carry are tagged (T-0098) and were this; they are still in the
+// catalogue until tracker T-0112 strips them and re-runs `make torture`.
+func TestAUniqueCredentialColumnIsCarriedRatherThanRefused(t *testing.T) {
+	// auth.refresh_tokens.token: varchar(255) under a unique index.
+	c := Constraints{TypeTag: famVarchar, MaxLen: 255, Unique: true, Rows: 500}
+	id, err := Pick(CatCredential, c)
+	if err != nil {
+		t.Fatalf("a unique credential column is still refused: %v", err)
+	}
+	if id != MaskerCredentialUnique {
+		t.Fatalf("Pick = %q, want %s", id, MaskerCredentialUnique)
+	}
+	if d := Admissible(id, c); d < Required(c.Rows) {
+		t.Fatalf("d = %d, d_required = %d", d, Required(c.Rows))
+	}
+
+	// And the values really are distinct: the refusal exists to stop a
+	// collision at load, so the generator has to carry the rows the rule
+	// admits.
+	const n = 20_000
+	pressure := Constraints{TypeTag: famVarchar, MaxLen: 255, Unique: true, Rows: n}
+	if _, err := Pick(CatCredential, pressure); err != nil {
+		t.Fatalf("the planner would not have accepted this column: %v", err)
+	}
+	got := maskAll(t, MaskerCredentialUnique, CatCredential, pressure, n, func(i int) string {
+		return fmt.Sprintf("token-%d-%s", i, strconv.Itoa(i*7919))
+	})
+	if got != n {
+		t.Fatalf("%d distinct fakes from %d distinct tokens: %d collisions", got, n, n-got)
+	}
+}
+
+// The default is unchanged and it has to be: ARCHITECTURE.md §5 says a
+// credential becomes a fixed unusable value, and a password column full of
+// well-formed-looking tokens is a column somebody tries to crack. The alternate
+// is not plausible either — every value it emits announces the tool — but it is
+// the wider one, so only a unique column may reach it.
+func TestANonUniqueCredentialColumnStillGetsTheFixedLiteral(t *testing.T) {
+	c := Constraints{TypeTag: famText}
+	id, err := Pick(CatCredential, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != CredentialMasker {
+		t.Fatalf("Pick = %q, want %s", id, CredentialMasker)
+	}
+	r, err := Apply(testKey(t), CatCredential, id, Value{Text: "$2y$10$abcdefghijklmnop"}, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Out.Text != CredentialLiteral {
+		t.Fatalf("got %q, want %q", r.Out.Text, CredentialLiteral)
+	}
 }
 
 func TestPickRefusesAColumnNoGeneratorFits(t *testing.T) {

@@ -23,6 +23,7 @@ import (
 	"github.com/Liarea/lazyslice/internal/extract"
 	"github.com/Liarea/lazyslice/internal/introspect"
 	"github.com/Liarea/lazyslice/internal/load"
+	"github.com/Liarea/lazyslice/internal/load/ddl"
 	"github.com/Liarea/lazyslice/internal/pg"
 	"github.com/Liarea/lazyslice/internal/pipeline"
 	"github.com/Liarea/lazyslice/internal/plan"
@@ -332,6 +333,13 @@ func (r *run) execute(ctx context.Context) (*pipeline.Report, error) {
 		return nil, nil
 	}
 	if err := r.planStage(ctx); err != nil {
+		return nil, err
+	}
+	// The classification fingerprint is recomputed here and not at classify,
+	// because the plan has just changed what this run will mask with
+	// (refingerprint, T-0101). It runs before emitPlanOnly, so the yml a
+	// --plan writes carries the same value a writing run would.
+	if err := r.refingerprint(); err != nil {
 		return nil, err
 	}
 	if r.req.Mode == ModePlan || r.req.PlanOnly {
@@ -841,6 +849,47 @@ func (r *run) classifierFingerprint() (string, error) {
 	return cls.Fingerprint, nil
 }
 
+// refingerprint recomputes Classification.Fingerprint over the decisions the
+// plan left behind (T-0101).
+//
+// ARCHITECTURE.md §5 makes the fingerprint a function of the rule-pack version
+// and, per column, its category and its masker, and §11.2 prints "classification
+// changed -- masked values will differ" when a bound marker's recorded one
+// differs from this run's. But the masker is not final when Classify returns:
+// §5's own unique-index rule says the *plan* picks the widest registered
+// generator for the category, and internal/plan/unique.go writes that pick back
+// onto the decision -- which internal/transform masks with and internal/emit
+// records. So a column that became unique between two runs (a new unique index,
+// or a --take that pushed the table past d_required) changed every masked value
+// in it and changed no fingerprint, and the one warning §11.2 has for that case
+// did not print.
+//
+// The pick cannot move into classify, which has the samples and the unique
+// indexes but no row count and no database. So the fingerprint moves instead:
+// it is computed here, after the plan, and it is the classification *plus* the
+// plan's picks. This is the same structural reason domain.go writes Domain and
+// SmallDomain after Classify returns, and internal/core/CLAUDE.md records both.
+//
+// Nothing changes for a run with no escalation: with the decisions Classify
+// left, classify.Refingerprint returns the value Classify computed, byte for
+// byte.
+//
+// r.classFP is deliberately *not* touched. That is the review pin's value --
+// the classifier's own verdicts, which is what --tui's reasons screen showed
+// somebody -- and it is compared before the plan runs, by
+// checkReviewedClassification, on both passes.
+func (r *run) refingerprint() error {
+	if r.cls == nil {
+		return nil
+	}
+	fp, err := classify.Refingerprint(r.cls)
+	if err != nil {
+		return wrap(CodeInternal, exitInternal, err, "the classification could not be fingerprinted")
+	}
+	r.cls.Fingerprint = fp
+	return nil
+}
+
 // ---------- introspect ----------
 
 func (r *run) introspectStage(ctx context.Context) error {
@@ -1072,6 +1121,36 @@ func (r *run) virtualEvents(p *pipeline.Plan) {
 func (r *run) planStage(ctx context.Context) error {
 	r.start(event.Plan)
 	defer r.done(event.Plan)
+
+	// ARCHITECTURE.md §11.1's not-recreatable refusal, raised where §11.1 says
+	// it is raised: "at plan -- before the snapshot is used for keys and before
+	// anything in the target is dropped" (T-0097).
+	//
+	// ddl.Recreatable is a pure function of the schema, and it used to be called
+	// by load.Load as its first statement, because a stage package may not
+	// import another stage package and the caller §11.1 describes is this one,
+	// which did not exist when the loader landed. Nothing about the check
+	// changes here; where it runs does. One of the ten schemas in
+	// testdata/torture/ reaches it as the fixture stands -- Mastodon's
+	// timestamp_id on nine primary keys, carried unedited for exactly that
+	// reason. GitLab reaches the same refusal upstream on two objects
+	// (organizations.uuid's DEFAULT gen_random_uuid_v7(), and the index
+	// index_todos_coalesced_snoozed_until_created_at on timestamp_coalesce),
+	// and its 43-table subset drops both, so the fixture does not
+	// (testdata/torture/gitlab/README.md, docs/TORTURE.md). From inside the
+	// loader an operator with either schema paid for a whole extract, holding
+	// the source snapshot throughout, before being told the target could not be
+	// built.
+	//
+	// It is before planRequest and before Plan, so it is also before the first
+	// key query: the refusal costs one introspect and nothing else. asStop maps
+	// *ddl.Refusal to its catalogued code and exit 13 (names.go,
+	// testdata/regressions/002-function-default-refusal-uncoded.sql), and both
+	// of ddl's codes carry stage: plan in internal/event/catalogue.yml, which
+	// is now where they are raised.
+	if err := ddl.Recreatable(r.schema); err != nil {
+		return asStop(err)
+	}
 
 	req, err := r.planRequest()
 	if err != nil {

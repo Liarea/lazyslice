@@ -360,15 +360,6 @@
 # target.schema.not_recreatable above, which internal/plan raises for the other
 # case §11.1 names. Exit 13 is ADR-005's "target schema not recreatable".
 #
-# The stage is where the check belongs and not yet where it runs. internal/plan
-# calls its own checkRecreatable, which covers ForeignKey.NotRecreatable and
-# nothing else; ddl.Recreatable, which raises the two codes below, is called
-# only by load.Load, as its first statement and before the first drop. So the
-# target is not destroyed for a schema that cannot be recreated, but the
-# refusal currently arrives after the snapshot has been used for keys. Wiring
-# it into plan (or into core before the drop) is owed and recorded in
-# internal/load/CLAUDE.md; when it lands, this comment goes.
-#
 # There is deliberately no flag that drops the offending default and carries on:
 # the application's first INSERT is the point of the tool. The remedy is the
 # load-into-existing-schema mode ADR-005's reversal condition names, deferred

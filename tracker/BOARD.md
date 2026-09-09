@@ -9,7 +9,7 @@
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 16 | 1 | 27 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 6 | 0 | 10 | 1 | 0 |
+| E9 Later | later | 8 | 0 | 10 | 1 | 0 |
 
 ## Open and in progress
 
@@ -38,6 +38,8 @@
 - T-0108 [open] E5 · T-HARD-A: unique credential masker, fingerprint after plan, exit 13 at plan (T-0098, T-0101, T-0097) (opus)
 - T-0109 [open] E5 · T-HARD-B: composite fail-closed, extension-type array splitter, auth-schema rules, URL not credential (T-0094, T-0103, T-0104, T-0100) (opus)
 - T-0110 [open] E5 · T-HARD-C: RegisterTypes on Writer, torture tag linted, testdata docs (T-0093, T-0105, T-0096) (sonnet)
+- T-0111 [open] E9 · ARCHITECTURE.md owes three sentences after T-HARD-A: 5's determinism scope, 5's credential line, 11.1's raise site ()
+- T-0112 [open] E9 · Re-measure docs/TORTURE.md's flag counts and the catalogue's flags-by-kind after the credential_unique masker ()
 
 ## Recently closed
 

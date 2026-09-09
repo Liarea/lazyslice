@@ -42,10 +42,13 @@ The ones about *changing* this directory are:
   trigger with a hard-coded foreign key, a value the catalogue cannot describe.
 - **An `--unmask` in the catalogue is a claim about the column, not about the
   run.** It says either "this is not personal data, and here is why" or "this is
-  personal data and lazyslice cannot mask it yet, tracker task N". Twenty of the
-  forty-five flags the ten schemas need are the second kind and every one of
-  them names **T-0098**; when that lands, they go, and docs/TORTURE.md's table is
-  what says by how much. The forty-fifth,
+  personal data and lazyslice cannot mask it yet, tracker task N". Eighteen of
+  the forty-five flags the ten schemas need are the second kind and every one of
+  them names **T-0098**. That masker has since landed (`mask/gen_credential.go`),
+  so all eighteen are now unnecessary — but stripping them and re-running `make
+  torture` is tracker **T-0112**, and until it does, the eighteen columns are
+  still copied into the target in clear and docs/TORTURE.md's table still quotes
+  the pre-fix split. The forty-fifth,
   `auth.mfa_factors.friendly_name`, is a third kind and its reason has to carry
   the whole argument: the column is under a partial composite unique index that
   admits none of its rows, and `d_required` is computed over the whole table

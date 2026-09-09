@@ -47,13 +47,16 @@ func TestFormatPreservationPerCategory(t *testing.T) {
 		"url":                wantMatch(`^https://example\.invalid/[a-z2-7]{13}$`),
 		// The bounded column's path is shorter, and it is the branch whose
 		// domain the planner refuses on (TestDomainMatchesWhatTheGeneratorEmits).
-		"url varchar":  wantMatch(`^https://example\.invalid/[a-z2-7]{12}$`),
-		"handle":       wantMatch(`^[a-z]+_[a-z2-7]+$`),
-		"uuid":         wantUUIDv4,
-		"credential":   wantExactly(CredentialLiteral),
-		"free text":    wantMatch(`^[a-z ]{1,200}$`),
-		"special enum": wantOneOf("single", "married", "widowed"),
-		"special text": wantMatch(`^[a-z ]+$`),
+		"url varchar": wantMatch(`^https://example\.invalid/[a-z2-7]{12}$`),
+		"handle":      wantMatch(`^[a-z]+_[a-z2-7]+$`),
+		"uuid":        wantUUIDv4,
+		"credential":  wantExactly(CredentialLiteral),
+		// Still not a plausible credential: the prefix is fixed and readable and
+		// only the 13-symbol suffix varies (T-0098).
+		"credential unique": wantMatch(`^lazyslice-invalid-[a-z2-7]{13}$`),
+		"free text":         wantMatch(`^[a-z ]{1,200}$`),
+		"special enum":      wantOneOf("single", "married", "widowed"),
+		"special text":      wantMatch(`^[a-z ]+$`),
 		// '' is the empty tsvector, and it is the whole of what this generator
 		// emits.
 		"tsvector": wantExactly(""),

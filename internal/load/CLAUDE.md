@@ -27,10 +27,11 @@ then after-data: indexes, FKs, setval, ANALYZE, bookkeeping tables).
 - A dependency `ddl/` cannot recreate (a non-`pg_catalog` function, a
   user-defined base type/operator class/collation) is exit 13, and
   ARCHITECTURE.md §11.1 requires it **at plan** — before the snapshot is used
-  for keys and before anything in the target is dropped. **Nothing calls
-  `ddl.Recreatable` at plan today**, so `Load` calls it itself as its first
-  statement, before the marker row and before the first drop. Read the owed
-  item below before relying on the §11.1 ordering.
+  for keys and before anything in the target is dropped. That is where it is
+  raised: `internal/core`'s `planStage` calls `ddl.Recreatable` before it builds
+  the plan request (T-0097). `Load` does **not** check again — one refusal,
+  raised once — so a caller that drives this package without `core.Run` (the
+  integration suite) makes the call itself.
 - `setval`'s first argument is a `regclass`, and `text` cast to `regclass` is
   parsed as an identifier: the literal carries the **quoted** name
   (`setval('"public"."LegacyCustomer_CustomerID_seq"', ...)`) or a mixed-case
@@ -93,17 +94,16 @@ then after-data: indexes, FKs, setval, ANALYZE, bookkeeping tables).
   validating it would fail the run over rows the source itself does not check. A
   `VALIDATE` that fails is exit 8 (`load.refused.fk_invalid`), which is
   ADR-005's foreign-key code found one stage before verify.
-- **Owed: `internal/plan` (or `core`, before the drop) must call
-  `ddl.Recreatable`.** §11.1 raises the not-recreatable refusal at plan;
-  `internal/plan/plan.go`'s `checkRecreatable` covers `ForeignKey.
-  NotRecreatable` and nothing else, and stage packages do not import each
-  other, so the natural caller is `core`, which does not exist yet. Until it
-  does, the only caller in a real run is `load.Load`, which checks before the
-  marker row and before the first drop — so the target is not destroyed for a
-  schema that cannot be recreated, but the refusal arrives after the snapshot
-  has been used for keys, which §11.1's ordering exists to avoid. The two exit
-  13 codes in `internal/event/catalogue.yml` still carry `stage: plan`, which
-  is where the check belongs and where it must move.
+- **`ddl.Recreatable` is called by `core`, not here (settled, T-0097).** §11.1
+  raises the not-recreatable refusal at plan; `internal/plan/plan.go`'s
+  `checkRecreatable` covers `ForeignKey.NotRecreatable` and nothing else, and
+  stage packages do not import each other, so the caller §11.1 describes is
+  `core` — which did not exist when this package landed and does now.
+  `internal/core`'s `planStage` makes the call before `planRequest` and before
+  `Plan`, so the refusal costs one introspect and no key query, and the two exit
+  13 codes in `internal/event/catalogue.yml` are raised at the `stage: plan`
+  they already declared. `Load` no longer calls it: the check was here as a
+  stand-in, and a second copy would be one refusal two stages could raise.
 - **`internal/pg` opens the transaction the `CatalogFingerprinter` runs in**
   (T-FPR, ADR-009). It used to call the fingerprinter with
   `&reader{conn: conn, own: false}` on a pooled connection in autocommit, where
@@ -291,9 +291,24 @@ THREAT_MODEL.md T8 outcome the strict-NULL form exists to prevent
 (`testdata/regressions/006-identity-sequence-renamed-table.sql`).
 `internal/verify` resolves it the same way and the two have to stay in step.
 
-The owed item above — §11.1 says `ddl.Recreatable` is called **at plan** and it is
-still called by `Load` — now has evidence and a task: two of the ten schemas in
-`testdata/torture/` reach it, so an operator with Mastodon or GitLab pays for a
-full extract before being told the target cannot be built (T-0097).
-`core.asStop` at least maps the refusal to its own code and exit 13 now
+The owed item above is closed. **One** of the ten schemas in `testdata/torture/`
+reaches the not-recreatable refusal as the fixtures stand — Mastodon's
+`timestamp_id` on nine primary keys, carried unedited for that reason. GitLab
+reaches the same refusal *upstream* on two objects (`organizations.uuid`'s
+`DEFAULT gen_random_uuid_v7()` and the index
+`index_todos_coalesced_snoozed_until_created_at` on `timestamp_coalesce`), and
+its 43-table subset drops both, so the fixture exits 0
+(`testdata/torture/gitlab/README.md`, `docs/TORTURE.md`). From inside `Load` an
+operator with either schema paid for a whole extract, holding the source
+snapshot throughout, before being told the target could not be built. T-0097
+moved the call into `internal/core`'s `planStage`, where §11.1 says it belongs;
+`core.asStop` maps the refusal to its own code and exit 13
 (`testdata/regressions/002-function-default-refusal-uncoded.sql`).
+
+That leaves `Load` with an **unchecked precondition**: its caller must have run
+`ddl.Recreatable` over the same `*pipeline.Schema` it passes, and nothing in this
+package enforces it. `core.Run` does; `load_integration_test.go` calls
+`ddl.Recreatable` over its fixture, but as a fixture assertion rather than a
+guard on `Load`. A direct caller that skips it drops every table in the target
+and then fails at `CREATE TABLE` with `42883` under exit 7 — the failure the
+check used to prevent from here.

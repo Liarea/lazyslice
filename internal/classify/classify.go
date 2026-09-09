@@ -122,7 +122,7 @@ func (classifier) Classify(schema *pipeline.Schema, s pipeline.Sampler, prior *p
 	for col, w := range st.dec {
 		cls.Decisions[col] = w.d
 	}
-	cls.Fingerprint = st.fingerprint()
+	cls.Fingerprint = fingerprintOf(st.pack.Version, cls.Decisions)
 	return cls, nil
 }
 
@@ -1263,21 +1263,61 @@ func (st *state) sampleDistinct(c ref.ColumnRef) (distinct, sampled bool) {
 // neighbouring-column rule or an extra_patterns raise changes it, which is what
 // makes "classification changed — masked values will differ" printable rather
 // than silent.
-func (st *state) fingerprint() string {
-	cols := make([]ref.ColumnRef, len(st.order))
-	copy(cols, st.order)
+func fingerprintOf(version string, decisions map[ref.ColumnRef]pipeline.Decision) string {
+	cols := make([]ref.ColumnRef, 0, len(decisions))
+	for c := range decisions {
+		cols = append(cols, c)
+	}
 	sort.Slice(cols, func(i, j int) bool { return cols[i].Less(cols[j]) })
 	var buf []byte
 	buf = appendField(buf, "rulepack")
-	buf = appendField(buf, st.pack.Version)
+	buf = appendField(buf, version)
 	for _, c := range cols {
-		w := st.dec[c]
+		d := decisions[c]
 		buf = appendField(buf, c.String())
-		buf = appendField(buf, string(w.d.Category))
-		buf = appendField(buf, string(w.d.Masker))
+		buf = appendField(buf, string(d.Category))
+		buf = appendField(buf, string(d.Masker))
 	}
 	sum := sha256.Sum256(buf)
 	return hex.EncodeToString(sum[:])[:16]
+}
+
+// Refingerprint recomputes Classification.Fingerprint over the decisions as
+// they stand now, rather than as Classify left them (T-0101).
+//
+// ARCHITECTURE.md §5 defines the fingerprint as sha256 over the rule-pack
+// version and, per column, its category and its masker; §11.2 prints
+// "classification changed -- masked values will differ" when a marked target's
+// recorded one differs from this run's. But the masker on a column under a
+// unique index is not settled until the plan has run: §5's own domain rule says
+// "the plan picks, within the column's category, the registered generator with
+// the largest Domain()", and internal/plan/unique.go writes that pick back onto
+// the decision -- which internal/transform then masks with and internal/emit
+// writes into the yml. Computed inside Classify alone, the fingerprint covered
+// the category and the *default* masker, so a column that became unique between
+// two runs -- a new unique index, or a --take that pushed it past d_required --
+// changed every masked value in it and changed no fingerprint, and the warning
+// §11.2 exists for did not print.
+//
+// The pick needs the planned row count, which internal/classify does not have
+// and cannot get (it reads samples, not a database), so it cannot move here.
+// The fingerprint moves instead: internal/core calls this after the plan, and
+// the fingerprint it records is the classification *plus* the plan's picks.
+// This is the same reason internal/core/domain.go writes Domain and SmallDomain
+// after Classify returns.
+//
+// Nothing else changes. With no escalation the decisions are the ones Classify
+// hashed and the value is byte-identical, so a run over a schema with no unique
+// masked column has exactly the fingerprint it had before.
+func Refingerprint(cls *pipeline.Classification) (string, error) {
+	if cls == nil {
+		return "", nil
+	}
+	p, err := pack()
+	if err != nil {
+		return "", err
+	}
+	return fingerprintOf(p.Version, cls.Decisions), nil
 }
 
 // appendField is a length-prefixed encoding, for the same reason mask.Encode is
