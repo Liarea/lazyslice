@@ -166,6 +166,18 @@ func (t transformer) cell(p colPlan, v any, key mask.Key, res pipeline.Residual)
 	if elems, ok := v.([]any); ok && p.shape.array {
 		return t.maskArray(p, elems, key, res)
 	}
+	if p.shape.array {
+		switch text := v.(type) {
+		case string:
+			return t.maskArrayLiteral(p, text, key, res)
+		case []byte:
+			out, err := t.maskArrayLiteral(p, string(text), key, res)
+			if err != nil {
+				return nil, err
+			}
+			return []byte(out), nil
+		}
+	}
 	return t.maskScalar(p, v, key, res)
 }
 
@@ -190,6 +202,61 @@ func (t transformer) maskArray(p colPlan, elems []any, key mask.Key, res pipelin
 		out[i] = masked
 	}
 	return out, nil
+}
+
+// maskArrayLiteral masks an array that arrived as the server's own text form
+// rather than as a slice, which is what pgx hands back for an array whose
+// element type its map does not know — a citext[], and every other array of an
+// extension's base type (tracker T-0118, array.go).
+//
+// It is maskArray's rule over a different carrier and not a second one: the
+// literal is parsed, every non-NULL element goes through the same element
+// masker with h computed per element, a NULL element stays NULL, an empty array
+// stays empty, the dimensions are unchanged, and the result is written back as
+// a literal array_in accepts. A literal this package cannot parse is a refusal
+// and never a copy — masking it as one string is what handed CopyFrom a scalar
+// for an _citext column, and copying it through is the cleartext
+// THREAT_MODEL.md T12 is about.
+func (t transformer) maskArrayLiteral(p colPlan, text string, key mask.Key, res pipeline.Residual) (string, error) {
+	prefix, root, err := parseArrayLiteral(text)
+	if err != nil {
+		return "", &Refusal{
+			Code: CodeMasker, Exit: exitTransform, Col: p.col,
+			Masker: string(p.id), Reason: err,
+		}
+	}
+	if err := t.maskArrayNode(p, &root, key, res); err != nil {
+		return "", err
+	}
+	return renderArrayLiteral(prefix, root), nil
+}
+
+// maskArrayNode masks one node of a parsed literal, recursing into a
+// multidimensional array's inner arrays.
+func (t transformer) maskArrayNode(p colPlan, n *arrayNode, key mask.Key, res pipeline.Residual) error {
+	if n.nested {
+		for i := range n.elems {
+			if err := t.maskArrayNode(p, &n.elems[i], key, res); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if n.null {
+		return nil
+	}
+	out, err := t.maskScalar(p, n.text, key, res)
+	if err != nil {
+		return err
+	}
+	if out == nil {
+		// A generator that answers NULL for an element writes the NULL marker,
+		// not the four-letter string.
+		n.null, n.text = true, ""
+		return nil
+	}
+	n.text = textOf(out)
+	return nil
 }
 
 // maskScalar is one value through mask.Apply: the NULL and empty rules,
