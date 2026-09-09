@@ -7,7 +7,7 @@
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 1 | 0 | 9 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
-| E5 Hardening | 5 | 13 | 1 | 27 | 0 | 0 |
+| E5 Hardening | 5 | 16 | 1 | 27 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
 | E9 Later | later | 6 | 0 | 10 | 1 | 0 |
 
@@ -35,6 +35,9 @@
 - T-0103 [open] E5 · An array of an extension type is sampled as one opaque string, so the classifier never sees the values inside it ()
 - T-0104 [open] E5 · The credential and online_id name rules miss the spellings an auth schema actually uses ()
 - T-0105 [open] E5 · .golangci.yml does not lint the torture build tag ()
+- T-0108 [open] E5 · T-HARD-A: unique credential masker, fingerprint after plan, exit 13 at plan (T-0098, T-0101, T-0097) (opus)
+- T-0109 [open] E5 · T-HARD-B: composite fail-closed, extension-type array splitter, auth-schema rules, URL not credential (T-0094, T-0103, T-0104, T-0100) (opus)
+- T-0110 [open] E5 · T-HARD-C: RegisterTypes on Writer, torture tag linted, testdata docs (T-0093, T-0105, T-0096) (sonnet)
 
 ## Recently closed
 
