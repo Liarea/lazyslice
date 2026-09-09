@@ -115,10 +115,29 @@ func (s *state) sequences(ctx context.Context) error {
 }
 
 func (s *state) sequence(ctx context.Context, t ref.TableRef, seq pipeline.SequenceDef, column string) error {
+	// Which relation to read is a question for the target, not an assumption
+	// from the source's name (sequenceNameSQL).
+	var name string
+	if err := s.one(ctx, s.target, sequenceNameSQL(t, column, seq.Name), &name); err != nil {
+		return fmt.Errorf("verify: resolving the sequence behind %s.%s in the target: %w", t, column, err)
+	}
+	if name == "" {
+		// Neither the target's own ownership nor the source's name names a
+		// relation the target has. Before sequenceNameSQL existed this branch
+		// was a 42P01 out of sequenceSQL and it failed the run; reporting it
+		// instead would turn "§11.1 did not create this sequence" into a green
+		// note, which is exactly the target THREAT_MODEL.md T8 describes as
+		// looking complete and not being.
+		s.fail(&Refusal{
+			Code: CodeRefusedSequence, Exit: exitLoad, Check: checkSequences,
+			Table: t, Column: column, Reason: reasonNoSequence,
+		})
+		return nil
+	}
 	var last int64
 	var called bool
-	if err := s.one(ctx, s.target, sequenceSQL(seq.Name), &last, &called); err != nil {
-		return fmt.Errorf("verify: reading the sequence %s in the target: %w", seq.Name, err)
+	if err := s.one(ctx, s.target, sequenceSQL(name), &last, &called); err != nil {
+		return fmt.Errorf("verify: reading the sequence %s in the target: %w", name, err)
 	}
 	var maxValue *int64
 	if err := s.one(ctx, s.target, maxSQL(t, column), &maxValue); err != nil {

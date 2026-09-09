@@ -276,3 +276,21 @@ each one is a deviation a reviewer should see rather than discover.
   permanently. The fix is a `/lazyslice` line in `.gitignore` — anchored, or it
   would also ignore the tracked source directory `cmd/lazyslice/` — and that
   file was outside T-PIN's paths: tracker T-0080.
+
+## `asStop` is exhaustive or it is nothing (T-TORTURE)
+
+There are **six** refusal types, not five: `internal/load/ddl`'s is returned by
+`load.Load` unwrapped and needs its own case. Without it an operator whose schema
+has a column default calling one of the application's own functions — Mastodon's
+`timestamp_id`, GitLab's `gen_random_uuid_v7`, both real, both in
+`testdata/torture/` — was told "lazyslice failed for a reason it has no code
+for; run with --debug" and given exit 1 to branch on, with the correct code and
+the whole correct sentence printed *inside* the message
+(`testdata/regressions/002-function-default-refusal-uncoded.sql`).
+
+The rule the file already stated is the one that was broken: "an error no stage
+claimed is exit 1, never a code a CI job branches on" is only true if every stage
+that has a code is claimed. A new refusal type anywhere under `internal/` is a
+case here in the same change, and `docs/ERRORS.md` is where to check whether the
+code already exists — both of `ddl`'s did, with `stage: plan` and `exit: 13`,
+for a refusal that was reaching people as an internal error.

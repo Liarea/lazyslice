@@ -431,3 +431,32 @@ decided unmasked and copied.
 residual hit as anything but exit 9; skip the cap on confirmation probes; treat
 a source-changed mismatch as a pass; let a value reach a refusal, a check or an
 event.
+
+## Which sequence to read (T-TORTURE)
+
+`sequenceNameSQL` asks the **target** which sequence backs a column, with the
+source's name as the fallback, and `counts.go` resolves it before reading
+`last_value`. An identity column's sequence is created and named by the target
+(§11.1 recreates the column as `GENERATED ... AS IDENTITY`), and the two names
+part company the moment the source's table has been renamed — Postgres does not
+rename an owned sequence with its table. Metabase's `sandboxes` still owns
+`group_table_access_policy_id_seq`; reading that name against a target that has
+`sandboxes_id_seq` is `42P01` against a target that is correct
+(`testdata/regressions/006-identity-sequence-renamed-table.sql`).
+
+The fallback is not decoration: pagila declares no sequence ownership at all, so
+`pg_get_serial_sequence` answers NULL for every one of its sequences and the
+source's name is the right one. `internal/load/ddl`'s `Setvals` makes the same
+choice the same way, and the two have to keep making it together.
+
+**When neither name resolves, the check fails.** `sequenceNameSQL` coalesces to
+the empty string, and that answer means the target has no such relation — a
+sequence §11.1's DDL did not create. It raises `verify.refused.sequence` with
+`reasonNoSequence` at exit 7, exactly as the `42P01` it replaced used to. It is
+deliberately **not** `verify.sequence.unowned`: that code is §6 item 5's report
+for "the loader could not attribute this sequence to a column, so it did not
+reset it", which is a state a correct run reaches (pagila reaches it twelve
+times). Reusing it here would turn the loudest evidence of THREAT_MODEL.md T8 —
+a target that looks complete with its sequences at 1 — into a passing note, and
+`sequences()` counts the sequence as checked before the call, so the pass would
+have counted it too.

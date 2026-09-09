@@ -275,3 +275,25 @@ deferred rollback, and what T8 is about is the kill that runs nothing.
 **Never:** open a connection to the source; commit a table's transaction before
 its `Last` batch; write a generated column; recreate a view, function, trigger,
 policy or partition (v1 does not — §11.1's `not_recreated` list).
+
+## setval and an identity column's sequence (T-TORTURE)
+
+`ddl.Setvals` addresses an **identity** column's sequence through
+`pg_get_serial_sequence` on the target, coalescing to the source's quoted name,
+rather than asserting the source's name. `sequences()` already skipped an
+identity sequence when emitting `CREATE SEQUENCE`, because the column's own
+`GENERATED ... AS IDENTITY` creates it — and the target names it itself, so the
+two names differ as soon as the source's table has been renamed. Metabase renamed
+`group_table_access_policy` to `sandboxes` and Postgres left the sequence behind
+under the old name; `setval` then named a relation the target has never had and
+the run died at `42P01` **after every table had been copied**, which is the
+THREAT_MODEL.md T8 outcome the strict-NULL form exists to prevent
+(`testdata/regressions/006-identity-sequence-renamed-table.sql`).
+`internal/verify` resolves it the same way and the two have to stay in step.
+
+The owed item above — §11.1 says `ddl.Recreatable` is called **at plan** and it is
+still called by `Load` — now has evidence and a task: two of the ten schemas in
+`testdata/torture/` reach it, so an operator with Mastodon or GitLab pays for a
+full extract before being told the target cannot be built (T-0097).
+`core.asStop` at least maps the refusal to its own code and exit 13 now
+(`testdata/regressions/002-function-default-refusal-uncoded.sql`).

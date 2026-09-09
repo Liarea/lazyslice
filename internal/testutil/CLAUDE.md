@@ -102,3 +102,13 @@ started nothing would fail there.
 **Never:** let `LoadNasty`'s Go-side `big` handling diverge from the SQL
 file's own gate; grant the fixture's `postgres` role superuser; add a second
 psql construct interpreter instead of erroring loudly on the unsupported one.
+
+## The port-mapping retry is sized for `make torture` (T-TORTURE)
+
+`portEndpointAttempts`/`portEndpointBudget` are thirty attempts over thirty
+seconds, not ten over five. `make integration` starts about a dozen containers
+and never exhausted five seconds; `make torture` starts about forty and
+exhausted them roughly once a run, failing a different torture schema each time
+with a message about a port rather than about anything the run was testing
+(T-0052 is the race). The budget is only ever spent when the race happens: the
+first attempt succeeds otherwise and the loop returns.

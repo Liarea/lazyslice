@@ -238,6 +238,14 @@ func (p *run) plan(ctx context.Context) (*pipeline.Plan, error) {
 	if err := p.walk(ctx, root); err != nil {
 		return nil, err
 	}
+	// §5's unique-index domain rule runs last of the checks, because it is the
+	// only one whose question needs n: the walk is what decides how many rows of
+	// each table the target will hold, and d_required is n²/2ε (unique.go). It
+	// still runs before assemble, so nothing has been extracted and the target
+	// has not been touched.
+	if err := p.checkUniqueDomain(); err != nil {
+		return nil, err
+	}
 	return p.assemble(root, rootReason), nil
 }
 

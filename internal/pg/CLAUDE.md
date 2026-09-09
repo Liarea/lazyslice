@@ -628,3 +628,29 @@ that lets one through (T-0082); put an `AfterConnect` hook on the source pool �
 codec for — one such type kills every target connection and the run with it, and
 an unregistered type is only ever one column that fails the way it failed
 before.
+
+## Extension base types (T-TORTURE)
+
+`types.go` registers the source's enums, domains and composites on every target
+connection (ARCHITECTURE.md §11.1, ADR-005). An extension's own **base** type —
+`citext`, `hstore`, `ltree`, pgvector's `vector` — is none of those three, is in
+none of `Schema.Enums`, `Schema.Domains` or `Schema.Composites`, and cannot be
+named from the source schema at all. `registerExtensionBaseTypes` resolves them
+on the target instead, from `Schema.Extensions`.
+
+- **It only claims two things, and refuses to guess a third.** A
+  string-category type is a varlena whose binary form is its bytes, which is what
+  `pgtype.TextCodec` writes; `hstore` gets pgx's own `HstoreCodec`. Everything
+  else — a category-'U' type pgx ships no codec for — is left unregistered and
+  keeps whatever behaviour it had.
+- **Why it matters is the array.** A scalar `citext` column loaded before any of
+  this; `citext[]` did not, because pgx builds the array codec over the element
+  and could not find one, so the binary `COPY` wrote nonsense and the server
+  answered `08P01`. Plausible's `monthly_reports.recipients citext[]` is the live
+  case (`testdata/regressions/005-array-of-extension-type-not-registered.sql`).
+  A scalar `hstore` column could never be loaded at all, before or after; it is
+  fixed in the same place.
+- **The source pool still carries no `AfterConnect` hook** (T-0076), so none of
+  this happens on the source — which is why a `citext[]` there is *sampled* as
+  one opaque string and the classifier never sees inside it. That is T-0103, and
+  it is a different problem in a different direction.

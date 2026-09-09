@@ -16,6 +16,7 @@ import (
 	"github.com/Liarea/lazyslice/internal/extract"
 	"github.com/Liarea/lazyslice/internal/introspect"
 	"github.com/Liarea/lazyslice/internal/load"
+	"github.com/Liarea/lazyslice/internal/load/ddl"
 	"github.com/Liarea/lazyslice/internal/pg"
 	"github.com/Liarea/lazyslice/internal/pipeline"
 	"github.com/Liarea/lazyslice/internal/plan"
@@ -109,6 +110,38 @@ func asStop(err error) error {
 		}
 	}
 
+	// internal/load/ddl's refusal is a sixth type and it arrives unwrapped:
+	// load.Load calls ddl.Recreatable as its first statement and returns what it
+	// gets. Without this case it fell through to the final wrap below and an
+	// operator whose Mastodon or GitLab schema has a column default calling one
+	// of the application's own functions -- ARCHITECTURE.md §11.1's exit 13,
+	// with the table, the column and the dependency all named inside the
+	// message -- was told "lazyslice failed for a reason it has no code for; run
+	// with --debug" and given exit 1 to branch on
+	// (testdata/regressions/002-function-default-refusal-uncoded.sql).
+	//
+	// The refusal itself is unchanged and stays: §11.1 has no flag that drops
+	// the default and carries on. What is owed, and is not this, is where it is
+	// raised -- §11.1 says at plan, and it still happens inside load.Load
+	// (internal/load/CLAUDE.md, T-0097).
+	var ddlRefusal *ddl.Refusal
+	if errors.As(err, &ddlRefusal) {
+		return &Stop{
+			Code: ddlRefusal.Code, Exit: ddlRefusal.Exit,
+			Table: ddlRefusal.Table, Column: ddlRefusal.Object,
+			Args: event.Args{
+				event.ArgTable:  ddlRefusal.Table.String(),
+				event.ArgColumn: ddlRefusal.Object,
+				event.ArgReason: ddlRefusal.Dependency,
+			},
+			// The sentence, not ddlRefusal.Error(): that one prefixes its own
+			// code, and Refusal.Error() prefixes it again, so the operator saw
+			// "target.schema.not_recreatable.function: ddl:
+			// target.schema.not_recreatable.function: ..." twice over.
+			Message: ddlRefusalMessage(ddlRefusal), err: err,
+		}
+	}
+
 	var verifyRefusal *verify.Refusal
 	if errors.As(err, &verifyRefusal) {
 		return &Stop{
@@ -137,6 +170,19 @@ func asStop(err error) error {
 	}
 
 	return wrap(CodeInternal, exitInternal, err, "%s", err.Error())
+}
+
+// ddlRefusalMessage renders internal/load/ddl's refusal as one sentence, naming
+// the object the way ddl.Refusal.Error() does — table-qualified when there is a
+// table, bare when the dependency is on an index or a constraint — and without
+// the event code, which Refusal.Error() and the renderer both add for
+// themselves.
+func ddlRefusalMessage(r *ddl.Refusal) string {
+	where := r.Object
+	if r.Table.Name != "" {
+		where = r.Table.String() + "." + r.Object
+	}
+	return fmt.Sprintf("%s depends on %s, which lazyslice does not recreate", where, r.Dependency)
 }
 
 // gateCode is the event code the gate's verdict carries, with a fallback for a

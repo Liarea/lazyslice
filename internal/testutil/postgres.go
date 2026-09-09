@@ -46,12 +46,20 @@ const (
 	startupTimeout = 3 * time.Minute
 
 	// portEndpointAttempts and portEndpointBudget bound the retry of
-	// PortEndpoint below: ~10 attempts spread over ~5 seconds. The wait
+	// PortEndpoint below: ~30 attempts spread over ~30 seconds. The wait
 	// strategy above already confirmed Postgres is accepting connections, but
 	// Docker's own port-mapping table can lag a beat behind that log line, so
 	// the first PortEndpoint call can still report the port unmapped (T-0052).
-	portEndpointAttempts = 10
-	portEndpointBudget   = 5 * time.Second
+	//
+	// It was ten attempts over five seconds until `make torture` measured it.
+	// That suite starts about forty containers in a row against `integration`'s
+	// twelve, and at that rate the five seconds ran out about once a run — on a
+	// different schema each time, with a message about a port rather than about
+	// anything the run was testing. Thirty seconds costs nothing when the port
+	// is there, because the first attempt succeeds and the loop returns; it is
+	// only ever spent on the race it exists for.
+	portEndpointAttempts = 30
+	portEndpointBudget   = 30 * time.Second
 )
 
 // Postgres starts a Postgres container and returns a connection URL for it.

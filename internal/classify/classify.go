@@ -128,10 +128,58 @@ func (classifier) Classify(schema *pipeline.Schema, s pipeline.Sampler, prior *p
 
 // indexKeys records which columns are under a unique index and which can be the
 // referenced side of a foreign key.
+//
+// The two are different questions and the sets are built by different rules.
+//
+// pkOrUnique is "may this column be the referenced side of an edge", which is
+// what ARCHITECTURE.md §4's foreign-key propagation asks. Postgres will accept a
+// reference to any column list a non-partial, non-expression unique constraint
+// covers, so every member column of a composite one is in it.
+//
+// unique is Decision.UniqueIndex, and §5 asks something narrower: whether *this
+// column on its own* has to hold a distinct value in every row, because that is
+// the column whose masker has to emit d_required = n²/2ε distinct values. One
+// column of `CREATE UNIQUE INDEX ... (record_type, record_id, name, blob_id)` is
+// not that column — the other three are what make the row distinct — and §5 says
+// nothing about the composite case at all. Marking all four raised
+// Decision.UniqueIndex on ActiveStorage's `name` (the literal 'cover'), on
+// GitLab's `events.target_type` and on three more of the ten schemas in
+// testdata/torture/, and the moment internal/plan's checkUniqueDomain started
+// reading the field those runs refused at exit 12 over columns that cannot
+// collide (testdata/regressions/003-composite-unique-index-is-not-a-unique-column.sql).
+//
+// So a column is in `unique` when it is a single-column primary key, or the only
+// key column of a non-partial unique index, or the only column an expression
+// unique index is over — §5 names `lower(email)` as exactly the case that drives
+// the generator choice. That is the predicate internal/transform's uniqueColumn
+// already applied to the schema, which internal/transform/CLAUDE.md says the two
+// have to agree on; this is the agreement, and it adds the expression case that
+// uniqueColumn drops.
+//
+// A **partial** single-column unique index is in, which is where this parts
+// company with internal/transform's uniqueColumn. A partial index says something
+// weaker than a total one — every row *the predicate admits* holds a distinct
+// value, not every row of the table — but it still says something, and Supabase
+// is the case that proves it has to be honoured: `auth.users` carries
+// `CREATE UNIQUE INDEX confirmation_token_idx ON auth.users (confirmation_token)
+// WHERE confirmation_token::text !~ '^[0-9 ]*$'`, the column classifies as
+// credential, and `$lazyslice$invalid` is inside the predicate for every row, so
+// the load put the rows in and the index would not build over them
+// (testdata/regressions/007-partial-unique-index-masked-column.sql).
+//
+// d_required is then computed over the whole table's row count, which
+// over-estimates: the predicate admits at most that many rows and usually far
+// fewer. Over-estimating refuses a plan that might have loaded, and the refusal
+// prints three escapes; under-estimating is a 23505 one statement after every
+// row has moved, and prints none. T-0099 carries the exact rule, along with the
+// composite tuple whose columns all repeat.
 func (st *state) indexKeys() {
 	for _, t := range st.schema.Tables {
 		for _, name := range t.PK {
 			st.pkOrUnique[ref.ColumnRef{Table: t.Ref, Column: name}] = true
+		}
+		if len(t.PK) == 1 {
+			st.unique[ref.ColumnRef{Table: t.Ref, Column: t.PK[0]}] = true
 		}
 		for _, idx := range t.Indexes {
 			if !idx.Unique {
@@ -139,23 +187,20 @@ func (st *state) indexKeys() {
 			}
 			cols := idx.Columns
 			if idx.Expression {
-				// ARCHITECTURE.md §5 names expression indexes ("including
-				// expression indexes such as lower(email)") because they are
-				// exactly the case that drives the generator choice: a
-				// small-domain generator under a unique lower(email) fails the
-				// load on a unique violation. introspect leaves Index.Columns
-				// empty for one, so the columns are recovered from the
-				// definition here.
+				// introspect leaves Index.Columns empty for an expression
+				// index, so the columns are recovered from the definition here.
 				cols = expressionColumns(t, idx)
 			}
+			if len(cols) == 1 {
+				st.unique[ref.ColumnRef{Table: t.Ref, Column: cols[0]}] = true
+			}
+			// An expression index is never the referenced side of a foreign
+			// key, and neither is a partial one.
+			if idx.Partial || idx.Expression {
+				continue
+			}
 			for _, name := range cols {
-				c := ref.ColumnRef{Table: t.Ref, Column: name}
-				st.unique[c] = true
-				// An expression index is never the referenced side of a foreign
-				// key, so it raises Decision.UniqueIndex and nothing else.
-				if !idx.Partial && !idx.Expression {
-					st.pkOrUnique[c] = true
-				}
+				st.pkOrUnique[ref.ColumnRef{Table: t.Ref, Column: name}] = true
 			}
 		}
 	}
@@ -510,11 +555,45 @@ func (st *state) decide(w *work, col pipeline.Column, ct columnType, values []st
 		w.frags = append(w.frags,
 			render("name_match", quoteIdent(hit.Name)),
 			render("type_conflict", ct.Family, string(hit.Category)))
-		if best != nil {
+		switch cat, hasType := typeSignals[ct.Family]; {
+		case best != nil:
 			w.d.Category = best.cat
 			w.d.Confidence = pipeline.ConfLikely
 			w.frags = append(w.frags, render("samples", best.matched, best.total, best.phrase))
-		} else {
+
+		case hasType:
+			// **A rejected name hit must not leave the column worse off than no
+			// name at all.** §4 gives json, jsonb, hstore and bytea a signal
+			// from their type alone, and the default branch below is where that
+			// signal used to be read — so a jsonb column whose *name* happened
+			// to match a rule that does not accept jsonb landed on `low`, below
+			// the mask threshold, and was copied verbatim.
+			//
+			// Supabase's auth schema is where that showed up, with the two
+			// columns side by side: `identities.identity_data` (jsonb, no name
+			// hit) was `semi_structured` and masked, and
+			// `users.raw_user_meta_data` (jsonb, name matching the free_text
+			// rule on its leading `raw_`) was `free_text` at `low` and copied —
+			// with the person's name, email address, phone number and postal
+			// address inside it. Two hundred of the source's own addresses
+			// arrived in the target in cleartext, under exit 0
+			// (THREAT_MODEL.md T1; testdata/regressions/008-name-hit-on-an-
+			// unaccepted-type-drops-the-type-signal.sql).
+			//
+			// So the type decides here exactly as it would have with no name:
+			// same category, same `possible`, same reason fragment. The name and
+			// the conflict are still printed above, because why the name did not
+			// decide is worth reading.
+			//
+			// trap 19's `people.email_verified boolean` is unaffected and still
+			// lands on `low`: boolean has no entry in typeSignals, so there is
+			// no type evidence to fall back to and §4's "recorded at low and
+			// copied" is the whole answer for it.
+			w.d.Category = cat
+			w.d.Confidence = pipeline.ConfPossible
+			w.frags = append(w.frags, render("type_signal", ct.Family, string(cat)))
+
+		default:
 			w.d.Category = hit.Category
 			w.d.Confidence = pipeline.ConfLow
 			w.typeConflict = true
@@ -1002,6 +1081,180 @@ func (st *state) finalise() {
 			w.d.Masker = st.pack.Masker[w.d.Category]
 		}
 	}
+	st.raiseCompositeUnique()
+}
+
+// raiseCompositeUnique is the composite half of Decision.UniqueIndex, and it
+// runs after the threshold because it is the only part of the answer that
+// depends on which columns ended up masked.
+//
+// indexKeys deliberately raises UniqueIndex only on a column that carries the
+// uniqueness alone (see there). That is right for a composite index with an
+// unmasked column in it — ActiveStorage's (record_type, record_id, name,
+// blob_id), where the two ids are surrogate keys copied verbatim and hold the
+// tuple apart whatever `name` masks to. It is wrong when *every* key column of
+// the index is masked, because then nothing is left to hold the tuple apart:
+// Django's `django_content_type` is UNIQUE (app_label, model) with both columns
+// masked, and the load died on
+// `django_content_type_app_label_model_76bd3d3b_uniq`
+// (testdata/regressions/004-composite-unique-index-all-masked.sql).
+//
+// A **partial** or **expression** composite index is in, for the same reason
+// indexKeys keeps a partial single-column one: it says something weaker than a
+// total index — every row *the predicate admits* holds a distinct tuple — but it
+// still says something, and nothing else raises it. Excluding the two shapes was
+// a strict loss against the code this replaced, which raised every column of
+// every unique index: the torture schemas alone carry 85 composite partial
+// unique indexes, several of them over a masked column (calcom's
+// `Watchlist_type_value_global_key ON public."Watchlist" (type, value) WHERE
+// "organizationId" IS NULL`, discourse's `topic_custom_fields (topic_id, value)`
+// partials), and dropping them puts the collision back in the loader after every
+// row has moved. An expression index's columns are recovered from its definition
+// the way indexKeys recovers them, because introspect leaves Index.Columns empty
+// for one. d_required is then computed over the whole table's row count, which
+// over-estimates a partial index exactly as it does in indexKeys, and for the
+// same reason: over-estimating refuses a plan with three printed escapes, and
+// under-estimating is a 23505 with none.
+//
+// The rule it applies is about one question: which of its key columns is what
+// makes a row distinct?
+//
+// Take `distinct` to mean "no value repeats in this column's sample". Then:
+//
+//  1. If an **unmasked** key column is distinct, nothing is raised. That column
+//     is copied verbatim and it holds every row apart on its own, so whatever
+//     the masked columns become the tuple stays unique. ActiveStorage's
+//     (record_type, record_id, name, blob_id) is this case: `record_id` and
+//     `blob_id` are surrogate keys, `name` is the literal 'cover' in every row,
+//     and raising `name` refused a run that could not have collided
+//     (testdata/regressions/003-composite-unique-index-is-not-a-unique-column.sql).
+//
+//  2. Otherwise the masked key columns that are distinct are raised, because one
+//     of them has to be the discriminator. Django's `auth_permission`
+//     (content_type_id, codename) is this case: `content_type_id` is a foreign
+//     key with forty values across two hundred permissions, so `codename` is
+//     what makes the row unique, it is masked, and not raising it loaded two
+//     hundred rows and died on
+//     `auth_permission_content_type_id_codename_01ab375a_uniq`.
+//
+//  3. If no key column is distinct at all, every masked one is raised. Nothing
+//     in the sample says which column carries the uniqueness, and the direction
+//     that fails safe is to hold each of them to d_required.
+//
+// Rule 1 has a condition on it, and it is the difference between two absences of
+// evidence that look identical in the sample. An unmasked key column with **no
+// scalar samples** is either (a) NULL in every sampled row, or (b) in a table
+// nothing could be sampled from — introspect tolerates a relation the role may
+// not read, and a partitioned table with no leaves has nothing to read. In case
+// (a) the tuple genuinely cannot collide: a NULL key component is never equal to
+// anything under a plain unique index, so `Role_name_teamId_key` over calcom's
+// three roles, whose `teamId` is NULL in all of them, holds however `name` is
+// masked. In case (b) nothing at all is known, and counting the column as
+// distinct suppresses the raise on no evidence — which is the fail-open this
+// used to be. The two are told apart by whether **any** column of the table
+// produced a sample (`tableWasSampled`), and case (a) is withdrawn for an index
+// declared `NULLS NOT DISTINCT`, where a NULL does collide with a NULL
+// (`nullsAreDistinct`, PostgreSQL 15 and later).
+//
+// All three are approximations of a rule ARCHITECTURE.md §5 does not state —
+// §5's d_required = n²/2ε is written about a column, never about a tuple — and
+// each errs towards raising, because raising wrongly costs a plan refusal with
+// three printed escapes and not raising costs a loader that dies with rows
+// already moved. What none of them covers is a tuple whose columns all repeat
+// and whose masking merges two groups at once; T-0099 carries the exact rule.
+//
+// The sample is the classifier's own (`state.samples`, the same flattening the
+// validators read), so this asks the source nothing it was not already asked.
+func (st *state) raiseCompositeUnique() {
+	for _, t := range st.schema.Tables {
+		for _, idx := range t.Indexes {
+			if !idx.Unique {
+				continue
+			}
+			cols := idx.Columns
+			if idx.Expression {
+				cols = expressionColumns(t, idx)
+			}
+			if len(cols) < 2 {
+				continue
+			}
+			// Whether the *table* produced any samples at all is what tells the
+			// two absences of evidence apart on an unmasked key column. See
+			// `nullsAreDistinct` and the rule 1 paragraph above.
+			sampledTable := st.tableWasSampled(t)
+			nullsDistinct := nullsAreDistinct(idx)
+			var maskedDistinct, maskedRepeating []*work
+			heldApart := false
+			for _, name := range cols {
+				c := ref.ColumnRef{Table: t.Ref, Column: name}
+				w, ok := st.dec[c]
+				distinct, sampled := st.sampleDistinct(c)
+				switch {
+				case !ok || !w.d.Masked:
+					heldApart = heldApart || (distinct && (sampled || (sampledTable && nullsDistinct)))
+				case distinct:
+					maskedDistinct = append(maskedDistinct, w)
+				default:
+					maskedRepeating = append(maskedRepeating, w)
+				}
+			}
+			raise := maskedDistinct
+			if len(raise) == 0 {
+				raise = maskedRepeating
+			}
+			if heldApart {
+				continue
+			}
+			for _, w := range raise {
+				w.d.UniqueIndex = true
+			}
+		}
+	}
+}
+
+// tableWasSampled reports that at least one column of the table produced a
+// sample value. It is how raiseCompositeUnique tells "this column is NULL in
+// every row" from "nothing about this table could be read at all", which look
+// the same from one column and mean opposite things.
+func (st *state) tableWasSampled(t pipeline.Table) bool {
+	for _, col := range t.Columns {
+		if len(st.samples(ref.ColumnRef{Table: t.Ref, Column: col.Name})) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// nullsAreDistinct reports PostgreSQL's default for a unique index: a NULL is
+// never equal to another NULL, so a tuple with a NULL key component conflicts
+// with nothing. PostgreSQL 15 added the opposite, spelled in the definition the
+// target recreates the index from, and there a NULL does collide.
+func nullsAreDistinct(idx pipeline.Index) bool {
+	return !strings.Contains(strings.ToUpper(idx.Def), "NULLS NOT DISTINCT")
+}
+
+// sampleDistinct reports whether every sampled value of the column is different
+// from every other, and — separately — whether there were any samples at all.
+//
+// The two answers are separate because the caller reads them in opposite
+// directions. A column with no samples counts as distinct, which is the
+// fail-closed answer for a *masked* key column: no evidence that it repeats is
+// not evidence that it does not, and being wrong that way costs a refusal the
+// operator can lift with --unmask rather than a collision in the loader. For an
+// *unmasked* key column the fail-closed answer is the other one — an unsampled
+// column must not be taken to hold the tuple apart — so raiseCompositeUnique
+// requires `sampled` there. Returning one boolean made the second case read as
+// the first, which is why this returns both.
+func (st *state) sampleDistinct(c ref.ColumnRef) (distinct, sampled bool) {
+	values := st.samples(c)
+	seen := make(map[string]bool, len(values))
+	for _, v := range values {
+		if seen[v] {
+			return false, true
+		}
+		seen[v] = true
+	}
+	return true, len(values) > 0
 }
 
 // fingerprint is sha256 over the rule-pack version and, per column, the

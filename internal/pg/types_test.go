@@ -97,8 +97,9 @@ func TestTheTargetPoolCarriesTheTypeRegistrationHook(t *testing.T) {
 	if target.types == nil {
 		t.Fatal("the target has no type registry")
 	}
-	if got := target.types.want(); len(got) != 0 {
-		t.Errorf("the registry starts holding %v; the target has none of the source's types until the DDL has run", got)
+	if got, exts := target.types.want(); len(got) != 0 || len(exts) != 0 {
+		t.Errorf("the registry starts holding types %v and extensions %v; the target has none of the source's "+
+			"types until the DDL has run", got, exts)
 	}
 }
 

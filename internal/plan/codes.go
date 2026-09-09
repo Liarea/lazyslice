@@ -67,6 +67,12 @@ const (
 	// (writeback.go, T-0054).
 	CodeUnwritable event.Code = "plan.refused.unwritable"
 
+	// CodeUniqueDomain is exit 12: a masked column under a unique index whose
+	// widest registered generator cannot emit d_required = n²/2ε distinct
+	// values at ε = 10⁻⁶ (ARCHITECTURE.md §5). The refusal names the column, d,
+	// d_required and the three escapes; unique.go is the check.
+	CodeUniqueDomain event.Code = "plan.refused.unique_domain"
+
 	// CodeNotRecreatable is exit 13: a foreign key the target's schema cannot
 	// carry (ARCHITECTURE.md §11.1, ForeignKey.NotRecreatable). It is raised at
 	// plan, before the snapshot is used for keys and before anything in the

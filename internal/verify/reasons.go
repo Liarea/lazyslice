@@ -30,6 +30,15 @@ const (
 	// form the target disagrees with.
 	reasonNotCalled = "is_called does not match whether the column holds a row"
 	reasonLastValue = "last_value is not the column's maximum"
+	// reasonNoSequence is the third failure of the same check and a different
+	// claim: the column owns a sequence in the source and the target resolves
+	// none for it, under either name sequenceNameSQL tries. That is a sequence
+	// §11.1's DDL did not create, so nothing reset it and the application's
+	// first INSERT has no number to take (THREAT_MODEL.md T8). It is a failure
+	// and not a CodeSequenceUnowned report: "the loader could not attribute this
+	// sequence to a column" is a thing §6 item 5 says to report, and "the target
+	// has no such relation" is a defect wearing the same word.
+	reasonNoSequence = "the target has no sequence behind this column"
 
 	// reasonTargetNotReadable is the wiring failure: the writer this stage was
 	// handed cannot be read from, so no check below could run at all. See the

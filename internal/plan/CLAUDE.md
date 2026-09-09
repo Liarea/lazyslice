@@ -547,3 +547,45 @@ reason for each.
   defaults before calling `Plan`. It is a defensive net for a direct caller —
   `plan_integration_test.go` builds a `PlanRequest` with no `Take` — and a zero
   reaching the walk would mean "select no rows" rather than "select 500".
+
+## The unique-index domain rule (T-TORTURE)
+
+`unique.go` is ARCHITECTURE.md §5's other domain rule, and it landed with the
+torture schemas because that is what found it missing: `mask.Pick` had
+implemented the whole of it — pick the widest generator for the category, refuse
+with a `*DomainError` when even that cannot emit `d_required = n²/2ε` — and
+nothing called it. `writeback.go` said so in a comment. Three of the ten schemas
+in `testdata/torture/` died **in the loader** on a unique violation as a result
+(`testdata/regressions/001-unique-index-masking-collision.sql`).
+
+- **It runs after `walk` and before `assemble`**, because it is the only check
+  whose question needs *n*: `d_required` is over the planned row count, which is
+  what the walk decides. `plannedRows` is that number and never the source's.
+- **It writes the chosen masker back onto `pipeline.Decision`.** §5 says "the
+  plan picks, within the column's category, the registered generator with the
+  largest `Domain()`", and `internal/transform` masks with `Decision.Masker`, so
+  the pick has nowhere else to go. That is how `phone` becomes `phone_unique` and
+  `network_id` becomes `ip_unique` on a unique column. **`Classification.Fingerprint`
+  is computed before this happens** and therefore does not cover the escalation;
+  `internal/core/domain.go` writes `Domain` and `SmallDomain` after the same
+  fingerprint for the same structural reason. T-0101 carries it.
+- **Which columns it applies to is `internal/classify`'s answer, not this
+  package's.** `Decision.UniqueIndex` is set there, and what it means — a column
+  that carries the uniqueness alone, plus the two approximations for composite
+  and partial indexes — is stated in `indexKeys` and `raiseCompositeUnique`.
+  Do not second-guess it here; the two have to agree, and the schema is read
+  once.
+- **`plan.refused.unique_domain` prints §5's three escapes**, and prints the row
+  count one only when there is one: `MaxRows` is zero for a generator with a
+  domain of 1, which is what `credential` has, and "take at most 0 rows" is not
+  advice (T-0098).
+- **Both outcomes are held by a unit test** (`unique_test.go`), for the reason
+  `writeback_test.go` exists: the evidence for this check is otherwise ten
+  Docker-gated schemas and eight files under `testdata/regressions/`, none of
+  which CI runs, so a revert would be caught by nothing on the path a change
+  actually takes. `TestUniqueDomainPicksTheWiderMasker` is `phone` becoming
+  `phone_unique`; `TestUniqueDomainRefusesWhenNoMaskerFits` is `credential` and
+  asserts the whole message, not only the code;
+  `TestUniqueDomainSkipsATableThisRunWillNotLoad` is the guard against refusing
+  on the source's shape. They call `checkUniqueDomain` directly because *n* is
+  the planned row count and a `Plan` over a reader with no rows plans none.
