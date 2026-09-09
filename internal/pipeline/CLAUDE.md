@@ -29,10 +29,7 @@ here, behaviour in the stage package) is the one to follow for any new type.
 
 **`Writer` has four methods and `TypeRegistrar` is gone (T-0093).**
 `RegisterTypes(ctx, *Schema) error` is `Writer`'s fourth method, in `source.go`,
-and §2 still prints the three it had — that edit is owed as **T-0123**, because
-ARCHITECTURE.md was outside the paths of the task that made the change and the
-rule above ("an interface change here is an ARCHITECTURE.md change first") is
-honoured by that tracker item and not by the commit. It was an optional second
+and ARCHITECTURE.md §2 prints all four (reconciled 2026-09-09). It was an optional second
 interface, `TypeRegistrar`, from T-0083 until T-0093: separate because the schema
 is the loader's argument and registration can only happen once the DDL has
 created the types in the target, halfway through the load. That justification did
