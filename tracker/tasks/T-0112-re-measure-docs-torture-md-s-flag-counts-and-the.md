@@ -3,12 +3,12 @@ id: T-0112
 title: "Re-measure docs/TORTURE.md's flag counts and the catalogue's flags-by-kind after the credential_unique masker"
 epic: E5
 phase: 5
-status: open
+status: done
 owner: ""
 created: 2026-09-08
 started: ""
-closed: ""
-outcome: ""
+closed: 2026-09-09
+outcome: "done: 3b03050; eighteen credential opt-outs stripped, counts re-measured, make torture green after T-HARD-C"
 ---
 
 # T-0112 · Re-measure docs/TORTURE.md's flag counts and the catalogue's flags-by-kind after the credential_unique masker
@@ -40,6 +40,8 @@ Paths this needs: internal/invariants/, docs/TORTURE.md, ROADMAP.md.
 
 - 2026-09-08 moved to E5 phase 5
 
+- 2026-09-09 closed: done: 3b03050; eighteen credential opt-outs stripped, counts re-measured, make torture green after T-HARD-C
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+Went well: the fix is now exercised on real auth schemas. Went badly: the gate was ticked while make torture still failed, caught by review. Change: a gate item is ticked only when its evidence command exits 0.
