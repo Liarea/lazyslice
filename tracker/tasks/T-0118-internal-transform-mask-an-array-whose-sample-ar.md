@@ -1,8 +1,8 @@
 ---
 id: T-0118
 title: "internal/transform: mask an array whose sample arrives as a text literal element-wise"
-epic: E9
-phase: ""
+epic: E5
+phase: 5
 status: open
 owner: ""
 created: 2026-09-08
@@ -24,6 +24,8 @@ T-HARD-B landed the classify half of T-0103: an array of an extension type (cite
 ## Log
 
 - 2026-09-08 created
+
+- 2026-09-09 moved to E5 phase 5
 
 ## Post-mortem
 

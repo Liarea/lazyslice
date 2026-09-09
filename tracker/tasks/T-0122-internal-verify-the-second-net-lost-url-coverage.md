@@ -1,8 +1,8 @@
 ---
 id: T-0122
 title: "internal/verify: the second net lost URL coverage when T-0100 narrowed textsig.LooksSecret"
-epic: E9
-phase: ""
+epic: E5
+phase: 5
 status: open
 owner: ""
 created: 2026-09-08
@@ -24,6 +24,8 @@ T-HARD-B review, high severity. T-0100 excluded a URL from textsig.LooksSecret a
 ## Log
 
 - 2026-09-08 created
+
+- 2026-09-09 moved to E5 phase 5
 
 ## Post-mortem
 

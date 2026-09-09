@@ -25,6 +25,8 @@ T-0104's tenth miss has no fix in T-HARD-B and needs a rule-pack feature rather 
 
 - 2026-09-08 created
 
+- 2026-09-09 Orchestrator 2026-09-09: stays in Later; a table-scoped rule is a rule-pack refinement, not a gap in coverage (the column is masked by its type family today).
+
 ## Post-mortem
 
 _(filled on close: what went well, what went badly, what we change next time)_

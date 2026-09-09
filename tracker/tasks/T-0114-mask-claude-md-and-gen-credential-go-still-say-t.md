@@ -1,8 +1,8 @@
 ---
 id: T-0114
 title: "mask/CLAUDE.md and gen_credential.go still say the torture counts are un-re-measured"
-epic: E9
-phase: ""
+epic: E5
+phase: 5
 status: open
 owner: ""
 created: 2026-09-08
@@ -33,6 +33,8 @@ Filed by T-0112, which could not write mask/.
 ## Log
 
 - 2026-09-08 created
+
+- 2026-09-09 moved to E5 phase 5
 
 ## Post-mortem
 

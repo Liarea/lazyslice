@@ -1,8 +1,8 @@
 ---
 id: T-0113
 title: "Regressions 004 and 007 expect exit 12 and now exit 0: credential_unique made their headers stale"
-epic: E9
-phase: ""
+epic: E5
+phase: 5
 status: open
 owner: ""
 created: 2026-09-08
@@ -35,6 +35,8 @@ Found by T-0112 while re-measuring the flag counts; recorded in internal/invaria
 ## Log
 
 - 2026-09-08 created
+
+- 2026-09-09 moved to E5 phase 5
 
 ## Post-mortem
 

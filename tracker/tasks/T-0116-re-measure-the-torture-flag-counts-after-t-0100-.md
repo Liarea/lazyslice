@@ -1,8 +1,8 @@
 ---
 id: T-0116
 title: "Re-measure the torture flag counts after T-0100 and T-0104"
-epic: E9
-phase: ""
+epic: E5
+phase: 5
 status: open
 owner: ""
 created: 2026-09-08
@@ -24,6 +24,8 @@ T-HARD-B changed two things the torture catalogue's flags were measured against.
 ## Log
 
 - 2026-09-08 created
+
+- 2026-09-09 moved to E5 phase 5
 
 ## Post-mortem
 
