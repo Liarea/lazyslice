@@ -3,12 +3,12 @@ id: T-0121
 title: "Decide public_key: credential, online_id, or neither"
 epic: E5
 phase: 5
-status: open
+status: done
 owner: ""
 created: 2026-09-08
 started: ""
-closed: ""
-outcome: ""
+closed: 2026-09-09
+outcome: "done: in T-HARD-C (4f9a186)"
 ---
 
 # T-0121 · Decide public_key: credential, online_id, or neither
@@ -29,6 +29,8 @@ T-0104 named it one of two columns that deserve a decision rather than a pattern
 
 - 2026-09-09 Orchestrator decision 2026-09-09: public_key is category credential (unusable literal; credential_unique under a unique index). A key that identifies a user is personal data; masking it costs nothing a dev database needs. Implemented in T-HARD-C.
 
+- 2026-09-09 closed: done: in T-HARD-C (4f9a186)
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+Went well: landed. Went badly: nothing. Change: none.

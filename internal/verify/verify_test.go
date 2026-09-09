@@ -288,8 +288,7 @@ func (writeOnly) CopyFrom(context.Context, ref.TableRef, []string, <-chan []any)
 }
 func (writeOnly) Begin(context.Context) (pipeline.Tx, error) { return nil, errors.New("no") }
 
-// RegisterTypes is pipeline.Writer's fourth method (internal/pipeline/source.go,
-// T-0093; ARCHITECTURE.md §2 still prints three, owed as T-0123):
+// RegisterTypes is pipeline.Writer's fourth method:
 // the loader registers the source's user-defined types on the target before the
 // first CopyFrom. Verify never calls it — by the time verify holds a Writer the
 // load is over — so this double answers nil.

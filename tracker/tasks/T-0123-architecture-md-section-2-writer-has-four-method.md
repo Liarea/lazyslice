@@ -3,12 +3,12 @@ id: T-0123
 title: "ARCHITECTURE.md section 2: Writer has four methods now, and pipeline.TypeRegistrar is gone"
 epic: E9
 phase: ""
-status: open
+status: done
 owner: ""
 created: 2026-09-09
 started: ""
-closed: ""
-outcome: ""
+closed: 2026-09-09
+outcome: "done: §2 Writer block has four methods with the reason; §11 note rewritten; seven citation sites stripped"
 ---
 
 # T-0123 · ARCHITECTURE.md section 2: Writer has four methods now, and pipeline.TypeRegistrar is gone
@@ -27,6 +27,8 @@ T-HARD-C (T-0093) moved RegisterTypes(ctx, *Schema) error onto pipeline.Writer a
 
 - 2026-09-09 Fix round on T-HARD-C confirmed the code half is done and this doc half is all that remains; recording the second half of the edit so it lands in one commit. Once §2's Writer block prints four methods, the seven citation sites that currently say '§2 still prints the three it had, owed as T-0123' become false and must be stripped back to a plain 'ARCHITECTURE.md §2' citation in the same commit: internal/verify/verify.go:25-28, internal/verify/verify_test.go:292, internal/verify/verify_integration_test.go:78, internal/load/load.go:255-257, internal/pg/CLAUDE.md:483-488, internal/pipeline/CLAUDE.md:30-33, internal/load/CLAUDE.md:198-201. Those files are inside T-HARD-C's paths but the strip cannot precede the ARCHITECTURE.md edit without re-creating the misleading citation it was raised for, so it belongs to this task.
 
+- 2026-09-09 closed: done: §2 Writer block has four methods with the reason; §11 note rewritten; seven citation sites stripped
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+Went well: doc. Went badly: nothing. Change: none.

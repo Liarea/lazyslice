@@ -197,8 +197,7 @@ then after-data: indexes, FKs, setval, ANALYZE, bookkeeping tables).
   `TestALoadWhoseWriterCannotRegisterTypesIsRefused` are gone with the assertion
   that needed them; `fakeWriter` implements `RegisterTypes` and
   `registeringWriter` records *when* the loader called it, which is the part the
-  compiler still does not check. ARCHITECTURE.md §2 owes the fourth method
-  (T-0123).
+  compiler still does not check. ARCHITECTURE.md §2 owes the fourth method.
   `TestLoadRegistersTheSourcesUserTypesBeforeTheFirstCopy` and
   `TestALoadWhoseTypeRegistrationFailsCopiesNothing` are the rest of the unit
   half;

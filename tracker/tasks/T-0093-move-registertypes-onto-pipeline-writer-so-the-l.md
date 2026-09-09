@@ -3,12 +3,12 @@ id: T-0093
 title: "Move RegisterTypes onto pipeline.Writer so the load's type registration is compiler-checked"
 epic: E5
 phase: 5
-status: open
+status: done
 owner: ""
 created: 2026-09-08
 started: ""
-closed: ""
-outcome: ""
+closed: 2026-09-09
+outcome: "done: in T-HARD-C (4f9a186)"
 ---
 
 # T-0093 · Move RegisterTypes onto pipeline.Writer so the load's type registration is compiler-checked
@@ -27,6 +27,8 @@ internal/load/load.go's registerTypes reaches type registration through an optio
 
 - 2026-09-08 moved to E5 phase 5
 
+- 2026-09-09 closed: done: in T-HARD-C (4f9a186)
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+Went well: landed. Went badly: nothing. Change: none.

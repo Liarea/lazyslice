@@ -22,9 +22,7 @@
 //
 // # Reading the target
 //
-// pipeline.Writer writes and registers types (Exec, CopyFrom, Begin and, since
-// T-0093, RegisterTypes — internal/pipeline/source.go; ARCHITECTURE.md section 2
-// still prints the three it had before that, and the edit is owed as T-0123) and
+// pipeline.Writer writes and registers types and
 // has no way to read, while every check below
 // is a read of the target. Verify
 // therefore asks the Writer it is handed for a Query method and refuses to run

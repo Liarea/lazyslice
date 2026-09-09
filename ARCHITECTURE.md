@@ -216,6 +216,12 @@ type Writer interface {
     Exec(ctx context.Context, sql string, args ...any) error
     CopyFrom(ctx context.Context, table TableRef, cols []string, rows <-chan []any) (int64, error)
     Begin(ctx context.Context) (Tx, error)
+    // RegisterTypes registers the source's enum, domain, composite and
+    // user-defined array types on every connection this writer uses, after
+    // the DDL has created them and before COPY. It is a method, not an
+    // optional second interface: an optional interface that misses is a load
+    // step that vanishes with no compile error (T-0093, 2026-09-09).
+    RegisterTypes(ctx context.Context, s *Schema) error
 }
 
 type Tx interface {
@@ -1229,7 +1235,7 @@ Every run inserts its row with `status = running` before the first drop and upda
 
 **Amended by ADR-009 (2026-09-06):** the schema fingerprint of §11.2 is `sha256` over the DDL text `internal/load/ddl` generates for the schema, computed by `internal/core` after introspection and by `load.GateFingerprint` for the target's end of the marker binding. Introspect does not fingerprint.
 
-**Recorded after T-0083 (2026-09-08):** `pipeline.TypeRegistrar` is the writer-side interface through which load registers the source's enum, domain, composite and user-defined array types on every target connection before COPY; a writer that cannot register types is refused by name. A composite value crosses COPY in its text form, and the same text form is what verify reads back on both sides, so item 5's comparison is like with like.
+**Recorded after T-0083 and T-0093 (2026-09-09):** load registers the source's enum, domain, composite and user-defined array types on every target connection through `Writer.RegisterTypes`, after the DDL has created them and before COPY; the compiler enforces it, so there is no by-name refusal. A composite value crosses COPY in its text form, and the same text form is what verify reads back on both sides, so item 5's comparison is like with like.
 
 ## 12. Repository layout
 

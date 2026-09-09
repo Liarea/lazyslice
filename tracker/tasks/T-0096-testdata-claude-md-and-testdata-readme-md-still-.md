@@ -3,12 +3,12 @@ id: T-0096
 title: "testdata/CLAUDE.md and testdata/README.md still say 'two fixtures and nothing else'"
 epic: E5
 phase: 5
-status: open
+status: done
 owner: ""
 created: 2026-09-08
 started: ""
-closed: ""
-outcome: ""
+closed: 2026-09-09
+outcome: "done: in T-HARD-C (4f9a186)"
 ---
 
 # T-0096 · testdata/CLAUDE.md and testdata/README.md still say 'two fixtures and nothing else'
@@ -27,6 +27,8 @@ T-TORTURE added testdata/torture/ (ten real schemas, 1,023 tables) and testdata/
 
 - 2026-09-08 moved to E5 phase 5
 
+- 2026-09-09 closed: done: in T-HARD-C (4f9a186)
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+Went well: landed. Went badly: nothing. Change: none.

@@ -252,9 +252,7 @@ func (l loader) load(
 // column fails 42804 and an enum array fails 54000, mid-table; T8's per-table
 // transaction then leaves the target empty or complete, and the run still fails.
 //
-// Registration is a method on pipeline.Writer (internal/pipeline/source.go;
-// ARCHITECTURE.md section 2 still prints the three methods Writer had before
-// T-0093, and that edit is owed as T-0123) and
+// Registration is a method on pipeline.Writer and
 // not an optional second interface, so this step cannot go missing: until
 // T-0093 it was reached through w.(pipeline.TypeRegistrar), and an optional
 // interface that misses is a step that vanishes with no compile error.

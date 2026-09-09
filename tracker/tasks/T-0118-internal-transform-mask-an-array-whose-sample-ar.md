@@ -3,10 +3,10 @@ id: T-0118
 title: "internal/transform: mask an array whose sample arrives as a text literal element-wise"
 epic: E5
 phase: 5
-status: open
+status: in_progress
 owner: ""
 created: 2026-09-08
-started: ""
+started: 2026-09-09
 closed: ""
 outcome: ""
 ---
@@ -26,6 +26,8 @@ T-HARD-B landed the classify half of T-0103: an array of an extension type (cite
 - 2026-09-08 created
 
 - 2026-09-09 moved to E5 phase 5
+
+- 2026-09-09 started
 
 ## Post-mortem
 
