@@ -7,7 +7,7 @@
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 1 | 0 | 9 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
-| E5 Hardening | 5 | 6 | 1 | 46 | 0 | 1 |
+| E5 Hardening | 5 | 5 | 1 | 47 | 0 | 1 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
 | E9 Later | later | 11 | 0 | 14 | 1 | 0 |
 
@@ -25,7 +25,6 @@
 - T-0089 [open] E5 · T-FAILUX: failure UX and error catalogue drift test (opus)
 - T-0090 [open] E5 · T-PERF: performance baseline and CI throughput guard (opus)
 - T-0102 [open] E9 · A text column holding a JSON document is invisible to ARCHITECTURE.md 4's JSON rule ()
-- T-0112 [open] E5 · Re-measure docs/TORTURE.md's flag counts and the catalogue's flags-by-kind after the credential_unique masker ()
 - T-0118 [blocked] E5 · internal/transform: mask an array whose sample arrives as a text literal element-wise ()
 - T-0119 [open] E9 · A table-scoped name rule, for refresh_tokens.parent and its kind ()
 - T-0124 [open] E9 · testdata/regressions covers plan.refused.unique_domain no longer ()
@@ -46,6 +45,7 @@
 - T-0105 [done] E5 · .golangci.yml does not lint the torture build tag → done: in T-HARD-C (4f9a186)
 - T-0109 [done] E5 · T-HARD-B: composite fail-closed, extension-type array splitter, auth-schema rules, URL not credential (T-0094, T-0103, T-0104, T-0100) → done: 78530ef; composite fail-closed, array-literal splitter, auth-schema rules, URL is online_id, key-child exemption
 - T-0110 [done] E5 · T-HARD-C: RegisterTypes on Writer, torture tag linted, testdata docs (T-0093, T-0105, T-0096) → done: 4f9a186; RegisterTypes on Writer, torture tag linted, testdata docs, online_id in the second net, regressions re-cut, make torture exits 0, torture re-measured, public_key is credential
+- T-0112 [done] E5 · Re-measure docs/TORTURE.md's flag counts and the catalogue's flags-by-kind after the credential_unique masker → done: 3b03050; eighteen credential opt-outs stripped, counts re-measured, make torture green after T-HARD-C
 - T-0113 [done] E5 · Regressions 004 and 007 expect exit 12 and now exit 0: credential_unique made their headers stale → done: in T-HARD-C (4f9a186)
 - T-0114 [done] E5 · mask/CLAUDE.md and gen_credential.go still say the torture counts are un-re-measured → done: in T-HARD-C (4f9a186)
 - T-0115 [done] E5 · docs/TORTURE.md: re-measure supabase-auth recall after T-0104's name rules → done: in T-HARD-C (4f9a186)
@@ -61,4 +61,3 @@
 - T-0052 [done] E5 · Flake: TestKillNineLeavesEveryTableEmptyOrComplete races container teardown (port 5432/tcp not found) → done: merged in the backlog run wf_e6bd43ea-99d (see git log for the hash)
 - T-0053 [done] E5 · pg gate follow-ups from T-FPR: regression test pinning the fingerprinter transaction (SAVEPOINT must not 25P01), rollback failure routed through endTx discipline, comment corrections; schema-only Introspector variant so the gate skips sampling → done: merged in the backlog run wf_e6bd43ea-99d (see git log for the hash)
 - T-0055 [done] E5 · Shared leaf package for value validators including the name dictionary; register person_name and free_text in verify's second net with a verify-side false-positive threshold decision → done: 654bfd4; internal/textsig leaf holds validators and the name dictionary; person_name and free_text in the second net with a multi-token or hit-rate threshold
-- T-0063 [done] E5 · Q1, the controlling terminal, and provisioning: widen pipeline.Provisioner to carry the generated POSTGRES_PASSWORD, then wire --create-target and the one blocking question → done: folded into T-PROVISION
