@@ -340,7 +340,14 @@ func TestSetvalQuotesASequenceNameThatNeedsQuoting(t *testing.T) {
 	if len(setvals) != 1 {
 		t.Fatalf("expected one setval, got %d", len(setvals))
 	}
-	want := `SELECT pg_catalog.setval('"public"."LegacyCustomer_CustomerID_seq"', ` +
+	// The sequence is addressed by asking the target for the name of the one
+	// behind the identity column, with the source's — quoted — name as the
+	// fallback. See Setvals for why: the target names an identity column's
+	// sequence itself, and the two names part company as soon as the source's
+	// table has been renamed. What this test is about is unchanged either way:
+	// every name in the statement is quoted, so a mixed-case one still resolves.
+	want := `SELECT pg_catalog.setval(coalesce(pg_catalog.pg_get_serial_sequence(` +
+		`'"public"."LegacyCustomer"', 'CustomerID'), '"public"."LegacyCustomer_CustomerID_seq"'), ` +
 		`coalesce(max("CustomerID"), 1), max("CustomerID") IS NOT NULL) FROM "public"."LegacyCustomer"`
 	if setvals[0].SQL != want {
 		t.Errorf("setval is\n  %s\nand should be\n  %s", setvals[0].SQL, want)

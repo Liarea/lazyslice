@@ -1,0 +1,30 @@
+---
+id: T-0096
+title: "testdata/CLAUDE.md and testdata/README.md still say 'two fixtures and nothing else'"
+epic: E9
+phase: ""
+status: open
+owner: ""
+created: 2026-09-08
+started: ""
+closed: ""
+outcome: ""
+---
+
+# T-0096 · testdata/CLAUDE.md and testdata/README.md still say 'two fixtures and nothing else'
+
+## Goal
+
+T-TORTURE added testdata/torture/ (ten real schemas, 1,023 tables) and testdata/regressions/ (seven reduced defects), and testdata/CLAUDE.md's opening line — 'Two fixtures and nothing else: pagila/ and nasty.sql' — is now false, as is testdata/README.md's 'Two PostgreSQL fixtures'. Both files were outside T-TORTURE's paths (testdata/torture/ only). Owed: testdata/CLAUDE.md gains testdata/torture/ and testdata/regressions/ with a pointer to each directory's own CLAUDE.md/README.md and a line saying which of the three a new fixture belongs in; testdata/README.md's opening paragraph says the same. Do not restate the torture rules there — testdata/torture/README.md is the spec.
+
+## Acceptance
+
+
+
+## Log
+
+- 2026-09-08 created
+
+## Post-mortem
+
+_(filled on close: what went well, what went badly, what we change next time)_

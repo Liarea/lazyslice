@@ -314,9 +314,31 @@ func Setvals(t pipeline.Table) []Setval {
 		// not exist, and the whole run dies at 42P01 after every table has been
 		// copied, with the sequences unreset. That is the T8 outcome the
 		// strict-NULL form below exists to prevent.
+		//
+		// **An identity column's sequence is named by the target and not by the
+		// source.** PreData creates such a sequence through the column's
+		// `GENERATED ... AS IDENTITY` (sequences() skips it deliberately), and
+		// the server names it `<table>_<column>_seq` — which is not the source's
+		// name whenever the source's table has been renamed since, because
+		// Postgres does not rename the sequence with it. Metabase's is the live
+		// case: `group_table_access_policy` became `sandboxes` and its identity
+		// sequence is still `group_table_access_policy_id_seq`, so this
+		// statement named a relation the target has never had and the run died
+		// at 42P01 with every table already copied
+		// (testdata/regressions/006-identity-sequence-renamed-table.sql).
+		//
+		// So for an identity column the name is asked of the target, through
+		// pg_get_serial_sequence, which answers with whatever the target's own
+		// identity column created. A non-identity sequence keeps the source's
+		// name, because that is the name PreData's CREATE SEQUENCE gave it.
+		seq := quoteLiteral(qualified(s.Name))
+		if identityColumn(t, col) {
+			seq = "coalesce(pg_catalog.pg_get_serial_sequence(" + quoteLiteral(tableName(t.Ref)) + ", " +
+				quoteLiteral(col) + "), " + seq + ")"
+		}
 		out = append(out, Setval{
 			Sequence: s.Name,
-			SQL: "SELECT pg_catalog.setval(" + quoteLiteral(qualified(s.Name)) + ", coalesce(max(" + c +
+			SQL: "SELECT pg_catalog.setval(" + seq + ", coalesce(max(" + c +
 				"), 1), max(" + c + ") IS NOT NULL) FROM " + tableName(t.Ref),
 		})
 	}

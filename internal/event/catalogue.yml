@@ -240,6 +240,20 @@
   message: "{table}.{column} cannot be masked in place: {reason}"
   args: [table, column, reason]
 
+# ARCHITECTURE.md §5's unique-index rule. {reason} carries d, d_required and the
+# escapes, because the sentence has to name four numbers and two flags to be
+# actionable and event.ArgKey has no keys for a domain or a category
+# (internal/event/event.go) -- the same borrowing plan.refused.unwritable above
+# makes, and owed to the same task. {count} is n, the planned row count of the
+# table, which is the number the operator changes with --take or --cap.
+
+- code: plan.refused.unique_domain
+  kind: error
+  stage: plan
+  exit: 12
+  message: "{table}.{column} is under a unique index and cannot be masked without collisions: {reason}"
+  args: [table, column, count, reason]
+
 # {reason} carries the parent table of the edge. event.ArgKey has no key for the
 # other end of a foreign key (internal/event/event.go), and this message has to
 # name both ends and the columns to be actionable, so it borrows {reason}. Owed

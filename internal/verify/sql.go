@@ -82,6 +82,39 @@ func sequenceSQL(name string) string {
 	return "SELECT last_value, is_called FROM " + qualifiedName(name)
 }
 
+// sequenceNameSQL asks the *target* which sequence backs one column, and answers
+// with the empty string when neither the target's own answer nor the source's
+// name names a relation the target has.
+//
+// It exists for the same reason the identity branch of ddl.Setvals does: an
+// identity column's sequence is created and named by the target, and the two
+// names part company the moment the source's table has been renamed, because
+// Postgres does not rename an owned sequence with its table. Metabase's
+// `sandboxes` still owns `group_table_access_policy_id_seq`; the target's is
+// `sandboxes_id_seq`; reading the source's name there is 42P01 against a target
+// that is correct (testdata/regressions/006-identity-sequence-renamed-table.sql).
+//
+// The source's name is the fallback and not the first choice, because
+// pg_get_serial_sequence answers only where ownership is recorded: pagila
+// declares none — every one of its sequences is reached through a column default
+// calling nextval — and for those the target's name is the source's, since that
+// is the name §11.1's CREATE SEQUENCE gave it.
+func sequenceNameSQL(t ref.TableRef, column, fallback string) string {
+	return "SELECT coalesce((SELECT n.nspname || '.' || c.relname" +
+		" FROM pg_catalog.pg_class c" +
+		" JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace" +
+		" WHERE c.oid = coalesce(" +
+		"pg_catalog.to_regclass(pg_catalog.pg_get_serial_sequence(" +
+		quoteStringLiteral(quoteTable(t)) + ", " + quoteStringLiteral(column) + "))," +
+		" pg_catalog.to_regclass(" + quoteStringLiteral(qualifiedName(fallback)) + "))), '')"
+}
+
+// quoteStringLiteral renders a Go string as a SQL string literal. Every value it
+// is given here is an identifier this package built, never a row.
+func quoteStringLiteral(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
+}
+
 // orphansSQL counts the child rows of one foreign key that reference a parent
 // row the target does not hold.
 //

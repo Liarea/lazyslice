@@ -374,3 +374,70 @@ one — a false negative is cleartext in the target under a green tick
 (THREAT_MODEL.md T1) — and precision's is deliberately loose, so that raising it
 by deleting a name pattern fails the test that matters first. Run
 `go test -v -run 'TestPagila|TestFiftyNames' ./internal/classify/` to read them.
+
+## What `Decision.UniqueIndex` means (T-TORTURE)
+
+`internal/plan/unique.go` holds every column this field raises to
+ARCHITECTURE.md §5's `d_required = n²/2ε`, so what the field means is a claim
+this package makes and the planner acts on. §5 states the rule for *a column*
+and says nothing about composite or partial indexes, so two of the three answers
+are approximations and both are argued at their site:
+
+- `indexKeys` raises a single-column primary key, a single-column non-partial
+  unique index, and a single-column *expression* unique index (§5 names
+  `lower(email)`). It also raises a single-column **partial** one, where
+  `internal/transform`'s `uniqueColumn` does not: Supabase's
+  `confirmation_token_idx` is partial, every masked row falls inside its
+  predicate, and the index would not build
+  (`testdata/regressions/007-partial-unique-index-masked-column.sql`).
+- `raiseCompositeUnique` runs after the threshold, because which columns are
+  masked is part of its answer, and decides by which key column's sample has no
+  repeats. Both directions were measured on real schemas: raising all of them
+  refused runs that could not collide (regression 003), raising none of them
+  loaded rows that did (regression 004). It judges **partial and expression**
+  composites too: excluding them raised the field on no column of such an index
+  at all, which was strictly less than the code it replaced did, and the ten
+  torture schemas carry 85 composite partial unique indexes, several over a
+  masked column.
+- The unmasked key column that suppresses the raise has to have been
+  **sampled**. A column with no scalar samples is one of two things and they
+  mean opposite things: NULL in every sampled row, where the tuple cannot
+  collide at all under a plain unique index (calcom's `Role_name_teamId_key`,
+  `teamId` NULL in all three rows); or in a table nothing could be sampled from,
+  where nothing is known and counting it distinct is a fail-open. They are told
+  apart by whether any column of the table produced a sample, and the first is
+  withdrawn for an index declared `NULLS NOT DISTINCT`.
+
+Both err towards raising. Raising wrongly costs a plan refusal that prints three
+escapes; not raising costs a loader that dies with every row already moved.
+T-0099 is the task that would replace them with a rule the architecture states.
+
+**These are behaviour rules, not repairs, and they shipped ahead of the
+architecture.** `Decision.UniqueIndex` feeds `internal/plan`'s exit-12 refusal,
+`internal/transform`'s `Constraints.Unique` and the emitted `lazyslice.yml`, so
+what is written above changes what every user's run does — and root CLAUDE.md
+says a decision lives in `docs/adr/`. No ADR and no ARCHITECTURE.md §5 edit came
+with them, because T-TORTURE's paths reached neither file. **T-0099 is the
+record until one does**, and it states both approximations precisely enough to
+be the ADR's text. Do not treat the paragraphs above as the specification.
+**T-0107** is the action that settles it before gate 5 closes: land the ADR with
+T-0099's text as its Decision, or record in the tracker that T-TORTURE was
+authorised to decide these rules and that T-0099 only tightens them later.
+
+## A rejected name hit never leaves a column worse off than no name (T-TORTURE)
+
+`decide`'s `hasName && !nameAccepted` branch used to record `low` and stop, and
+`low` is below the mask threshold — so a `jsonb` column whose *name* matched a
+rule that does not accept `jsonb` was copied verbatim, while the same column with
+no name at all was `semi_structured` and masked. Supabase's
+`auth.users.raw_user_meta_data` is the case: the identity provider's profile,
+names and addresses and phone numbers, in the target in cleartext under exit 0
+(THREAT_MODEL.md T1;
+`testdata/regressions/008-name-hit-on-an-unaccepted-type-drops-the-type-signal.sql`).
+That branch now falls back to `typeSignals[family]` when the samples say nothing.
+
+The rule to keep in mind when touching `decide`: **every branch that rejects a
+signal has to be at least as safe as the branch with no signal at all.** The
+`sig.refused` branch below is the same shape with a value signal instead of a
+name, and it has not been measured against a real schema; if one turns up, it
+gets the same treatment.

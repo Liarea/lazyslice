@@ -798,3 +798,53 @@ func TestVerifyFailsOnASequenceThatWasNotReset(t *testing.T) {
 	}
 	noCheckBothWays(t, report)
 }
+
+// The other half of the sequence check: a sequence the *target* does not have at
+// all, which is one §11.1's DDL failed to create.
+//
+// `sequenceNameSQL` resolves the relation on the target rather than trusting the
+// source's name (the identity-rename case, testdata/regressions/006), and it
+// answers the empty string when neither the target's own ownership nor the
+// source's name names a relation the target has. That answer used to be reported
+// as `verify.sequence.unowned` and counted as a *passing* check, which turns the
+// loudest evidence of THREAT_MODEL.md T8 — a target that looks complete with a
+// sequence missing — into a green note. Before `sequenceNameSQL` existed the same
+// case was a 42P01 out of `sequenceSQL` and it failed the run; this asserts it
+// still does, with a reason of its own so the two meanings of "unowned" stay
+// apart.
+func TestVerifyFailsOnASequenceTheTargetDoesNotHave(t *testing.T) {
+	ctx := context.Background()
+	r := pipelineRun(ctx, t)
+
+	target := connect(ctx, t, r.targetURL)
+	// CASCADE takes the column default with it, so nothing in the target names
+	// the sequence any more — which is the state a failed CREATE SEQUENCE leaves.
+	if _, err := target.Exec(ctx, `DROP SEQUENCE public.customer_customer_id_seq CASCADE`); err != nil {
+		t.Fatalf("dropping the sequence from the target: %v", err)
+	}
+
+	report, err := r.verify(ctx)
+	if report == nil {
+		t.Fatalf("Verify returned no report: %v", err)
+	}
+	if report.ExitCode != 7 {
+		t.Fatalf("exit code %d, want 7 (extract or load)", report.ExitCode)
+	}
+	var refusal *Refusal
+	if !errors.As(err, &refusal) {
+		t.Fatalf("Verify returned %v, want a *Refusal", err)
+	}
+	if refusal.Code != CodeRefusedSequence {
+		t.Fatalf("code %s, want %s", refusal.Code, CodeRefusedSequence)
+	}
+	if refusal.Table != rootTable || refusal.Column != "customer_id" {
+		t.Errorf("the refusal names %s.%s, want %s.customer_id", refusal.Table, refusal.Column, rootTable)
+	}
+	if refusal.Reason != reasonNoSequence {
+		t.Errorf("the refusal reads %q, want %q", refusal.Reason, reasonNoSequence)
+	}
+	if _, ok := checkNamed(report, checkSequences); !ok {
+		t.Error("the report carries no failing sequences check")
+	}
+	noCheckBothWays(t, report)
+}

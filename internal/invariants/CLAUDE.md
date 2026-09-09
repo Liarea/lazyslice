@@ -258,3 +258,60 @@ whole package is twelve pairs; run one invariant with `-run TestI3`.
 package instead of through the binary; loosen an assertion because the
 pipeline is a no-op — every test here fails today, naming the run's exit code,
 and that is the phase 3 gate.
+
+## The torture suite (T-TORTURE)
+
+Three files here are behind `integration && torture` rather than `integration`
+alone: `torture_catalogue_test.go`, `torture_test.go`, and nothing else.
+`make torture` is the target; `make integration` does not see them.
+
+They are **in this package on purpose**. The ten schemas of `testdata/torture/`
+are put through the same `foreignKeysOf`, `assertEveryForeignKeyRecreated`,
+`danglingRows`, `fingerprintTables`, `fingerprintCatalog`, `countRows`,
+`scanCells` and `assertNoSourceLiteralSurvives` that I1, I2, I4 and I6 use
+against pagila and nasty. A torture suite in a package of its own would have had
+to re-implement "every foreign key in the target resolves", and an assertion that
+differs subtly from the invariant of the same name is worse than no assertion.
+
+- **I3 and I5 are not run over the torture schemas**, and that is a choice with a
+  reason: both compare two `pg_dump --data-only` runs of the target, which is a
+  second full snapshot per schema, and neither is a statement about the *schema*.
+  They stay on the two fixtures, where they run on every change.
+- **`fixture.image` exists for Discourse alone.** Its `structure.sql` declares
+  `CREATE EXTENSION vector` and three `halfvec` columns, so both its databases
+  run `pgvector/pgvector:pg16`. Neither fixture in `testdata/` sets it and
+  neither should: an invariant that only holds on a special image is not an
+  invariant.
+- **The root is recomputed at run time.** `assertRootIsMostConnected` is the
+  rule — highest foreign-key degree, ties by incoming, then row count, then name
+  — evaluated against the loaded source, so a generator change that moves the
+  answer fails the suite instead of quietly slicing from somewhere else.
+- **`TestTortureRegressions` asserts the leak check on every regression that is
+  expected to succeed, not only the exit code.** Regression 008 exited 0 both
+  before and after its fix; the only thing that ever said a jsonb column of names
+  and addresses had been copied verbatim was I2's grep half.
+- **Nine clean and one refused is the gate**, and
+  `TestTortureCatalogueMatchesTheFixtures` refuses a second failing schema as
+  firmly as it refuses a directory with no catalogue entry. It is nine clean
+  **with forty-five flags**, and the kinds do not merge: thirty-seven
+  `--unmask`, seven `--skip-table` and one `--key`, twenty of the thirty-seven
+  being one unfixed defect (T-0098). `--unmask` copies a column of personal data
+  into the target verbatim and `--skip-table` drops a table, so quoting the
+  total alone overstates the masking evidence by eight. The counts are part of
+  the claim, `tortureSchemas` above is what they are counted from, and
+  docs/TORTURE.md carries them; ROADMAP.md's gate-5 line is owed the same split
+  when it is ticked, which is T-0106 because ROADMAP.md is outside this task's
+  paths.
+- **Every run in this package masks under a fixed key** (`fixedSecret`, written
+  into the working directory by `start` before the first invocation). It is not a
+  convenience: the residual scan fails a run when a masked value equals a value
+  the source still holds in that column, and under a fresh `mask.NewKey()` per
+  run that is a probability rather than an answer —
+  `TestTortureSchemas/calcom` failed about one run in five on
+  `public."Attendee".name`, exit 9, `verify.refused.residual`. The fixtures carry
+  the other half (`testdata/torture/README.md`: a generated name may not be a
+  word in `mask/words.go`'s lists), so the collision is impossible rather than
+  merely unlikely under this key. I3's "same secret, same target" is unaffected —
+  it needs the key *persisted between its two runs*, which a file written up
+  front gives it — and its `os.Stat` guard still fails a run that removed the
+  file.

@@ -38,7 +38,7 @@ LDFLAGS := -s -w \
 	-X main.commit=$(COMMIT) \
 	-X main.date=$(DATE)
 
-.PHONY: all build test lint integration forbidden unsafe-flags spdx fmt check tools clean help docs docs-check vulncheck
+.PHONY: all build test lint integration torture vet-tagged forbidden unsafe-flags spdx fmt check tools clean help docs docs-check vulncheck
 
 ## build: compile the binary into bin/
 build:
@@ -66,6 +66,80 @@ GOTESTFLAGS ?=
 
 integration:
 	go test -tags integration -count=1 -timeout 30m $(GOTESTFLAGS) ./...
+
+## torture: the ten real schemas of testdata/torture/, plus testdata/regressions/
+##
+## Phase 5's gate: ten open-source schemas nobody wrote with us in mind, each
+## loaded into a container with generated rows, sliced from its most-connected
+## table into a second container, and put through the invariants. Nine snapshot
+## cleanly; the tenth (mastodon) refuses at exit 13 for a reason ARCHITECTURE.md
+## §11.1 states, and the suite asserts that refusal as tightly as it asserts the
+## nine successes. docs/TORTURE.md is the table: schema, tables, time, and every
+## defect these fixtures found.
+##
+## It is a target of its own rather than part of `integration` because it is a
+## different unit of work — twenty containers and about 2.5 GB of images, one of
+## them pgvector, against `integration`'s twelve — and because a change to the
+## planner wants the six invariants back in seconds, not in twenty minutes. The
+## build tag is the mechanism: every file behind `integration && torture` is
+## invisible to `make integration`, and `internal/invariants` is one package
+## either way, so the torture suite runs the *same* I1, I4 and I6 helpers rather
+## than a second implementation of them.
+##
+## The timeout is 60m, not `integration`'s 30m: discourse alone is 370 tables and
+## the four largest schemas each pull an image before they start.
+##
+## **This target is a manual gate. No CI job runs it**, and none should: it wants
+## twenty containers, about 2.5 GB of images and an hour, against a pull
+## request's minutes. What CI does run over these files is `vet-tagged` (below),
+## which type-checks and vets them under the same two build tags, so a compile
+## error or a vet finding in the suite fails `make check` rather than waiting for
+## somebody to run this by hand. The behaviour of the ten schemas is asserted
+## here and recorded in docs/TORTURE.md; the reductions in `testdata/regressions/`
+## are what stop a defect coming back, and `internal/classify`'s and
+## `internal/plan`'s own unit tests are what run on every change.
+##
+## `-run 'TestTorture'` needs the same guard `unsafe-flags` explains at length:
+## `go test -run <pattern>` exits 0 and prints plain `ok` when the pattern matches
+## zero tests, so a rename of these four functions would make this target go
+## silently vacuous. It runs with `-v` and greps the output for each one's own
+## `--- PASS:` line, which is why the output is teed rather than buffered — an
+## hour of silence is not a run anybody would trust.
+TORTURE_TESTS := TestTortureSchemas TestTortureRegressions TestTortureCatalogueMatchesTheFixtures TestTortureImagesAreReachable
+
+torture:
+	@log=$$(mktemp); \
+	trap 'rm -f "$$log"' EXIT; \
+	go test -tags 'integration torture' -count=1 -timeout 60m -v $(GOTESTFLAGS) -run 'TestTorture' ./internal/invariants/... | tee "$$log"; \
+	ok=1; \
+	for name in $(TORTURE_TESTS); do \
+		grep -q -- "--- PASS: $$name " "$$log" || { echo "torture: no '--- PASS: $$name' line"; ok=0; }; \
+	done; \
+	if [ "$$ok" != 1 ]; then \
+		echo; \
+		echo "torture: a go test -run that matches zero tests exits 0, so this target checks for the"; \
+		echo "explicit --- PASS lines of every TestTorture* function rather than trusting the exit code."; \
+		exit 1; \
+	fi
+	@echo "==> torture: the ten schemas, the catalogue and testdata/regressions/ all reported --- PASS"
+
+## vet-tagged: type-check and vet the code behind the `integration` and
+## `integration && torture` build tags
+##
+## `go build` and `go test` see neither: every file in `internal/invariants` is
+## behind a tag, and the torture suite is behind two. So `make check` — the
+## release gate, and what ci.yml runs — compiled and vetted none of it, and a
+## compile error in an 800-line test suite would ship. This runs `go vet`, which
+## type-checks the package including its test files, once per tag set. It needs
+## no Docker and no database: nothing here is executed.
+##
+## .golangci.yml's `run.build-tags` lists `integration` alone, so `make lint`
+## still does not lint the torture files; that file was outside T-TORTURE's paths
+## and **T-0105** is the task that adds the tag there.
+vet-tagged:
+	go vet -tags integration ./...
+	go vet -tags 'integration torture' ./internal/invariants/...
+	@echo "==> vet-tagged: the integration and torture build tags compile and vet clean"
 
 ## forbidden: fail on any name that would turn masking off
 ##
@@ -250,7 +324,7 @@ fmt:
 ## it is a network call and this target is also the local default; run it
 ## separately (`make vulncheck`) or add it to release.yml if the release path
 ## should block on it too.
-check: lint forbidden unsafe-flags docs-check test
+check: lint forbidden unsafe-flags docs-check vet-tagged test
 
 ## tools: install the pinned build tools into bin/tools
 tools:

@@ -110,6 +110,19 @@ type fixture struct {
 	// record of the conflict.
 	extra []string
 
+	// image is the container image both databases run, or "" for
+	// testutil.Postgres's default (which honours
+	// $LAZYSLICE_TEST_POSTGRES_IMAGE, so the CI matrix still moves the two
+	// fixtures across majors).
+	//
+	// It exists for the torture schemas: Discourse's structure.sql declares
+	// `CREATE EXTENSION vector` and three `halfvec` columns, so both its source
+	// and its target have to be an image that has pgvector installed, and a
+	// stock postgres cannot load it at all. Neither of the two fixtures in
+	// testdata/ sets it, and neither should: an invariant that only holds on a
+	// special image is not an invariant.
+	image string
+
 	// countedRoot and countedTake are I6's slice.
 	//
 	// I6 says the root holds exactly --take rows, which is only true of a root
@@ -403,6 +416,29 @@ type databases struct {
 	dir    string // working directory: lazyslice.yml and lazyslice.secret live here
 }
 
+// fixedSecret is the masking key every run in this package uses: 64 hex
+// characters, the form ./lazyslice.secret carries (mask.ParseKey).
+//
+// It is written into the working directory before the first invocation, so that
+// `resolveKey` reads it rather than falling through to `mask.NewKey()`. Without
+// it every run of every test here masks under a fresh random key, and the suite
+// is not one experiment repeated — it is a new one each time.
+//
+// That is not a tidiness point. The residual scan (§6 item 3) fails a run when a
+// masked value equals a value the source still holds in that column, and a
+// generator drawing from a large domain hits that collision with some
+// probability per row. Under a random key the outcome is a coin flip: on the
+// torture schemas `TestTortureSchemas/calcom` failed roughly one run in five,
+// always on `public."Attendee".name`, and a gate that passes four times in five
+// is not a gate. A fixed key makes the answer the same every run, so a failure
+// is a defect and a pass is evidence. The fixtures carry the other half of it:
+// no generated name may be a word in the maskers' own lists
+// (testdata/torture/README.md).
+//
+// It is a constant in a test file and it protects nothing — the value is public
+// in this repository and no real snapshot may ever use it.
+const fixedSecret = "7c9b2f4a1e6d80b35f47ca92d1e0b8563a4f7d2c9e18b60451af3d72c68e9b04"
+
 // start brings up both containers and loads the fixture into the source.
 //
 // Two containers, never one database with two schemas: the target gate refuses
@@ -414,13 +450,17 @@ func start(ctx context.Context, t *testing.T, f fixture) *databases {
 
 	testutil.SkipWithoutDocker(ctx, t)
 
-	source := testutil.Postgres(ctx, t, "")
+	source := testutil.Postgres(ctx, t, f.image)
 	if err := f.load(ctx, source); err != nil {
 		t.Fatalf("loading the %s fixture into the source: %v", f.name, err)
 	}
-	target := testutil.Postgres(ctx, t, "")
+	target := testutil.Postgres(ctx, t, f.image)
 
-	return &databases{source: source, target: target, dir: t.TempDir()}
+	db := &databases{source: source, target: target, dir: t.TempDir()}
+	if err := os.WriteFile(db.secretPath(), []byte(fixedSecret+"\n"), 0o600); err != nil {
+		t.Fatalf("writing the fixed masking key to %s: %v", db.secretPath(), err)
+	}
+	return db
 }
 
 // configPath and secretPath are the two files a run owns in its working

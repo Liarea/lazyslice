@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/jackc/pgx/v5"
@@ -31,14 +32,52 @@ import (
 // case for a target whose DDL has not run yet, not a failure: the registry is
 // filled again after the DDL and the pool is reset, so a connection made before
 // then simply carries fewer types than a connection made after.
+//
+// `typtype` covers the three classes Schema names, plus 'b': an extension's own
+// base type — `citext` — is a base type, and registerExtensionBaseTypes puts it
+// into the same $1 list once it has resolved the name from the extension. The
+// join then finds its array type the same way, which is the whole point:
+// pgx cannot build a codec for `_citext` unless `citext` is on the map first.
 const sqlTargetUserTypes = `SELECT n.nspname || '.' || t.typname,
        CASE WHEN t.typarray <> 0 THEN an.nspname || '.' || a.typname END
 FROM pg_type t
 JOIN pg_namespace n ON n.oid = t.typnamespace
 LEFT JOIN pg_type a ON a.oid = t.typarray
 LEFT JOIN pg_namespace an ON an.oid = a.typnamespace
-WHERE t.typtype IN ('e', 'd', 'c')
+WHERE t.typtype IN ('e', 'd', 'c', 'b')
   AND n.nspname || '.' || t.typname = ANY($1::text[])`
+
+// sqlTargetExtensionBaseTypes is the base types the source's extensions own, with
+// the OID and the type category the server reports for each.
+//
+// It exists because pgx cannot resolve an array over one of them on its own.
+// `conn.LoadTypes(["public._citext"])` walks to the element type, finds a base
+// type that is neither user-defined in pgx's sense (enum, domain, composite,
+// range, multirange) nor in its default map, and gives up — so `_citext` came
+// back in loadTypes's skipped list and Plausible's
+// `monthly_reports.recipients citext[]` wrote nonsense down the binary COPY
+// (testdata/regressions/005-array-of-extension-type-not-registered.sql).
+//
+// Registering the element first is what lets LoadTypes build the array codec
+// over it. Only the **string** category is registered, and that is the whole of
+// the claim being made: a string-category type is a varlena whose binary form is
+// its bytes, which is what pgtype.TextCodec encodes, and citext, ltree and
+// their kind are that. A category-'U' type — hstore, PostGIS geometry,
+// pgvector's vector — has a binary form of its own that TextCodec would corrupt,
+// so it is left exactly as it was: unregistered, scalar columns loading as they
+// always did, arrays over it still refused by the loader rather than silently
+// mangled.
+const sqlTargetExtensionBaseTypes = `SELECT n.nspname || '.' || t.typname, t.oid, t.typcategory
+FROM pg_type t
+JOIN pg_namespace n ON n.oid = t.typnamespace
+WHERE t.typtype = 'b' AND t.typelem = 0 AND t.typarray <> 0
+  AND EXISTS (
+      SELECT 1 FROM pg_depend d
+      JOIN pg_extension e ON e.oid = d.refobjid
+      WHERE d.objid = t.oid
+        AND d.classid = 'pg_type'::regclass
+        AND d.refclassid = 'pg_extension'::regclass
+        AND e.extname = ANY($1::text[]))`
 
 // typeRegistry is the set of user-defined types every target connection must
 // have registered on its pgx type map, and the AfterConnect hook that registers
@@ -73,28 +112,36 @@ WHERE t.typtype IN ('e', 'd', 'c')
 type typeRegistry struct {
 	mu    sync.RWMutex
 	names []string
+	// exts is the source's extension names. What they are for is resolved on
+	// the target (sqlTargetExtensionBaseTypes), because an extension's base
+	// types are not in Schema.Enums, Schema.Domains or Schema.Composites and
+	// cannot be named from the source schema at all.
+	exts []string
 	// unregistered is what the hook asked for and could not get a codec for,
 	// by name. It is a report and not a failure (loadTypes says why); the
 	// column keeps the behaviour it had before any of this existed.
 	unregistered map[string]bool
 }
 
-// want returns the names to register on a new connection.
-func (r *typeRegistry) want() []string {
+// want returns the names, and the extensions, to register on a new connection.
+func (r *typeRegistry) want() (names, exts []string) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	return r.names
+	return r.names, r.exts
 }
 
 // use replaces the set. The slice is copied and never mutated afterwards, so
 // want can hand it out under a read lock alone. The skip list is dropped with
 // the old set: it is a statement about the names being replaced.
-func (r *typeRegistry) use(names []string) {
+func (r *typeRegistry) use(names, exts []string) {
 	sorted := append([]string(nil), names...)
 	sort.Strings(sorted)
+	sortedExts := append([]string(nil), exts...)
+	sort.Strings(sortedExts)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.names = sorted
+	r.exts = sortedExts
 	r.unregistered = nil
 }
 
@@ -143,11 +190,17 @@ func (r *typeRegistry) skipped() []string {
 // A type pgx cannot build a codec for is skipped instead, and loadTypes is where
 // that is decided.
 func (r *typeRegistry) afterConnect(ctx context.Context, conn *pgx.Conn) error {
-	names := r.want()
-	if len(names) == 0 {
+	names, exts := r.want()
+	if len(names) == 0 && len(exts) == 0 {
 		return nil
 	}
-	present, err := targetTypeNames(ctx, conn, names)
+	// The extensions' own string base types go on the map first: pgx needs the
+	// element registered before it can build a codec for the array over it.
+	extNames, err := registerExtensionBaseTypes(ctx, conn, exts)
+	if err != nil {
+		return err
+	}
+	present, err := targetTypeNames(ctx, conn, append(append([]string(nil), names...), extNames...))
 	if err != nil {
 		return err
 	}
@@ -175,6 +228,85 @@ func (r *typeRegistry) afterConnect(ctx context.Context, conn *pgx.Conn) error {
 	// it is made rather than relying on the internal one staying.
 	conn.TypeMap().RegisterTypes(types)
 	return nil
+}
+
+// registerExtensionBaseTypes puts the string-category base types the source's
+// extensions own onto this connection's type map, with pgtype.TextCodec, and
+// returns their names so the caller can ask for their array types too.
+//
+// See sqlTargetExtensionBaseTypes for why only the string category, and for what
+// this does not attempt. An extension the target does not have contributes no
+// rows and no error: §11.1 item 2 creates the ones a recreated object depends
+// on, and a connection made before that DDL simply registers fewer types, the
+// same way the rest of this file already tolerates.
+func registerExtensionBaseTypes(ctx context.Context, conn *pgx.Conn, exts []string) ([]string, error) {
+	if len(exts) == 0 {
+		return nil, nil
+	}
+	rows, err := conn.Query(ctx, sqlTargetExtensionBaseTypes, exts)
+	if err != nil {
+		return nil, fmt.Errorf("pg: reading the base types of the source's extensions on the target: %w", err)
+	}
+	defer rows.Close()
+	var names []string
+	for rows.Next() {
+		var (
+			name     string
+			oid      uint32
+			category string
+		)
+		if err := rows.Scan(&name, &oid, &category); err != nil {
+			return nil, fmt.Errorf("pg: reading the base types of the source's extensions on the target: %w", err)
+		}
+		bare := name
+		if i := strings.LastIndexByte(bare, '.'); i >= 0 {
+			bare = bare[i+1:]
+		}
+		codec, ok := extensionCodec(bare, category)
+		if !ok {
+			continue
+		}
+		conn.TypeMap().RegisterType(&pgtype.Type{Name: bare, OID: oid, Codec: codec})
+		names = append(names, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("pg: reading the base types of the source's extensions on the target: %w", err)
+	}
+	return names, nil
+}
+
+// extensionCodec is the codec to register for one of an extension's base types,
+// and the whole of what this file claims to know about them.
+//
+// Two entries, and the reason for each is different.
+//
+// A **string-category** type is a varlena whose binary form is its bytes —
+// `citext` and its kind — which is exactly what pgtype.TextCodec writes, so the
+// category alone is enough and no list of names is needed.
+//
+// `hstore` is not string-category and its binary form is nothing like its text
+// form, so the category rule would corrupt it. pgx ships a codec for it, and
+// registering that is what makes an hstore column loadable at all: without it
+// the value arrives as its text form, pgx sends those bytes as the binary body,
+// and the server reports 08P01 ("insufficient data left in message") — measured
+// on a one-column table, and true before any of this changed
+// (testdata/regressions/005-array-of-extension-type-not-registered.sql).
+// pgtype.HstoreCodec.DecodeValue returns a pgtype.Hstore, which is a
+// HstoreValuer, so pgx's scan-the-string-then-encode fallback completes — the
+// same route compositeCodec below relies on.
+//
+// Everything else is refused here rather than guessed at. A category-'U' type
+// pgx ships no codec for — PostGIS geometry, pgvector's vector, ltree — keeps
+// the behaviour it has always had: unregistered, and whatever that column did
+// before, it still does.
+func extensionCodec(name, category string) (pgtype.Codec, bool) {
+	if name == "hstore" {
+		return pgtype.HstoreCodec{}, true
+	}
+	if category == "S" {
+		return pgtype.TextCodec{}, true
+	}
+	return nil, false
 }
 
 // loadTypes resolves as many of the names as pgx can build a codec for, and
@@ -401,6 +533,28 @@ func userTypeNames(s *pipeline.Schema) []string {
 	return names
 }
 
+// extensionNames is the source's installed extensions, as internal/introspect
+// recorded them: "every installed extension a recreated column, index or default
+// depends on" (pipeline.Schema). registerExtensionBaseTypes turns them into type
+// names on the target; nothing here can, because an extension's base type is not
+// an enum, a domain or a composite and appears in none of Schema's type maps.
+func extensionNames(s *pipeline.Schema) []string {
+	if s == nil {
+		return nil
+	}
+	seen := make(map[string]bool, len(s.Extensions))
+	out := make([]string, 0, len(s.Extensions))
+	for _, e := range s.Extensions {
+		if e.Name == "" || seen[e.Name] {
+			continue
+		}
+		seen[e.Name] = true
+		out = append(out, e.Name)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // registerTypes registers the source's user-defined types on every target
 // connection from here on (ARCHITECTURE.md §11.1, ADR-005). The schema is the
 // one being loaded; the names come out of it.
@@ -422,8 +576,9 @@ func registerTypes(ctx context.Context, pool *pgxpool.Pool, reg *typeRegistry, s
 		return errors.New("pg: registering the source's user-defined types: no target pool")
 	}
 	names := userTypeNames(s)
-	reg.use(names)
-	if len(names) == 0 {
+	exts := extensionNames(s)
+	reg.use(names, exts)
+	if len(names) == 0 && len(exts) == 0 {
 		// Nothing to register, so the hook is a no-op and the connections already
 		// open are as good as new ones. A pool reset here would cost the gate's
 		// connection for nothing.
