@@ -53,8 +53,14 @@ used to be exit 1, `run.refused.internal`, "run with --debug", with the real cod
 buried inside the message
 (`testdata/regressions/002-function-default-refusal-uncoded.sql`).
 
-The five `--unmask` flags in the catalogue are the plan-time refusals that come
-first; without them the run stops before it ever reaches §11.1's.
+The three `--unmask` flags in the catalogue were the plan-time refusals that
+came first, back when §11.1's refusal was raised inside `load.Load`; T-HARD-A
+moved it ahead of the plan, so this run now reaches exit 13 whatever the flags
+say. Two more flags stood here until T-0112: `users.confirmation_token` and
+`users.reset_password_token`, unique credential columns nothing could mask
+(T-0098). Removing them changes nothing about this run — it refuses before the
+plan — which is why the columns of this schema are no evidence that
+`credential_unique` works, and docs/TORTURE.md says so.
 
 ## What else it is here for
 

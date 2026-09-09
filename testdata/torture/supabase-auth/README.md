@@ -45,5 +45,8 @@ survives into `schema.sql`, which is dumped `--no-owner --no-privileges`.
 * **A partial unique index.** `confirmation_token_idx` is
   `UNIQUE (confirmation_token) WHERE confirmation_token::text !~ '^[0-9 ]*$'`,
   which is `testdata/regressions/007-partial-unique-index-masked-column.sql`.
-* **Six unique token columns** that cannot be masked at all today, which is the
-  single biggest finding of the whole exercise. See docs/TORTURE.md and T-0098.
+* **Six unique token columns** that could not be masked at all, which was the
+  single biggest finding of the whole exercise: `refresh_tokens.token` and five
+  of `users`'s. `mask/gen_credential.go`'s `credential_unique` masks them now and
+  T-0112 removed the six `--unmask` flags they forced, leaving this schema with
+  one. See docs/TORTURE.md and T-0098.

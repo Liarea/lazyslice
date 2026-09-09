@@ -8,26 +8,34 @@ second container, and put through the invariants.
 make torture
 ```
 
-Nine of the ten snapshot cleanly **with forty-five flags between them —
-thirty-seven `--unmask`, seven `--skip-table` and one `--key` — twenty of the
-thirty-seven being one unfixed defect (T-0098)**. That whole sentence is the
-result, and the split is part of it rather than a footnote: `--unmask` copies a
-column of personal data into the target verbatim and `--skip-table` drops a
-table, so the two are not interchangeable evidence and the total is never
-quoted here without them. A stranger pointing lazyslice at GitLab types eleven
-`--unmask` flags before it runs. The tenth, Mastodon, refuses at exit 13 for a
-reason ARCHITECTURE.md §11.1 states, and the suite asserts that refusal by name.
-Between them the ten found **eight defects**, every one of which is now a file in
-`testdata/regressions/` and a fix in `internal/`, and **nine more** that are
+Nine of the ten snapshot cleanly **with twenty-seven flags between them —
+nineteen `--unmask`, seven `--skip-table` and one `--key`**. That whole sentence
+is the result, and the split is part of it rather than a footnote: `--unmask`
+copies a column of personal data into the target verbatim and `--skip-table`
+drops a table, so the two are not interchangeable evidence and the total is
+never quoted here without them. A stranger pointing lazyslice at GitLab types
+three `--unmask` flags before it runs. The tenth, Mastodon, refuses at exit 13
+for a reason ARCHITECTURE.md §11.1 states, and the suite asserts that refusal by
+name. Between them the ten found **twelve defects**, every one of which is now a
+fix in `internal/`, `mask/` or ARCHITECTURE.md §5, and **five more** that are
 filed rather than fixed because the change belongs somewhere this task could not
 reach.
 
-Two things the nine clean runs do **not** say, both measured below and both
-carrying a task: supabase-auth's classifier misses ten of the fifty columns the
+It was forty-five flags — thirty-seven `--unmask` — when this file was first
+written. Eighteen of those `--unmask` flags were one defect, T-0098, and the
+`credential_unique` masker (`mask/gen_credential.go`) removed the need for every
+one of them; T-0112 stripped them one schema at a time and re-ran the suite,
+which is the measurement above. **`make torture` does not currently exit 0**:
+two of its eight regressions, `004` and `007`, still assert the exit-12 refusal
+that T-0098's fix removed, and re-cutting them is **T-0113**. All ten schemas
+and both catalogue guards pass.
+
+One thing the nine clean runs do **not** say, measured below and carrying a
+task: supabase-auth's classifier misses ten of the fifty columns the
 hand-labelling calls personal, and each of those is copied into the target in
-cleartext under exit 0 (recall 0.800, T-0104); and `credential`'s only masker
-has a domain of one, which is where twenty of the thirty-seven `--unmask` flags
-come from (T-0098).
+cleartext under exit 0 (recall 0.800, T-0104). A second one used to stand beside
+it — `credential`'s only masker had a domain of one — and that is the T-0098
+defect the count above no longer carries.
 
 The fixtures are `testdata/torture/`; the catalogue that runs them is
 `internal/invariants/torture_catalogue_test.go`; the reduced defects are
@@ -51,7 +59,11 @@ failed about one run in five on `public."Attendee".name`, exit 9,
 `verify.refused.residual`. Measured before the fix: two of three whole-suite
 runs failed, both on calcom, and calcom on its own failed two of eleven.
 Measured after it: six consecutive `make torture` runs, six passes, and the
-same table below to a tenth of a second. The fixtures carry the other half of
+same table below. (Those six were measured before T-0112 removed eighteen
+flags. The table below is one run of the tree as it now stands; a second run of
+the same tree gave the same result and the same flag counts, with each schema's
+time moving by up to half a second, so read the times as the shape of the run
+rather than as a benchmark.) The fixtures carry the other half of
 the fix — a generated name may not be a word in the maskers' own lists, which is
 the same rule `testdata/torture/README.md` already stated for `example.com`,
 RFC 5737 and `555-01XX` — so the collision is impossible rather than merely
@@ -59,20 +71,21 @@ unlucky under this key.
 
 | Schema | Tables | FKs | Columns | Root | Flags | Time | Result |
 |---|---:|---:|---:|---|---:|---:|---|
-| [rails-activestorage](../testdata/torture/rails-activestorage/README.md) | 7 | 3 | 36 | `public.active_storage_blobs` | 1 | 3.8 s | clean |
-| [django](../testdata/torture/django/README.md) | 10 | 9 | 44 | `public.auth_user` | 1 | 2.3 s | clean |
-| [supabase-auth](../testdata/torture/supabase-auth/README.md) | 27 | 24 | 271 | `auth.users` | 7 | 3.1 s | clean |
-| [plausible](../testdata/torture/plausible/README.md) | 42 | 40 | 294 | `public.sites` | 2 | 2.7 s | clean |
-| [gitlab](../testdata/torture/gitlab/README.md) | 43 | 116 | 968 | `public.namespaces` | 11 | 4.6 s | clean |
-| [metabase](../testdata/torture/metabase/README.md) | 100 | 130 | 892 | `public.core_user` | 4 | 3.6 s | clean |
-| [calcom](../testdata/torture/calcom/README.md) | 102 | 179 | 1,092 | `public.users` | 2 | 4.5 s | clean |
-| [mastodon](../testdata/torture/mastodon/README.md) | 118 | 156 | 1,018 | `public.accounts` | 5 | 2.6 s | **exit 13** |
-| [odoo](../testdata/torture/odoo/README.md) | 204 | 622 | 2,048 | `public.res_users` | 3 | 5.5 s | clean |
-| [discourse](../testdata/torture/discourse/README.md) | 370 | 29 | 3,372 | `public.users` | 9 | 7.6 s | clean |
-| **total** | **1,023** | **1,308** | **10,035** | | **45** | **40 s** | 9 clean, 1 refused |
+| [rails-activestorage](../testdata/torture/rails-activestorage/README.md) | 7 | 3 | 36 | `public.active_storage_blobs` | 1 | 3.6 s | clean |
+| [django](../testdata/torture/django/README.md) | 10 | 9 | 44 | `public.auth_user` | 1 | 2.2 s | clean |
+| [supabase-auth](../testdata/torture/supabase-auth/README.md) | 27 | 24 | 271 | `auth.users` | 1 | 3.0 s | clean |
+| [plausible](../testdata/torture/plausible/README.md) | 42 | 40 | 294 | `public.sites` | 2 | 2.6 s | clean |
+| [gitlab](../testdata/torture/gitlab/README.md) | 43 | 116 | 968 | `public.namespaces` | 3 | 4.7 s | clean |
+| [metabase](../testdata/torture/metabase/README.md) | 100 | 130 | 892 | `public.core_user` | 4 | 3.5 s | clean |
+| [calcom](../testdata/torture/calcom/README.md) | 102 | 179 | 1,092 | `public.users` | 1 | 4.4 s | clean |
+| [mastodon](../testdata/torture/mastodon/README.md) | 118 | 156 | 1,018 | `public.accounts` | 3 | 2.5 s | **exit 13** |
+| [odoo](../testdata/torture/odoo/README.md) | 204 | 622 | 2,048 | `public.res_users` | 3 | 5.6 s | clean |
+| [discourse](../testdata/torture/discourse/README.md) | 370 | 29 | 3,372 | `public.users` | 8 | 7.4 s | clean |
+| **total** | **1,023** | **1,308** | **10,035** | | **27** | **39.6 s** | 9 clean, 1 refused |
 
-The whole `make torture` target is 58 seconds: the 40 above, plus 16 for the
-eight regressions and a second for the two catalogue guards.
+The whole `make torture` target is 56 seconds: the 39.6 above, plus 15 for the
+eight regressions and a second for the two catalogue guards and the image
+check.
 
 "Clean" means exit 0 with every check in `TestTortureSchemas` passing: the
 tables the slice had to reach hold rows and, where a correct run cannot reach
@@ -83,18 +96,54 @@ is unchanged in rows and in catalog (I4); the counted root holds exactly
 anywhere in the target (the grep half of I2).
 
 **"Flags" is the number a first run demanded and named**, counting every flag
-of any kind: of the forty-five, thirty-seven are `--unmask`, seven are
+of any kind: of the twenty-seven, nineteen are `--unmask`, seven are
 `--skip-table` (plausible 1, metabase 2, discourse 4) and one is `--key`
 (discourse). It is the honest headline number of this exercise: a stranger
-pointing lazyslice at GitLab types eleven `--unmask` flags before it runs.
-Twenty of the thirty-seven `--unmask` flags are one defect (T-0098), and the
-table above is what will say by how much it improves when that lands. The
-newest of the thirty-seven carries the longest reason:
-`auth.mfa_factors.friendly_name` is under a *partial* composite unique index
-that admits none of its rows, and `d_required` is computed over the whole
-table's row count anyway — the over-estimate T-0099 owes an exact rule for.
-`internal/invariants/torture_catalogue_test.go` carries the whole reason beside
-the flag.
+pointing lazyslice at GitLab types three `--unmask` flags before it runs. The
+longest reason of the nineteen is `auth.mfa_factors.friendly_name`: it is under
+a *partial* composite unique index that admits none of its rows, and
+`d_required` is computed over the whole table's row count anyway — the
+over-estimate ADR-011 clause (b) states as the rule and ARCHITECTURE.md §5
+carries. `internal/invariants/torture_catalogue_test.go` carries the whole
+reason beside the flag, and `TestTortureCatalogueMatchesTheFixtures` counts the three kinds
+so this paragraph cannot drift from them again.
+
+**It was forty-five, and eighteen of the thirty-seven `--unmask` flags went in
+one change** (T-0112, after T-HARD-A landed `credential_unique`): supabase-auth
+6, gitlab 8, mastodon 2, calcom 1, discourse 1. Per schema the flag count fell
+7 → 1, 11 → 3, 5 → 3, 2 → 1 and 9 → 8. What the re-run then measured, column by
+column, is worth stating exactly, because "the flag is gone" and "the column is
+masked" are not the same claim:
+
+* **Four columns now hold masked values that used to need a flag** —
+  `auth.refresh_tokens.token`, `auth.users.confirmation_token`,
+  `auth.users.recovery_token` and
+  `public.user_security_keys.credential_id`. Every non-null value in the target
+  carries `credential_unique`'s `lazyslice-invalid-` prefix, and the distinct
+  count equals the row count: 136 of 136, 100 of 100, 100 of 100, 100 of 100,
+  no collisions.
+* **Two hold the empty string**, which `mask.Apply` passes through by §6 item 6:
+  `auth.users.email_change_token_current` and
+  `auth.users.reauthentication_token` are `''` in every row of the fixture, so
+  there is nothing to mask and nothing that leaks.
+* **Ten are NULL in every row of their fixture** — calcom's
+  `"Booking".oneTimePassword`, all eight of gitlab's, and
+  `auth.users.email_change_token_new`. Their flags were demanded because
+  `d_required` is computed over the whole table's planned row count whatever the
+  values are (the same over-estimate ADR-011 clause (b) states as the rule, in
+  ARCHITECTURE.md §5), not because a credential was ever going to be copied.
+* **Mastodon's two were never reached at all.** That run refuses at exit 13
+  before the plan runs, so removing `public.users.confirmation_token` and
+  `public.users.reset_password_token` leaves the refusal unchanged and proves
+  nothing about masking; it is the count that is now honest, not a new
+  measurement.
+
+So the eighteen are gone and the number a stranger types drops by 40%, but the
+end-to-end evidence that `credential_unique` masks a real column is four
+columns, not eighteen. The rest of its evidence is unit-level:
+`mask`'s `TestAUniqueCredentialColumnIsCarriedRatherThanRefused` (a
+`varchar(255)` unique credential column at 20,000 rows, no collisions) and
+`internal/plan`'s `TestUniqueCredentialColumnEscalates`.
 
 ### The tenth
 
@@ -121,16 +170,20 @@ rather than spending a second of the ten on the same finding;
 
 ## Defects found and fixed
 
-Eight. Each has a file in `testdata/regressions/` — the smallest schema that
-still shows it — written before the fix, and each of those files is run by
-`make torture`.
+Twelve. Eight of them have a file in `testdata/regressions/` — the smallest
+schema that still shows it — written before the fix, and each of those files is
+run by `make torture`. The other four are below the table and none of them
+reduces to a schema: T-0098's fix is in `mask/`, which is ADR-006's own module,
+and has its unit tests there; T-0097, T-0099 and T-0101 stood in "Found and not
+fixed" until T-HARD-A and ADR-011 reached the files this exercise could not
+write.
 
 | # | Regression | Found by | What was wrong | Fixed in |
 |---|---|---|---|---|
 | 1 | `001-unique-index-masking-collision.sql` | django, rails-activestorage, supabase-auth | ARCHITECTURE.md §5's unique-index domain rule was never called. `mask.Pick` implemented it; nothing invoked it, and `internal/transform` used the rule pack's default masker whatever the column's constraints were. A masked column under a unique index collided **in the loader**, after every row had moved: `duplicate key value violates unique constraint "auth_group_name_key" (SQLSTATE 23505)`. | `internal/plan/unique.go` (new): after the walk, every masked column under a unique index is held to `d_required = n²/2ε`; the widest generator for the category is chosen and written back onto the decision, or the run refuses at exit 12 under the new code `plan.refused.unique_domain`, printing d, d_required and §5's three escapes. |
 | 2 | `002-function-default-refusal-uncoded.sql` | mastodon, gitlab | §11.1's exit-13 refusal arrived as exit 1, `run.refused.internal`, "run with --debug", with its own code printed *inside* the message of the wrong one. `core.asStop` converts five stage refusal types and `*ddl.Refusal` was a sixth that nothing converted. | `internal/core/names.go`: the missing case, plus a message that does not print the code twice. |
 | 3 | `003-composite-unique-index-is-not-a-unique-column.sql` | rails-activestorage, supabase-auth, calcom, gitlab, mastodon | `Decision.UniqueIndex` was set for **every** column of every unique index. Once defect 1's check started reading it, five schemas refused at plan over columns that cannot collide — ActiveStorage's `name`, the literal `'cover'`, one of four in `(record_type, record_id, name, blob_id)`. | `internal/classify/classify.go`, `indexKeys`: a column is raised when it carries the uniqueness *alone*. |
-| 4 | `004-composite-unique-index-all-masked.sql` | django | The other side of 3. `django_content_type` is `UNIQUE (app_label, model)` with both columns masked, and nothing was left to hold the tuple apart: `duplicate key value violates unique constraint "django_content_type_app_label_model_76bd3d3b_uniq"`. | `internal/classify/classify.go`, `raiseCompositeUnique`: a composite index — total, partial or expression — raises its masked columns unless an unmasked key column's sample has no repeats, where "no repeats" requires the column to have been *sampled*: a key column with no samples in a table nothing could be sampled from holds nothing apart, while one with no samples in a table that *was* sampled is NULL in every row and holds the tuple apart on its own (calcom's `Role_name_teamId_key`), unless the index is `NULLS NOT DISTINCT`. §5 does not state the composite rule; the approximation and its known imprecisions are T-0099. |
+| 4 | `004-composite-unique-index-all-masked.sql` | django | The other side of 3. `django_content_type` is `UNIQUE (app_label, model)` with both columns masked, and nothing was left to hold the tuple apart: `duplicate key value violates unique constraint "django_content_type_app_label_model_76bd3d3b_uniq"`. | `internal/classify/classify.go`, `raiseCompositeUnique`: a composite index — total, partial or expression — raises its masked columns unless an unmasked key column's sample has no repeats, where "no repeats" requires the column to have been *sampled*: a key column with no samples in a table nothing could be sampled from holds nothing apart, while one with no samples in a table that *was* sampled is NULL in every row and holds the tuple apart on its own (calcom's `Role_name_teamId_key`), unless the index is `NULLS NOT DISTINCT`. §5 now states the composite rule, as ADR-011 clause (a); the approximation and its known imprecisions are recorded there. |
 | 5 | `005-array-of-extension-type-not-registered.sql` | plausible | `monthly_reports.recipients citext[]` — the addresses a report is emailed to. `citext` is a **base** type an extension installs, so it is in none of `Schema.Enums`, `Domains` or `Composites`, nothing registered it, and pgx could not build a codec for `_citext`: the binary `COPY` wrote nonsense and the server answered `08P01`. A scalar `hstore` column, found in the same file, could never be loaded at all. | `internal/pg/types.go`: the extensions the source depends on are resolved to their own base types on the target and registered — string-category ones with `pgtype.TextCodec`, `hstore` with pgx's `HstoreCodec` — before `LoadTypes` builds the arrays over them. |
 | 6 | `006-identity-sequence-renamed-table.sql` | metabase | Metabase renamed `group_table_access_policy` to `sandboxes` and Postgres left the identity sequence under the old name. The target's `GENERATED AS IDENTITY` creates `sandboxes_id_seq`; `setval` named the source's, and the run died at `42P01` **after every table had been copied** — the THREAT_MODEL.md T8 outcome the strict-NULL `setval` exists to prevent. `internal/verify` read the same wrong name. | `internal/load/ddl/ddl.go` and `internal/verify`: for an identity column the sequence is resolved on the target with `pg_get_serial_sequence`, with the source's name as the fallback for the ownerless case (pagila). |
 | 7 | `007-partial-unique-index-masked-column.sql` | supabase-auth | `CREATE UNIQUE INDEX confirmation_token_idx ON auth.users (confirmation_token) WHERE confirmation_token::text !~ '^[0-9 ]*$'`. A partial unique index was excluded from §5's rule, the masked literal fell inside the predicate in every row, the rows went in and the index would not build over them. | `internal/classify/classify.go`: a single-column partial unique index raises the column too, with `d_required` over the whole table's row count — an over-estimate, and the direction that refuses at plan rather than failing in the loader. |
@@ -147,6 +200,37 @@ for and fails the run instead, which is what the `42P01` it replaced used to do
 the two build tags is type-checked and vetted by the release gate rather than
 only by this target.
 
+### The ninth: unique credential columns (T-0098)
+
+**`credential`'s only masker had a domain of exactly 1**, so no column under a
+unique index that classified as a credential could be masked at all: `d_required`
+is n²/2ε (ARCHITECTURE.md §5) and `MaxRows(1)` is zero, so the run refused at
+exit 12 under `plan.refused.unique_domain` at *every* row count — "lower
+`--take`" was not an escape, and the operator's only two were `--unmask`, which
+copies the credential into the target verbatim, and `mapping_file:`. **Eighteen
+of the thirty-seven `--unmask` flags in the first measurement of this file were
+this one defect**, six of them in supabase-auth alone. An authentication schema
+is nothing but unique credentials.
+
+The fix is `credential_unique` (`mask/gen_credential.go`), a second
+`CatCredential` generator registered *after* the fixed literal, so `Pick` reaches
+it only for a unique column and a non-null non-unique credential column still
+becomes `$lazyslice$invalid`. What it emits is not a plausible token: the first
+eighteen characters are the constant `lazyslice-invalid-` and only a base32
+suffix varies, thirteen symbols where the column has room — 65 bits, which clears
+the 2⁶⁴ §5 asks of a generator a unique column escalates to. A narrower column
+shortens the suffix and `Domain()` shrinks with it; nothing is truncated.
+
+Two consequences are recorded rather than hidden. The first is that
+`testdata/regressions/004-composite-unique-index-all-masked.sql` and
+`007-partial-unique-index-masked-column.sql` both reduce a credential column and
+both say `expect: exit 12 plan.refused.unique_domain`; both now exit 0 with the
+column masked, so `make torture` fails them and **T-0113** owes the decision
+about what those two files should assert instead. The second is in the "Flags"
+section above: of the eighteen columns whose flag this removed, four are actually
+masked end to end, two are the empty string, ten are NULL in their fixture and
+two are in the run that refuses before the plan.
+
 One more change is not a defect in the pipeline but in the harness, and it is
 here because the suite is what measured it: `internal/testutil`'s wait for
 Docker's port table was ten attempts over five seconds, which `make torture`'s
@@ -154,19 +238,50 @@ forty container starts exhausted about once a run, failing a different schema
 each time with a message about a port. It is thirty seconds now, and costs
 nothing when the port is there.
 
+### The other three: T-0097, T-0099 and T-0101
+
+Each of these had a row in "Found and not fixed" when this file was written,
+because the change belonged in ARCHITECTURE.md or in `internal/core` and
+T-TORTURE's paths reached neither. All three have since landed, so they are
+defects this exercise found *and* got fixed:
+
+* **T-0099 — §5 said nothing about composite or partial unique indexes**, and
+  defects 3, 4 and 7 were all approximations of a rule the architecture had not
+  written. **ADR-011** (accepted 2026-09-08) writes it and ARCHITECTURE.md §5
+  carries both clauses: (a) a composite unique index raises every masked column
+  it covers unless an unmasked key column's sample has no repeats; (b) a
+  single-column partial unique index raises its column, with `d_required` over
+  the whole table's row count. Clause (b) is the over-estimate quoted twice
+  above — now the specified behaviour and the safe direction, not an open gap.
+  ADR-011 carries the reversal condition: the agreeing-group statistic that
+  would make (a) exact.
+* **T-0097 — §11.1's not-recreatable refusal was raised inside `load.Load`.**
+  T-HARD-A (`ecc42ae`) moved `ddl.Recreatable` to the top of `internal/core`'s
+  `planStage`, before the plan request and before the first key query, which is
+  where §11.1 says it is raised. Mastodon and gitlab now pay one introspect
+  rather than a whole extract before being told the target cannot be built, and
+  `internal/core/recreatable_test.go` pins the ordering.
+* **T-0101 — the classification fingerprint was computed before the plan's
+  picks.** `internal/plan` writes the escalated masker back onto the decision,
+  so a column that became unique changed what it was masked with and did not
+  change the fingerprint, and §11.2's "classification changed — masked values
+  will differ" would not have printed for it. T-HARD-A recomputes the
+  fingerprint after the plan (`classify.Refingerprint`, `core.refingerprint`),
+  and ARCHITECTURE.md §5's determinism scope states the consequence: the
+  fingerprint now moves with `--take`, `--depth`, the root and `--skip-table`,
+  which is the conservative direction.
+
 ## Found and not fixed
 
-Nine, each with a tracker task, because the change belongs in a file this task
-could not write (`mask/` is ADR-006's own module; ARCHITECTURE.md is the
-architecture; `.golangci.yml` is neither) or is a decision rather than a repair.
+Five, each with a tracker task, because the change belongs in a file this task
+could not write (`mask/` is ADR-006's own module; `.golangci.yml` is neither) or
+is a decision rather than a repair. It was eight: T-0097, T-0099 and T-0101 had
+a row here until T-HARD-A and ADR-011 fixed them, and they are in "Defects found
+and fixed" above.
 
 | Task | Finding |
 |---|---|
-| **T-0098** | **`credential`'s only masker has a domain of exactly 1**, so no column under a unique index that classifies as a credential can be masked at all — `MaxRows(1)` is zero, so "lower `--take`" is not an escape either. **Twenty of the thirty-seven `--unmask` flags in the table above are this**, six of them in supabase-auth alone. An authentication schema is nothing but unique credentials. The fix is a second `CatCredential` generator in `mask/`, the shape `phone_unique` and `ip_unique` already have. |
-| T-0099 | §5 states the unique-index rule for *a column* and says nothing about composite or partial indexes. Defects 3, 4 and 7 are all approximations of a rule the architecture has not written. |
-| T-0097 | §11.1 says the not-recreatable refusal is raised **at plan**; it is still raised inside `load.Load`, so mastodon and gitlab pay for a full extract before being told the target cannot be built. |
-| T-0100 | `textsig.LooksSecret` classifies a **URL** as a credential — `https://home.social.test/users/bea_donnelly1` clears its entropy test — which is safe but wrong, and under a unique index becomes a flag the operator has to type. Two of mastodon's five. |
-| T-0101 | `internal/plan` now writes the escalated masker back onto the decision, and `Classification.Fingerprint` was computed before that, so "classification changed — masked values will differ" would not print for a column that became unique. |
+| T-0100 | `textsig.LooksSecret` classifies a **URL** as a credential — `https://home.social.test/users/bea_donnelly1` clears its entropy test — which is safe but wrong, and under a unique index becomes a flag the operator has to type. Two of mastodon's three. |
 | T-0102 | A **text column holding a JSON document** is invisible to §4's JSON rule: the scalar validators do not match a document and the column is copied. |
 | T-0103 | An **array of an extension type** is sampled as one opaque string, so the classifier never sees the addresses inside a `citext[]`; and if it does decide to mask it, the masked scalar cannot be encoded into the array column at all. |
 | T-0105 | `.golangci.yml`'s `run.build-tags` lists `integration` alone, so the 821 lines behind `integration && torture` are linted by nothing. `make check` now runs `vet-tagged`, which type-checks and vets them under both tag sets; linting them is one line in a file outside this task's paths. |

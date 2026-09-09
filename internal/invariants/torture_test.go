@@ -455,6 +455,12 @@ func TestTortureCatalogueMatchesTheFixtures(t *testing.T) {
 	// could not find. docs/TORTURE.md and internal/invariants/CLAUDE.md both
 	// quote this split, and it was quoted wrong once (as forty-five --unmask
 	// flags) because nothing counted it. This is what they are counted from.
+	//
+	// It was 37/7/1 until T-0112. `credential_unique` (mask/gen_credential.go,
+	// T-HARD-A) gave CatCredential a generator wide enough for a unique column,
+	// and the eighteen --unmask flags that existed only because no such
+	// generator did were removed and the suite re-run: supabase-auth 6,
+	// gitlab 8, mastodon 2, calcom 1, discourse 1.
 	byKind := map[string]int{}
 	for _, s := range tortureSchemas {
 		for _, f := range s.flags {
@@ -463,7 +469,7 @@ func TestTortureCatalogueMatchesTheFixtures(t *testing.T) {
 			}
 		}
 	}
-	for kind, want := range map[string]int{"--unmask": 37, "--skip-table": 7, "--key": 1} {
+	for kind, want := range map[string]int{"--unmask": 19, "--skip-table": 7, "--key": 1} {
 		if byKind[kind] != want {
 			t.Errorf("torture: the catalogue holds %d %s flags and docs/TORTURE.md says %d; "+
 				"re-measure the split there and on ROADMAP.md's gate-5 line (T-0106) rather than "+
