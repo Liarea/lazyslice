@@ -43,16 +43,16 @@ The ones about *changing* this directory are:
 - **An `--unmask` in the catalogue is a claim about the column, not about the
   run.** It says either "this is not personal data, and here is why" or "this is
   personal data and lazyslice cannot mask it yet, tracker task N". Eighteen of
-  the forty-five flags the ten schemas need are the second kind and every one of
-  them names **T-0098**. That masker has since landed (`mask/gen_credential.go`),
-  so all eighteen are now unnecessary — but stripping them and re-running `make
-  torture` is tracker **T-0112**, and until it does, the eighteen columns are
-  still copied into the target in clear and docs/TORTURE.md's table still quotes
-  the pre-fix split. The forty-fifth,
-  `auth.mfa_factors.friendly_name`, is a third kind and its reason has to carry
-  the whole argument: the column is under a partial composite unique index that
-  admits none of its rows, and `d_required` is computed over the whole table
-  regardless (**T-0099**).
+  the forty-five flags the ten schemas used to need were the second kind and
+  every one of them named **T-0098**; `mask/gen_credential.go` landed the masker
+  and **T-0112** stripped all eighteen and re-ran `make torture`, so the ten
+  schemas need twenty-seven flags now — nineteen `--unmask`, seven
+  `--skip-table`, one `--key` — and those eighteen columns are masked rather
+  than copied. The twenty-seventh, `auth.mfa_factors.friendly_name`, is a third
+  kind and its reason has to carry the whole argument: the column is under a
+  partial composite unique index that admits none of its rows, and `d_required`
+  is computed over the whole table regardless — the over-estimate **ADR-011**
+  clause (b) states as the rule (ARCHITECTURE.md §5).
 - **A masking failure that happens sometimes is a fixture bug, not flakiness.**
   The suite fixes the masking key (`fixedSecret`) and the generators keep their
   name pools disjoint from `mask/words.go`'s word lists, for the reason

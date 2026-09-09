@@ -51,7 +51,7 @@ Run the vertical slice against real open-source schemas until the failures that 
 
 Gate 5:
 
-- [x] Nine of ten torture schemas snapshot cleanly and the tenth fails naming its cause (docs/TORTURE.md, T-TORTURE, 2026-09-08). The ten runs demanded forty-five flags between them: thirty-seven `--unmask`, seven `--skip-table`, one `--key`; twenty of the thirty-seven were one defect, unique credential columns (T-0098), fixed in the harden step.
+- [x] Nine of ten torture schemas snapshot cleanly and the tenth fails naming its cause (docs/TORTURE.md, T-TORTURE, 2026-09-08). The ten runs demand twenty-seven flags between them: nineteen `--unmask`, seven `--skip-table`, one `--key`. It was forty-five and thirty-seven `--unmask` at T-TORTURE; eighteen of those were one defect, unique credential columns (T-0098), fixed in the harden step by `mask/gen_credential.go` and re-measured by T-0112 (2026-09-08). Two of the eight reductions in `testdata/regressions/` still assert the exit-12 refusal that fix removed, so `make torture` itself does not yet exit 0 — T-0113.
 - [ ] Red team found nothing that leaks unmasked flagged data.
 - [ ] Performance baseline is recorded and enforced in CI.
 - [ ] Every item ARCHITECTURE.md section 14 lists under "v1 after Gate 4 (phase 5)" has shipped.

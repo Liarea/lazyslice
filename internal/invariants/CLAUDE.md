@@ -293,15 +293,27 @@ differs subtly from the invariant of the same name is worse than no assertion.
 - **Nine clean and one refused is the gate**, and
   `TestTortureCatalogueMatchesTheFixtures` refuses a second failing schema as
   firmly as it refuses a directory with no catalogue entry. It is nine clean
-  **with forty-five flags**, and the kinds do not merge: thirty-seven
-  `--unmask`, seven `--skip-table` and one `--key`, twenty of the thirty-seven
-  being one unfixed defect (T-0098). `--unmask` copies a column of personal data
-  into the target verbatim and `--skip-table` drops a table, so quoting the
-  total alone overstates the masking evidence by eight. The counts are part of
-  the claim, `tortureSchemas` above is what they are counted from, and
-  docs/TORTURE.md carries them; ROADMAP.md's gate-5 line is owed the same split
-  when it is ticked, which is T-0106 because ROADMAP.md is outside this task's
-  paths.
+  **with twenty-seven flags**, and the kinds do not merge: nineteen
+  `--unmask`, seven `--skip-table` and one `--key`. `--unmask` copies a column
+  of personal data into the target verbatim and `--skip-table` drops a table, so
+  quoting the total alone overstates the masking evidence by eight. The counts
+  are part of the claim, `tortureSchemas` above is what they are counted from,
+  and docs/TORTURE.md and ROADMAP.md's gate-5 line both carry them. It was
+  forty-five and thirty-seven `--unmask` until T-0112 removed the eighteen that
+  existed only because `CatCredential` had no generator wide enough for a unique
+  column (T-0098, fixed by `mask/gen_credential.go`) and re-ran the suite.
+  `mask/CLAUDE.md` and `mask/gen_credential.go` still say that re-run has not
+  happened; `mask/` was outside T-0112's paths and correcting them is **T-0114**.
+- **`make torture` does not exit 0 today, and the failure is not in this
+  package.** `testdata/regressions/004-composite-unique-index-all-masked.sql`
+  and `007-partial-unique-index-masked-column.sql` both carry
+  `expect: exit 12 plan.refused.unique_domain` over a *credential* column;
+  `credential_unique` escalates both now, so both exit 0 with the column masked
+  and `TestTortureRegressions` fails them against their own headers. Measured at
+  ecc42ae with T-0112's catalogue changes stashed, so it predates T-0112. What
+  those two reductions should assert instead is a decision about
+  `testdata/regressions/`, which is outside this package: **T-0113**. All ten
+  schemas and both catalogue guards pass.
 - **Every run in this package masks under a fixed key** (`fixedSecret`, written
   into the working directory by `start` before the first invocation). It is not a
   convenience: the residual scan fails a run when a masked value equals a value

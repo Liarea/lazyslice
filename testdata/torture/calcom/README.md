@@ -2,8 +2,9 @@
 
 The scheduling app: 102 tables, 179 foreign keys, 46 enum types, and every
 identifier in the application's own case. **It needs fewer flags than any other
-schema of its size in the set**: two, both of them opaque identifiers Cal.com
-generates.
+schema of its size in the set**: one, `"Booking".uid`, the opaque reference in a
+booking's public URL. `"Booking".oneTimePassword` was the second until T-0112
+(T-0098).
 
 | | |
 |---|---|
