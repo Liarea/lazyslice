@@ -838,6 +838,104 @@ func TestAMaskedKeyOverridesTheColumnsThatReferenceIt(t *testing.T) {
 	}
 }
 
+// TestAKeyChildWhoseParentIsCopiedKeepsTheExemption is tracker T-0120's
+// reconciliation, the other direction of the one above.
+//
+// markNeverMasked reads a column's own signals, so an integer or uuid FK child
+// that reaches `possible` on a *name* hit alone loses the surrogate-key
+// exemption while the primary key it references — the same values, no name hit —
+// keeps it. `identities.provider_id uuid` is the shape auth schemas actually
+// carry: the name is `online_id` by rules.yml's IdP rule, the parent
+// `sso_providers.id` is a surrogate key, and masking the child alone replaces
+// the values on one end of the edge only. The load then adds the constraint NOT
+// VALID, internal/verify/fk.go counts the orphans and the run fails at exit 8
+// (THREAT_MODEL.md T8) — and it protects nothing, because a child's values are a
+// subset of the parent key's and the parent copied them verbatim.
+func TestAKeyChildWhoseParentIsCopiedKeepsTheExemption(t *testing.T) {
+	t.Parallel()
+	providers := ref.TableRef{Schema: "auth", Name: "sso_providers"}
+	devices := ref.TableRef{Schema: "auth", Name: "devices"}
+	identities := ref.TableRef{Schema: "auth", Name: "identities"}
+
+	schema := &pipeline.Schema{
+		Tables: []pipeline.Table{
+			tt("auth", "sso_providers", []string{"id"}, tc("id", "uuid")),
+			// A masked uuid key: `device_id` is online_id by name, so the
+			// exemption is lost on the parent's own signals.
+			tt("auth", "devices", []string{"device_id"}, tc("device_id", "uuid")),
+			tt("auth", "identities", []string{"id"},
+				tc("id", "uuid"),
+				tc("provider_id", "uuid"),
+				tc("external_id", "uuid"),
+			),
+			// The same column under an edge Postgres never checked.
+			tt("auth", "legacy_links", []string{"link_id"},
+				tc("link_id", "bigint"),
+				tc("provider_id", "uuid"),
+			),
+		},
+		FKs: []pipeline.ForeignKey{
+			{
+				Name: "legacy_links_provider_id_fkey", Validated: false,
+				Child: ref.TableRef{Schema: "auth", Name: "legacy_links"}, ChildCols: []string{"provider_id"},
+				Parent: providers, ParentCols: []string{"id"},
+			},
+			fk("identities_provider_id_fkey", identities, []string{"provider_id"}, providers, []string{"id"}),
+			// external_id has two parents, one copied and one masked. The
+			// masked one has to win, or the exemption this pass hands back
+			// would be a recall hole (THREAT_MODEL.md T1).
+			fk("identities_external_id_fkey", identities, []string{"external_id"}, providers, []string{"id"}),
+			fk("identities_external_id_device_fkey", identities, []string{"external_id"}, devices, []string{"device_id"}),
+		},
+	}
+	cls, err := New().Classify(schema, nil, nil)
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+
+	if d := cls.Decisions[ref.ColumnRef{Table: providers, Column: "id"}]; d.Masked {
+		t.Fatalf("auth.sso_providers.id = %+v, want the surrogate key copied", d)
+	}
+	child := cls.Decisions[ref.ColumnRef{Table: identities, Column: "provider_id"}]
+	if child.Masked {
+		t.Errorf("auth.identities.provider_id = %+v, want it copied: its parent key is copied, so masking this end orphans the row and hides nothing", child)
+	}
+	if child.Masker != "" {
+		t.Errorf("auth.identities.provider_id masker = %q, want none on a copied column", child.Masker)
+	}
+	// The name signal is kept on the line rather than erased: the report says
+	// what the column looked like *and* which key overruled it.
+	if child.Category != pipeline.CatOnlineID {
+		t.Errorf("auth.identities.provider_id category = %q, want %q kept", child.Category, pipeline.CatOnlineID)
+	}
+	if !strings.Contains(child.Reason, "a copied surrogate key: preserved verbatim") {
+		t.Errorf("auth.identities.provider_id reason = %q, want the parent key named", child.Reason)
+	}
+	if bad, ok := ParseReason(child.Reason); !ok {
+		t.Errorf("reason %q does not parse: %q", child.Reason, bad)
+	}
+
+	both := cls.Decisions[ref.ColumnRef{Table: identities, Column: "external_id"}]
+	if !both.Masked || both.Category != pipeline.CatOnlineID {
+		t.Errorf("auth.identities.external_id = %+v, want it masked: one of its two parents is masked", both)
+	}
+	if strings.Contains(both.Reason, "preserved verbatim") {
+		t.Errorf("auth.identities.external_id reason = %q, want the exemption blanked where propagation took over", both.Reason)
+	}
+	if !strings.Contains(both.Reason, "propagated through foreign key") {
+		t.Errorf("auth.identities.external_id reason = %q, want the propagation named", both.Reason)
+	}
+
+	// The subset argument is only true where Postgres checked it. An
+	// unvalidated constraint is a hint over rows it never verified, and
+	// internal/plan will not even follow it to fetch the parent row, so the
+	// child can hold a value that is nowhere else in the snapshot.
+	legacy := cls.Decisions[ref.ColumnRef{Table: ref.TableRef{Schema: "auth", Name: "legacy_links"}, Column: "provider_id"}]
+	if !legacy.Masked {
+		t.Errorf("auth.legacy_links.provider_id = %+v, want it masked: NOT VALID is a hint, not a guarantee that the parent holds the value", legacy)
+	}
+}
+
 // TestConfigCannotRaiseWithoutAUsableCategory is the other half of ADR-004's
 // tighten-only rule. A raise is applied only when it leaves a category the
 // column's type family accepts, because Decision.Masker is chosen from the

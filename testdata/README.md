@@ -870,18 +870,33 @@ makes it succeed has two parts, and the second is not implied by the first:
 Neither column is personal data and neither takes a name or a value hit in §4 —
 `account_status` already classifies at `none` (trap 13), and `booked`, `amount`
 and `currency` are no category — because what this trap is about is the driver
-and not the classifier. **That steers around a hole rather than covering it**,
-and the hole is worth naming here because this trap is what opened it: a
-composite column could not be loaded at all before the registration existed, and
-now that it can be, nothing downstream can mask one. `mask.TypeTag` has no tag
-for a composite, `internal/transform` gives it `famOther`, no rule-pack category
-but `special_category` accepts `famOther`, so a name or value hit on a composite
-column drops to `low` with a `type_conflict` reason and the column is copied;
-`internal/verify`'s second net skips `famOther` and the residual scan only walks
-masked columns. A composite column holding personal data would therefore be
-copied verbatim and reported by nothing. Tracker T-0094 owns the decision —
-refuse such a column at plan time, or mask a composite field-wise — and the
-THREAT_MODEL.md T1 entry that must record it meanwhile. `seen` is `NOT NULL` and one of its three rows is the
+and not the classifier. **That steering is now load-bearing**: a composite here
+that did carry personal data would refuse the run, so this fixture could not
+also be the one that loads end to end.
+
+The hole it used to steer around is closed (tracker T-0094, T-HARD-B). It was
+real: a composite could not be loaded at all before the registration existed,
+and once it could, nothing downstream could mask one — `mask.TypeTag` has no tag
+for a composite, no rule-pack category accepts one, so a name or a value hit
+dropped to `low` with a `type_conflict` reason and the column was copied, and
+`internal/verify`'s second net skips the family while the residual scan only
+walks masked columns. A composite holding personal data was therefore copied
+verbatim and reported by nothing (THREAT_MODEL.md T1). The decision taken is to
+**fail closed**: `internal/classify` gives a composite its own type family, runs
+the validators over the record's *fields* as well as the name rules over its
+name, and reaches `possible` on any hit; `internal/plan` then refuses at exit 12
+under `plan.refused.unwritable`, naming the column and offering `--skip-table`
+or a reasoned `--unmask`. No masker can write a record, so a refusal is the only
+fail-closed answer there is. A composite with **no** hit — these two — is copied,
+and its reason says `composite type: its fields were read and none is personal
+data`, so a green run over a composite is a claim rather than a silence. (Both
+columns here have a value to read; a composite in a table nothing could be
+sampled from says `composite type: no field value was read, so only its name was
+checked` instead, because the copy branch must not claim a check that did not
+run.) The validators are run over each sample **whole** as well as over its
+fields, since a record can spell an address across three fields none of which is
+one on its own.
+`seen` is `NOT NULL` and one of its three rows is the
 empty array `'{}'`: a column that were always `NULL` would never reach an
 encode plan and the trap would pass by accident.
 `settlements.reversed` is the nullable composite, so a `NULL` of a

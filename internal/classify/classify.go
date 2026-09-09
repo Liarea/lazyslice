@@ -70,8 +70,13 @@ type work struct {
 	// unmasked is a per-column opt-out that has not expired.
 	unmasked bool
 	family   string
-	table    ref.TableRef
-	column   pipeline.Column
+	// array is columnType.Array: family is the *element* family for an array
+	// column, so the two questions "is this a uuid" and "is this a uuid[]" need
+	// both fields. The key exemption is scoped to a scalar key (markNeverMasked),
+	// and keyChildren has to ask the same question of the same column later.
+	array  bool
+	table  ref.TableRef
+	column pipeline.Column
 }
 
 // state is one Classify call.
@@ -111,6 +116,7 @@ func (classifier) Classify(schema *pipeline.Schema, s pipeline.Sampler, prior *p
 	st.base()
 	st.byteaInPersonShapedTable()
 	st.neighbouringColumns()
+	st.keyChildren()
 	st.foreignKeys()
 	st.sameColumnName()
 	cls, err := st.applyPrior(prior)
@@ -291,6 +297,13 @@ var validators = []struct {
 	{pipeline.CatPhone, phraseE164, func(_ *textsig.Dict, s string) bool { return textsig.ValidPhone(s) }},
 	{pipeline.CatNetworkID, phraseIP, func(_ *textsig.Dict, s string) bool { return textsig.ValidIP(s) }},
 	{pipeline.CatNetworkID, phraseMAC, func(_ *textsig.Dict, s string) bool { return textsig.ValidMAC(s) }},
+	// Ahead of the secrets one, and that order is the whole of tracker T-0100:
+	// a URL clears every guard in textsig.LooksSecret, so mastodon's
+	// accounts.uri was `credential` on every row -- masked to the fixed
+	// literal, and refused at plan under the unique index it carries. A URL
+	// that names a person is an online_id, whose generator has a domain large
+	// enough for a unique column.
+	{pipeline.CatOnlineID, phraseURL, func(_ *textsig.Dict, s string) bool { return textsig.ValidURL(s) }},
 	{pipeline.CatCredential, phraseSecrets, func(_ *textsig.Dict, s string) bool { return textsig.LooksSecret(s) }},
 	{pipeline.CatPersonName, phraseNameDict, func(d *textsig.Dict, s string) bool { return d.LooksLikeName(s) }},
 	{pipeline.CatAddress, phraseAddrShape, func(_ *textsig.Dict, s string) bool { return textsig.AddressShape(s) }},
@@ -324,11 +337,12 @@ func (st *state) base() {
 				d:       pipeline.Decision{Col: cref, Category: pipeline.CatNone, Confidence: pipeline.ConfNone, Source: pipeline.ByClassifier},
 				keyFrag: -1,
 				family:  ct.Family,
+				array:   ct.Array,
 				table:   t.Ref,
 				column:  col,
 			}
 			st.dec[cref] = w
-			values := st.samples(cref)
+			values := st.samples(cref, ct)
 			sig := bestSignal(dict, values, st.pack, ct.Family)
 			st.decide(w, col, ct, values, sig)
 			st.appendContext(w, t, ct, sig.total)
@@ -338,13 +352,15 @@ func (st *state) base() {
 }
 
 // samples flattens one column's samples into the strings the validators read.
-func (st *state) samples(c ref.ColumnRef) []string {
+// The column's type is part of the flattening: an array whose sample arrived as
+// one string is read back as an array literal (tracker T-0103, scalarsOf).
+func (st *state) samples(c ref.ColumnRef, ct columnType) []string {
 	if st.sampler == nil {
 		return nil
 	}
 	var out []string
 	for _, v := range st.sampler.Samples(c) {
-		out = append(out, scalars(v)...)
+		out = append(out, scalarsOf(ct, v)...)
 	}
 	return out
 }
@@ -375,6 +391,10 @@ func bestSignal(dict *textsig.Dict, values []string, p *compiledPack, family str
 	}
 	if isJSONFamily(family) {
 		sig.strong = jsonSignal(p, values)
+		return sig
+	}
+	if family == famComposite {
+		sig.strong = compositeSignal(dict, values)
 		return sig
 	}
 	if family == famBytea || family == famTSVector {
@@ -482,6 +502,62 @@ func silencedByType(p *compiledPack, cat pipeline.Category, family string) bool 
 	return !p.accepted(cat, family)
 }
 
+// compositeSignal asks the one question that can be asked of a composite: do
+// its fields carry personal data at all (tracker T-0094).
+//
+// It is jsonSignal's shape rather than the scalar validators' ratio, for
+// jsonSignal's reason. A record is a small document with heterogeneous fields,
+// so scoring the fields as if they were the column's values dilutes the
+// evidence -- a (street, city, email) record is one third addresses and one
+// third email, both under the weak threshold, and the column would be decided
+// `none` and copied with the address in it. Any field of any sample that
+// validates is a hit, because the answer here is not which masker to use: no
+// masker can write a record, so what follows a hit is internal/plan's exit-12
+// refusal naming --skip-table and --unmask, and what follows no hit is a copy
+// whose reason says the fields were read.
+//
+// **Each sample is scored whole as well as field by field**, and either is a
+// hit. Splitting alone was a fail-open, because a record can hold personal data
+// that exists only as the concatenation of its fields: `(9,"Rue de
+// Rivoli",Paris)` is an address, and no field of it is one — AddressShape wants
+// a digit and two words in a single value, and the digit lives in its own
+// field. Scored field-wise that record was `none` and copied verbatim, under a
+// reason that said the fields had been read and none was personal data, which
+// is worse than a silence. The whole literal is what the address shape reads.
+//
+// The category is the first validator in precedence order that matched, which
+// is what the refusal names. A composite the splitter cannot read is scored as
+// one opaque value, which is what happened to every composite before this
+// existed.
+func compositeSignal(dict *textsig.Dict, values []string) *valueSignal {
+	fields := make([][]string, 0, len(values))
+	for _, v := range values {
+		// The raw sample first: precedence inside one record is the validator
+		// order, not the order the strings are listed in, because the loop
+		// below asks each validator about every string before moving on.
+		record := []string{v}
+		if f, ok := splitCompositeLiteral(v); ok {
+			record = append(record, f...)
+		}
+		fields = append(fields, record)
+	}
+	for _, v := range validators {
+		matched := 0
+		for _, record := range fields {
+			for _, f := range record {
+				if v.ok(dict, f) {
+					matched++
+					break
+				}
+			}
+		}
+		if matched > 0 {
+			return &valueSignal{cat: v.cat, phrase: v.phrase, matched: matched, total: len(values)}
+		}
+	}
+	return nil
+}
+
 // jsonSignal walks the sampled documents. ARCHITECTURE.md §4 masks a json or
 // jsonb column whole, so the question here is only whether the documents carry
 // personal data at a leaf — which is what raises the column above the type
@@ -516,6 +592,10 @@ func (st *state) decide(w *work, col pipeline.Column, ct columnType, values []st
 		w.d.Category = pipeline.CatDerivedText
 		w.d.Confidence = pipeline.ConfCertain
 		w.frags = append(w.frags, render("derived_text"))
+		return
+	}
+	if ct.Family == famComposite {
+		st.decideComposite(w, col, sig)
 		return
 	}
 	best := sig.strong
@@ -650,6 +730,62 @@ func (st *state) decide(w *work, col pipeline.Column, ct columnType, values []st
 			break
 		}
 		w.frags = append(w.frags, render("no_signal"))
+	}
+}
+
+// decideComposite is the fail-closed answer for a column of a composite type
+// (tracker T-0094, THREAT_MODEL.md T1).
+//
+// No category in the rule pack accepts a composite and none can: mask.TypeTag
+// has no tag for one, every generator emits a scalar, and there is no shape a
+// record could be masked into field-wise without a masker per field. Before
+// this branch a composite took the ordinary path, where a name hit on a type no
+// category accepts is recorded at `low` and copied and a value hit could decide
+// a category whose masker cannot be written -- so a composite carrying an
+// address was copied into the target verbatim under exit 0, and one the
+// validators did decide died at load.
+//
+// So the decision is only ever one of two. A hit -- from the name or from any
+// field of any sample -- is `possible`, which is above ARCHITECTURE.md §4's
+// mask threshold and is what internal/plan turns into an exit-12 refusal naming
+// the column, --skip-table and a reasoned --unmask (writeback.go). No hit is a
+// copy, and the reason says the fields were read and said nothing, so that a
+// green run over a composite is a claim somebody made rather than a silence --
+// and when there was nothing to read at all, it says that instead, because a
+// claim about a check that did not run is worse than no claim.
+//
+// `possible` and not `likely`: the confidence is a claim about how much is
+// known, and what is known is that something in the record looked personal.
+// Nothing downstream reads it above the threshold -- the refusal is on
+// Decision.Masked -- and the operator's escape is a flag either way.
+func (st *state) decideComposite(w *work, col pipeline.Column, sig signals) {
+	hit, hasName := st.pack.match(normaliseName(col.Name))
+	best := sig.strong
+	switch {
+	case best != nil:
+		w.d.Category = best.cat
+		w.d.Confidence = pipeline.ConfPossible
+		if hasName {
+			w.frags = append(w.frags, render("name_match", quoteIdent(hit.Name)))
+		}
+		w.frags = append(w.frags,
+			render("samples", best.matched, best.total, best.phrase),
+			render("composite_refused"))
+	case hasName:
+		w.d.Category = hit.Category
+		w.d.Confidence = pipeline.ConfPossible
+		w.frags = append(w.frags,
+			render("name_match", quoteIdent(hit.Name)),
+			render("composite_refused"))
+	case sig.total == 0:
+		// No name, and nothing to read: the copy is decided on the name alone
+		// and the reason has to say so. Claiming the fields were read here
+		// would be a claim about a check that did not run, on precisely the
+		// branch that copies -- and it is the common case, since a composite
+		// column in an empty table is exactly this.
+		w.frags = append(w.frags, render("composite_no_sample"))
+	default:
+		w.frags = append(w.frags, render("composite_no_signal"))
 	}
 }
 
@@ -812,6 +948,96 @@ func (st *state) raisable(w *work) bool {
 }
 
 // ---------- pass 4: FK propagation and shared column names ----------
+
+// keyChildren is the child-to-parent half of the key exemption, and it is
+// tracker T-0120's reconciliation.
+//
+// markNeverMasked scopes the exemption to a key column whose *own* signals
+// stayed below the mask threshold, so an integer or uuid FK child that reaches
+// `possible` on a name hit alone loses it while the primary key it references —
+// the same values, no name hit — keeps it. That is the one shape where the two
+// ends of one edge disagree and propagation cannot see it: the child is masked,
+// the parent is copied verbatim, the load adds the edge NOT VALID and
+// internal/verify/fk.go counts the orphans and fails the run at exit 8
+// (THREAT_MODEL.md T8). It protects nothing either — a FK child's values are a
+// subset of the parent key's by definition, and the parent shipped them in the
+// clear — so masking this end alone costs the join and buys no confidentiality.
+// ARCHITECTURE.md §4's own wording is the child's side here: the exemption is
+// for "surrogate keys (id bigint and the FK columns that reference them)", with
+// no condition on what the child column happens to be *called*.
+//
+// So a key-family child whose parent end is an exempt surrogate key takes the
+// exemption back, and says which column vouched for it. The direction §4 states
+// is untouched and still wins: a **masked** parent overrides the child, which is
+// why this runs before propagateKeys rather than after — a column with two
+// parents, one exempt and one masked, ends masked, and propagateKeys lifts and
+// blanks what this grants through the same keyFrag it sets.
+//
+// The gate on the parent is its own key fragment (keyFrag), not "the parent is
+// unmasked". A generated parent is also neverMask and is not a surrogate key:
+// its column is recomputed by the target from columns that may themselves be
+// masked, so its values are not evidence that the child's are copied anywhere.
+// The edge has to be a checked one for the same reason (see the sweep below).
+//
+// It sweeps for the same reason foreignKeys does: a chain of exempt keys is one
+// lift per edge and Schema.FKs is in no order relative to the chain.
+func (st *state) keyChildren() {
+	for round := 0; round <= len(st.schema.FKs); round++ {
+		if !st.reconcileKeyChildren() {
+			return
+		}
+	}
+}
+
+// reconcileKeyChildren is one sweep. It reports whether it changed anything.
+func (st *state) reconcileKeyChildren() bool {
+	changed := false
+	for _, fk := range st.schema.FKs {
+		// The whole argument is "the child's values are a subset of the
+		// parent's", and only Postgres saying so makes that true. An
+		// unvalidated constraint is a hint over rows it never checked
+		// (pipeline.ForeignKey.Validated) and a virtual one is a line in the
+		// yml, so a child of either can hold a value the parent does not, and
+		// internal/plan does not even follow it to fetch the parent row
+		// (followsAsParent). Propagation runs over every edge because it only
+		// ever masks more; this pass masks less, so it takes the narrow set.
+		if !fk.Validated || fk.Virtual {
+			continue
+		}
+		for i, childName := range fk.ChildCols {
+			if i >= len(fk.ParentCols) {
+				break
+			}
+			parent := ref.ColumnRef{Table: fk.Parent, Column: fk.ParentCols[i]}
+			child := ref.ColumnRef{Table: fk.Child, Column: childName}
+			pw, cw := st.dec[parent], st.dec[child]
+			if pw == nil || cw == nil {
+				continue
+			}
+			// keyFrag is written on the surrogate-key and fk-column paths of
+			// markNeverMasked and on no other, so it is the exact question
+			// "is the referenced column an exempt key".
+			if !pw.neverMask || pw.keyFrag < 0 {
+				continue
+			}
+			// A child that is already exempt has nothing to take back, and one
+			// below the threshold would not have been masked anyway.
+			if cw.neverMask || cw.d.Confidence < pipeline.ConfPossible {
+				continue
+			}
+			// The same type gate markNeverMasked applies: a text key is not a
+			// surrogate key, and this may not exempt one.
+			if !isKeyFamily(cw.family) || cw.array {
+				continue
+			}
+			cw.neverMask = true
+			cw.keyFrag = len(cw.frags)
+			cw.frags = append(cw.frags, render("key_child_exempt", quoteColumn(parent)))
+			changed = true
+		}
+	}
+	return changed
+}
 
 // foreignKeys is ARCHITECTURE.md §4's propagation sentence: "a masked PK or
 // unique column's decision overrides the decision on every column referencing
@@ -1212,13 +1438,21 @@ func (st *state) raiseCompositeUnique() {
 	}
 }
 
+// rawSamples flattens a column's samples without the array-literal split
+// scalarsOf performs for the validators (tracker T-0103). The two callers below
+// ask about the *value* in the column -- does it repeat, was there one at all --
+// and a unique index is over the whole array, not over the strings inside it.
+func (st *state) rawSamples(c ref.ColumnRef) []string {
+	return st.samples(c, columnType{})
+}
+
 // tableWasSampled reports that at least one column of the table produced a
 // sample value. It is how raiseCompositeUnique tells "this column is NULL in
 // every row" from "nothing about this table could be read at all", which look
 // the same from one column and mean opposite things.
 func (st *state) tableWasSampled(t pipeline.Table) bool {
 	for _, col := range t.Columns {
-		if len(st.samples(ref.ColumnRef{Table: t.Ref, Column: col.Name})) > 0 {
+		if len(st.rawSamples(ref.ColumnRef{Table: t.Ref, Column: col.Name})) > 0 {
 			return true
 		}
 	}
@@ -1246,7 +1480,7 @@ func nullsAreDistinct(idx pipeline.Index) bool {
 // requires `sampled` there. Returning one boolean made the second case read as
 // the first, which is why this returns both.
 func (st *state) sampleDistinct(c ref.ColumnRef) (distinct, sampled bool) {
-	values := st.samples(c)
+	values := st.rawSamples(c)
 	seen := make(map[string]bool, len(values))
 	for _, v := range values {
 		if seen[v] {

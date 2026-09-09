@@ -48,6 +48,50 @@ const minSamples = 3
 
 // ---------- turning a sampled value into strings ----------
 
+// scalarsOf reduces one sampled value to the strings the validators run over,
+// for a column of this type.
+//
+// The array branch is tracker T-0103. scalars() below flattens an array only
+// when the driver handed back a slice, and pgx does that only for an array type
+// its map knows: the source pool runs in QueryExecModeExec and registers no
+// user types (T-0076), so a citext[] of addresses arrives as the single string
+// "{a@b.test,c@d.test}", no validator matches it, and the column is decided
+// `none` and copied verbatim (THREAT_MODEL.md T1). When the column's type says
+// array and the sample is one string, the string is read back as an array
+// literal and the validators see the addresses inside it.
+//
+// It is a fallback and not a replacement: a sample the splitter cannot read
+// falls through to scalars(), which treats it as one opaque value, which is the
+// behaviour before this change and never worse than it.
+func scalarsOf(ct columnType, v any) []string {
+	if ct.Array {
+		if s, ok := literalText(v); ok {
+			if elems, ok := splitArrayLiteral(s); ok {
+				out := make([]string, 0, len(elems))
+				for _, e := range elems {
+					out = append(out, scalars(e)...)
+				}
+				return out
+			}
+		}
+	}
+	return scalars(v)
+}
+
+// literalText is the sampled value as the server's text form, for the two
+// callers that read a literal back. A []byte is the same bytes: pgx hands an
+// unregistered type back as text, and whether that arrives as a string or as
+// raw bytes is a driver detail, not a decision about the column.
+func literalText(v any) (string, bool) {
+	switch t := v.(type) {
+	case string:
+		return t, true
+	case []byte:
+		return string(t), true
+	}
+	return "", false
+}
+
 // scalars reduces one sampled value to the strings the validators run over. An
 // array yields its elements, because ARCHITECTURE.md §4 classifies an array on
 // its element type; a NULL yields nothing at all, because the ratio is over the

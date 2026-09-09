@@ -52,7 +52,7 @@ func (p *run) checkWriteBack() error {
 		if !p.inScope[t.Ref] {
 			continue
 		}
-		for _, col := range t.Columns {
+		for ci, col := range t.Columns {
 			d, ok := p.cls.Decisions[ref.ColumnRef{Table: t.Ref, Column: col.Name}]
 			if !ok || !d.Masked {
 				continue
@@ -65,6 +65,62 @@ func (p *run) checkWriteBack() error {
 				// cannot produce one; nothing here should invent a second
 				// spelling for it.
 				continue
+			}
+			if base, ok := p.compositeType(col); ok {
+				// A composite is the one type this check refuses on the type
+				// alone (tracker T-0094, THREAT_MODEL.md T1). Everything else
+				// it declines to judge is a type mask has no tag for and might
+				// still load -- an ltree, a PostGIS geometry -- but a record
+				// can hold no value any generator emits, and internal/classify
+				// only reaches `possible` on one when a name or a field of a
+				// sample said personal data. Before this, such a column was
+				// copied verbatim under exit 0 with the personal data inside
+				// it, or was masked as a scalar and died at load with the rows
+				// already moving. The refusal is here, before a key is fetched,
+				// and it prints the two escapes an operator has: drop the
+				// table, or say in writing that the record is not personal.
+				r := refuse(CodeUnwritable, exitPlan, t.Ref,
+					fmt.Sprintf("%s.%s is masked as %s and its type %s is a composite, which no masker can write into",
+						t.Ref, col.Name, d.Category, base),
+					event.Args{
+						event.ArgTable:  t.Ref.String(),
+						event.ArgColumn: col.Name,
+						event.ArgReason: "the type " + base + " is a composite and no masker can write a record: " +
+							"--skip-table " + t.Ref.String() + ", or --unmask " + t.Ref.String() + "." + col.Name + "=REASON",
+					})
+				r.Column = col.Name
+				return r
+			}
+			if arrayArrivesAsLiteral(t, ci, col) {
+				// The same shape as the composite above, and here until the
+				// transform half of T-0103 lands (T-0118). internal/transform
+				// masks an array element-wise only when the driver handed the
+				// value back as a slice, and pgx does that only for an array
+				// type its map knows: the source pool registers no user types
+				// (T-0076), so a citext[] arrives as the single string
+				// "{a@b.test,c@d.test}", is masked as one scalar, and CopyFrom
+				// dies with "cannot find encode plan" at exit 7 with rows
+				// already moving and the earlier tables committed.
+				//
+				// internal/classify now reads inside such a literal, so the
+				// column is decided rather than copied (which is why this can
+				// be reached at all); the refusal is what keeps that from being
+				// a half-loaded target. It asks the samples rather than the
+				// type, because the samples are the only place the driver's
+				// answer is recorded: a text[] comes back as a slice and is
+				// masked element-wise as it always was.
+				r := refuse(CodeUnwritable, exitPlan, t.Ref,
+					fmt.Sprintf("%s.%s is masked as %s and its type %s is an array no masker can write element-wise yet",
+						t.Ref, col.Name, d.Category, col.TypeName),
+					event.Args{
+						event.ArgTable:  t.Ref.String(),
+						event.ArgColumn: col.Name,
+						event.ArgReason: "the type " + col.TypeName + " arrives from the source as one text literal and " +
+							"cannot be masked element-wise yet: --skip-table " + t.Ref.String() +
+							", or --unmask " + t.Ref.String() + "." + col.Name + "=REASON",
+					})
+				r.Column = col.Name
+				return r
 			}
 			c, judged := p.constraintsOf(col)
 			if !judged || mask.Writable(mask.Category(d.Category), d.Masker, c) {
@@ -100,12 +156,15 @@ func (p *run) checkWriteBack() error {
 // The second return is false for a column this check does not judge. Two cases
 // reach it, and both are deliberately not refusals:
 //
-//   - An enum, or any type mask has no family for — a composite, an extension
-//     type, a domain whose base introspect could not render. Every generator
-//     answers a labelled column with one of its labels, so an enum is writable
-//     under any category; an unknown type is one nothing here knows enough
-//     about to refuse, and refusing on ignorance would turn a working run into
-//     a plan refusal.
+//   - An enum, or any type mask has no family for — an extension type, a
+//     domain whose base introspect could not render. Every generator answers a
+//     labelled column with one of its labels, so an enum is writable under any
+//     category; an unknown type is one nothing here knows enough about to
+//     refuse, and refusing on ignorance would turn a working run into a plan
+//     refusal. A **composite** used to be in this list and is not any more: it
+//     is refused by type above (compositeType, T-0094), because it is the one
+//     case where the ignorance is not real — a record can hold nothing any
+//     generator emits.
 //   - An array whose element type is unknown, for the same reason. An array is
 //     masked element-wise under its element type (ARCHITECTURE.md §5), so the
 //     element is what the tag is taken from.
@@ -132,6 +191,69 @@ func (p *run) constraintsOf(col pipeline.Column) (mask.Constraints, bool) {
 		Checks:   col.Checks,
 		Nullable: col.Nullable,
 	}, true
+}
+
+// compositeType reports the composite type a column is declared over, after an
+// array suffix and a domain have been resolved, and whether it is one at all.
+// Schema.Composites is the catalog's own list of typtype 'c' with relkind 'c'
+// (internal/introspect/sql.go), so a view's row type is not in it.
+//
+// An array of a composite is a composite for this purpose: ARCHITECTURE.md §5
+// masks an array element-wise under its element type, and the element is the
+// record nothing can write.
+func (p *run) compositeType(col pipeline.Column) (string, bool) {
+	name := strings.TrimSpace(col.TypeName)
+	for strings.HasSuffix(name, "[]") {
+		name = strings.TrimSuffix(name, "[]")
+	}
+	if col.Domain != "" {
+		if base, ok := p.domainBase(col.Domain); ok {
+			name = base
+			for strings.HasSuffix(name, "[]") {
+				name = strings.TrimSuffix(name, "[]")
+			}
+		}
+	}
+	name = mask.UnquoteType(mask.StripTypmod(name))
+	bare := mask.BareTypeName(name)
+	for _, c := range p.schema.Composites {
+		if mask.UnquoteType(c.Name) == name || mask.BareTypeName(c.Name) == bare {
+			return c.Name, true
+		}
+	}
+	return "", false
+}
+
+// arrayArrivesAsLiteral reports that this array column's sampled values reached
+// us as the server's own text form rather than as a slice — which is what pgx
+// does for an array whose element type its map does not know, and the one thing
+// that tells a `citext[]` from a `text[]` here (tracker T-0118).
+//
+// It is deliberately asked of the samples and not of the type: `mask.TypeTag`
+// knows citext, so the type says nothing about whether the driver can decode
+// an array of it, and a list of the arrays pgx registers would be a fourth copy
+// of a type table that T-0054 spent a task removing. A column nothing was
+// sampled from is not refused: there is no row to load either.
+func arrayArrivesAsLiteral(t *pipeline.Table, idx int, col pipeline.Column) bool {
+	if !strings.HasSuffix(strings.TrimSpace(col.TypeName), "[]") {
+		return false
+	}
+	seen := false
+	for _, row := range t.Samples {
+		if idx >= len(row) || row[idx] == nil {
+			continue
+		}
+		switch row[idx].(type) {
+		case string, []byte:
+			seen = true
+		default:
+			// One decoded value is enough: the driver has a codec for this
+			// array and internal/transform's element-wise path is the one that
+			// runs.
+			return false
+		}
+	}
+	return seen
 }
 
 // domainBase returns the base type a domain is declared over, read out of the

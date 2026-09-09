@@ -43,6 +43,7 @@ const (
 	famTSVector  = "tsvector"
 	famXML       = "xml"
 	famEnum      = "enum"
+	famComposite = "composite"
 	famOther     = "other"
 )
 
@@ -163,8 +164,32 @@ func typeOf(schema *pipeline.Schema, col pipeline.Column) columnType {
 		ct.Family = famEnum
 		return ct
 	}
+	// A composite is told from every other type this package has no family for
+	// because internal/plan has to refuse a masked one and nothing else here can
+	// tell it from an ltree or a PostGIS geometry (tracker T-0094). Schema.Composites
+	// is the catalog's own list, read by internal/introspect from pg_type
+	// typtype 'c' with relkind 'c', so a view's row type is not in it.
+	if schema != nil && isComposite(schema, name) {
+		ct.Family = famComposite
+		return ct
+	}
 	ct.Family = famOther
 	return ct
+}
+
+// isComposite resolves a type name against Schema.Composites by both
+// spellings, for the reason isEnum does: format_type writes a type that is
+// visible in the search_path unqualified, and Schema.Composites is keyed
+// "nspname.typname".
+func isComposite(schema *pipeline.Schema, name string) bool {
+	want := mask.UnquoteType(name)
+	bare := mask.BareTypeName(name)
+	for _, c := range schema.Composites {
+		if mask.UnquoteType(c.Name) == want || mask.BareTypeName(c.Name) == bare {
+			return true
+		}
+	}
+	return false
 }
 
 // isEnum resolves a type name against Schema.Enums by both spellings.
