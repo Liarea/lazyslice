@@ -63,6 +63,12 @@ func corpus() []tcase {
 			Constraints{TypeTag: famUUID}},
 		{"credential", CatCredential, CredentialMasker, "$2y$10$abcdefghijklmnop",
 			Constraints{TypeTag: famVarchar, MaxLen: 60}},
+		// The shape an authentication schema is full of: a token column under a
+		// unique index, which the fixed literal above cannot carry at any row
+		// count (T-0098).
+		{"credential unique", CatCredential, MaskerCredentialUnique,
+			"e7f3c0a2-4b19-4d55-9f6c-1a2b3c4d5e6f",
+			Constraints{TypeTag: famVarchar, MaxLen: 255, Unique: true, Rows: 500}},
 		{"free text", CatFreeText, MaskerFreeText, "a long bio about a real person",
 			Constraints{TypeTag: famVarchar, MaxLen: 200}},
 		{"special enum", CatSpecial, MaskerSpecial, "married",

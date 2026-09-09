@@ -103,6 +103,8 @@ func TestWideGeneratorsClearTheUniqueThreshold(t *testing.T) {
 		{"email unique", MaskerEmail, Constraints{TypeTag: famText, Unique: true}},
 		{"ip_unique", MaskerIPUnique, Constraints{TypeTag: famInet}},
 		{"online_id", MaskerOnlineID, Constraints{TypeTag: famText}},
+		// 13 base32 symbols after the prefix are 65 bits (T-0098).
+		{"credential_unique", MaskerCredentialUnique, Constraints{TypeTag: famText}},
 	}
 	for _, tc := range cases {
 		m, _ := Get(tc.id)
@@ -128,6 +130,8 @@ func TestATooSmallColumnHasNoDomainAndRefuses(t *testing.T) {
 		{MaskerPhone, Constraints{TypeTag: famVarchar, MaxLen: 9}},
 		{MaskerGeo, Constraints{TypeTag: famVarchar, MaxLen: 3}},
 		{MaskerIPUnique, Constraints{TypeTag: famVarchar, MaxLen: 20}},
+		// len("lazyslice-invalid-") with no room for a single suffix symbol.
+		{MaskerCredentialUnique, Constraints{TypeTag: famVarchar, MaxLen: 18}},
 		{MaskerPersonDate, Constraints{TypeTag: famVarchar, MaxLen: 8}},
 	}
 	for _, tc := range cases {
@@ -362,6 +366,7 @@ func TestAClosedColumnOnlyEverGetsOneOfItsLabels(t *testing.T) {
 		{MaskerPhoneUnique, enum}, {MaskerNationalID, enum}, {MaskerFinancial, enum},
 		{MaskerNetworkID, enum}, {MaskerIPUnique, enum}, {MaskerPersonDate, enum},
 		{MaskerGeo, enum}, {MaskerSemiStruct, enum}, {MaskerSpecial, enum},
+		{MaskerCredentialUnique, enum},
 	}
 	for _, tc := range cases {
 		m, _ := Get(tc.id)

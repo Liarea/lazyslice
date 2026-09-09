@@ -128,6 +128,18 @@ was chosen and is recorded here rather than only in a comment.
 - **The classification fingerprint is length-prefixed in decimal.** The claim is
   ARCHITECTURE.md §5's — that `b.c` in schema `a` must not hash like `c` in
   schema `a.b` — with no integer narrowing in the encoder.
+- **`Refingerprint` is exported and `internal/core` calls it after the plan**
+  (T-0101). §5 hashes each column's category and its **masker**, and the masker
+  is not final when `Classify` returns: §5's unique-index rule has the *plan*
+  pick the widest registered generator, and `internal/plan/unique.go` writes
+  that pick back onto the decision. Computed here alone the fingerprint covered
+  the *default* masker, so a column that became unique between two runs changed
+  every masked value in it and changed no fingerprint, and §11.2's
+  `classification changed` line did not print. The pick cannot move into this
+  package — it needs the planned row count, which a pure classifier reading
+  samples does not have — so the fingerprint moves instead. `Classify` and
+  `Refingerprint` are one function over the decisions (`fingerprintOf`), so the
+  two cannot drift, and with no escalation the value is byte-identical.
 - **`internal/classify` imports `github.com/nyaruka/phonenumbers` directly.**
   ARCHITECTURE.md §13 lists it for "the `mask` module and classifier validator",
   and it is already required at the pinned version. The root `go.mod` still

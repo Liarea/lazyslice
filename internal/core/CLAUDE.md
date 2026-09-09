@@ -282,8 +282,9 @@ each one is a deviation a reviewer should see rather than discover.
 There are **six** refusal types, not five: `internal/load/ddl`'s is returned by
 `load.Load` unwrapped and needs its own case. Without it an operator whose schema
 has a column default calling one of the application's own functions — Mastodon's
-`timestamp_id`, GitLab's `gen_random_uuid_v7`, both real, both in
-`testdata/torture/` — was told "lazyslice failed for a reason it has no code
+`timestamp_id`, which `testdata/torture/mastodon` carries unedited, and GitLab's
+`gen_random_uuid_v7`, real upstream but dropped by that fixture's 43-table
+subset — was told "lazyslice failed for a reason it has no code
 for; run with --debug" and given exit 1 to branch on, with the correct code and
 the whole correct sentence printed *inside* the message
 (`testdata/regressions/002-function-default-refusal-uncoded.sql`).
@@ -294,3 +295,76 @@ that has a code is claimed. A new refusal type anywhere under `internal/` is a
 case here in the same change, and `docs/ERRORS.md` is where to check whether the
 code already exists — both of `ddl`'s did, with `stage: plan` and `exit: 13`,
 for a refusal that was reaching people as an internal error.
+
+## Decisions made during T-HARD-A (2026-09-08)
+
+- **The classification fingerprint is recomputed after the plan** (`refingerprint`,
+  run.go; `classify.Refingerprint`; T-0101). ARCHITECTURE.md §5 makes
+  `Classification.Fingerprint` a function of the rule-pack version and, per
+  column, its category and its **masker**, and §11.2 prints `classification
+  changed — masked values will differ` when a bound marker's recorded one
+  differs. But the masker is not final when `Classify` returns: §5's own
+  unique-index rule says the *plan* picks the widest registered generator for
+  the category, and `internal/plan/unique.go` writes that pick back onto the
+  decision — which `internal/transform` masks with and `internal/emit` records.
+  So a column that became unique between two runs (a new unique index, or a
+  `--take` past `d_required`) changed every masked value in it and changed no
+  fingerprint, and the one warning §11.2 has for that case did not print. The
+  pick cannot move into `internal/classify`, which has the samples and the
+  unique indexes but no row count and no database, so the fingerprint moved
+  instead: `execute` calls `refingerprint` immediately after `planStage` and
+  before `emitPlanOnly`, so a `--plan` writes the same value a writing run
+  would. It is the same structural reason `domain.go` writes `Domain` and
+  `SmallDomain` after `Classify` returns. **`r.classFP` is deliberately not
+  touched**: that is the review pin's value — the classifier's own verdicts,
+  which is what `--tui`'s reasons screen showed somebody — and it is compared
+  before the plan on both passes. With no escalation `Refingerprint` returns
+  what `Classify` computed, byte for byte
+  (`TestRefingerprintIsAnIdentityWhenThePlanChangedNothing`).
+
+  The defect was an **ordering** one, so the order is pinned at the call site
+  and not only in the function: `TestTheFingerprintIsRecomputedAfterThePlanAnd`
+  `BeforeItIsWritten` parses `run.go` and asserts `execute` calls `planStage`
+  before `refingerprint`, and `refingerprint` before `emitPlanOnly` and `move`.
+  It is structural for the same reason the review pin's wiring test is
+  (`TestTheReviewPinIsWiredIntoTheRunItGuards`, whose `receiverCalls` it
+  reuses): reaching `refingerprint` through `execute` needs two Postgres
+  servers, and the claim is about two statements' order. Without it, deleting
+  the call or moving it above `planStage` left every test in the repo green
+  while restoring the bug exactly.
+
+  A consequence worth knowing before reading a warning: because the value is
+  computed after the plan, it is a function of **plan inputs** too, not of the
+  classification alone. A different root, `--take`, `--depth` or `--skip-table`
+  changes the planned row count, which changes what `d_required` escalates,
+  which moves the fingerprint — so `classification changed — masked values will
+  differ` can print for a table whose rows are not in this target at all. That
+  is the conservative direction, but it is why the line fires without the rule
+  pack or the schema having moved. `internal/pipeline/classify.go`'s comment on
+  the field says the same.
+
+  **Owed:** ARCHITECTURE.md §2's comment on the field and §5's
+  determinism-scope paragraph both describe it as computed inside `Classify`;
+  tracker **T-0111**.
+- **§11.1's not-recreatable refusal is raised here, at plan** (`planStage`,
+  T-0097). §11.1 says exit 13 is raised "at plan — before the snapshot is used
+  for keys and before anything in the target is dropped", and it was raised by
+  `load.Load` as its first statement, because a stage package may not import
+  another stage package and the caller §11.1 describes is this one, which did
+  not exist when the loader landed. `planStage` now calls `ddl.Recreatable`
+  before `planRequest` and before `Plan`, so the refusal costs one introspect
+  and no key query. `load.Load` no longer checks: one refusal, raised once.
+  That makes it an **unchecked precondition of `Load`** — the caller must have
+  run `ddl.Recreatable` over the same `*pipeline.Schema`, and nothing in
+  `internal/load` enforces it; `load_integration_test.go` calls
+  `ddl.Recreatable` over its fixture, but as a fixture assertion, not a guard.
+  `internal/load/CLAUDE.md` records the consequence. `asStop`'s `*ddl.Refusal`
+  case is unchanged and now converts a refusal that arrives from the plan rather
+  than from the loader
+  (`testdata/regressions/002-function-default-refusal-uncoded.sql`). **One** of
+  the ten schemas in `testdata/torture/` reaches it as the fixtures stand —
+  Mastodon, unedited — which is what made the old ordering measurable: that
+  operator paid for a whole extract, holding the source snapshot throughout,
+  before being told the target could not be built. GitLab reaches the same
+  refusal upstream on two objects its 43-table subset removes, so its fixture
+  exits 0 (`docs/TORTURE.md`).

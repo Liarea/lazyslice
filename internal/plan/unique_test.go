@@ -75,14 +75,41 @@ func TestUniqueDomainPicksTheWiderMasker(t *testing.T) {
 	}
 }
 
-// TestUniqueDomainRefusesWhenNoMaskerFits is the second outcome, and it is the
-// one an operator reads. `credential`'s only masker is the fixed literal
-// `$lazyslice$invalid`, whose domain is 1, so no row count and no generator can
-// make the column unique — which is T-0098, and twenty of the forty-five
-// `--unmask` flags docs/TORTURE.md records.
-func TestUniqueDomainRefusesWhenNoMaskerFits(t *testing.T) {
+// TestUniqueCredentialColumnEscalates is T-0098's half of the first outcome, and
+// it is the one an authentication schema is made of. `credential` used to have
+// one masker — the fixed literal `$lazyslice$invalid`, domain 1 — so every
+// column under a unique index that classified as a credential was refused here
+// at every row count, and eighteen of the thirty-seven `--unmask` flags
+// internal/invariants/torture_catalogue_test.go carries were that (they are
+// tagged `(T-0098)`; stripping them and re-measuring docs/TORTURE.md's split is
+// tracker T-0112). `mask` now registers `credential_unique`
+// as the category's alternate and this check reaches it.
+func TestUniqueCredentialColumnEscalates(t *testing.T) {
 	t.Parallel()
 	p, tbl := uniqueRun(pipeline.CatCredential, mask.CredentialMasker, "text", -1, 200)
+
+	if err := p.checkUniqueDomain(); err != nil {
+		t.Fatalf("checkUniqueDomain still refuses a unique credential column: %v", err)
+	}
+	d := p.cls.Decisions[ref.ColumnRef{Table: tbl, Column: "handle"}]
+	if d.Masker != mask.MaskerCredentialUnique {
+		t.Errorf("Masker = %q, want %q", d.Masker, mask.MaskerCredentialUnique)
+	}
+	if d.Category != pipeline.CatCredential {
+		t.Errorf("Category = %q; the check chooses within the category and never changes it", d.Category)
+	}
+}
+
+// TestUniqueDomainRefusesWhenNoMaskerFits is the second outcome, and it is the
+// one an operator reads. A `varchar(18)` credential column has no room for
+// `credential_unique`'s prefix and a single suffix symbol, so the widest
+// generator the category has left is the fixed literal, whose domain is 1: no
+// row count and no generator makes that column unique, and the refusal has to
+// say so rather than print a `--take` that would not help.
+func TestUniqueDomainRefusesWhenNoMaskerFits(t *testing.T) {
+	t.Parallel()
+	// typmod 22 is varchar(18): len("lazyslice-invalid-") with nothing after it.
+	p, tbl := uniqueRun(pipeline.CatCredential, mask.CredentialMasker, "character varying(18)", 22, 200)
 
 	err := p.checkUniqueDomain()
 	var refusal *Refusal

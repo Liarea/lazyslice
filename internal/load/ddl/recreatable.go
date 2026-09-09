@@ -16,14 +16,19 @@ import (
 // the snapshot is used for keys and before anything in the target is dropped —
 // so their row in internal/event/catalogue.yml carries stage plan.
 //
-// That is where the check belongs and not yet where it runs. internal/plan calls
-// its own checkRecreatable, which covers ForeignKey.NotRecreatable and nothing
-// else, and stage packages do not import each other, so the caller section 11.1
-// describes is core and core does not exist. The only caller today is load.Load,
-// which calls Recreatable as its first statement, before the marker row and
-// before the first drop: the target is not destroyed for a schema that cannot be
-// recreated, but the refusal arrives after the snapshot has been used for keys.
-// internal/load/CLAUDE.md records the wiring as owed.
+// That is where it runs, since T-0097: internal/core's planStage calls
+// Recreatable before it builds the plan request and before Plan issues its first
+// key query, so the refusal costs one introspect and nothing else.
+// internal/plan's own checkRecreatable is a different check on the same
+// sentence, covering ForeignKey.NotRecreatable. Until T-0097 the only caller was
+// load.Load, as its first statement -- before the marker row and before the
+// first drop, so the target was never destroyed for a schema that cannot be
+// recreated, but the refusal arrived after the snapshot had been used for every
+// key and every row had been extracted. One of the ten schemas in
+// testdata/torture/ reaches it as the fixture stands (mastodon, unedited);
+// gitlab reaches it upstream on two objects its 43-table subset removes, which
+// docs/TORTURE.md and testdata/torture/gitlab/README.md both record. That is
+// what made the cost measurable.
 //
 // There is deliberately no flag that drops the offending default and carries on,
 // because the application's first INSERT is the point of the tool. The remedy is

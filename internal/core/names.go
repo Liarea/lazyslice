@@ -111,8 +111,9 @@ func asStop(err error) error {
 	}
 
 	// internal/load/ddl's refusal is a sixth type and it arrives unwrapped:
-	// load.Load calls ddl.Recreatable as its first statement and returns what it
-	// gets. Without this case it fell through to the final wrap below and an
+	// run.go's planStage calls ddl.Recreatable and returns what it gets (before
+	// T-0097 it was load.Load that did, as its first statement). Without this
+	// case it fell through to the final wrap below and an
 	// operator whose Mastodon or GitLab schema has a column default calling one
 	// of the application's own functions -- ARCHITECTURE.md §11.1's exit 13,
 	// with the table, the column and the dependency all named inside the
@@ -121,9 +122,9 @@ func asStop(err error) error {
 	// (testdata/regressions/002-function-default-refusal-uncoded.sql).
 	//
 	// The refusal itself is unchanged and stays: §11.1 has no flag that drops
-	// the default and carries on. What is owed, and is not this, is where it is
-	// raised -- §11.1 says at plan, and it still happens inside load.Load
-	// (internal/load/CLAUDE.md, T-0097).
+	// the default and carries on. Where it is raised is no longer owed either:
+	// §11.1 says at plan and T-0097 moved it there, so this case now converts a
+	// refusal that arrives from planStage rather than from the loader.
 	var ddlRefusal *ddl.Refusal
 	if errors.As(err, &ddlRefusal) {
 		return &Stop{

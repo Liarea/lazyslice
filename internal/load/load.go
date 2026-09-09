@@ -109,20 +109,36 @@ func (l loader) Load(
 		return nil, errors.New("load: no schema")
 	}
 
-	// ARCHITECTURE.md section 11.1 raises the not-recreatable refusal (exit 13)
-	// at plan, before the snapshot is used for keys and before anything in the
-	// target is dropped. Nothing calls ddl.Recreatable there yet: internal/plan
-	// checks ForeignKey.NotRecreatable and nothing else, and stage packages do
-	// not import each other, so the caller is core and core does not exist. The
-	// check is made here as well — first, before the marker row and before the
-	// first drop — so that a source whose default calls a function v1 does not
-	// recreate is refused with exit 13 rather than destroying every table in the
-	// target and then failing at CREATE TABLE with 42883 under exit 7. Here is
-	// the backstop and not the place it belongs: wiring it into plan is owed,
-	// and internal/load/CLAUDE.md records it.
-	if err := ddl.Recreatable(schema); err != nil {
-		return nil, err
-	}
+	// ARCHITECTURE.md section 11.1's not-recreatable refusal is *not* raised
+	// here. It is raised at plan, which is where section 11.1 says it is raised
+	// -- "before the snapshot is used for keys and before anything in the target
+	// is dropped" -- by internal/core's planStage, which calls the same
+	// ddl.Recreatable this used to call as its first statement (T-0097). The
+	// check was here because a stage package may not import another stage
+	// package and the caller section 11.1 describes is core, which did not exist
+	// when this loader landed; it does now. From inside Load the refusal arrived
+	// after the snapshot had been used for every key and every row had been
+	// extracted, which is what mastodon -- one of the ten schemas in
+	// testdata/torture/, and the only one that reaches the refusal as the
+	// fixtures stand -- paid. (GitLab reaches it upstream on two objects its
+	// 43-table subset removes; docs/TORTURE.md records both halves.)
+	//
+	// Nothing replaces it here, deliberately. A second copy would be one refusal
+	// two stages could raise, and the exit-13 message names the table, the
+	// column and the dependency in one place.
+	//
+	// State the consequence plainly, because it is a real one: **Load now has an
+	// unchecked precondition.** Its caller must have run ddl.Recreatable over
+	// the same *pipeline.Schema it passes here, and nothing in this package
+	// enforces that. core.Run does make the call (planStage), and
+	// load_integration_test.go calls ddl.Recreatable over its fixture before
+	// building a plan -- but as a fixture assertion, not as a guard on Load, so
+	// it documents the precondition without enforcing it either. A future direct
+	// caller that skips the check drops every table in the target and then fails
+	// at CREATE TABLE with 42883 under exit 7, which is the failure the check
+	// used to prevent from here. If a second in-tree caller of Load ever
+	// appears, the check belongs at that call site too, or on a constructor that
+	// cannot be built without it.
 
 	// Section 11.2's schema_fingerprint, computed here rather than accepted from
 	// the caller: the gate recomputes it over the target's catalog, and the two

@@ -30,11 +30,18 @@ const (
 	MaskerNetworkID   ID = "network_id"
 	MaskerIPUnique    ID = "ip_unique"
 	MaskerOnlineID    ID = "online_id"
-	MaskerFreeText    ID = "free_text"
-	MaskerSpecial     ID = "special_category"
-	MaskerNull        ID = "null"
-	MaskerSemiStruct  ID = "semi_structured"
-	MaskerDerivedText ID = "derived_text"
+	// MaskerCredentialUnique is the alternate for a credential column under a
+	// unique index; the fixed literal above stays the category's default
+	// (gen_credential.go, T-0098).
+	//nolint:gosec // G101: an id in the registry, not a credential. The values
+	// this generator emits open with "lazyslice-invalid-" and are the opposite
+	// of a secret (gen_credential.go).
+	MaskerCredentialUnique ID = "credential_unique"
+	MaskerFreeText         ID = "free_text"
+	MaskerSpecial          ID = "special_category"
+	MaskerNull             ID = "null"
+	MaskerSemiStruct       ID = "semi_structured"
+	MaskerDerivedText      ID = "derived_text"
 )
 
 func init() {
@@ -51,6 +58,7 @@ func init() {
 	Register(MaskerIPUnique, CatNetworkID, ipUniqueMasker{})
 	Register(MaskerOnlineID, CatOnlineID, onlineIDMasker{})
 	Register(CredentialMasker, CatCredential, fixedMasker{literal: CredentialLiteral})
+	Register(MaskerCredentialUnique, CatCredential, credentialUniqueMasker{})
 	Register(MaskerFreeText, CatFreeText, freeTextMasker{})
 	Register(MaskerSpecial, CatSpecial, specialCategoryMasker{})
 	Register(MaskerNull, CatBinary, nullMasker{})

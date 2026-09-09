@@ -104,6 +104,20 @@ type Classification struct {
 	// Fingerprint is sha256 over (rule-pack version, and per column: category,
 	// masker)[:16]. A change is printed as "classification changed - masked
 	// values will differ", because the mapping depends on the category.
+	//
+	// Classify computes it, but it is not final when Classify returns: the value
+	// that reaches the yml is recomputed *after the plan*, by internal/core's
+	// refingerprint, because §5's unique-index rule lets the plan overwrite
+	// Decision.Masker and internal/transform masks with what the plan left
+	// (T-0101). So this covers the classification plus the plan's unique-index
+	// picks, and it is a function of plan inputs too, not of the classification
+	// alone: --take, --depth, --skip-table or a different root change the
+	// planned row count, which changes what d_required escalates, which moves
+	// this value. A table that is SchemaOnly in one run and selected in another
+	// can therefore print "classification changed - masked values will differ"
+	// for rows that are not in the target at all. That is the conservative
+	// direction -- the warning is about values that may differ -- but it is the
+	// reason the line can fire without the rule pack or the schema moving.
 	Fingerprint string
 }
 

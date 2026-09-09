@@ -68,7 +68,11 @@ Domain(c Constraints) int64
   an arbitrary string, which would fail the load with `22P02`. libphonenumber
   validity is preserved except under `phone_unique`, which says so.
 - **Credentials become the fixed unusable value `$lazyslice$invalid`**, never
-  a plausible-looking one.
+  a plausible-looking one. The one exception is a credential column *under a
+  unique index*, which escalates to `credential_unique` and gets
+  `lazyslice-invalid-` followed by thirteen base32 symbols of `h` — still not a
+  credential any application would accept, still announcing the tool that wrote
+  it, but wide enough to carry `d_required` (`gen_credential.go`, T-0098).
 - **Nothing is loaded at runtime** (ADR-006): no `.so`, no subprocess, no
   expression language, no `--masker-exec`, no file path or plugin accepted as
   a masker. Extension is a pull request to this module or a build calling
@@ -283,6 +287,35 @@ next change to this module argues with a decision rather than rediscovering it.
   cannot print key material (THREAT_MODEL.md A4). `ParseKey` reads 64 hex
   characters, the form `./lazyslice.secret` and `$LAZYSLICE_SECRET` carry, and
   its error never quotes the input.
+- **A unique credential column escalates rather than being refused**
+  (`gen_credential.go`, T-0098). `CatCredential` shipped with only the fixed
+  literal, whose `Domain()` is 1, so every column under a unique index that
+  classified as a credential was refused at plan with exit 12 at *every* row
+  count — `MaxRows(1)` is zero, so the refusal could not even name a `--take`
+  that would work, and the operator's only escapes were `--unmask`, which copies
+  the credential into the target verbatim, and `mapping_file:`. Of the
+  thirty-seven `--unmask` flags the ten schemas carry in
+  `internal/invariants/torture_catalogue_test.go`, **eighteen** are tagged
+  `(T-0098)` and are that one defect — six in supabase-auth, eight in gitlab,
+  two in mastodon, one each in calcom and discourse.
+  `credential_unique` is the alternate, registered after the
+  literal so `Pick` reaches it only for a unique column, and it is *not* a
+  plausible token: the first eighteen characters are the constant
+  `lazyslice-invalid-` and only the suffix varies. Thirteen base32 symbols are
+  65 bits, which clears the 2⁶⁴ §5 asks of a generator a unique column escalates
+  to; a narrower column shortens the suffix and `Domain()` shrinks with it, and
+  a column with no room for the prefix and one symbol has `Domain() == 0` and
+  returns `ErrNoRoom` like every other generator. Nothing is truncated.
+  **`docs/TORTURE.md`'s counts are stale until somebody re-runs `make torture`**
+  — the eighteen flags, the thirty-seven/seven/one split, the per-schema table
+  and the flags-by-kind assertion in `internal/invariants/torture_test.go` all
+  quote a number this change moves, and none of those files was in this task's
+  paths: tracker **T-0112**. Two consequences hold until it lands, and both are
+  live: the eighteen flags are still in the catalogue, so `make torture` still
+  copies eighteen credential columns into the target in clear; and because
+  every unique credential column in the ten schemas is opted out,
+  `credential_unique` has **no end-to-end coverage** on any real schema — the
+  tests in this package are all of it.
 - **`Register(id, category, masker)`**, and order within a category is
   meaningful: the first registration is the category's default and the rest are
   the alternates `Pick` considers for a unique column. `Get` understands the
