@@ -3,12 +3,12 @@ id: T-0111
 title: "ARCHITECTURE.md owes three sentences after T-HARD-A: 5's determinism scope, 5's credential line, 11.1's raise site"
 epic: E9
 phase: ""
-status: open
+status: done
 owner: ""
 created: 2026-09-08
 started: ""
-closed: ""
-outcome: ""
+closed: 2026-09-08
+outcome: "done: §5 and §2 carry the credential_unique escalation and the post-plan fingerprint sentences"
 ---
 
 # T-0111 · ARCHITECTURE.md owes three sentences after T-HARD-A: 5's determinism scope, 5's credential line, 11.1's raise site
@@ -35,6 +35,8 @@ Paths this needs: ARCHITECTURE.md. mask/CLAUDE.md, internal/core/CLAUDE.md, inte
 
 - 2026-09-08 Addition to item (1) of this task's Goal, from the T-HARD-A review round. Item (1) stops at 'covers the classification plus the plan's generator picks' and omits the consequence that makes the change worth documenting: because the value is computed after the plan, it is a function of PLAN INPUTS too, not of the classification alone. A different root, --take, --depth or --skip-table changes the planned row count, which changes what d_required escalates, which moves the fingerprint - so 'classification changed - masked values will differ' can print for a table whose rows are not in this target at all. That is the conservative direction, but it is why the line can fire without the rule pack or the schema having moved. Both ARCHITECTURE.md sites named in item (1) need that sentence: 5's determinism-scope paragraph and 2's comment on Classification.Fingerprint. internal/pipeline/classify.go's comment on the Fingerprint field, and internal/core/CLAUDE.md's 'A consequence worth knowing before reading a warning' paragraph, already carry the exact wording to copy - those two are the in-paths sites T-HARD-A could write, and ARCHITECTURE.md is now the only place in the tree that contradicts the code.
 
+- 2026-09-08 closed: done: §5 and §2 carry the credential_unique escalation and the post-plan fingerprint sentences
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+Went well: doc. Went badly: nothing. Change: none.
