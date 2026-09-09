@@ -483,9 +483,8 @@ for the privilege.
   **`writer.RegisterTypes(ctx, *pipeline.Schema)` is the entry point, and the
   only one** (`pipeline.Writer`'s fourth method since T-0093, `pipeline.TypeRegistrar`
   before that; `internal/load` holds a `Writer` and never a `Target`).
-  ARCHITECTURE.md §2 still prints the three methods `Writer` had before T-0093;
-  that edit is owed as **T-0123**, so read §2's block as three-plus-this-one
-  until it lands. It takes the source's enum, domain and composite names out
+  ARCHITECTURE.md §2 prints all four methods (reconciled 2026-09-09). It takes
+  the source's enum, domain and composite names out
   of the schema `internal/introspect` read; the loader calls it between §11.1
   item 3 and the first `CopyFrom`, which is the only moment it can be called —
   before it the target has none of those types, and after the copy is too late.
