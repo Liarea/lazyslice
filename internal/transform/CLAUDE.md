@@ -194,32 +194,98 @@ Every leaf entry goes through one function, `addLeaf`, so the table above has
 one implementation and not five call sites. Changing a row of it changes a
 contract another package is written against: change both in one commit.
 
-**An array whose value arrives as a text literal is not masked element-wise
-yet — T-0118.** `maskArray` fires on a `[]any`, which is what pgx hands back for
-an array type its map knows. The source pool registers no user types (T-0076),
-so an array of an *extension* type — a `citext[]` — arrives as the single string
-`{a@b.test,c@d.test}`, falls through to the scalar path, is masked as one
-string, and `CopyFrom` then fails with "cannot find encode plan" at exit 7 with
-rows already moving. `internal/classify` reads inside such a literal now
-(T-0103, `literal.go` there), so a `citext[]` of real addresses is *decided*
-`email` and reaches this package, where it used to be decided `none` and copied
-silently. That is the fail-closed direction and it is not the end state: the
-owed change is to split the literal here, mask element-wise, and re-render it.
-**Until it lands the run does not reach this package at all for such a column**:
-`internal/plan`'s write-back check refuses it at exit 12 with `--skip-table` and
-`--unmask` (`arrayArrivesAsLiteral` in `internal/plan/writeback.go`), because
-landing the classify half alone would have turned a silent leak into a target
-half-loaded behind exit 7. That refusal is a stand-in for the masker below and
-goes when T-0118 does.
+**An array whose value arrives as a text literal is masked element-wise through
+its literal (`array.go`, T-0118).** `maskArray` fires on a `[]any`, which is what
+pgx hands back for an array type its map knows. The source pool registers no user
+types (T-0076), so an array of an *extension* type — a `citext[]` — arrives as
+the single string `{a@b.test,c@d.test}`. It used to fall through to the scalar
+path, be masked as one string, and `CopyFrom` then failed with "cannot find
+encode plan" at exit 7 with rows already moving. `internal/classify` reads inside
+such a literal (T-0103, `literal.go` there) so that a `citext[]` of real
+addresses is *decided* `email` rather than copied silently; `array.go` is the
+write half of that, and the two have to agree about what an element is.
+
+The rule is `maskArray`'s over a different carrier and not a second one: the
+literal is parsed, each non-NULL element goes through the same element masker
+with `h` computed per element, a NULL element stays NULL, an empty array stays
+empty, a NULL column stays NULL, the dimensions and the `[0:1]=` prefix are
+unchanged, and the result is written back in the form `array_in` reads. Every
+element enters the filter under the column's empty path, which is the row the
+residual table above already gives an array element.
+
+**The filter entries a literal array makes are not reachable by the residual
+scan today, and that is a hole this carrier opens (T-0129).** The entries are
+per element, but `internal/verify` reads the target column back as one Go
+`string` — the literal — and `residual.go`'s `arrayHits` falls back to
+`scalarHits` on the whole value when it is not a `[]any`. The whole literal
+canonicalises to something no per-element entry matches, so every entry is
+untestable and the scan reports a green pass. Do not read the row above as
+saying otherwise: for a column that arrives as a slice the second net of
+ARCHITECTURE.md §6 item 1 holds, and for one that arrives as a literal it is
+inert — which is the one control THREAT_MODEL.md T12 has against a masker here
+that fails open, over exactly the column class this file enables. Measured by
+writing one element through unmasked while still recording it: exit 0, residual
+check passed, and only the torture harness's external I2 grep saw the addresses
+in the target. `internal/verify` is where that is fixed and it was outside
+T-0118's paths, so it is filed rather than worked around.
+
+Two things separate it from `internal/classify`'s reader of the same grammar,
+and both come from this being a parser rather than a signal. It **keeps the
+nesting**, because a multidimensional literal is only valid when every inner
+array has the same length and a flattened one is a literal `array_in` rejects.
+And a literal it cannot read is a **refusal** (`transform.refused.masker`, exit
+7) rather than one opaque value: masking it whole is what handed `CopyFrom` a
+scalar for an `_citext` column, and copying it through is T12. classify may be
+liberal because a literal it cannot read costs a signal; nothing here may be,
+because what it produces is written into the target.
+
+Three things about this are owed outside this package and are filed rather than
+worked around. The first two are not independent of each other: **T-0127 is what
+makes T-0129's hole live**, so the order between them is part of each task.
+
+- **T-0127**: `arrayArrivesAsLiteral` in `internal/plan/writeback.go` still
+  refuses such a column at exit 12. It was written as a stand-in for the masker
+  above — landing the classify half alone would have turned a silent leak into a
+  target half-loaded behind exit 7 — and it now refuses a column this package can
+  mask. `internal/plan` was outside T-0118's paths, so it is still there, and it
+  is why `testdata/regressions/009` headers `exit 12 plan.refused.unwritable`
+  rather than `ok`. **Nothing here has end-to-end coverage until it lands**: the
+  CLI stops at plan before a row moves, so `array_test.go` is the whole of it.
+  Removing the refusal also moves the failure for an *unparseable* literal from
+  plan time to load time, mid-stream, which is the half-loaded target that
+  refusal exists to prevent — the task carries that constraint. It carries one
+  more, and it is the reason this bullet and T-0129's are one decision: while the
+  refusal stands, no *masked* array column arriving as a literal reaches the
+  target at all, so verify's blindness below costs nothing. The commit that
+  removes the refusal is the commit that first lets such a column load, with
+  ARCHITECTURE.md §6 item 1's second net inert over it — masked in the report,
+  unscanned in fact. So **T-0127 does not land before T-0129**, or it lands
+  together with verify refusing or flagging the column, and the task says so.
+- **T-0128**: the load flattens a multidimensional array that arrives as a
+  literal. pgx's `encodeCopyValue` falls back to scanning the literal as text and
+  re-encoding it in binary (`values.go`), which is what makes a `string` writable
+  into an `_citext` column at all — measured on postgres:16 — and that round trip
+  drops the nesting and the dimension prefix. This package preserves both; the
+  loss is entirely in the load, and it is there for an unmasked column too.
+- **T-0129**: `internal/verify` cannot see inside the literal, so the residual
+  entries this package makes for its elements are untestable — the paragraph
+  above. Harmless only for as long as T-0127 is unlanded, per that bullet: it is
+  the plan refusal, not verify, that keeps such a column out of the target today.
+  Ordered ahead of T-0127 for that reason, not queued beside it.
+
 `testdata/regressions/005` keeps its `citext[]` values short and dull to steer
-around both halves and says so.
+around the classify half and says so; `testdata/regressions/009` is the same
+column with the addresses it really holds.
 
 **Test.** `go test ./internal/transform/...`: determinism across two runs
 under one key, difference across two keys, distinct values staying distinct
 under a unique column, every JSON leaf replaced with its kind and its key name
 intact, the log-shaped table collapsed with no per-leaf entries, an
 already-empty document recorded nowhere, a boolean leaf redrawn across 32 keys
-and recorded nowhere, arrays masked element-wise, `NULL` and `''` surviving,
+and recorded nowhere, arrays masked element-wise as a slice and as a literal,
+the array grammar read and written back over quoting, escaping, NULL elements,
+the empty array, nesting and the dimension prefix, a value in an array column
+that is not a literal refused, `NULL` and `''` surviving,
 every masked cell and leaf found in the filter afterwards, and a masker refusal
 carrying `transform.refused.masker` at exit 7 without quoting the value.
 `TestEveryJSONLeafIsReplaced` asserts nothing about a boolean leaf's value: it

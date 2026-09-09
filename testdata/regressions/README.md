@@ -60,6 +60,22 @@ original collision restated against the target instead of against an exit code.
 | `006-identity-sequence-renamed-table.sql` | metabase | `setval` named the source's sequence for an identity column whose table had been renamed, and died at `42P01` after every table had been copied |
 | `007-partial-unique-index-masked-column.sql` | supabase-auth | a masked column under a *partial* unique index collided when the index was recreated |
 | `008-name-hit-on-an-unaccepted-type-drops-the-type-signal.sql` | supabase-auth | **a leak**: a name hit the column's type does not accept removed the masking the type alone would have given, and a jsonb column of names, addresses and phone numbers was copied verbatim under exit 0 |
+| `009-citext-array-of-addresses-masked-as-one-string.sql` | plausible | **a leak, then a half-loaded target**: a `citext[]` of addresses arrives as one text literal, so the classifier saw one opaque value and copied it, and once it read inside the literal the transformer still masked it as one scalar and `CopyFrom` refused the result mid-load |
+
+009 is the one file here whose header asserts a refusal it wants gone. It says
+`expect: exit 12 plan.refused.unwritable`, because that is what the tree does:
+`arrayArrivesAsLiteral` in `internal/plan/writeback.go` was written as a stand-in
+for the element-wise masker T-0118 has now landed
+(`internal/transform/array.go`), and `internal/plan` was outside T-0118's paths,
+so the stand-in still refuses a column the pipeline can now mask. Tracker
+**T-0127** removes it and flips this file's header to `ok` in the same change —
+and only then does the harness reach the leak check, which is the half of 009
+that matters. A header saying `ok` before that lands would be a wish, not an
+assertion, and would leave `make torture` red at every commit in between. T-0127
+is itself ordered behind **T-0129**, and the file's own comment says why: this
+suite's leak check is an external grep over one fixture, while the product's
+residual scan is blind to a masked array carried as a literal, and removing the
+plan refusal is what first lets such a column reach a target.
 
 ## What each file asserts, beyond its exit code
 
