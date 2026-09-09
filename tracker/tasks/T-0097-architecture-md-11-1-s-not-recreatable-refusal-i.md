@@ -3,12 +3,12 @@ id: T-0097
 title: "ARCHITECTURE.md 11.1's not-recreatable refusal is still raised inside load.Load, not at plan"
 epic: E5
 phase: 5
-status: open
+status: done
 owner: ""
 created: 2026-09-08
 started: ""
-closed: ""
-outcome: ""
+closed: 2026-09-08
+outcome: "done: in T-HARD-A (ecc42ae)"
 ---
 
 # T-0097 · ARCHITECTURE.md 11.1's not-recreatable refusal is still raised inside load.Load, not at plan
@@ -27,6 +27,8 @@ outcome: ""
 
 - 2026-09-08 moved to E5 phase 5
 
+- 2026-09-08 closed: done: in T-HARD-A (ecc42ae)
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+Went well: landed. Went badly: nothing. Change: none.
