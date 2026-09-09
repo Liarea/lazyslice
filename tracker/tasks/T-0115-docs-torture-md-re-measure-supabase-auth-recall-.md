@@ -1,8 +1,8 @@
 ---
 id: T-0115
 title: "docs/TORTURE.md: re-measure supabase-auth recall after T-0104's name rules"
-epic: E9
-phase: ""
+epic: E5
+phase: 5
 status: open
 owner: ""
 created: 2026-09-08
@@ -24,6 +24,8 @@ T-HARD-B widened internal/classify/rules.yml's credential and online_id patterns
 ## Log
 
 - 2026-09-08 created
+
+- 2026-09-09 moved to E5 phase 5
 
 ## Post-mortem
 

@@ -3,12 +3,12 @@ id: T-0120
 title: "internal/classify: a masked FK child whose parent is copied orphans the row"
 epic: E9
 phase: ""
-status: open
+status: done
 owner: ""
 created: 2026-09-08
 started: ""
-closed: ""
-outcome: ""
+closed: 2026-09-09
+outcome: "done: in T-HARD-B (78530ef)"
 ---
 
 # T-0120 · internal/classify: a masked FK child whose parent is copied orphans the row
@@ -25,6 +25,8 @@ T-HARD-B review. propagateKeys runs parent to child only, so a key-family child 
 
 - 2026-09-08 created
 
+- 2026-09-09 closed: done: in T-HARD-B (78530ef)
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+Went well: landed. Went badly: nothing. Change: none.

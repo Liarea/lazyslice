@@ -3,12 +3,12 @@ id: T-0100
 title: "textsig.LooksSecret classifies a URL as a credential"
 epic: E5
 phase: 5
-status: open
+status: done
 owner: ""
 created: 2026-09-08
 started: ""
-closed: ""
-outcome: ""
+closed: 2026-09-09
+outcome: "done: in T-HARD-B (78530ef)"
 ---
 
 # T-0100 · textsig.LooksSecret classifies a URL as a credential
@@ -27,6 +27,8 @@ LooksSecret matches any 16-to-512-character string with two character classes an
 
 - 2026-09-08 moved to E5 phase 5
 
+- 2026-09-09 closed: done: in T-HARD-B (78530ef)
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+Went well: landed. Went badly: nothing. Change: none.

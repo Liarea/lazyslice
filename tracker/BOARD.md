@@ -1,4 +1,4 @@
-# Board · 2026-09-08
+# Board · 2026-09-09
 
 | Epic | Phase | Open | In progress | Done | Cancelled | Blocked |
 |---|---|---|---|---|---|---|
@@ -7,9 +7,9 @@
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 1 | 0 | 9 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
-| E5 Hardening | 5 | 13 | 1 | 31 | 0 | 0 |
+| E5 Hardening | 5 | 15 | 1 | 36 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 16 | 0 | 11 | 1 | 0 |
+| E9 Later | later | 7 | 0 | 13 | 1 | 0 |
 
 ## Open and in progress
 
@@ -25,29 +25,29 @@
 - T-0089 [open] E5 · T-FAILUX: failure UX and error catalogue drift test (opus)
 - T-0090 [open] E5 · T-PERF: performance baseline and CI throughput guard (opus)
 - T-0093 [open] E5 · Move RegisterTypes onto pipeline.Writer so the load's type registration is compiler-checked ()
-- T-0094 [open] E5 · A composite column now loads, and no rule pack category accepts its type family: decide refuse or mask field-wise (THREAT_MODEL.md T1) ()
 - T-0096 [open] E5 · testdata/CLAUDE.md and testdata/README.md still say 'two fixtures and nothing else' ()
-- T-0100 [open] E5 · textsig.LooksSecret classifies a URL as a credential ()
 - T-0102 [open] E9 · A text column holding a JSON document is invisible to ARCHITECTURE.md 4's JSON rule ()
-- T-0103 [open] E5 · An array of an extension type is sampled as one opaque string, so the classifier never sees the values inside it ()
-- T-0104 [open] E5 · The credential and online_id name rules miss the spellings an auth schema actually uses ()
 - T-0105 [open] E5 · .golangci.yml does not lint the torture build tag ()
-- T-0109 [open] E5 · T-HARD-B: composite fail-closed, extension-type array splitter, auth-schema rules, URL not credential (T-0094, T-0103, T-0104, T-0100) (opus)
 - T-0110 [open] E5 · T-HARD-C: RegisterTypes on Writer, torture tag linted, testdata docs (T-0093, T-0105, T-0096) (sonnet)
 - T-0112 [open] E5 · Re-measure docs/TORTURE.md's flag counts and the catalogue's flags-by-kind after the credential_unique masker ()
-- T-0113 [open] E9 · Regressions 004 and 007 expect exit 12 and now exit 0: credential_unique made their headers stale ()
-- T-0114 [open] E9 · mask/CLAUDE.md and gen_credential.go still say the torture counts are un-re-measured ()
-- T-0115 [open] E9 · docs/TORTURE.md: re-measure supabase-auth recall after T-0104's name rules ()
-- T-0116 [open] E9 · Re-measure the torture flag counts after T-0100 and T-0104 ()
-- T-0117 [open] E9 · THREAT_MODEL.md T1 and ARCHITECTURE.md owe the composite decision (T-0094 closed) ()
-- T-0118 [open] E9 · internal/transform: mask an array whose sample arrives as a text literal element-wise ()
+- T-0113 [open] E5 · Regressions 004 and 007 expect exit 12 and now exit 0: credential_unique made their headers stale ()
+- T-0114 [open] E5 · mask/CLAUDE.md and gen_credential.go still say the torture counts are un-re-measured ()
+- T-0115 [open] E5 · docs/TORTURE.md: re-measure supabase-auth recall after T-0104's name rules ()
+- T-0116 [open] E5 · Re-measure the torture flag counts after T-0100 and T-0104 ()
+- T-0118 [open] E5 · internal/transform: mask an array whose sample arrives as a text literal element-wise ()
 - T-0119 [open] E9 · A table-scoped name rule, for refresh_tokens.parent and its kind ()
-- T-0120 [open] E9 · internal/classify: a masked FK child whose parent is copied orphans the row ()
-- T-0121 [open] E9 · Decide public_key: credential, online_id, or neither ()
-- T-0122 [open] E9 · internal/verify: the second net lost URL coverage when T-0100 narrowed textsig.LooksSecret ()
+- T-0121 [open] E5 · Decide public_key: credential, online_id, or neither ()
+- T-0122 [open] E5 · internal/verify: the second net lost URL coverage when T-0100 narrowed textsig.LooksSecret ()
 
 ## Recently closed
 
+- T-0094 [done] E5 · A composite column now loads, and no rule pack category accepts its type family: decide refuse or mask field-wise (THREAT_MODEL.md T1) → done: in T-HARD-B (78530ef)
+- T-0100 [done] E5 · textsig.LooksSecret classifies a URL as a credential → done: in T-HARD-B (78530ef)
+- T-0103 [done] E5 · An array of an extension type is sampled as one opaque string, so the classifier never sees the values inside it → done: in T-HARD-B (78530ef)
+- T-0104 [done] E5 · The credential and online_id name rules miss the spellings an auth schema actually uses → done: in T-HARD-B (78530ef)
+- T-0109 [done] E5 · T-HARD-B: composite fail-closed, extension-type array splitter, auth-schema rules, URL not credential (T-0094, T-0103, T-0104, T-0100) → done: 78530ef; composite fail-closed, array-literal splitter, auth-schema rules, URL is online_id, key-child exemption
+- T-0117 [done] E9 · THREAT_MODEL.md T1 and ARCHITECTURE.md owe the composite decision (T-0094 closed) → done: THREAT_MODEL T1 and ARCHITECTURE §4 record the composite fail-closed decision
+- T-0120 [done] E9 · internal/classify: a masked FK child whose parent is copied orphans the row → done: in T-HARD-B (78530ef)
 - T-0046 [done] E5 · Fixture: deferrable unique on a partitioned root, leaf-local key, and an edge referencing the leaf → done: merged in the backlog run wf_e6bd43ea-99d (see git log for the hash)
 - T-0049 [done] E5 · Mask module low findings from T-MASK review (see T-0040 log) and a registry test that every rules.yml masker id resolves → done: merged in the backlog run wf_e6bd43ea-99d (see git log for the hash)
 - T-0050 [done] E5 · Extract and transform hand-offs from T-EXTRACT review (see T-0041 log): shape-template identifier escaping, KeySet chunk iterator, pgbouncer testcontainer, text-keyed big fixture → done: 2694a03; shape-template identifiers escaped, KeySet FirstChunk and EachChunk with extract and verify using them, pgbouncer testcontainer, text-keyed big fixture; §2 reconciled by the orchestrator
@@ -66,10 +66,3 @@
 - T-0074 [done] E5 · Unsafe-flag rail enforced over the registered flag set: main_test's forbidden list permits exactly unmask and rejects every other name containing it; make unsafe-flags runs that test → done: 2a35a36; forbidden rule walks every registered flag set recursively, permits exactly unmask, self-test proves it fires; make unsafe-flags runs the test
 - T-0075 [done] E5 · CI red from provisioning: password-file mode assertion on Windows; provisioned container not ready within 60 s on GitHub runners (image pull inside the deadline) → done: merged in the backlog run wf_e6bd43ea-99d (see git log for the hash)
 - T-0076 [done] E5 · T-0076: source read-only setting per transaction, never a session GUC that leaks through a transaction-pooling PgBouncer; T9 reworded → done: 2d57b00; session GUC removed, SystemID in a read-only transaction, pgbouncer neighbour test proves a second client can CREATE TABLE after lazyslice exits, T9 reworded
-- T-0077 [done] E5 · T-0077: stream_docs lifted above the nasty.sql big gate; introspect table list updated; extract workaround removed → done: 7142c52; stream_docs declared beside stream_rows above the gate, only the fill is gated; introspect table list updated; extract workaround removed
-- T-0078 [done] E5 · internal/load/ddl: drop the dangling back-reference to target.refused.start_timeout's deleted comment → done: back-reference dropped in T-0081's commit
-- T-0079 [done] E9 · Record the review pin outside internal/core: ARCHITECTURE.md entry points, cmd/CLAUDE.md, and ADR-005's exit 12 → done: ARCHITECTURE.md §1 records the three entry points and the review pin; ADR README errata carries the fifth exit-12 cause; cmd/CLAUDE.md names core.Preview
-- T-0080 [done] E9 · Anchor /lazyslice in .gitignore so a bare go build cannot commit a 32MB binary → done: /lazyslice anchored in .gitignore (2d57b00)
-- T-0081 [done] E5 · Stale default_transaction_read_only prose outside internal/pg after T-0076 → done: 3df6a22; dial inside a read-only transaction, shape miss beats the transaction rule, probe acts on its tracer verdict, stale prose rewritten
-- T-0082 [done] E5 · No mechanism detects a source statement sent outside a transaction → done: folded into T-0081; the tracer refuses any source statement outside a transaction, pinned by unit and real-server tests
-- T-0084 [done] E9 · THREAT_MODEL.md T9 still says the discover dial sends its reads outside a transaction → done: THREAT_MODEL T9 gained the dial bullet

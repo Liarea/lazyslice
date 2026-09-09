@@ -3,12 +3,12 @@ id: T-0117
 title: "THREAT_MODEL.md T1 and ARCHITECTURE.md owe the composite decision (T-0094 closed)"
 epic: E9
 phase: ""
-status: open
+status: done
 owner: ""
 created: 2026-09-08
 started: ""
-closed: ""
-outcome: ""
+closed: 2026-09-09
+outcome: "done: THREAT_MODEL T1 and ARCHITECTURE §4 record the composite fail-closed decision"
 ---
 
 # T-0117 · THREAT_MODEL.md T1 and ARCHITECTURE.md owe the composite decision (T-0094 closed)
@@ -25,6 +25,8 @@ T-HARD-B closed T-0094 in code: internal/classify gives a composite its own type
 
 - 2026-09-08 created
 
+- 2026-09-09 closed: done: THREAT_MODEL T1 and ARCHITECTURE §4 record the composite fail-closed decision
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+Went well: doc. Went badly: nothing. Change: none.
