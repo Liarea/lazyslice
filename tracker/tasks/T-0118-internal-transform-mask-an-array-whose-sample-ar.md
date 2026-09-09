@@ -3,7 +3,7 @@ id: T-0118
 title: "internal/transform: mask an array whose sample arrives as a text literal element-wise"
 epic: E5
 phase: 5
-status: in_progress
+status: blocked
 owner: ""
 created: 2026-09-08
 started: 2026-09-09
@@ -28,6 +28,8 @@ T-HARD-B landed the classify half of T-0103: an array of an extension type (cite
 - 2026-09-09 moved to E5 phase 5
 
 - 2026-09-09 started
+
+- 2026-09-09 blocked: Code complete and green; unreachable from the CLI because internal/plan's writeback still refuses an array that arrives as a text literal (exit 12). Sequence: T-0129 (verify refuses or flags a masked array column whose target value does not decode to a slice) first or together with T-0127 (plan drops arrayArrivesAsLiteral); then regression 009's header flips to ok and its leak assertion runs. Paused 2026-09-09.
 
 ## Post-mortem
 
