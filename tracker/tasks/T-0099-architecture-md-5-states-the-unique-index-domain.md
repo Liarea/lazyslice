@@ -3,12 +3,12 @@ id: T-0099
 title: "ARCHITECTURE.md 5 states the unique-index domain rule for a column and says nothing about composite or partial indexes"
 epic: E9
 phase: ""
-status: open
+status: done
 owner: ""
 created: 2026-09-08
 started: ""
-closed: ""
-outcome: ""
+closed: 2026-09-08
+outcome: "done: ADR-011 and §5 state the composite and partial rules"
 ---
 
 # T-0099 · ARCHITECTURE.md 5 states the unique-index domain rule for a column and says nothing about composite or partial indexes
@@ -25,6 +25,8 @@ internal/plan/unique.go now implements 5's rule (d_required = n squared / 2 epsi
 
 - 2026-09-08 created
 
+- 2026-09-08 closed: done: ADR-011 and §5 state the composite and partial rules
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+Went well: doc. Went badly: nothing. Change: none.

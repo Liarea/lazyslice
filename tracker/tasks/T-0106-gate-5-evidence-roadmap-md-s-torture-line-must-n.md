@@ -3,12 +3,12 @@ id: T-0106
 title: "Gate 5 evidence: ROADMAP.md's torture line must name the unmask/skip-table split, not the flag total"
 epic: E9
 phase: ""
-status: open
+status: done
 owner: ""
 created: 2026-09-08
 started: ""
-closed: ""
-outcome: ""
+closed: 2026-09-08
+outcome: "done: ROADMAP gate line carries the 37/7/1 split"
 ---
 
 # T-0106 · Gate 5 evidence: ROADMAP.md's torture line must name the unmask/skip-table split, not the flag total
@@ -25,6 +25,8 @@ docs/TORTURE.md now states the torture result as forty-five flags between the ni
 
 - 2026-09-08 created
 
+- 2026-09-08 closed: done: ROADMAP gate line carries the 37/7/1 split
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+Went well: doc. Went badly: nothing. Change: none.

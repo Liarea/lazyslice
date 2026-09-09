@@ -3,12 +3,12 @@ id: T-0091
 title: "ARCHITECTURE.md section 2 owes pipeline.TypeRegistrar, and section 11.1 owes the composite text-form note"
 epic: E9
 phase: ""
-status: open
+status: done
 owner: ""
 created: 2026-09-08
 started: ""
-closed: ""
-outcome: ""
+closed: 2026-09-08
+outcome: "done: §2 note names pipeline.TypeRegistrar and §11's composite text-form note"
 ---
 
 # T-0091 · ARCHITECTURE.md section 2 owes pipeline.TypeRegistrar, and section 11.1 owes the composite text-form note
@@ -25,6 +25,8 @@ T-0083 added pipeline.TypeRegistrar (RegisterTypes(ctx, *Schema) error), an opti
 
 - 2026-09-08 created
 
+- 2026-09-08 closed: done: §2 note names pipeline.TypeRegistrar and §11's composite text-form note
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+Went well: doc. Went badly: nothing. Change: none.

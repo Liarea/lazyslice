@@ -1,8 +1,8 @@
 ---
 id: T-0101
 title: "internal/plan changes Decision.Masker after internal/classify has computed the classification fingerprint"
-epic: E9
-phase: ""
+epic: E5
+phase: 5
 status: open
 owner: ""
 created: 2026-09-08
@@ -24,6 +24,8 @@ internal/plan/unique.go implements 5's 'the plan picks, within the column's cate
 ## Log
 
 - 2026-09-08 created
+
+- 2026-09-08 moved to E5 phase 5
 
 ## Post-mortem
 

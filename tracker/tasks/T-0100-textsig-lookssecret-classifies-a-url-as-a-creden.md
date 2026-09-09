@@ -1,8 +1,8 @@
 ---
 id: T-0100
 title: "textsig.LooksSecret classifies a URL as a credential"
-epic: E9
-phase: ""
+epic: E5
+phase: 5
 status: open
 owner: ""
 created: 2026-09-08
@@ -24,6 +24,8 @@ LooksSecret matches any 16-to-512-character string with two character classes an
 ## Log
 
 - 2026-09-08 created
+
+- 2026-09-08 moved to E5 phase 5
 
 ## Post-mortem
 

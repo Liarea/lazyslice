@@ -3,12 +3,12 @@ id: T-0092
 title: "verify item 5 compares a user-defined-type column as two different Go values"
 epic: E9
 phase: ""
-status: open
+status: cancelled
 owner: ""
 created: 2026-09-08
 started: ""
-closed: ""
-outcome: ""
+closed: 2026-09-08
+outcome: cancelled
 ---
 
 # T-0092 · verify item 5 compares a user-defined-type column as two different Go values
@@ -25,6 +25,8 @@ ARCHITECTURE.md section 6 item 5 compares every unmasked column of a sampled row
 
 - 2026-09-08 created
 
+- 2026-09-08 cancelled: Premise measured false by T-0083's developer: verify reads the target through an unregistered pool and sees the same text form as the source (T-0095).
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+Cancelled. Reason: Premise measured false by T-0083's developer: verify reads the target through an unregistered pool and sees the same text form as the source (T-0095).

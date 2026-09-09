@@ -1,8 +1,8 @@
 ---
 id: T-0098
 title: "credential's only masker has a domain of 1, so no unique credential column can be masked at all"
-epic: E9
-phase: ""
+epic: E5
+phase: 5
 status: open
 owner: ""
 created: 2026-09-08
@@ -24,6 +24,8 @@ mask/register.go registers one generator for CatCredential: fixedMasker with the
 ## Log
 
 - 2026-09-08 created
+
+- 2026-09-08 moved to E5 phase 5
 
 ## Post-mortem
 

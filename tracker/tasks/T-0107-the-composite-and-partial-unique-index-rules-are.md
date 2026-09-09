@@ -3,12 +3,12 @@ id: T-0107
 title: "The composite and partial unique-index rules are a decision with no ADR: land one or record the authorisation before gate 5"
 epic: E9
 phase: ""
-status: open
+status: done
 owner: ""
 created: 2026-09-08
 started: ""
-closed: ""
-outcome: ""
+closed: 2026-09-08
+outcome: "done: ADR-011 accepted"
 ---
 
 # T-0107 · The composite and partial unique-index rules are a decision with no ADR: land one or record the authorisation before gate 5
@@ -25,6 +25,8 @@ internal/classify's raiseCompositeUnique and indexKeys decide which columns carr
 
 - 2026-09-08 created
 
+- 2026-09-08 closed: done: ADR-011 accepted
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+Went well: T-0099's text became the ADR. Went badly: nothing. Change: none.

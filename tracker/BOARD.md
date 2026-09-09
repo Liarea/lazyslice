@@ -7,9 +7,9 @@
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 1 | 0 | 9 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
-| E5 Hardening | 5 | 4 | 1 | 26 | 0 | 0 |
+| E5 Hardening | 5 | 13 | 1 | 27 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 22 | 0 | 5 | 0 | 0 |
+| E9 Later | later | 6 | 0 | 10 | 1 | 0 |
 
 ## Open and in progress
 
@@ -22,26 +22,19 @@
 - T-0065 [open] E6 · 20-second VHS GIF of the first run on Pagila (sonnet)
 - T-0083 [in_progress] E5 · Target type registration for CopyFrom: no owner since internal/load shipped ()
 - T-0087 [open] E9 · internal/classify's JSON leaf signal never consults the name dictionary, so verify's second net cannot score person_name or free_text over document leaves ()
-- T-0088 [open] E5 · T-TORTURE: ten real schemas, regressions, docs/TORTURE.md (opus)
 - T-0089 [open] E5 · T-FAILUX: failure UX and error catalogue drift test (opus)
 - T-0090 [open] E5 · T-PERF: performance baseline and CI throughput guard (opus)
-- T-0091 [open] E9 · ARCHITECTURE.md section 2 owes pipeline.TypeRegistrar, and section 11.1 owes the composite text-form note ()
-- T-0092 [open] E9 · verify item 5 compares a user-defined-type column as two different Go values ()
-- T-0093 [open] E9 · Move RegisterTypes onto pipeline.Writer so the load's type registration is compiler-checked ()
-- T-0094 [open] E9 · A composite column now loads, and no rule pack category accepts its type family: decide refuse or mask field-wise (THREAT_MODEL.md T1) ()
-- T-0095 [open] E9 · Withdraw T-0092: verify does not read the target through the type-registered pool ()
-- T-0096 [open] E9 · testdata/CLAUDE.md and testdata/README.md still say 'two fixtures and nothing else' ()
-- T-0097 [open] E9 · ARCHITECTURE.md 11.1's not-recreatable refusal is still raised inside load.Load, not at plan ()
-- T-0098 [open] E9 · credential's only masker has a domain of 1, so no unique credential column can be masked at all ()
-- T-0099 [open] E9 · ARCHITECTURE.md 5 states the unique-index domain rule for a column and says nothing about composite or partial indexes ()
-- T-0100 [open] E9 · textsig.LooksSecret classifies a URL as a credential ()
-- T-0101 [open] E9 · internal/plan changes Decision.Masker after internal/classify has computed the classification fingerprint ()
+- T-0093 [open] E5 · Move RegisterTypes onto pipeline.Writer so the load's type registration is compiler-checked ()
+- T-0094 [open] E5 · A composite column now loads, and no rule pack category accepts its type family: decide refuse or mask field-wise (THREAT_MODEL.md T1) ()
+- T-0096 [open] E5 · testdata/CLAUDE.md and testdata/README.md still say 'two fixtures and nothing else' ()
+- T-0097 [open] E5 · ARCHITECTURE.md 11.1's not-recreatable refusal is still raised inside load.Load, not at plan ()
+- T-0098 [open] E5 · credential's only masker has a domain of 1, so no unique credential column can be masked at all ()
+- T-0100 [open] E5 · textsig.LooksSecret classifies a URL as a credential ()
+- T-0101 [open] E5 · internal/plan changes Decision.Masker after internal/classify has computed the classification fingerprint ()
 - T-0102 [open] E9 · A text column holding a JSON document is invisible to ARCHITECTURE.md 4's JSON rule ()
-- T-0103 [open] E9 · An array of an extension type is sampled as one opaque string, so the classifier never sees the values inside it ()
-- T-0104 [open] E9 · The credential and online_id name rules miss the spellings an auth schema actually uses ()
-- T-0105 [open] E9 · .golangci.yml does not lint the torture build tag ()
-- T-0106 [open] E9 · Gate 5 evidence: ROADMAP.md's torture line must name the unmask/skip-table split, not the flag total ()
-- T-0107 [open] E9 · The composite and partial unique-index rules are a decision with no ADR: land one or record the authorisation before gate 5 ()
+- T-0103 [open] E5 · An array of an extension type is sampled as one opaque string, so the classifier never sees the values inside it ()
+- T-0104 [open] E5 · The credential and online_id name rules miss the spellings an auth schema actually uses ()
+- T-0105 [open] E5 · .golangci.yml does not lint the torture build tag ()
 
 ## Recently closed
 
