@@ -3,12 +3,12 @@ id: T-0116
 title: "Re-measure the torture flag counts after T-0100 and T-0104"
 epic: E5
 phase: 5
-status: open
+status: done
 owner: ""
 created: 2026-09-08
 started: ""
-closed: ""
-outcome: ""
+closed: 2026-09-09
+outcome: "done: in T-HARD-C (4f9a186)"
 ---
 
 # T-0116 · Re-measure the torture flag counts after T-0100 and T-0104
@@ -27,6 +27,8 @@ T-HARD-B changed two things the torture catalogue's flags were measured against.
 
 - 2026-09-09 moved to E5 phase 5
 
+- 2026-09-09 closed: done: in T-HARD-C (4f9a186)
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+Went well: landed. Went badly: nothing. Change: none.

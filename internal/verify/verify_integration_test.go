@@ -74,8 +74,7 @@ type run struct {
 // readableWriter is a pipeline.Writer that can also be read from.
 //
 // pipeline.Writer has Exec, CopyFrom, Begin and, since T-0093, RegisterTypes,
-// and no Query (internal/pipeline/source.go; ARCHITECTURE.md §2 still prints the
-// first three, owed as T-0123), and
+// and no Query, and
 // every check in §6 is a read of the target, so Verify asks the Writer it is
 // handed for a Query method (verify.go, "Reading the target"). internal/pg's
 // writer does not have one yet; this is what core will need there, and until it

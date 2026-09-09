@@ -3,12 +3,12 @@ id: T-0115
 title: "docs/TORTURE.md: re-measure supabase-auth recall after T-0104's name rules"
 epic: E5
 phase: 5
-status: open
+status: done
 owner: ""
 created: 2026-09-08
 started: ""
-closed: ""
-outcome: ""
+closed: 2026-09-09
+outcome: "done: in T-HARD-C (4f9a186)"
 ---
 
 # T-0115 · docs/TORTURE.md: re-measure supabase-auth recall after T-0104's name rules
@@ -27,6 +27,8 @@ T-HARD-B widened internal/classify/rules.yml's credential and online_id patterns
 
 - 2026-09-09 moved to E5 phase 5
 
+- 2026-09-09 closed: done: in T-HARD-C (4f9a186)
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+Went well: landed. Went badly: nothing. Change: none.
