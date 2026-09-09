@@ -24,7 +24,7 @@ How this project is built by one orchestrator and a fleet of agents, with a huma
 | Reviews: correctness, security, scope | Opus | high | A cheap reviewer that misses a leak is worse than no reviewer. |
 | Format conversion, boilerplate, tracker board regeneration | Haiku | low | Mechanical. |
 
-Default is to inherit the session model when unsure. Never downgrade a reviewer to save tokens.
+Correction, 2026-09-09 (Gareth): phase 5 ran an Opus developer plus three Opus reviewers on nearly every task and burned the weekly allowance. The defaults are now a Sonnet developer and one Opus reviewer; a task opts in to Opus or to three reviewers only for masking, verify, and source-safety logic. Mechanical work goes to Haiku or Sonnet. Any single run expected to exceed about one million tokens is confirmed with Gareth first.
 
 ## Budget reality
 

@@ -29,7 +29,7 @@ if (step === 'features') {
   phase('Features')
   const results = []
   for (const t of FEATURES.slice(from)) {
-    const r = await workflow({ scriptPath: IMPL }, { ...t, model: t.id === 'T-CI5' ? 'sonnet' : 'opus', effort: 'high' })
+    const r = await workflow({ scriptPath: IMPL }, { ...t, model: t.model || 'sonnet', effort: t.effort || 'medium' })
     results.push(r)
     if (!r || r.status !== 'merged') { log(`Stopped at ${t.id}`); return { results, stopped_at: t.id } }
   }
@@ -99,7 +99,7 @@ if (step === 'harden') {
   phase('Harden')
   const results = []
   for (const t of TASKS.slice(from)) {
-    const r = await workflow({ scriptPath: IMPL }, { ...t, model: 'opus', effort: 'high' })
+    const r = await workflow({ scriptPath: IMPL }, { ...t, model: t.model || 'sonnet', effort: t.effort || (t.model === 'opus' ? 'high' : 'medium') })
     results.push(r)
     if (!r || r.status !== 'merged') { log(`Stopped at ${t.id}`); return { results, stopped_at: t.id } }
   }
