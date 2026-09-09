@@ -1,8 +1,8 @@
 ---
 id: T-0129
 title: "internal/verify: an array column that arrives as a text literal is not residual-scanned element-wise"
-epic: E9
-phase: ""
+epic: E5
+phase: 5
 status: open
 owner: ""
 created: 2026-09-09
@@ -26,6 +26,8 @@ internal/transform (T-0118) masks such a column element-wise and records one res
 - 2026-09-09 created
 
 - 2026-09-09 Ordered ahead of T-0127 (T-0118 re-review). T-0127 removes internal/plan's arrayArrivesAsLiteral refusal, which is the only thing keeping a masked array column that arrives as a text literal out of the target today; while it stands, the untestable per-element filter entries this task is about cost nothing. The commit that removes it is the commit that turns them into a green residual tick over a column class that actually loads. So this task lands first, or in the same change as T-0127 -- T-0127's log carries the matching constraint. Landing this one alone is inert and safe.
+
+- 2026-09-09 moved to E5 phase 5
 
 ## Post-mortem
 

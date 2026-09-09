@@ -7,9 +7,9 @@
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 1 | 0 | 9 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
-| E5 Hardening | 5 | 4 | 2 | 46 | 0 | 0 |
+| E5 Hardening | 5 | 6 | 1 | 46 | 0 | 1 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 13 | 0 | 14 | 1 | 0 |
+| E9 Later | later | 11 | 0 | 14 | 1 | 0 |
 
 ## Open and in progress
 
@@ -26,14 +26,14 @@
 - T-0090 [open] E5 · T-PERF: performance baseline and CI throughput guard (opus)
 - T-0102 [open] E9 · A text column holding a JSON document is invisible to ARCHITECTURE.md 4's JSON rule ()
 - T-0112 [open] E5 · Re-measure docs/TORTURE.md's flag counts and the catalogue's flags-by-kind after the credential_unique masker ()
-- T-0118 [in_progress] E5 · internal/transform: mask an array whose sample arrives as a text literal element-wise ()
+- T-0118 [blocked] E5 · internal/transform: mask an array whose sample arrives as a text literal element-wise ()
 - T-0119 [open] E9 · A table-scoped name rule, for refresh_tokens.parent and its kind ()
 - T-0124 [open] E9 · testdata/regressions covers plan.refused.unique_domain no longer ()
 - T-0125 [open] E9 · Makefile's vet-tagged comment still says .golangci.yml does not lint the torture tag ()
 - T-0126 [open] E9 · internal/textsig/CLAUDE.md still says internal/verify has no URL entry (T-0122 has landed) ()
-- T-0127 [open] E9 · internal/plan: drop the arrayArrivesAsLiteral stand-in now that transform masks a literal array element-wise ()
+- T-0127 [open] E5 · internal/plan: drop the arrayArrivesAsLiteral stand-in now that transform masks a literal array element-wise ()
 - T-0128 [open] E9 · A multidimensional array carried as a text literal is flattened to one dimension at CopyFrom ()
-- T-0129 [open] E9 · internal/verify: an array column that arrives as a text literal is not residual-scanned element-wise ()
+- T-0129 [open] E5 · internal/verify: an array column that arrives as a text literal is not residual-scanned element-wise ()
 
 ## Recently closed
 

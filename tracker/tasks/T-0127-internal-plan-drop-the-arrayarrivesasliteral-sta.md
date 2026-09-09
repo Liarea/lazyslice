@@ -1,8 +1,8 @@
 ---
 id: T-0127
 title: "internal/plan: drop the arrayArrivesAsLiteral stand-in now that transform masks a literal array element-wise"
-epic: E9
-phase: ""
+epic: E5
+phase: 5
 status: open
 owner: ""
 created: 2026-09-09
@@ -30,6 +30,8 @@ T-0118 landed the transform half: internal/transform/array.go parses a Postgres 
 - 2026-09-09 internal/plan/CLAUDE.md line 518 still says the branch stands 'until T-0118 lands' and credits T-HARD-B; T-0118 has landed, so that line is stale on the tree today and this task is what removes it rather than re-dating it.
 
 - 2026-09-09 Third constraint from T-0118's re-review, and it is an ordering, not a code change: this task does not land before T-0129, or it lands together with internal/verify refusing or flagging a masked array column whose target value does not decode to []any. Reason: removing arrayArrivesAsLiteral is what makes T-0129's blindness live. Today no *masked* array column arriving as a text literal can reach the target at all -- this refusal stops it at exit 12 -- so verify's inability to see inside the literal (internal/verify/residual.go, arrayHits falls back to scalarHits on the whole value when it is not a []any) costs nothing. The commit that removes the refusal is the first commit under which such a column loads, and it loads with ARCHITECTURE.md section 6 item 1's second net inert over exactly the column class T-0118 enables, while the run report calls the column masked. That is the fail-open THREAT_MODEL.md T12 is about, and section 6 item 1 is the only control against it. Land T-0129 first, or land the two together, so the blindness is loud rather than a green tick.
+
+- 2026-09-09 moved to E5 phase 5
 
 ## Post-mortem
 
