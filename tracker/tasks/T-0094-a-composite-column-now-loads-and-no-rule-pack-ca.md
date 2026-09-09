@@ -1,8 +1,8 @@
 ---
 id: T-0094
 title: "A composite column now loads, and no rule pack category accepts its type family: decide refuse or mask field-wise (THREAT_MODEL.md T1)"
-epic: E9
-phase: ""
+epic: E5
+phase: 5
 status: open
 owner: ""
 created: 2026-09-08
@@ -24,6 +24,8 @@ Before T-0083 a source table with a composite column failed CopyFrom at 42804, s
 ## Log
 
 - 2026-09-08 created
+
+- 2026-09-08 moved to E5 phase 5
 
 ## Post-mortem
 

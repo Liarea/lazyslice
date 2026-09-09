@@ -3,12 +3,12 @@ id: T-0095
 title: "Withdraw T-0092: verify does not read the target through the type-registered pool"
 epic: E9
 phase: ""
-status: open
+status: done
 owner: ""
 created: 2026-09-08
 started: ""
-closed: ""
-outcome: ""
+closed: 2026-09-08
+outcome: "done: T-0092 cancelled"
 ---
 
 # T-0095 · Withdraw T-0092: verify does not read the target through the type-registered pool
@@ -25,6 +25,8 @@ T-0092 says verify's section 6 item 5 sample comparison will report verify.sampl
 
 - 2026-09-08 created
 
+- 2026-09-08 closed: done: T-0092 cancelled
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+Went well: measurement beat the reviewer's assumption. Went badly: nothing. Change: none.

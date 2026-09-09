@@ -1,8 +1,8 @@
 ---
 id: T-0105
 title: ".golangci.yml does not lint the torture build tag"
-epic: E9
-phase: ""
+epic: E5
+phase: 5
 status: open
 owner: ""
 created: 2026-09-08
@@ -24,6 +24,8 @@ run.build-tags in .golangci.yml lists 'integration' alone, so the ~820 lines of 
 ## Log
 
 - 2026-09-08 created
+
+- 2026-09-08 moved to E5 phase 5
 
 ## Post-mortem
 

@@ -1,8 +1,8 @@
 ---
 id: T-0103
 title: "An array of an extension type is sampled as one opaque string, so the classifier never sees the values inside it"
-epic: E9
-phase: ""
+epic: E5
+phase: 5
 status: open
 owner: ""
 created: 2026-09-08
@@ -26,6 +26,8 @@ internal/classify's scalars() flattens an array sample element-wise, which is wh
 - 2026-09-08 created
 
 - 2026-09-08 Second half, same root cause: because the array is not flattened, the classifier decides a category on the whole literal {a,b} and internal/transform then masks it as a *scalar* - so CopyFrom is handed the plain string $lazyslice$invalid for an _citext column and fails with 'cannot find encode plan' (SQLSTATE 57014), exit 7, mid-load. So the gap is not only 'the values inside are not seen': a masked array-of-extension-type column cannot be loaded at all. testdata/regressions/005 steers around both by keeping its citext[] values short and dull, and says so.
+
+- 2026-09-08 moved to E5 phase 5
 
 ## Post-mortem
 

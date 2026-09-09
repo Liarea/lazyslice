@@ -1,8 +1,8 @@
 ---
 id: T-0093
 title: "Move RegisterTypes onto pipeline.Writer so the load's type registration is compiler-checked"
-epic: E9
-phase: ""
+epic: E5
+phase: 5
 status: open
 owner: ""
 created: 2026-09-08
@@ -24,6 +24,8 @@ internal/load/load.go's registerTypes reaches type registration through an optio
 ## Log
 
 - 2026-09-08 created
+
+- 2026-09-08 moved to E5 phase 5
 
 ## Post-mortem
 

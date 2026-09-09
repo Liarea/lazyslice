@@ -25,6 +25,8 @@ outcome: ""
 
 - 2026-09-08 created
 
+- 2026-09-08 Orchestrator 2026-09-08: stays in Later. A text column holding JSON is scanned by the free-text and dictionary validators like any text column, so personal data in it is masked as free_text; what is lost is per-key masking, not coverage.
+
 ## Post-mortem
 
 _(filled on close: what went well, what went badly, what we change next time)_
