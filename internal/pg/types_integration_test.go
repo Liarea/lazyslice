@@ -234,11 +234,7 @@ func TestATargetConnectionCarriesTheSourcesUserTypes(t *testing.T) {
 		t.Fatalf("Writer: %v", err)
 	}
 
-	reg, ok := w.(pipeline.TypeRegistrar)
-	if !ok {
-		t.Fatal("the target's Writer is not a pipeline.TypeRegistrar, so the loader would silently skip registration")
-	}
-	if regErr := reg.RegisterTypes(ctx, userTypeSchema()); regErr != nil {
+	if regErr := w.RegisterTypes(ctx, userTypeSchema()); regErr != nil {
 		t.Fatalf("RegisterTypes: %v", regErr)
 	}
 
@@ -294,11 +290,7 @@ func TestRegisteringTypesRetiresConnectionsMadeBeforeTheDDL(t *testing.T) {
 		t.Fatalf("creating the target schema: %v", err)
 	}
 
-	reg, ok := w.(pipeline.TypeRegistrar)
-	if !ok {
-		t.Fatal("the target's Writer is not a pipeline.TypeRegistrar")
-	}
-	if err := reg.RegisterTypes(ctx, userTypeSchema()); err != nil {
+	if err := w.RegisterTypes(ctx, userTypeSchema()); err != nil {
 		t.Fatalf("RegisterTypes: %v", err)
 	}
 
@@ -379,12 +371,8 @@ func TestATypeWithAnUnresolvableDependencyIsSkippedNotFatal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Writer: %v", err)
 	}
-	reg, ok := w.(pipeline.TypeRegistrar)
-	if !ok {
-		t.Fatal("the target's Writer is not a pipeline.TypeRegistrar")
-	}
 
-	if regErr := reg.RegisterTypes(ctx, citextSchema()); regErr != nil {
+	if regErr := w.RegisterTypes(ctx, citextSchema()); regErr != nil {
 		t.Fatalf("RegisterTypes over a schema pgx cannot fully resolve: %v\n"+
 			"one unregisterable type must not fail the registration: it fails every connection in the pool with it", regErr)
 	}

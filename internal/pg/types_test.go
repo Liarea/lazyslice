@@ -114,19 +114,16 @@ func TestRegisteringNoTypesLeavesThePoolAlone(t *testing.T) {
 	defer target.Close()
 
 	// Through the Writer, because that is the only entry point: internal/load
-	// holds a pipeline.Writer and the loader calls writer.RegisterTypes.
+	// holds a pipeline.Writer and the loader calls writer.RegisterTypes, which
+	// is one of pipeline.Writer's four methods (T-0093) and so needs no
+	// assertion here.
 	w, err := target.Writer(context.Background())
 	if err != nil {
 		t.Fatalf("Writer: %v", err)
 	}
-	reg, ok := w.(pipeline.TypeRegistrar)
-	if !ok {
-		t.Fatal("the target's Writer is not a pipeline.TypeRegistrar")
-	}
-
 	// The DSN points at nothing, so an eager acquire would fail. A registration
 	// with no names must not attempt one.
-	if err := reg.RegisterTypes(context.Background(), &pipeline.Schema{}); err != nil {
+	if err := w.RegisterTypes(context.Background(), &pipeline.Schema{}); err != nil {
 		t.Errorf("RegisterTypes over a schema with no user types = %v, want no error and no connection", err)
 	}
 }

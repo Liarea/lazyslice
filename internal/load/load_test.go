@@ -53,10 +53,10 @@ func (w *fakeWriter) CopyFrom(context.Context, ref.TableRef, []string, <-chan []
 	return 0, errors.New("the loader must copy inside a transaction, never on the writer")
 }
 
-// RegisterTypes makes this a pipeline.TypeRegistrar, which every Writer the
-// loader accepts must be: a Writer that cannot register the source's
-// user-defined types is refused (load.go, registerTypes), because an optional
-// interface that misses is a load step that disappears without a compile error.
+// RegisterTypes is pipeline.Writer's fourth method (T-0093): every Writer the
+// loader is handed can register the source's user-defined types, and a Writer
+// that cannot no longer compiles, because an optional interface that misses is
+// a load step that disappears without a compile error.
 // registeringWriter below overrides this to record when it was called.
 func (w *fakeWriter) RegisterTypes(context.Context, *pipeline.Schema) error { return nil }
 
@@ -491,9 +491,8 @@ func TestGateFingerprintWithNoIntrospectorFailsClosed(t *testing.T) {
 	}
 }
 
-// registeringWriter is a fakeWriter that also implements
-// pipeline.TypeRegistrar, so that the assertion in registerTypes can be
-// observed at all.
+// registeringWriter is a fakeWriter whose RegisterTypes records when the loader
+// called it, so that the ordering registerTypes exists for can be observed.
 type registeringWriter struct {
 	fakeWriter
 	// at is the number of statements the writer had seen when RegisterTypes was
@@ -521,10 +520,11 @@ func (w *registeringWriter) RegisterTypes(_ context.Context, s *pipeline.Schema)
 // mid-table (54000 for an enum array, 42804 for a composite — measured, and
 // testdata/nasty.sql trap 27 is the fixture).
 //
-// The call is behind a type assertion, and a type assertion that misses
-// degrades silently: the loader would go on copying and the failure would
-// reappear only in the integration suite, on the two tables of trap 27. This is
-// what holds the assertion.
+// That the call happens at all is the compiler's business since T-0093 —
+// RegisterTypes is one of pipeline.Writer's four methods — but *when* it happens
+// is not, and a registration moved after the first CopyFrom would fail only in
+// the integration suite, on the two tables of trap 27. This is what holds the
+// ordering.
 func TestLoadRegistersTheSourcesUserTypesBeforeTheFirstCopy(t *testing.T) {
 	w := newRegisteringWriter()
 	l := New(Run{ToolVersion: "test"}, nil)
@@ -560,55 +560,6 @@ func TestLoadRegistersTheSourcesUserTypesBeforeTheFirstCopy(t *testing.T) {
 	}
 	if len(w.txs) == 0 {
 		t.Fatal("the load opened no transaction, so there was no copy for the registration to precede")
-	}
-}
-
-// plainWriter is a pipeline.Writer and nothing more: Exec, CopyFrom and Begin,
-// ARCHITECTURE.md §2's three methods, with no RegisterTypes. It is what a Writer
-// wrapped for some other purpose looks like to the type assertion in
-// registerTypes.
-type plainWriter struct{ w *fakeWriter }
-
-func (p plainWriter) Exec(ctx context.Context, sql string, args ...any) error {
-	return p.w.Exec(ctx, sql, args...)
-}
-
-func (p plainWriter) CopyFrom(ctx context.Context, t ref.TableRef, cols []string, rows <-chan []any) (int64, error) {
-	return p.w.CopyFrom(ctx, t, cols, rows)
-}
-
-func (p plainWriter) Begin(ctx context.Context) (pipeline.Tx, error) { return p.w.Begin(ctx) }
-
-// A Writer that cannot register types fails the load and names itself, rather
-// than skipping the step.
-//
-// The assertion in registerTypes is the whole wiring: nothing in the compiler
-// checks that the Writer the loader is handed is a pipeline.TypeRegistrar, and
-// internal/core already wraps this same writer in a readableWriter (which embeds
-// the Writer interface and would therefore *not* be a registrar) for verify. A
-// silent skip there is a load that carries on and fails mid-copy on a composite
-// column, in the integration suite and nowhere else.
-func TestALoadWhoseWriterCannotRegisterTypesIsRefused(t *testing.T) {
-	inner := &fakeWriter{}
-	w := plainWriter{w: inner}
-	l := New(Run{ToolVersion: "test"}, nil)
-
-	orders := tref("public", "orders")
-	_, err := l.Load(context.Background(), w, testPlan(), testSchema(), feed(
-		pipeline.RowBatch{Table: orders, Cols: []string{"id"}, Rows: [][]any{row(1)}, Seq: 0, Last: true},
-	))
-	var refusal *Refusal
-	if !errors.As(err, &refusal) {
-		t.Fatalf("a Writer that cannot register types loaded anyway: err = %v", err)
-	}
-	if refusal.Code != CodeRefusedDDL || refusal.Exit != exitLoad {
-		t.Errorf("the refusal is %s exit %d, want %s exit %d", refusal.Code, refusal.Exit, CodeRefusedDDL, exitLoad)
-	}
-	if !strings.Contains(err.Error(), "plainWriter") {
-		t.Errorf("the refusal is %q; it must name the Writer that could not register", err)
-	}
-	if len(inner.txs) != 0 {
-		t.Errorf("the load opened %d transactions, want none", len(inner.txs))
 	}
 }
 

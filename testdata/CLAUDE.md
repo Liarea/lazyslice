@@ -1,14 +1,38 @@
 # testdata/
 
-Two fixtures and nothing else: `pagila/` (the friendly schema) and
-`nasty.sql` (one trap per shape that has broken a subsetting tool). No Go code
-lives here — loaders are `internal/testutil`; this directory is data plus
-`README.md`.
+Four things, in two layers. The two fixtures **we wrote**: `pagila/` (the
+friendly schema) and `nasty.sql` (one trap per shape that has broken a
+subsetting tool). And the two directories **the real world wrote**:
+`torture/`, ten open-source schemas at pinned commits or image digests (1,023
+tables, 1,308 foreign keys) plus `build.sh`, the script that rebuilds any of
+their `schema.sql` files from its pin; and `regressions/`, one small `.sql`
+file per defect a torture schema found and no fixture did. No Go code lives
+here — loaders are `internal/testutil` and `internal/invariants`; this
+directory is data plus prose.
 
-**Contract.** `README.md` in this directory is the spec: it names every table,
-every row count, and every one of the 27 numbered traps in `nasty.sql` (1 to
-27, with 16 split into 16a and 16b because §4 prescribes two different
-behaviours for the two JSON columns) with the exact required behaviour.
+**Which of the three a new fixture belongs in.** A shape you are *inventing*
+to pin behaviour the architecture specifies goes in `nasty.sql` as a numbered
+trap. A schema you are *copying* from a real project, whole and unedited, goes
+in `torture/` under its own directory with its pin — never hand-written, never
+trimmed to taste. A failing run against one of those ten, reduced to the
+smallest schema that still fails, goes in `regressions/` as one numbered file;
+that reduction is required before `internal/` changes. `pagila/` takes nothing
+new: it is a byte-for-byte upstream copy.
+
+**The two subdirectories have their own rules and this file does not repeat
+them**: `testdata/torture/CLAUDE.md` and `testdata/torture/README.md` are the
+spec for the ten schemas (`README.md` there is the authority — the table of
+tables, roots and runs, what each directory's three files are, and why
+mastodon refuses at exit 13), and `testdata/regressions/README.md` is the spec
+for the header grammar every regression file carries and for what the harness
+asserts beyond an exit code. `make torture` is what runs both;
+`docs/TORTURE.md` is what came of them.
+
+**Contract.** `README.md` in this directory is the spec for `pagila/` and
+`nasty.sql`: it names every table, every row count, and every one of the 27
+numbered traps in `nasty.sql` (1 to 27, with 16 split into 16a and 16b because
+§4 prescribes two different behaviours for the two JSON columns) with the exact
+required behaviour.
 `internal/testutil/fixtures_test.go` (behind `integration`) is what checks the
 loaded databases against it. There is no type in ARCHITECTURE.md this directory
 implements directly — it's the input the stage packages
@@ -66,7 +90,13 @@ proven against.
 **Test.** `psql -f testdata/pagila/pagila-schema.sql -f
 testdata/pagila/pagila-data.sql` and `psql -f testdata/nasty.sql` to load by
 hand; `go test -tags integration ./internal/testutil/...` to check them.
+`torture/` and `regressions/` are checked by `make torture` instead — twenty
+containers and about an hour, a manual gate no CI job runs — and
+`testdata/torture/build.sh` (Docker and network, never CI) is what rebuilds a
+`schema.sql` from its pin.
 
 **Never:** add a trap without a `README.md` entry; edit `pagila`'s SQL files
 in place instead of re-pinning; let the row counts or trap list in `README.md`
-go stale relative to the SQL.
+go stale relative to the SQL; hand-edit a `torture/*/schema.sql` instead of
+moving its pin and re-running `build.sh`; change `internal/` for a torture
+failure before it has been reduced into `regressions/`.

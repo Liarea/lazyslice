@@ -65,9 +65,26 @@ type validator struct {
 	ok   func(string) bool
 }
 
-// validators is the set: all ten of internal/classify's value validators, in
-// its own precedence order, folded into eight entries (its two financial
+// validators is the set: all eleven of internal/classify's value validators, in
+// its own precedence order, folded into nine entries (its two financial
 // validators share one here, and so do its two network ones).
+//
+// Eleven, not the ten this comment said until tracker T-0122: internal/classify
+// gained textsig.ValidURL ahead of its secrets validator when T-0100 stopped
+// textsig.LooksSecret reading a URL as a credential, and this package was
+// outside that task's paths. The online_id entry below is the counterpart, in
+// the same position for the same reason. Between T-0100 and T-0122 a URL was
+// the one value shape *neither* net could see: LooksSecret had stopped matching
+// it and nothing here had replaced it, so a profile URI that reached the target
+// unmasked passed email, phone, ip, mac, luhn, iban, LooksSecret, NameShape,
+// AddressShape and ProseName alike. THREAT_MODEL.md T1 makes this net a
+// blocking control for the column the 200-row sample under-represented, and the
+// two packages score independently, so classify gaining the validator did not
+// compensate.
+//
+// Every one of the eleven now has an entry here, and none is missing; two are
+// answered by a *deliberately different* validator rather than copied, which is
+// the dictionary rule and is the next paragraph.
 //
 // person_name and free_text were missing until tracker T-0055, because both
 // read internal/classify's embedded name dictionary and this package may not
@@ -89,6 +106,11 @@ var validators = []validator{
 	{category: pipeline.CatFinancial, name: "financial_account", text: true, digits: true, ok: func(s string) bool {
 		return textsig.ValidLuhn(s) || textsig.ValidIBAN(s)
 	}},
+	// Ahead of the credential entry, which is internal/classify's order and, as
+	// there, the whole of tracker T-0100: a URL clears every guard in
+	// textsig.LooksSecret, so before that task mastodon's accounts.uri read as
+	// `credential` on every row. A URL that names a person is an online_id.
+	{category: pipeline.CatOnlineID, name: "online_id", text: true, ok: textsig.ValidURL},
 	{category: pipeline.CatCredential, name: "credential", text: true, ok: textsig.LooksSecret},
 	// The two dictionary-backed ones keep internal/classify's precedence:
 	// person_name before address, free_text last, so a note that mentions a

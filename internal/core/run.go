@@ -663,8 +663,8 @@ func (r *run) openTarget(ctx context.Context) error {
 	// called from move, before the first write to the target.
 	r.gate = e
 
-	// The read side of the target. pipeline.Writer has Exec, CopyFrom and Begin
-	// and no way to read (ARCHITECTURE.md section 2), and every check verify
+	// The read side of the target. pipeline.Writer writes and registers types and
+	// has no way to read (ARCHITECTURE.md section 2), and every check verify
 	// makes is a read of the target, so the wiring supplies one rather than
 	// letting verify report a green tick over checks that did not happen. A
 	// Query method on internal/pg's writer is the proper home for it and is

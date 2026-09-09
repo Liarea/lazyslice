@@ -288,6 +288,13 @@ func (writeOnly) CopyFrom(context.Context, ref.TableRef, []string, <-chan []any)
 }
 func (writeOnly) Begin(context.Context) (pipeline.Tx, error) { return nil, errors.New("no") }
 
+// RegisterTypes is pipeline.Writer's fourth method (internal/pipeline/source.go,
+// T-0093; ARCHITECTURE.md §2 still prints three, owed as T-0123):
+// the loader registers the source's user-defined types on the target before the
+// first CopyFrom. Verify never calls it — by the time verify holds a Writer the
+// load is over — so this double answers nil.
+func (writeOnly) RegisterTypes(context.Context, *pipeline.Schema) error { return nil }
+
 // noResidual is a filter that answers no to everything.
 type noResidual struct{}
 
@@ -760,6 +767,89 @@ func TestTheDictionaryRule(t *testing.T) {
 			}
 			if got := s.failures[0].Exit; got != exitResidual {
 				t.Errorf("the refusal exits %d, want %d", got, exitResidual)
+			}
+		})
+	}
+}
+
+// A URL is the shape neither net could see between tracker T-0100 and T-0122.
+//
+// T-0100 took a URL out of textsig.LooksSecret — a URL clears every guard that
+// validator has, so mastodon's accounts.uri read as `credential` on every row —
+// and put textsig.ValidURL into internal/classify ahead of the secrets
+// validator. internal/verify was outside that task's paths, so this net kept
+// the credential entry that no longer matched a URL and gained no online_id
+// entry at all: email, phone, ip, mac, luhn, iban, LooksSecret, NameShape,
+// AddressShape and ProseName all return false for a profile URI, so one that
+// reached the target unmasked was seen by nothing and the run exited 0.
+// THREAT_MODEL.md T1 makes this net a blocking control for the column the
+// 200-row sample under-represented, and the two packages score independently,
+// so classify gaining the validator did not compensate.
+//
+// The second case is the half that says the entry is in the right place: the
+// refusal names online_id and not credential, which is the order of the two in
+// validators.go and in internal/classify.
+func TestAProfileURLFailsTheSecondNetAsAnOnlineID(t *testing.T) {
+	table := customers()
+	col := ref.ColumnRef{Table: table, Column: "note"}
+
+	cases := []struct {
+		name     string
+		vals     []any
+		wantFail string // the category the refusal names, empty for no refusal
+	}{
+		{
+			name: "mastodon-shaped profile URIs",
+			vals: []any{
+				"https://home.social.test/users/bea_donnelly1",
+				"https://home.social.test/users/ada_lovelace2",
+				"https://home.social.test/users/grace_hopper3",
+				"https://home.social.test/users/alan_turing4",
+			},
+			wantFail: "online_id",
+		},
+		{
+			name: "a column of ordinary words is still not a URL",
+			vals: []any{"pending", "settled", "refunded", "settled"},
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s := &state{
+				schema: &pipeline.Schema{},
+				target: oneColumn{vals: c.vals},
+				steps:  []pipeline.Step{{Table: table, Mode: pipeline.ChildOK}},
+				tables: map[ref.TableRef]*pipeline.Table{
+					table: {Ref: table, Columns: []pipeline.Column{{Name: col.Column, TypeName: "text"}}},
+				},
+				cls: &pipeline.Classification{Decisions: map[ref.ColumnRef]pipeline.Decision{
+					col: {Col: col, Category: pipeline.CatNone, Source: pipeline.ByClassifier},
+				}},
+			}
+			if err := s.secondNet(context.Background()); err != nil {
+				t.Fatalf("secondNet: %v", err)
+			}
+			if c.wantFail == "" {
+				if len(s.failures) != 0 {
+					t.Fatalf("the net failed %s on %v as %q", col, c.vals, s.failures[0].Reason)
+				}
+				return
+			}
+			if len(s.failures) != 1 {
+				t.Fatalf("the net recorded %d failures on %v, want one naming %s; a profile URI "+
+					"nobody masked is in the target and neither net saw it", len(s.failures), c.vals, c.wantFail)
+			}
+			got := s.failures[0]
+			if got.Reason != c.wantFail {
+				t.Errorf("the refusal names the category %q, want %q; online_id is ahead of "+
+					"credential in validators.go for the reason T-0100 gives", got.Reason, c.wantFail)
+			}
+			if got.Table != table || got.Column != col.Column {
+				t.Errorf("the refusal names %s.%s, want %s", got.Table, got.Column, col)
+			}
+			if got.Exit != exitResidual {
+				t.Errorf("the refusal exits %d, want %d", got.Exit, exitResidual)
 			}
 		})
 	}

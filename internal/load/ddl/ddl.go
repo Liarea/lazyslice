@@ -77,9 +77,9 @@ type TableDrop struct {
 // as readily as a marked one that holds all of them.
 //
 // extra is the target's own user tables, which this package cannot read:
-// pipeline.Writer has Exec, CopyFrom and Begin and no way to query
-// (ARCHITECTURE.md section 2), so a table the target holds under a name the
-// source does not use is dropped only if the caller names it. A table this
+// pipeline.Writer has no way to query (ARCHITECTURE.md section 2), so a table
+// the target holds under a name the source does not use is dropped only if the
+// caller names it. A table this
 // function is not given is left alone rather than dropped silently.
 func DropTables(schema *pipeline.Schema, extra []ref.TableRef) []TableDrop {
 	if schema == nil {

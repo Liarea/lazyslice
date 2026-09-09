@@ -560,8 +560,8 @@ func extensionNames(s *pipeline.Schema) []string {
 // one being loaded; the names come out of it.
 //
 // The one entry point is writer.RegisterTypes (writer.go), which is
-// pipeline.TypeRegistrar and is what the loader calls: internal/load holds a
-// Writer and never a Target. Target had an exported RegisterTypes of its own
+// pipeline.Writer's fourth method and is what the loader calls: internal/load
+// holds a Writer and never a Target. Target had an exported RegisterTypes of its own
 // until this was reviewed; it had no caller but a test, and two public doors
 // onto one private room is how the next reader ends up behind the wrong one.
 //

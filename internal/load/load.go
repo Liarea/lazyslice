@@ -54,9 +54,9 @@ type Run struct {
 	SecretFingerprint         string
 
 	// TargetTables are the user tables the target already holds, as the gate
-	// enumerated them. pipeline.Writer has Exec, CopyFrom and Begin and no way
-	// to read (section 2), so a table the target holds under a name the source
-	// does not use is dropped only when the caller names it here; one this
+	// enumerated them. pipeline.Writer has no way to read (section 2), so a table
+	// the target holds under a name the source does not use is dropped only when
+	// the caller names it here; one this
 	// package is not told about is left alone rather than dropped silently.
 	TargetTables []ref.TableRef
 }
@@ -252,27 +252,20 @@ func (l loader) load(
 // column fails 42804 and an enum array fails 54000, mid-table; T8's per-table
 // transaction then leaves the target empty or complete, and the run still fails.
 //
-// **A Writer that is not a pipeline.TypeRegistrar is an error here, not a
-// skipped step.** The registration is reached through an optional interface —
-// pipeline.Writer is ARCHITECTURE.md section 2's three methods and registration
-// needs the schema, which is the loader's argument and not the connection's —
-// and an optional interface that misses is a step that vanishes with no compile
-// error. internal/core already wraps this same writer in a readableWriter for
-// verify, and a readableWriter embeds the Writer interface, so it is one
-// refactor away from being what the loader is handed: the assertion would miss,
-// the load would carry on, and the failure would reappear as a mid-table encode
-// error in the integration suite and nowhere else. It therefore names the type
-// it was given and refuses. Every Writer in this tree registers types; a second
-// engine that genuinely cannot is a change to pipeline.Writer, not a silent
-// return (tracker T-0093).
+// Registration is a method on pipeline.Writer (internal/pipeline/source.go;
+// ARCHITECTURE.md section 2 still prints the three methods Writer had before
+// T-0093, and that edit is owed as T-0123) and
+// not an optional second interface, so this step cannot go missing: until
+// T-0093 it was reached through w.(pipeline.TypeRegistrar), and an optional
+// interface that misses is a step that vanishes with no compile error.
+// internal/core wraps this same writer in a readableWriter for verify, and that
+// wrapper embeds the Writer interface, so it was one refactor away from being
+// what the loader is handed — the assertion would have missed, the load would
+// have carried on, and the failure would have reappeared as a mid-table encode
+// error in the integration suite and nowhere else. A Writer that has nothing to
+// register returns nil; a Writer that cannot register no longer compiles.
 func registerTypes(ctx context.Context, w pipeline.Writer, schema *pipeline.Schema) error {
-	r, ok := w.(pipeline.TypeRegistrar)
-	if !ok {
-		return refuse(CodeRefusedDDL, exitLoad, ref.TableRef{}, "",
-			fmt.Errorf("the target writer (%T) cannot register the source's user-defined "+
-				"types, so a composite or an array of a user-defined type would fail mid-copy", w))
-	}
-	if err := r.RegisterTypes(ctx, schema); err != nil {
+	if err := w.RegisterTypes(ctx, schema); err != nil {
 		return refuse(CodeRefusedDDL, exitLoad, ref.TableRef{}, "", err)
 	}
 	return nil

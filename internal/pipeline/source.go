@@ -141,30 +141,23 @@ type Writer interface {
 	Exec(ctx context.Context, sql string, args ...any) error
 	CopyFrom(ctx context.Context, table TableRef, cols []string, rows <-chan []any) (int64, error)
 	Begin(ctx context.Context) (Tx, error)
-}
-
-// TypeRegistrar is a Writer whose connections can be given the source's
-// user-defined types (ARCHITECTURE.md section 11.1, ADR-005: "types registered
-// in AfterConnect"). Without them a value of an enum array or a composite type
-// has no encode plan on the target and CopyFrom fails mid-table — 54000 and
-// 42804 respectively, measured on postgres:16.
-//
-// It is a second interface rather than a method on Writer because the schema is
-// the loader's argument and not the connection's: registration can only happen
-// once the DDL has created the types in the target, which is halfway through the
-// load, and Writer stays the three methods section 2 gives it.
-//
-// **A Writer that is not a TypeRegistrar is not a Writer the loader accepts.**
-// internal/load refuses it by name rather than skipping the step: an optional
-// interface that misses is a load step that disappears with no compile error,
-// and the failure comes back as a mid-copy encode error on a composite column.
-// The compiler-checked alternative — a fourth method on Writer — is the better
-// shape and is filed as T-0093; it touches test doubles in internal/verify,
-// which was outside the paths of the task that found this.
-type TypeRegistrar interface {
 	// RegisterTypes makes the schema's enums, domains, composites and the array
 	// types over them encodable on every connection this Writer opens from here
-	// on. It is called after the pre-data DDL and before the first CopyFrom.
+	// on (ARCHITECTURE.md section 11.1, ADR-005: "types registered in
+	// AfterConnect"). The loader calls it after the pre-data DDL has created
+	// those types in the target and before the first CopyFrom. Without it a
+	// value of an enum array or a composite type has no encode plan on the
+	// target and CopyFrom fails mid-table — 54000 and 42804 respectively,
+	// measured on postgres:16.
+	//
+	// It is a method on Writer, and not the optional second interface
+	// TypeRegistrar it was until T-0093, because an optional interface that
+	// misses is a load step that vanishes with no compile error: internal/core
+	// wraps this same writer in a readableWriter for verify, that wrapper
+	// embeds the Writer interface, and one refactor putting it ahead of the
+	// load would have turned every run's registration off. The schema is the
+	// loader's argument rather than the connection's, which is why the method
+	// takes it; a Writer with no user-defined types to register returns nil.
 	RegisterTypes(ctx context.Context, s *Schema) error
 }
 

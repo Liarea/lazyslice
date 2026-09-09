@@ -1,9 +1,10 @@
 # internal/pg
 
 The only package that speaks Postgres. Implements `pipeline.Source`,
-`pipeline.Target` (including the gate), `pipeline.Reader`, `pipeline.Writer`
-and `pipeline.TypeRegistrar`, and registers the shape-allowlist tracers on the
-source pool. No other package opens a `pgxpool.Pool`.
+`pipeline.Target` (including the gate), `pipeline.Reader` and `pipeline.Writer`
+(whose fourth method, `RegisterTypes`, this package is the only real
+implementation of), and registers the shape-allowlist tracers on the source
+pool. No other package opens a `pgxpool.Pool`.
 
 **Contract.** ARCHITECTURE.md §2 "source and target handles" in full —
 `Source.Snapshot`/`.Reader`/`.Short`/`.Release`/`.Trace`,
@@ -480,8 +481,11 @@ for the privilege.
   THREAT_MODEL.md T8's per-table transaction cleaning up after a run that still
   failed.
   **`writer.RegisterTypes(ctx, *pipeline.Schema)` is the entry point, and the
-  only one** (`pipeline.TypeRegistrar`; `internal/load` holds a `Writer` and
-  never a `Target`). It takes the source's enum, domain and composite names out
+  only one** (`pipeline.Writer`'s fourth method since T-0093, `pipeline.TypeRegistrar`
+  before that; `internal/load` holds a `Writer` and never a `Target`).
+  ARCHITECTURE.md §2 still prints the three methods `Writer` had before T-0093;
+  that edit is owed as **T-0123**, so read §2's block as three-plus-this-one
+  until it lands. It takes the source's enum, domain and composite names out
   of the schema `internal/introspect` read; the loader calls it between §11.1
   item 3 and the first `CopyFrom`, which is the only moment it can be called —
   before it the target has none of those types, and after the copy is too late.

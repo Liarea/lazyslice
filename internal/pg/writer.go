@@ -22,13 +22,10 @@ type writer struct {
 	types *typeRegistry
 }
 
-var (
-	_ pipeline.Writer        = (*writer)(nil)
-	_ pipeline.TypeRegistrar = (*writer)(nil)
-)
+var _ pipeline.Writer = (*writer)(nil)
 
-// RegisterTypes is pipeline.TypeRegistrar: the loader calls it once, after the
-// DDL of ARCHITECTURE.md §11.1 item 3 has created the source's enums, domains
+// RegisterTypes is pipeline.Writer's fourth method: the loader calls it once,
+// after the DDL of ARCHITECTURE.md §11.1 item 3 has created the source's enums, domains
 // and composites in the target and before the first CopyFrom (types.go).
 func (w *writer) RegisterTypes(ctx context.Context, s *pipeline.Schema) error {
 	return registerTypes(ctx, w.pool, w.types, s)

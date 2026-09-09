@@ -1,8 +1,9 @@
 -- root:   public.reg7_account
 -- take:   40
--- expect: exit 12 plan.refused.unique_domain
+-- expect: ok
 -- found:  supabase-auth
 -- why:    a masked column under a *partial* unique index collided when the index was recreated
+-- unique-masked: public.reg7_account.confirmation_token
 --
 -- Supabase's auth schema carries
 --
@@ -34,16 +35,41 @@
 -- estimating refuses a plan that might have loaded; under-estimating is the
 -- 23505 above, one statement after every row has moved. The plan refusal prints
 -- three escapes and the collision prints none, so the over-estimate is the
--- direction taken, and T-0099 carries the exact rule along with the rest of §5's
--- unwritten index cases.
+-- direction taken. It is the accepted rule now, not a placeholder:
+-- docs/adr/011-unique-index-domain-rule.md clause (b), accepted 2026-09-08,
+-- with §5 amended to state it (T-0099, T-0107).
 --
--- `expect:` is therefore the refusal. `reg7_account.label` is the control: it is
--- under a partial unique index too and is *not* masked, so nothing about it
--- changes.
+-- **`expect:` was that refusal until T-0113, and is now `ok`.** The classifier
+-- rule this file pins is unchanged — a single-column partial unique index still
+-- raises Decision.UniqueIndex and d_required is still computed over the whole
+-- table — and what changed is what the plan can do about the raise:
+-- mask/gen_credential.go's `credential_unique` (T-0098) gave CatCredential an
+-- alternate generator wide enough for a unique column, so §5's widest-generator
+-- step finds one and the run loads. The over-estimate is therefore still an
+-- over-estimate and still errs the safe way; it simply no longer costs a
+-- refusal for this category.
+--
+-- `expect: ok` alone would pass a run that copied the token verbatim, which is
+-- the leak the column exists to prevent, so the header carries `unique-masked:`
+-- and the harness reads the target: every confirmation_token prefixed
+-- `lazyslice-invalid-`, and one distinct value per loaded row. That also
+-- re-states the original defect in the target rather than in the exit code — a
+-- repeat here is the index that would not build.
+--
+-- `reg7_account.label` is the control: it is under a partial unique index too
+-- and is *not* masked, so nothing about it changes.
+--
+-- `reg7_account.email` came in with the header change and is not part of the
+-- defect. Every regression that exits 0 is also put through the grep half of
+-- invariant I2, which fails when the *source* holds no email address and no
+-- phone number — finding none in the target would prove nothing about a fixture
+-- that never had one. This file had none, because until T-0113 it never reached
+-- that assertion: it was expected to refuse before anything was loaded.
 
 CREATE TABLE public.reg7_account (
     id                 integer PRIMARY KEY,
     label              text,
+    email              text NOT NULL,
     confirmation_token text
 );
 
@@ -61,8 +87,8 @@ CREATE TABLE public.reg7_session (
     agent      text NOT NULL
 );
 
-INSERT INTO public.reg7_account (id, label, confirmation_token)
-SELECT i, 'L' || i, md5('confirm' || i) || md5('confirm2' || i)
+INSERT INTO public.reg7_account (id, label, email, confirmation_token)
+SELECT i, 'L' || i, 'person' || i || '@regression.test', md5('confirm' || i) || md5('confirm2' || i)
 FROM generate_series(1, 120) AS g(i);
 
 INSERT INTO public.reg7_session (id, account_id, agent)

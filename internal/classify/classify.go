@@ -177,8 +177,10 @@ func (classifier) Classify(schema *pipeline.Schema, s pipeline.Sampler, prior *p
 // over-estimates: the predicate admits at most that many rows and usually far
 // fewer. Over-estimating refuses a plan that might have loaded, and the refusal
 // prints three escapes; under-estimating is a 23505 one statement after every
-// row has moved, and prints none. T-0099 carries the exact rule, along with the
-// composite tuple whose columns all repeat.
+// row has moved, and prints none. **ADR-011 clause (b) is the accepted decision
+// for this rule** (2026-09-08, from T-0099's text), and ARCHITECTURE.md §5
+// states it: the over-estimate is the rule, not a placeholder, and its reversal
+// condition is introspect collecting the statistic that would make it exact.
 func (st *state) indexKeys() {
 	for _, t := range st.schema.Tables {
 		for _, name := range t.PK {
@@ -1387,7 +1389,10 @@ func (st *state) finalise() {
 // each errs towards raising, because raising wrongly costs a plan refusal with
 // three printed escapes and not raising costs a loader that dies with rows
 // already moved. What none of them covers is a tuple whose columns all repeat
-// and whose masking merges two groups at once; T-0099 carries the exact rule.
+// and whose masking merges two groups at once. **ADR-011 clause (a) is the
+// accepted decision for this rule** (2026-09-08, from T-0099's text), and
+// ARCHITECTURE.md §5 states it; the exact rule needs the largest-agreeing-group
+// statistic nothing collects, which is that ADR's reversal condition.
 //
 // The sample is the classifier's own (`state.samples`, the same flattening the
 // validators read), so this asks the source nothing it was not already asked.

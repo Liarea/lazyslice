@@ -12,31 +12,34 @@ import (
 // The ten columns docs/TORTURE.md's supabase-auth truth set records as missed:
 // hand-labelled personal, classified below §4's mask threshold, and therefore
 // copied into the target verbatim under exit 0. Recall on that schema was 0.800
-// and this was the 0.200.
+// and this was the 0.200. It is 0.980 now (precision 0.671, re-measured in
+// T-HARD-C and recorded in docs/TORTURE.md); this file is the column-by-column
+// half of that number.
 //
-// **Eight of the ten are masked now** (T-0104): the credential and online_id
-// name patterns in rules.yml gained the spellings a real authentication schema
-// uses, and this file is the pin that says so. It was written asserting the
+// **Nine of the ten are masked now** (T-0104, and public_key at T-0121): the
+// credential and online_id name patterns in rules.yml gained the spellings a
+// real authentication schema uses, and this file is the pin that says so. It was written asserting the
 // leak, with the instruction to flip each entry rather than delete the file
 // when the rules landed, and that is what has happened. It still fails in both
 // directions — a column that stops being masked fails it too — which is the
 // whole point of keeping it.
 //
-// **The other two are decisions and not omissions**, which is what T-0104 said
-// of them: "two of the ten deserve a decision rather than a pattern".
+// **The other two were decisions and not omissions**, which is what T-0104 said
+// of them: "two of the ten deserve a decision rather than a pattern". One has
+// been decided and one has not.
 //
-// `webauthn_credentials.public_key` is the first, and it is still open (T-0121).
-// A public key is published by design — WebAuthn hands it to every relying
-// party and mastodon puts the account's in its actor document — so the
-// credential rule would mask a value that is not secret to the fixed literal,
-// at a priority that outranks everything else; and it is also a stable
-// identifier for exactly one person, which is the online_id argument. Those are
-// two different maskers and two different answers, the hand label in
-// names_test.go moves with whichever wins, and neither the rule nor the label
-// is a rule author's call to take alone. Until it is settled the column is
-// copied, and that is recorded here rather than anywhere quieter.
+// `webauthn_credentials.public_key` is the first, and it is settled (T-0121,
+// 2026-09-09): the column is `credential`, masked to the unusable fixed literal,
+// or `credential_unique` where a unique index makes the literal collide. A
+// public key is published by design — WebAuthn hands it to every relying party
+// and mastodon puts the account's in its actor document — so it is not a secret;
+// what decided it is that a key identifying exactly one person is a per-person
+// identifier that outlives every other value in the row, and nothing a local
+// development database does verifies an assertion or serves an actor document,
+// so the real value buys nothing there. The hand labels in names_test.go moved
+// with the rule, and docs/TORTURE.md records what the rates did.
 //
-// `refresh_tokens.parent` is the second.
+// `refresh_tokens.parent` is the second, and it is still open.
 // holds another refresh token in a column named after a tree edge, and T-0104
 // says it deserves a decision rather than a pattern. There is no pattern to
 // write: a rule matching `parents?` would match `parent_id` in every schema
@@ -65,7 +68,7 @@ func TestSupabaseAuthMissesArePinned(t *testing.T) {
 	}{
 		{"flow_state", "auth_code", "text", "the OAuth authorization code", true},
 		{"identities", "provider_id", "text", "the provider's subject id for the person", true},
-		// The two that are still copied, and on purpose: see the note above.
+		// The one that is still copied, and on purpose: see the note above.
 		{"refresh_tokens", "parent", "character varying(255)", "another refresh token", false},
 		{"mfa_challenges", "otp_code", "text", "the one-time code", true},
 		{"mfa_recovery_codes", "code_hash", "text", "a recovery code", true},
@@ -73,7 +76,7 @@ func TestSupabaseAuthMissesArePinned(t *testing.T) {
 		{"oauth_client_states", "code_verifier", "text", "the secret half of PKCE", true},
 		{"scim_users", "external_id", "text", "the IdP's id for the person", true},
 		{"webauthn_credentials", "credential_id", "bytea", "the authenticator's credential id", true},
-		{"webauthn_credentials", "public_key", "bytea", "a stable per-person identifier", false},
+		{"webauthn_credentials", "public_key", "bytea", "a stable per-person identifier", true},
 	}
 
 	for _, c := range cases {
