@@ -7,7 +7,7 @@
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 1 | 0 | 9 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
-| E5 Hardening | 5 | 15 | 1 | 36 | 0 | 0 |
+| E5 Hardening | 5 | 14 | 2 | 36 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
 | E9 Later | later | 7 | 0 | 13 | 1 | 0 |
 
@@ -28,7 +28,7 @@
 - T-0096 [open] E5 · testdata/CLAUDE.md and testdata/README.md still say 'two fixtures and nothing else' ()
 - T-0102 [open] E9 · A text column holding a JSON document is invisible to ARCHITECTURE.md 4's JSON rule ()
 - T-0105 [open] E5 · .golangci.yml does not lint the torture build tag ()
-- T-0110 [open] E5 · T-HARD-C: RegisterTypes on Writer, torture tag linted, testdata docs (T-0093, T-0105, T-0096) (sonnet)
+- T-0110 [in_progress] E5 · T-HARD-C: RegisterTypes on Writer, torture tag linted, testdata docs (T-0093, T-0105, T-0096) (sonnet)
 - T-0112 [open] E5 · Re-measure docs/TORTURE.md's flag counts and the catalogue's flags-by-kind after the credential_unique masker ()
 - T-0113 [open] E5 · Regressions 004 and 007 expect exit 12 and now exit 0: credential_unique made their headers stale ()
 - T-0114 [open] E5 · mask/CLAUDE.md and gen_credential.go still say the torture counts are un-re-measured ()
