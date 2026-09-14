@@ -1,8 +1,8 @@
 -- root:   public.reg9_site
 -- take:   20
--- expect: exit 12 plan.refused.unwritable
+-- expect: ok
 -- found:  plausible
--- why:    a citext[] of addresses arrived as one text literal and was masked as one scalar
+-- why:    a citext[] of addresses arrives as one text literal and is masked element-wise
 --
 -- The other half of 005, and the one that carries personal data.
 --
@@ -27,50 +27,39 @@
 --     and the rows of this one already moving. That is what T-0118 fixed:
 --     transform parses the literal, masks each element under the column's
 --     masker with h computed per element, and writes a literal back.
---   * internal/plan refused the column at exit 12 in between the two, so that
---     landing the classify half alone could not half-load a target. That
---     refusal is a stand-in for the masker and goes with it.
+--   * internal/plan used to refuse the column at exit 12 in between the two,
+--     so that landing the classify half alone could not half-load a target.
+--     That refusal (`arrayArrivesAsLiteral` in internal/plan/writeback.go) was
+--     a stand-in for the masker and T-0127 is what removes it, now that both
+--     the masker (T-0118) and the residual scan's own reader of the literal
+--     (T-0129) exist.
 --
--- **The header asserts the refusal, not the load, and that is the tree as it
--- stands.** internal/plan was outside T-0118's paths, so `arrayArrivesAsLiteral`
--- in internal/plan/writeback.go is still standing in for the masker that now
--- exists, and it refuses this column before a row moves:
---
---     plan.refused.unwritable: public.reg9_report.recipients is masked as email
---       and its type citext[] is an array no masker can write element-wise yet
---
--- So what this file asserts today is that the refusal is still the one the
--- operator gets, whole and coded, rather than the exit 7 mid-load that the
--- unfixed transform gave. A header saying `ok` here would have been a wish:
--- README.md's rule is that `expect: ok` means the run must now succeed, and
--- `make torture` has to be green at every commit or it stops being able to tell
--- a new defect from a known one.
---
--- **Tracker T-0127 flips this header back to `ok` in the same change that
--- removes `arrayArrivesAsLiteral`** — one line of removal there, one line here.
--- What the file will then assert is the whole chain: the run exits 0, so the
--- literal is something `CopyFrom` can write; and the suite's own leak check
--- (`assertTortureNoLiteralSurvives`, which the harness runs only for a file
--- expecting exit 0) finds none of the source's addresses in the target, so the
--- elements inside the literal were masked rather than copied. A run with either
--- half missing fails one of the two — the old transform on the first, the old
--- classify on the second. Until then the element-wise masker has unit coverage
--- in internal/transform/array_test.go and no end-to-end coverage from the CLI,
--- because the pipeline stops at plan before a row moves.
+-- **The header now asserts the load, not the refusal.** T-0127 removed
+-- `arrayArrivesAsLiteral`, so the plan no longer refuses this column and the
+-- run reaches the loader. What this file asserts is the whole chain: the run
+-- exits 0, so the literal is something `CopyFrom` can write; and the suite's
+-- own leak check (`assertTortureNoLiteralSurvives`, which the harness runs only
+-- for a file expecting exit 0) finds none of the source's addresses in the
+-- target, so the elements inside the literal were masked rather than copied.
+-- This is the first commit under which that check actually runs for this file
+-- — before it, the harness returned at the refusal for any file expecting a
+-- non-zero exit, so the element-wise masker had unit coverage in
+-- internal/transform/array_test.go only, and no end-to-end evidence from the
+-- CLI.
 --
 -- What that leak check is *not* is the residual scan. It is this suite's own
 -- external grep of the target, and it covers this fixture only. Inside the
 -- product, ARCHITECTURE.md §6 item 1's residual scan used to be blind to a
 -- masked array that arrives as a literal: internal/verify read the column back
 -- as one string, so the per-element filter entries transform makes matched
--- nothing and the scan passed green. **T-0129 has landed and that is fixed**:
--- internal/verify/arrayliteral.go splits the literal with transform's own
+-- nothing and the scan passed green. T-0129 landed first and fixed that:
+-- internal/verify's `arrayHits` splits the literal with transform's own
 -- grammar and tests one filter entry per element, and a masked array column
 -- whose value it cannot split is exit 9 naming the column rather than a green
--- tick (internal/verify/CLAUDE.md carries the rule). So when T-0127 flips this
--- header, the second net and the residual scan are both looking inside the
+-- tick (internal/transform/CLAUDE.md carries the rule). So now that T-0127 has
+-- landed, the second net and the residual scan are both looking inside the
 -- braces, and this file's own grep is corroboration rather than the only
--- evidence — which is the order T-0127's log requires and the reason it was
+-- evidence — which is the order T-0127's log required and the reason it was
 -- ordered behind T-0129.
 --
 -- The addresses are under `.test` rather than `example.com`, `example.net` or

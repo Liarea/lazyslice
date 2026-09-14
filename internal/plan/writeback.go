@@ -52,7 +52,7 @@ func (p *run) checkWriteBack() error {
 		if !p.inScope[t.Ref] {
 			continue
 		}
-		for ci, col := range t.Columns {
+		for _, col := range t.Columns {
 			d, ok := p.cls.Decisions[ref.ColumnRef{Table: t.Ref, Column: col.Name}]
 			if !ok || !d.Masked {
 				continue
@@ -87,37 +87,6 @@ func (p *run) checkWriteBack() error {
 						event.ArgColumn: col.Name,
 						event.ArgReason: "the type " + base + " is a composite and no masker can write a record: " +
 							"--skip-table " + t.Ref.String() + ", or --unmask " + t.Ref.String() + "." + col.Name + "=REASON",
-					})
-				r.Column = col.Name
-				return r
-			}
-			if arrayArrivesAsLiteral(t, ci, col) {
-				// The same shape as the composite above, and here until the
-				// transform half of T-0103 lands (T-0118). internal/transform
-				// masks an array element-wise only when the driver handed the
-				// value back as a slice, and pgx does that only for an array
-				// type its map knows: the source pool registers no user types
-				// (T-0076), so a citext[] arrives as the single string
-				// "{a@b.test,c@d.test}", is masked as one scalar, and CopyFrom
-				// dies with "cannot find encode plan" at exit 7 with rows
-				// already moving and the earlier tables committed.
-				//
-				// internal/classify now reads inside such a literal, so the
-				// column is decided rather than copied (which is why this can
-				// be reached at all); the refusal is what keeps that from being
-				// a half-loaded target. It asks the samples rather than the
-				// type, because the samples are the only place the driver's
-				// answer is recorded: a text[] comes back as a slice and is
-				// masked element-wise as it always was.
-				r := refuse(CodeUnwritable, exitPlan, t.Ref,
-					fmt.Sprintf("%s.%s is masked as %s and its type %s is an array no masker can write element-wise yet",
-						t.Ref, col.Name, d.Category, col.TypeName),
-					event.Args{
-						event.ArgTable:  t.Ref.String(),
-						event.ArgColumn: col.Name,
-						event.ArgReason: "the type " + col.TypeName + " arrives from the source as one text literal and " +
-							"cannot be masked element-wise yet: --skip-table " + t.Ref.String() +
-							", or --unmask " + t.Ref.String() + "." + col.Name + "=REASON",
 					})
 				r.Column = col.Name
 				return r
@@ -222,38 +191,6 @@ func (p *run) compositeType(col pipeline.Column) (string, bool) {
 		}
 	}
 	return "", false
-}
-
-// arrayArrivesAsLiteral reports that this array column's sampled values reached
-// us as the server's own text form rather than as a slice — which is what pgx
-// does for an array whose element type its map does not know, and the one thing
-// that tells a `citext[]` from a `text[]` here (tracker T-0118).
-//
-// It is deliberately asked of the samples and not of the type: `mask.TypeTag`
-// knows citext, so the type says nothing about whether the driver can decode
-// an array of it, and a list of the arrays pgx registers would be a fourth copy
-// of a type table that T-0054 spent a task removing. A column nothing was
-// sampled from is not refused: there is no row to load either.
-func arrayArrivesAsLiteral(t *pipeline.Table, idx int, col pipeline.Column) bool {
-	if !strings.HasSuffix(strings.TrimSpace(col.TypeName), "[]") {
-		return false
-	}
-	seen := false
-	for _, row := range t.Samples {
-		if idx >= len(row) || row[idx] == nil {
-			continue
-		}
-		switch row[idx].(type) {
-		case string, []byte:
-			seen = true
-		default:
-			// One decoded value is enough: the driver has a codec for this
-			// array and internal/transform's element-wise path is the one that
-			// runs.
-			return false
-		}
-	}
-	return seen
 }
 
 // domainBase returns the base type a domain is declared over, read out of the

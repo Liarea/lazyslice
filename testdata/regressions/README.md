@@ -62,20 +62,19 @@ original collision restated against the target instead of against an exit code.
 | `008-name-hit-on-an-unaccepted-type-drops-the-type-signal.sql` | supabase-auth | **a leak**: a name hit the column's type does not accept removed the masking the type alone would have given, and a jsonb column of names, addresses and phone numbers was copied verbatim under exit 0 |
 | `009-citext-array-of-addresses-masked-as-one-string.sql` | plausible | **a leak, then a half-loaded target**: a `citext[]` of addresses arrives as one text literal, so the classifier saw one opaque value and copied it, and once it read inside the literal the transformer still masked it as one scalar and `CopyFrom` refused the result mid-load |
 
-009 is the one file here whose header asserts a refusal it wants gone. It says
-`expect: exit 12 plan.refused.unwritable`, because that is what the tree does:
-`arrayArrivesAsLiteral` in `internal/plan/writeback.go` was written as a stand-in
-for the element-wise masker T-0118 has now landed
-(`internal/transform/array.go`), and `internal/plan` was outside T-0118's paths,
-so the stand-in still refuses a column the pipeline can now mask. Tracker
-**T-0127** removes it and flips this file's header to `ok` in the same change —
-and only then does the harness reach the leak check, which is the half of 009
-that matters. A header saying `ok` before that lands would be a wish, not an
-assertion, and would leave `make torture` red at every commit in between. T-0127
-is itself ordered behind **T-0129**, and the file's own comment says why: this
-suite's leak check is an external grep over one fixture, while the product's
-residual scan is blind to a masked array carried as a literal, and removing the
-plan refusal is what first lets such a column reach a target.
+009's header now says `ok`. It did not always: `arrayArrivesAsLiteral` in
+`internal/plan/writeback.go` was written as a stand-in for the element-wise
+masker T-0118 hadn't yet landed (`internal/transform/array.go`), and while it
+stood the file headered `exit 12 plan.refused.unwritable` — the CLI stopped at
+plan, before a row moved, so the leak check below never ran. **T-0127** removed
+that stand-in refusal (ordered behind **T-0129**, so the residual scan below
+would not stay blind to the column class the refusal was newly letting
+through) and flipped the header to `ok` in the same change. With the refusal
+gone, the run now reaches the leak check, which is the half of 009 that
+matters: plan admits the column, transform masks it element-wise, load writes
+it back, and the residual scan tests the per-element entries — end to end,
+with `internal/verify/arrayliteral.go` (T-0129) splitting the literal the same
+way transform does so the scan sees inside it instead of past it.
 
 ## What each file asserts, beyond its exit code
 

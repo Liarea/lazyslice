@@ -514,24 +514,33 @@ reason for each.
     `TestMaskedCompositeIsRefusedAtPlan` and
     `TestUnmaskedCompositeIsNotRefusedAtPlan` hold both sides, including that an
     ltree is still not refused.
-  - **An array whose samples arrive as a text literal is refused too, and only
-    until T-0118 lands** (`arrayArrivesAsLiteral`, T-HARD-B).
-    `internal/transform`'s `maskArray` masks element-wise only when the driver
-    handed the value back as a `[]any`, and pgx does that only for an array type
-    its map knows: the source pool registers no user types (T-0076), so a
-    `citext[]` arrives as the single string `{a@b.test,c@d.test}`, is masked as
-    one scalar, and `CopyFrom` dies with "cannot find encode plan" at exit 7 with
-    rows already moving and the earlier tables committed. `internal/classify`
-    reads inside such a literal now, so the column is decided rather than copied
-    — which is what makes this reachable — and this refusal is what keeps that
-    from being a half-loaded target instead of a silent leak. It asks the
-    **samples** and not the type on purpose: `mask.TypeTag` knows citext, so the
-    type says nothing about whether the driver can decode an array of it, and a
-    list of the arrays pgx registers would be a fourth copy of the type table
-    T-0054 spent a task removing. A `text[]` comes back as a slice and is not
-    refused (`TestArrayTheDriverDecodesIsNotRefusedAtPlan`). **Delete this branch
-    when T-0118 lands** — it is a stand-in for a masker, not a property of the
-    type.
+  - **An array whose samples arrive as a text literal is no longer refused
+    here** (T-0127). `arrayArrivesAsLiteral` was a stand-in for the masker half
+    of T-0103: pgx hands such a column back as the single string
+    `{a@b.test,c@d.test}` because the source pool registers no user types
+    (T-0076), and before T-0118 `internal/transform`'s `maskArray` fired only on
+    a `[]any` — so masking the literal as one scalar handed `CopyFrom` a string
+    for an array column and it died with "cannot find encode plan" at exit 7,
+    rows already moving. T-0118 taught `internal/transform` to parse and mask
+    such a literal element-wise, and T-0129 taught `internal/verify` to split it
+    the same way for the residual scan, so the column this check used to refuse
+    is now planned, masked and verified like any other array. Both fixture cases
+    stay covered by `TestArrayThatArrivesAsALiteralIsNotRefusedAtPlan` (the
+    citext case) and `TestArrayTheDriverDecodesIsNotRefusedAtPlan` (the text[]
+    case that was never refused). The removed branch's comment recorded a hard
+    ordering: this task does not land before T-0129, because while the refusal
+    stood, no masked array literal reached the target for T-0129's blindness to
+    cost anything. Removing this refusal also moves the failure for an
+    *unparseable* array literal from here at plan time (exit 12, before a key
+    is fetched) to load time (`transform.refused.masker`, exit 7, mid-stream
+    with earlier tables already committed); no plan-time parse check was kept
+    to hold the failure at this stage. `internal/transform/CLAUDE.md`'s T-0127
+    entry records why that is fail-closed rather than merely moved: classify's
+    reader and this package's masker read different grammars (a trailing
+    empty field and a doubled quote split one way and refuse the other), but
+    every value either package sees for an array column is Postgres's own
+    `array_out` output, and `array_out` never writes either form — so the
+    divergence has no reachable column, only an unreachable one.
   - **The refusal is held by a unit test as well as by the fixture suite**
     (`writeback_test.go`). `writeback_integration_test.go` asserts that the real
     classifier over both fixtures produces nothing this check refuses, but it

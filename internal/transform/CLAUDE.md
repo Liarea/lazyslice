@@ -213,21 +213,21 @@ unchanged, and the result is written back in the form `array_in` reads. Every
 element enters the filter under the column's empty path, which is the row the
 residual table above already gives an array element.
 
-**The filter entries a literal array makes are not reachable by the residual
-scan today, and that is a hole this carrier opens (T-0129).** The entries are
-per element, but `internal/verify` reads the target column back as one Go
-`string` — the literal — and `residual.go`'s `arrayHits` falls back to
-`scalarHits` on the whole value when it is not a `[]any`. The whole literal
-canonicalises to something no per-element entry matches, so every entry is
-untestable and the scan reports a green pass. Do not read the row above as
-saying otherwise: for a column that arrives as a slice the second net of
-ARCHITECTURE.md §6 item 1 holds, and for one that arrives as a literal it is
-inert — which is the one control THREAT_MODEL.md T12 has against a masker here
-that fails open, over exactly the column class this file enables. Measured by
-writing one element through unmasked while still recording it: exit 0, residual
-check passed, and only the torture harness's external I2 grep saw the addresses
-in the target. `internal/verify` is where that is fixed and it was outside
-T-0118's paths, so it is filed rather than worked around.
+**The filter entries a literal array makes are reachable by the residual scan**
+(`internal/verify`, T-0129, landed). The entries are per element, and before
+T-0129, `internal/verify` read the target column back as one Go `string` — the
+literal — and `residual.go`'s `arrayHits` fell back to `scalarHits` on the whole
+value when it was not a `[]any`: the whole literal canonicalised to something no
+per-element entry matched, so every entry was untestable and the scan reported a
+green pass. Measured by writing one element through unmasked while still
+recording it: exit 0, residual check passed, and only the torture harness's
+external I2 grep saw the addresses in the target. `internal/verify`'s
+`arrayHits` now splits a `string` or `[]byte` carrier with the same grammar
+`array.go` uses (`literalHits`) and tests each element; a literal it cannot
+parse is `verify.refused.residual_unconfirmable` at exit 9 naming the column
+rather than a silent fall-through, which is the same rule this package applies
+at load time below. `internal/verify` was outside T-0118's paths, so it was filed rather
+than worked around, and it was fixed and landed ahead of T-0127 below.
 
 Two things separate it from `internal/classify`'s reader of the same grammar,
 and both come from this being a parser rather than a signal. It **keeps the
@@ -239,39 +239,60 @@ scalar for an `_citext` column, and copying it through is T12. classify may be
 liberal because a literal it cannot read costs a signal; nothing here may be,
 because what it produces is written into the target.
 
-Three things about this are owed outside this package and are filed rather than
-worked around. The first two are not independent of each other: **T-0127 is what
-makes T-0129's hole live**, so the order between them is part of each task.
+One thing about this is still owed outside this package and is filed rather
+than worked around; two more that used to sit here have landed.
 
-- **T-0127**: `arrayArrivesAsLiteral` in `internal/plan/writeback.go` still
-  refuses such a column at exit 12. It was written as a stand-in for the masker
-  above — landing the classify half alone would have turned a silent leak into a
-  target half-loaded behind exit 7 — and it now refuses a column this package can
-  mask. `internal/plan` was outside T-0118's paths, so it is still there, and it
-  is why `testdata/regressions/009` headers `exit 12 plan.refused.unwritable`
-  rather than `ok`. **Nothing here has end-to-end coverage until it lands**: the
-  CLI stops at plan before a row moves, so `array_test.go` is the whole of it.
-  Removing the refusal also moves the failure for an *unparseable* literal from
-  plan time to load time, mid-stream, which is the half-loaded target that
-  refusal exists to prevent — the task carries that constraint. It carries one
-  more, and it is the reason this bullet and T-0129's are one decision: while the
-  refusal stands, no *masked* array column arriving as a literal reaches the
-  target at all, so verify's blindness below costs nothing. The commit that
-  removes the refusal is the commit that first lets such a column load, with
-  ARCHITECTURE.md §6 item 1's second net inert over it — masked in the report,
-  unscanned in fact. So **T-0127 does not land before T-0129**, or it lands
-  together with verify refusing or flagging the column, and the task says so.
+- **T-0127, landed.** `arrayArrivesAsLiteral` in `internal/plan/writeback.go`
+  used to refuse such a column at exit 12 — a stand-in for the masker above,
+  written so that landing the classify half alone would not turn a silent leak
+  into a target half-loaded behind exit 7. It refused a column this package can
+  mask, which is why `testdata/regressions/009` headered
+  `exit 12 plan.refused.unwritable` rather than `ok`, and why nothing here had
+  end-to-end coverage: the CLI stopped at plan before a row moved, so
+  `array_test.go` was the whole of it. Removing the refusal was ordered behind
+  T-0129 on purpose — while it stood, no *masked* array column arriving as a
+  literal reached the target at all, so verify's blindness (below, now closed)
+  cost nothing; landing it after T-0129 is what makes the residual scan's second
+  net live over this column class instead of inert. `testdata/regressions/009`
+  now headers `ok`, and its leak assertion is what the torture harness runs to
+  confirm the whole path — plan admits the column, transform masks it
+  element-wise, load writes it back, and the residual scan (T-0129) actually
+  tests the per-element entries — end to end. Removing the refusal also moves
+  the failure for an *unparseable* array literal from plan time (exit 12,
+  before a key is fetched) to load time (`transform.refused.masker`, exit 7,
+  mid-stream with earlier tables already committed) — the task carries that
+  constraint, and no plan-time parse check was added to keep the failure where
+  it was. What T-0127 established instead, in place of that check: the two
+  grammars are not the same, and the divergence is fail-closed. classify's
+  `splitLiteral` is deliberately liberal — a trailing empty field after a
+  comma (`{a,}`) is silently dropped rather than flushed, and a doubled quote
+  (`{"a""b"}`) is read as an escaped quote — because every caller there is a
+  signal and a literal it cannot read falls back to one opaque value. This
+  package's `array.go` refuses both forms (`bareElement` on the empty field,
+  `quoted`/`element` on the doubled quote) rather than guess, because guessing
+  can change the element count or the text, and what it produces is written
+  into the target. So classify can decide a column that this package then
+  refuses at load time. The reason it does not happen in practice: a value
+  this package ever sees for an array column already passed through Postgres's
+  own `array_out` — pgx hands back that exact server output, not user input —
+  and `array_out` never writes a trailing empty field or a doubled quote; both
+  forms above are things `array_in` would accept from a human but `array_out`
+  itself does not produce (see the comments on `bareElement` and the
+  backslash case in `element`). The residual risk is therefore a value
+  classify's reader treats as parseable that no real array column can ever
+  contain, not a real column this package will refuse. (`internal/classify/CLAUDE.md`'s
+  own array-literal section still describes the refusal as standing and T-0118
+  as owed; it is outside this package's paths, so it is not fixed here —
+  **T-0147** tracks repointing it.)
+- **T-0129, landed.** See the paragraph above: `internal/verify`'s `arrayHits`
+  now splits the literal with this package's own grammar and tests each
+  element, so the second net holds for this carrier too.
 - **T-0128**: the load flattens a multidimensional array that arrives as a
   literal. pgx's `encodeCopyValue` falls back to scanning the literal as text and
   re-encoding it in binary (`values.go`), which is what makes a `string` writable
   into an `_citext` column at all — measured on postgres:16 — and that round trip
   drops the nesting and the dimension prefix. This package preserves both; the
   loss is entirely in the load, and it is there for an unmasked column too.
-- **T-0129**: `internal/verify` cannot see inside the literal, so the residual
-  entries this package makes for its elements are untestable — the paragraph
-  above. Harmless only for as long as T-0127 is unlanded, per that bullet: it is
-  the plan refusal, not verify, that keeps such a column out of the target today.
-  Ordered ahead of T-0127 for that reason, not queued beside it.
 
 `testdata/regressions/005` keeps its `citext[]` values short and dull to steer
 around the classify half and says so; `testdata/regressions/009` is the same
