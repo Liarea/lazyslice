@@ -9,7 +9,7 @@
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 18 | 1 | 47 | 0 | 1 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 15 | 0 | 14 | 1 | 0 |
+| E9 Later | later | 16 | 0 | 14 | 1 | 0 |
 
 ## Open and in progress
 
@@ -50,6 +50,7 @@
 - T-0144 [open] E9 · The memory budget accounts for samples, pending traversal, channels and batch bytes; rename the flag help to what it measures (sonnet)
 - T-0145 [open] E9 · A read-only verify command that checks the current target without dropping it (opus)
 - T-0146 [open] E9 · internal/verify: a residual hit on an array element cannot be confirmed by either probe of section 6 item 3 ()
+- T-0147 [open] E9 · internal/classify/CLAUDE.md array-literal section is stale after T-0118/T-0129/T-0127 ()
 
 ## Recently closed
 

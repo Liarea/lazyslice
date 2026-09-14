@@ -267,34 +267,19 @@ func arrayTable() (ref.TableRef, *pipeline.Schema) {
 	}
 }
 
-// TestArrayThatArrivesAsALiteralIsRefusedAtPlan is T-0118's half of T-0103,
-// held here until the transform half lands. internal/classify reads inside such
-// a literal now, so a citext[] of addresses is decided `email` instead of being
-// copied verbatim; internal/transform's maskArray fires only on a []any, so
-// without this refusal the column is masked as one scalar string and CopyFrom
-// dies with "cannot find encode plan" at exit 7, mid-load, with the tables
-// before it already committed. Exit 12 with the two escapes is the difference
-// between a refusal and a half-loaded target.
-func TestArrayThatArrivesAsALiteralIsRefusedAtPlan(t *testing.T) {
+// TestArrayThatArrivesAsALiteralIsNotRefusedAtPlan is T-0127: internal/transform
+// (T-0118) now masks such a column element-wise through the literal, so the
+// plan-time stand-in that used to refuse it here is gone. internal/classify
+// reads inside such a literal, so a citext[] of addresses is decided `email`
+// instead of being copied verbatim, and the plan admits it the same way it
+// admits a text[] the driver decodes as a slice.
+func TestArrayThatArrivesAsALiteralIsNotRefusedAtPlan(t *testing.T) {
 	t.Parallel()
 	tbl, schema := arrayTable()
 	cls := masking(tbl, "recipients", pipeline.CatEmail, mask.MaskerEmail)
 
-	_, err := New().Plan(context.Background(), &countingReader{}, schema, cls, pipeline.PlanRequest{Root: &tbl})
-	var refusal *Refusal
-	if !errors.As(err, &refusal) {
-		t.Fatalf("Plan returned %v, want a *plan.Refusal", err)
-	}
-	if refusal.Exit != 12 || refusal.Code != CodeUnwritable {
-		t.Errorf("Exit/Code = %d/%q, want 12/%q", refusal.Exit, refusal.Code, CodeUnwritable)
-	}
-	if refusal.Column != "recipients" {
-		t.Errorf("Column = %q, want %q", refusal.Column, "recipients")
-	}
-	for _, want := range []string{"--skip-table public.monthly_reports", "--unmask public.monthly_reports.recipients=REASON"} {
-		if !strings.Contains(refusal.Args[event.ArgReason], want) {
-			t.Errorf("args[reason] = %q does not offer %q", refusal.Args[event.ArgReason], want)
-		}
+	if _, err := New().Plan(context.Background(), &countingReader{}, schema, cls, pipeline.PlanRequest{Root: &tbl}); err != nil {
+		t.Fatalf("Plan refused a citext[] arriving as a literal: %v", err)
 	}
 }
 
