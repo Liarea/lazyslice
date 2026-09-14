@@ -7,9 +7,9 @@
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 1 | 0 | 9 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
-| E5 Hardening | 5 | 13 | 1 | 53 | 0 | 0 |
+| E5 Hardening | 5 | 14 | 1 | 54 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 15 | 0 | 18 | 3 | 0 |
+| E9 Later | later | 18 | 0 | 18 | 3 | 0 |
 
 ## Open and in progress
 
@@ -38,12 +38,16 @@
 - T-0138 [open] E5 · mapping_file is refused explicitly until it is implemented; ADR-012 records the deferral (sonnet)
 - T-0139 [open] E5 · Torture suite fingerprints the source before the run, with a negative control (sonnet)
 - T-0140 [open] E5 · CI runs the torture suite on main and the release workflow requires a green CI run for the tagged commit (sonnet)
-- T-0141 [open] E5 · README.md and SECURITY.md no longer claim every stage is a no-op (haiku)
 - T-0142 [open] E9 · Implement the mapping_file contract of ADR-006 (opus)
 - T-0143 [open] E9 · Decide the arbitrary-JSON policy: structure-preserving masking versus whole-document replacement (human)
 - T-0144 [open] E9 · The memory budget accounts for samples, pending traversal, channels and batch bytes; rename the flag help to what it measures (sonnet)
 - T-0145 [open] E9 · A read-only verify command that checks the current target without dropping it (opus)
 - T-0146 [open] E9 · internal/verify: a residual hit on an array element cannot be confirmed by either probe of section 6 item 3 ()
+- T-0153 [open] E9 · plan.refused.equality_group: a code of its own for the FK equality-group refusal ()
+- T-0154 [open] E9 · Equality groups over inferred edges: virtual_fks and polymorphic pairs ()
+- T-0155 [open] E5 · v0.0.1 proves the release pipeline end to end: goreleaser, the tap cask, brew install prints a version (sonnet)
+- T-0156 [open] E5 · Go public: git-crypt decision, tap initial commit, flip visibility, branch protection (human)
+- T-0157 [open] E9 · Performance: the 20,000,000-row child run and byte-budget accounting (0.2) (sonnet)
 
 ## Recently closed
 
@@ -53,6 +57,7 @@
 - T-0130 [done] E5 · Target ownership: a run lease on the target and a lock-and-recheck before every destructive DDL → done
 - T-0131 [done] E5 · Events carry no source value: polymorphic inference reports unknown type values by count and keyed digest, and an output-sink canary test proves it → done
 - T-0133 [done] E5 · Core owns the run lifecycle: complete is written only after verify passes, and a residual failure empties the target → done
+- T-0141 [done] E5 · README.md and SECURITY.md no longer claim every stage is a no-op → done
 - T-0147 [done] E9 · internal/classify/CLAUDE.md array-literal section is stale after T-0118/T-0129/T-0127 → done
 - T-0148 [done] E9 · Regenerate docs/ERRORS.md for the four exit-4 target-ownership codes → done
 - T-0149 [done] E9 · Regenerate docs/ERRORS.md for T-0133's two new codes → done
@@ -71,4 +76,3 @@
 - T-0112 [done] E5 · Re-measure docs/TORTURE.md's flag counts and the catalogue's flags-by-kind after the credential_unique masker → done: 3b03050; eighteen credential opt-outs stripped, counts re-measured, make torture green after T-HARD-C
 - T-0113 [done] E5 · Regressions 004 and 007 expect exit 12 and now exit 0: credential_unique made their headers stale → done: in T-HARD-C (4f9a186)
 - T-0114 [done] E5 · mask/CLAUDE.md and gen_credential.go still say the torture counts are un-re-measured → done: in T-HARD-C (4f9a186)
-- T-0115 [done] E5 · docs/TORTURE.md: re-measure supabase-auth recall after T-0104's name rules → done: in T-HARD-C (4f9a186)

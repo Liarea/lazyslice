@@ -5,10 +5,12 @@ the tool is that the copy is safe to hold on a laptop, so a bug that leaves
 personal data unmasked is not a cosmetic defect: it is the failure the tool was
 built to prevent.
 
-**lazyslice is pre-release and every stage is currently a no-op.** There is no
-supported version yet. Report anything you find anyway — the design is what is
-under review at this stage, and a hole in the design is cheaper to fix than a
-hole in the code.
+**lazyslice is pre-release.** The pipeline runs end to end against PostgreSQL,
+but there is no supported version until `v0.1.0` is tagged, and the findings of
+the independent review of 2026-09-09
+([docs/reviews/2026-09-09/REVIEW.md](docs/reviews/2026-09-09/REVIEW.md)) are
+tracked in [tracker/](tracker/) until each lands. Report anything you find
+anyway — a hole in the design is cheaper to fix than a hole in the code.
 
 ## Reporting a masking miss, or any other vulnerability
 

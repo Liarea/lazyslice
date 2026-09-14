@@ -25,6 +25,8 @@ Gareth deferred encryption on 2026-09-05; apply only if still wanted at go-publi
 
 - 2026-09-05 created
 
+- 2026-09-14 2026-09-14 orchestrator recommendation: cancel. Nothing in the AI-specific paths is a secret (scanned); encrypting them costs tokens on every read and write, blocks contributors, and the operating model is part of what the project shows. Gareth decides at T-0154.
+
 ## Post-mortem
 
 _(filled on close: what went well, what went badly, what we change next time)_
