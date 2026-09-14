@@ -114,6 +114,69 @@ was chosen and is recorded here rather than only in a comment.
     measurement against `TestPagilaPrecisionAndRecall`, not a quiet threshold
     change; until then the asymmetry is the record and verify's exit 9 is the
     answer to a minority hit.
+    - **Above `minSamples`, a *strong* minority hit is masked here now too**
+      (`signals.strongHit`, T-0136, docs/reviews/2026-09-09/REVIEW.md finding
+      7, `evidence/sparse_email.log`). The paragraph above is about a column
+      with too few samples for a ratio to mean anything; this is the other
+      gap, over a *proven* column, and it was a leak rather than a refusal.
+      One email address among nineteen ordinary strings in a proven column is
+      a 5% ratio — under `weakThreshold` as well as `validatorThreshold` — so
+      the column fell all the way through `best`, `weak` and `refused` to
+      `none`, and `internal/transform` copied the address verbatim under exit
+      0. `bestSignal` now records the first *strong* validator (a real parse:
+      email, phone, network_id, the Luhn half of financial_account, online_id
+      — the `validators` list's own `strong` field, mirroring
+      `internal/verify/validators.go`'s) that matches at least one proven
+      sample without reaching `validatorThreshold`, and `decide` masks the
+      column as `free_text` on that alone rather than the hit's own category:
+      the column is not reliably an email column, only mixed, and
+      `free_text`'s masker replaces every value. `credential`, `address` and
+      IBAN (financial_account's other half) are not strong and are
+      unaffected — a slug or a room number is a shape guess, and IBAN is a
+      mod-97 checksum over letters and digits rather than over a run of
+      digits, so an ordinary all-caps string passes it about as often as any
+      string of the right length does (five of pagila's own film titles do;
+      `internal/verify/validators.go`'s own comment has the count). None of
+      that is the same claim as a valid email address, and masking an
+      ordinary column on one occurrence of any of them would be the wrong
+      direction for a column that is not personal data at all. This narrows
+      but does not close the asymmetry above: below `minSamples` every
+      non-dict validator still decides only on the strong branch (a ratio
+      over one or two values is either all of them or none), so a strong
+      minority hit there is still `none` here and exit 9 at verify, which
+      already fails any hit below its own `minValues` regardless of category.
+      `internal/verify/secondnet.go` carries the matching fix for whatever
+      this misses — a strong hit at *any* column size verify scans, not only
+      below `minValues` as before — so a column this case does not reach is
+      still not a silent leak, only a refusal instead of a mask.
+    - **`strongHit` is gated by whether `free_text` itself is writable on
+      this family, not by the hit's own category** (`bestSignal`, T-0136
+      review round, finding 1). The first landing read only
+      `silencedByType(p, hit.cat, family)` — the *hit's* category's own
+      gate — but `decide` never assigns the hit's category to the column: it
+      always assigns `free_text`, on the "not reliably that category, only
+      mixed" reasoning two paragraphs up. So a proven `bigint`/`integer`/
+      `numeric` column where a minority of samples pass `ValidLuhn` (roughly
+      one in ten 12-to-19-digit runs does, by chance — snowflake IDs,
+      epoch-millisecond timestamps, EAN-13 barcodes, order numbers) cleared
+      the old gate, because `financial_account` accepts those families, and
+      was decided `free_text`/`Masked=true` on a family `free_text`'s masker
+      cannot write into (`rules.yml`'s `accepts:` for `free_text` is
+      `text`/`varchar`/`bpchar`/`citext` only) — `mask.Writable` answers
+      false and `internal/plan/writeback.go` refused the whole run at exit
+      12, over a column that carried nothing worth refusing a run for. That
+      is the T-0054 failure class `silencedByType` exists to prevent,
+      reached by a branch that substitutes a category the gate never saw.
+      The gate is now `silencedByType(p, pipeline.CatFreeText, family)` —
+      the category `decide` is actually going to write — so a `bigint`
+      column with a Luhn minority hit is left for `sig.weak`/`sig.refused`/
+      `none` exactly as before T-0136, and `internal/verify`'s second net
+      (the family-split Luhn entry in `internal/verify/validators.go`,
+      T-0136 review finding 2) is what catches the value on the family this
+      branch cannot reach — a refusal at exit 9 over an already-loaded
+      target rather than a leak, which is the same "refusal instead of a
+      mask" shape the paragraph above already accepts for the gap below
+      `minSamples`.
 - **`Decision.Domain`, `SmallDomain` and `Refused` are left at their zero
   values.** They are §5 quantities: `Domain` is `min(column domain,
   generator.Domain())` and no generator is registered in `mask` yet, and the

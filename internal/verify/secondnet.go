@@ -12,9 +12,10 @@ import (
 
 // The second net (ARCHITECTURE.md section 6 item 4).
 //
-// All eleven of the classifier's value validators, folded into the nine entries
-// in validators.go (its two financial validators share one entry here, and so
-// do its two network ones), run over the full contents of
+// All eleven of the classifier's value validators, folded into the ten entries
+// in validators.go (its two network validators, IP and MAC, share one entry
+// here; the two financial ones, Luhn and IBAN, do not -- see validators.go's
+// own comment, T-0136), run over the full contents of
 // every column of the loaded target that is not fully masked by a category
 // masker: every unmasked, non-opted-out column of a family this package can
 // name and render, and the string leaves of every JSON column, masked or not. A
@@ -212,13 +213,14 @@ func (s *state) netColumn(ctx context.Context, col ref.ColumnRef, mode netMode) 
 			continue
 		}
 		ratio := float64(hits[i]) / float64(nonNull)
-		if val.dict {
+		switch {
+		case val.dict:
 			// The dictionary rule (see the package comment above and
-			// internal/verify/CLAUDE.md). Two differences from the six
-			// validators that carry a parse, both narrowing, and both because a
+			// internal/verify/CLAUDE.md). Two differences from the validators
+			// that carry a parse, both narrowing, and both because a
 			// dictionary word is a word an ordinary English column may hold:
 			// the strong ratio is required whatever the column's size, so the
-			// branch above this one does not extend to these two; and the hits
+			// branch below does not extend to these two; and the hits
 			// must be at least minValues *distinct* values, so a single
 			// dictionary literal repeated down a column cannot reach exit 9.
 			// The validators themselves are already the narrow ones —
@@ -226,8 +228,33 @@ func (s *state) netColumn(ctx context.Context, col ref.ColumnRef, mode netMode) 
 			if ratio < validatorThreshold || len(distinct[i]) < minValues {
 				continue
 			}
-		} else if proven && ratio < validatorThreshold {
-			continue
+		case val.strong:
+			// Second net, second bug (docs/reviews/2026-09-09/REVIEW.md
+			// finding 7): a strong validator is a precise parse, so any hit
+			// at all is one production value of that shape sitting in the
+			// target, whatever the ratio and whether or not the column is
+			// "proven". Before this case existed, a strong hit fell into the
+			// `proven && ratio < validatorThreshold` branch below like every
+			// other non-dict validator, so one email address among nineteen
+			// ordinary strings had a ratio of 5% and passed at exit 0
+			// (evidence/sparse_email.log) — the 80% column ratio is a good
+			// question for "what category is this column", and a poor one
+			// for "does this already-loaded target hold a recognisable
+			// source value". No ratio and no ratio gate here: hits[i] == 0
+			// was already filtered above, so reaching this case is the
+			// refusal.
+		default:
+			// The ratio rule, for the two validators that are a shape guess
+			// rather than a parse (credential, address): below minValues the
+			// column is unproven and any hit still fails (T-0058, above);
+			// at or above it, only a ratio at or over validatorThreshold
+			// does. Weakening this to "any hit" for these two would be exit
+			// 9 on an ordinary slug or a room number, which is not what a
+			// heuristic's occasional false positive should cost on a target
+			// that is already loaded.
+			if proven && ratio < validatorThreshold {
+				continue
+			}
 		}
 		s.fail(&Refusal{
 			Code: CodeRefusedSecondNet, Exit: exitResidual, Check: checkSecondNet,

@@ -116,6 +116,19 @@ carries. `internal/invariants/torture_catalogue_test.go` carries the whole
 reason beside the flag, and `TestTortureCatalogueMatchesTheFixtures` counts the three kinds
 so this paragraph cannot drift from them again.
 
+**Re-measured after T-0136** (docs/reviews/2026-09-09/REVIEW.md finding 7:
+`internal/classify`'s `bestSignal` now masks a proven column as `free_text` on
+a single strong-validator hit below the category threshold, and
+`internal/verify`'s second net now fails a strong hit at any column size, not
+only below `minValues`). Neither change touched a name signal or a ratio at or
+above `validatorThreshold`, so no torture schema's first run demanded a flag it
+did not already carry: the count is still twenty-seven — nineteen `--unmask`,
+seven `--skip-table`, one `--key` — `TestTortureCatalogueMatchesTheFixtures`
+passed against the unchanged catalogue, and all ten schemas still resolve the
+way the table above records. `testdata/regressions/012-single-strong-hit-in-a-
+mostly-plain-text-column.sql` is finding 7's own reduction, checked in rather
+than only measured here.
+
 **It was forty-five, and eighteen of the thirty-seven `--unmask` flags went in
 one change** (T-0112, after T-HARD-A landed `credential_unique`): supabase-auth
 6, gitlab 8, mastodon 2, calcom 1, discourse 1. Per schema the flag count fell

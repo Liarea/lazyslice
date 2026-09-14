@@ -62,12 +62,44 @@ type validator struct {
 	// document and this net may not refuse on evidence the classifier is
 	// structurally unable to see.
 	dict bool
-	ok   func(string) bool
+	// strong is true for the five entries that are a precise parse rather
+	// than a shape guess: email, phone, network_id (IP, MAC), the Luhn half
+	// of financial_account, and online_id (URL). A hit from one of these is
+	// one value that IS the thing it parses as, so secondnet.go fails the
+	// column on any hit at all, whatever the ratio and whatever the column's
+	// size (docs/reviews/2026-09-09/REVIEW.md finding 7,
+	// docs/reviews/2026-09-09/evidence/sparse_email.log): one email address
+	// among nineteen ordinary strings is still one email address in the
+	// target. The IBAN half of financial_account is deliberately not strong
+	// (see below), and neither are credential (looksSecret, an entropy
+	// guess) and address (mixed digits and words, a shape guess): a
+	// heuristic that fires on one occurrence in an ordinary
+	// column would be exit 9 on a slug or a room number, which is the
+	// direction §4's "when in doubt, mask it" does not require here because
+	// the evidence is not precise enough to name a single value as personal
+	// data. The two dictionary-backed validators are their own rule (dict,
+	// above) and are never strong.
+	strong bool
+	ok     func(string) bool
 }
 
 // validators is the set: all eleven of internal/classify's value validators, in
-// its own precedence order, folded into nine entries (its two financial
-// validators share one here, and so do its two network ones).
+// its own precedence order, folded into eleven entries here (its two network
+// validators, IP and MAC, share one). Its two financial validators used
+// to share one too, until T-0136 split them back apart: Luhn and IBAN are
+// both checksums over an arbitrary string, but Luhn's only ever matches a run
+// of digits, where IBAN's matches fifteen to thirty-four letters-and-digits
+// with the first two required to be letters -- pagila's own film titles carry
+// five IBAN-shaped false positives ("CHARIOTS CONSPIRACY" passes the mod-97
+// check) and zero Luhn-shaped ones, because nothing in an ordinary English
+// title is a run of digits. IBAN is not strong.
+//
+// Luhn itself is then split a second way, by family rather than by strength
+// (T-0136's review round, finding 2): the entry over character columns is
+// `strong` (see its own comment below), and the entry over integer/bigint/
+// numeric columns is not, so this file's own entry count is eleven where the
+// classifier's stays at eleven distinct validators -- the two Luhn rows here
+// answer for the classifier's one.
 //
 // Eleven, not the ten this comment said until tracker T-0122: internal/classify
 // gained textsig.ValidURL ahead of its secrets validator when T-0100 stopped
@@ -98,19 +130,49 @@ type validator struct {
 // street name, a compound colour and a contract clause cannot carry. See the
 // dictionary rule in secondnet.go.
 var validators = []validator{
-	{category: pipeline.CatEmail, name: "email", text: true, ok: textsig.ValidEmail},
-	{category: pipeline.CatPhone, name: "phone", text: true, ok: textsig.ValidPhone},
-	{category: pipeline.CatNetworkID, name: "network_id", text: true, ok: func(s string) bool {
+	{category: pipeline.CatEmail, name: "email", text: true, strong: true, ok: textsig.ValidEmail},
+	{category: pipeline.CatPhone, name: "phone", text: true, strong: true, ok: textsig.ValidPhone},
+	{category: pipeline.CatNetworkID, name: "network_id", text: true, strong: true, ok: func(s string) bool {
 		return textsig.ValidIP(s) || textsig.ValidMAC(s)
 	}},
-	{category: pipeline.CatFinancial, name: "financial_account", text: true, digits: true, ok: func(s string) bool {
-		return textsig.ValidLuhn(s) || textsig.ValidIBAN(s)
-	}},
+	// Luhn is split by family, not just by strength (T-0136 review finding 2).
+	// A 12-to-19-digit run inside a *character* column that passes the check
+	// digit is a precise parse -- a payment card number typed into a text
+	// field -- so that side stays strong: any hit at all fails the column,
+	// as it did before this split. An *integer/bigint/numeric* column is a
+	// different claim: roughly one in ten 12-to-19-digit identifiers passes
+	// Luhn by chance (snowflake IDs, epoch-millisecond timestamps, EAN-13
+	// barcodes, order numbers), so an ordinary unmasked bigint id column of
+	// any realistic size contains at least one hit, and a `strong` digits
+	// entry would fail nearly every such column with no ratio escape and no
+	// green path short of --unmask on a column that holds no personal data
+	// -- the outcome the dictionary-rule paragraph above and
+	// internal/verify/CLAUDE.md's "an operator cannot act on" sentence both
+	// argue against, and the state a column lands in once internal/classify
+	// stops routing it to an unwritable free_text (T-0136 review finding 1).
+	// So the digits side keeps the ratio rule instead: strong stays false,
+	// and validatorThreshold (with the any-hit-below-minValues floor,
+	// T-0058) is what decides it, same as IBAN and every other non-strong
+	// entry.
+	{category: pipeline.CatFinancial, name: "financial_account", text: true, strong: true, ok: textsig.ValidLuhn},
+	{category: pipeline.CatFinancial, name: "financial_account", digits: true, ok: textsig.ValidLuhn},
+	// IBAN is a checksum over letters and digits, not a run of digits, so it
+	// keeps the ratio rule rather than joining Luhn as strong: an ordinary
+	// all-caps title or slug is about as likely to be fifteen-to-thirty-four
+	// letters-and-digits passing a mod-97 check as any other string of that
+	// shape is, and one occurrence of that is not the same claim as one
+	// occurrence of a value that parses as a payment card number.
+	{category: pipeline.CatFinancial, name: "financial_account", text: true, ok: textsig.ValidIBAN},
 	// Ahead of the credential entry, which is internal/classify's order and, as
 	// there, the whole of tracker T-0100: a URL clears every guard in
 	// textsig.LooksSecret, so before that task mastodon's accounts.uri read as
 	// `credential` on every row. A URL that names a person is an online_id.
-	{category: pipeline.CatOnlineID, name: "online_id", text: true, ok: textsig.ValidURL},
+	{category: pipeline.CatOnlineID, name: "online_id", text: true, strong: true, ok: textsig.ValidURL},
+	// credential is deliberately not strong: textsig.LooksSecret is an entropy
+	// guess (16+ characters, two character classes, no space, no "@"), not a
+	// parse, so one occurrence in an ordinary column is not evidence that the
+	// value is a credential the way one occurrence of a valid email address is
+	// evidence that it is an email address.
 	{category: pipeline.CatCredential, name: "credential", text: true, ok: textsig.LooksSecret},
 	// The two dictionary-backed ones keep internal/classify's precedence:
 	// person_name before address, free_text last, so a note that mentions a

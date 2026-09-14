@@ -287,7 +287,7 @@ func TestNeighbouringColumnRule(t *testing.T) {
 		Tables: []pipeline.Table{
 			tt("public", "member", nil,
 				tc("email", "text"),         // certain: the name and the values agree
-				tc("contact_point", "text"), // low: half the samples parse as addresses
+				tc("contact_point", "text"), // low: half the samples are address-shaped
 				tc("nickname", "boolean"),   // low: a name hit on a type online_id refuses
 			),
 		},
@@ -295,8 +295,12 @@ func TestNeighbouringColumnRule(t *testing.T) {
 	samples := mapSampler{
 		ref.ColumnRef{Table: member, Column: "email"}: anyOf(
 			"a@fixture.test", "b@fixture.test", "c@fixture.test", "d@fixture.test"),
+		// address is not a strong validator (validators.go), so this stays a
+		// weak signal at `low` for the neighbouring-column rule to raise,
+		// unlike a strong validator's hit below threshold (sig.strongHit),
+		// which decides free_text on its own (finding 7).
 		ref.ColumnRef{Table: member, Column: "contact_point"}: anyOf(
-			"e@fixture.test", "f@fixture.test", "unknown", "n/a"),
+			"42 Cedar Street", "17 Birch Lane", "unknown", "n/a"),
 		ref.ColumnRef{Table: member, Column: "nickname"}: anyOf(true, false, true, false),
 	}
 	cls, err := New().Classify(schema, samples, nil)
@@ -626,6 +630,165 @@ func TestValueSignalSurvivesATypeNothingCanJudge(t *testing.T) {
 	}
 	if stamp.Confidence != pipeline.ConfLow {
 		t.Errorf("records.ref_d confidence = %v, want low", stamp.Confidence)
+	}
+}
+
+// TestStrongMinorityHitMasksColumnAsFreeText is the T-0136 review's finding 3:
+// the classify-side unit coverage for signals.strongHit / decide's
+// sig.strongHit branch was missing entirely (a decide() that dropped the
+// `case sig.strongHit != nil` arm still passed `go test ./internal/classify`
+// unchanged before this test existed). One email address among nineteen
+// ordinary strings in a proven text column is a 5% ratio -- under both
+// weakThreshold and validatorThreshold -- so before T-0136 the column fell
+// through to `none` and internal/transform copied the email verbatim
+// (docs/reviews/2026-09-09/REVIEW.md finding 7, evidence/sparse_email.log).
+func TestStrongMinorityHitMasksColumnAsFreeText(t *testing.T) {
+	t.Parallel()
+	tbl := ref.TableRef{Schema: "public", Name: "sparse"}
+	schema := &pipeline.Schema{
+		Tables: []pipeline.Table{
+			tt("public", "sparse", []string{"id"},
+				tc("id", "bigint"),
+				tc("misc_field", "text"),
+			),
+		},
+	}
+	values := make([]any, 0, 20)
+	for i := 0; i < 19; i++ {
+		values = append(values, "an ordinary string that is not personal data")
+	}
+	values = append(values, "ada.lovelace@fixture.test")
+	samples := mapSampler{
+		col(tbl, "id"):         anyOf(int64(1), int64(2), int64(3)),
+		col(tbl, "misc_field"): values,
+	}
+	cls, err := New().Classify(schema, samples, nil)
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+	d := decision(t, cls, col(tbl, "misc_field"))
+	if d.Category != pipeline.CatFreeText {
+		t.Errorf("sparse.misc_field category = %q, want free_text", d.Category)
+	}
+	if d.Confidence != pipeline.ConfPossible {
+		t.Errorf("sparse.misc_field confidence = %v, want possible", d.Confidence)
+	}
+	if !d.Masked {
+		t.Errorf("sparse.misc_field is not masked: %+v", d)
+	}
+	if !strings.Contains(d.Reason, "strong validator hit below the category threshold") {
+		t.Errorf("sparse.misc_field reason = %q, want the strong_hit_free_text fragment", d.Reason)
+	}
+}
+
+// TestNonStrongMinorityHitDoesNotMask is TestStrongMinorityHitMasksColumnAsFreeText's
+// negative control: a validator the review's finding 3 also asked for, so the
+// strongHit branch is shown to be reachable only through a *strong* validator
+// (email, phone, network_id, Luhn, online_id) and not through address, which
+// is a shape guess rather than a parse (validators.go's own comment). Address
+// cannot be run at the same 1-in-20 minority ratio as the email case above and
+// land anywhere but `none` -- weakThreshold is 0.5, and a hit that never
+// reaches it is not evidence of anything -- so this asks the question the
+// review meant to ask a different way: at a ratio that *does* clear
+// weakThreshold but not validatorThreshold, a non-strong hit still lands at
+// `low` (copied) rather than being promoted to a masked free_text column the
+// way a strong hit at a much lower ratio is.
+func TestNonStrongMinorityHitDoesNotMask(t *testing.T) {
+	t.Parallel()
+	tbl := ref.TableRef{Schema: "public", Name: "sparse2"}
+	schema := &pipeline.Schema{
+		Tables: []pipeline.Table{
+			tt("public", "sparse2", []string{"id"},
+				tc("id", "bigint"),
+				tc("misc_field", "text"),
+			),
+		},
+	}
+	values := make([]any, 0, 20)
+	for i := 0; i < 10; i++ {
+		values = append(values, "12 Rue de Rivoli")
+	}
+	for i := 0; i < 10; i++ {
+		values = append(values, "an ordinary string that is not personal data")
+	}
+	samples := mapSampler{
+		col(tbl, "id"):         anyOf(int64(1), int64(2), int64(3)),
+		col(tbl, "misc_field"): values,
+	}
+	cls, err := New().Classify(schema, samples, nil)
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+	d := decision(t, cls, col(tbl, "misc_field"))
+	if d.Masked {
+		t.Errorf("sparse2.misc_field is masked: %+v, want copied at low (address is not a strong validator)", d)
+	}
+	if d.Confidence != pipeline.ConfLow {
+		t.Errorf("sparse2.misc_field confidence = %v, want low", d.Confidence)
+	}
+	if d.Category != pipeline.CatAddress {
+		t.Errorf("sparse2.misc_field category = %q, want address", d.Category)
+	}
+}
+
+// TestStrongHitOnAnUnwritableFamilyDoesNotMask is the T-0136 review's finding
+// 1: bestSignal used to gate signals.strongHit on
+// silencedByType(p, hit.cat, family) -- the *hit's own* category's accepted
+// families -- but decide() never assigns the hit's own category to the
+// column, it always assigns free_text. financial_account accepts bigint, so
+// a bigint column with a single Luhn-passing sample among an otherwise
+// ordinary set of thirteen-digit identifiers cleared the old gate and was
+// decided free_text/Masked=true on a family free_text's own masker cannot
+// write into (rules.yml's free_text accepts text/varchar/bpchar/citext
+// only) -- mask.Writable(free_text, ..., bigint) is false, and
+// internal/plan/writeback.go refused the whole run at exit 12. This asserts
+// the column is left unmasked instead, for internal/verify's second net
+// (the family-split Luhn entry, finding 2) to catch.
+func TestStrongHitOnAnUnwritableFamilyDoesNotMask(t *testing.T) {
+	t.Parallel()
+	tbl := ref.TableRef{Schema: "public", Name: "orders"}
+	schema := &pipeline.Schema{
+		Tables: []pipeline.Table{
+			tt("public", "orders", []string{"id"},
+				tc("id", "bigint"),
+				tc("reference", "bigint"),
+			),
+		},
+	}
+	// Twenty ordinary thirteen-digit identifiers, none of which happens to
+	// pass the Luhn check digit, plus one that does -- 4111111111119 is a
+	// Luhn-valid thirteen-digit number (the sixteen-digit test card
+	// 4111111111111111 truncated and its check digit corrected).
+	values := make([]any, 0, 20)
+	for i := 0; i < 19; i++ {
+		values = append(values, int64(1300000000000)+int64(i))
+	}
+	values = append(values, int64(4111111111119))
+	samples := mapSampler{
+		col(tbl, "id"):        anyOf(int64(1), int64(2), int64(3)),
+		col(tbl, "reference"): values,
+	}
+	cls, err := New().Classify(schema, samples, nil)
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+	d := decision(t, cls, col(tbl, "reference"))
+	if d.Masked && d.Category == pipeline.CatFreeText {
+		t.Fatalf("orders.reference = %+v, masked as free_text on a bigint column -- "+
+			"mask.Writable(free_text, ..., bigint) is false, so this is an exit-12 refusal waiting to happen", d)
+	}
+	// The fix leaves the column unmasked (CatNone) rather than routing it to
+	// any other category: bigint has no typeSignals entry, so decide()'s
+	// default branch is CatNone/unmasked, exactly as it was before
+	// signals.strongHit existed. A regression that instead routed it
+	// elsewhere (e.g. sig.weak, sig.refused) would still be worth catching,
+	// so the whole decision is pinned, not only the free_text branch.
+	if d.Masked {
+		t.Errorf("orders.reference = %+v, want unmasked (a minority Luhn hit on bigint reaches neither "+
+			"validatorThreshold nor weakThreshold, and strongHit is gated off this family now)", d)
+	}
+	if d.Category != pipeline.CatNone {
+		t.Errorf("orders.reference category = %q, want none", d.Category)
 	}
 }
 
@@ -1208,9 +1371,14 @@ func TestReasonGrammarQuotesOddIdentifiers(t *testing.T) {
 		},
 	}
 	samples := mapSampler{
-		ref.ColumnRef{Table: parent, Column: "main id"}:   anyOf("a@b.com", "c@d.com", "e@f.com", "g@h.com"),
-		ref.ColumnRef{Table: parent, Column: "email"}:     anyOf("a@b.com", "c@d.com", "e@f.com", "g@h.com"),
-		ref.ColumnRef{Table: parent, Column: "half done"}: anyOf("a@b.com", "c@d.com", "nope", "nah"),
+		ref.ColumnRef{Table: parent, Column: "main id"}: anyOf("a@b.com", "c@d.com", "e@f.com", "g@h.com"),
+		ref.ColumnRef{Table: parent, Column: "email"}:   anyOf("a@b.com", "c@d.com", "e@f.com", "g@h.com"),
+		// address, not email: address is not a strong validator (validators.go),
+		// so this stays a weak signal at `low` for the neighbouring-column rule
+		// to raise, which is the fragment this fixture needs. A strong
+		// validator's hit at the same ratio decides free_text on its own
+		// (finding 7) and never reaches the rule.
+		ref.ColumnRef{Table: parent, Column: "half done"}: anyOf("42 Cedar Street", "17 Birch Lane", "nope", "nah"),
 	}
 	cls, err := New().Classify(schema, samples, nil)
 	if err != nil {
