@@ -1474,15 +1474,99 @@ func (r *run) move(ctx context.Context) (*pipeline.Report, error) {
 	}
 
 	r.start(event.Verify)
-	defer r.done(event.Verify)
-	report, err := verify.New(verify.Options{ProbeCap: r.req.ResidualProbeCap}).Verify(
+	report, verifyErr := verify.New(verify.Options{ProbeCap: r.req.ResidualProbeCap}).Verify(
 		ctx, r.source, readableWriter{Writer: writer, pool: r.targetPool},
 		r.schema, r.plan, r.cls, residual, lr,
 	)
-	if err != nil {
-		return report, asStop(err)
+	r.closeRun(ctx, writer, lr, verifyErr)
+	r.done(event.Verify)
+	if verifyErr != nil {
+		return report, asStop(verifyErr)
 	}
 	return report, nil
+}
+
+// closeRun is core's half of T-0133 (THREAT_MODEL.md T8, amended 2026-09-14,
+// docs/reviews/2026-09-09 finding 4): the marker row says complete only once
+// verify has actually passed, and failed after any verify failure. load.Load no
+// longer closes the row on success — it leaves it at StatusRunning, which
+// already authorises the next run to truncate exactly as a run killed mid-copy
+// does (internal/pg/marker.go has the reasoning) — so this is the only place
+// that writes StatusComplete at all, and the only place downstream of Load that
+// writes StatusFailed.
+//
+// It is not called when Load itself failed: move returns before reaching verify
+// on that path, and Load's own failure branch already closed the row to
+// StatusFailed (nothing about that changed here).
+//
+// On a residual-class failure — a *verify.Refusal whose Exit is 9: the residual
+// scan, an unconfirmable hit, or the second net — the target holds personal
+// data by definition, so this also drops every table the run just loaded before
+// closing the row, rather than leaving that data on disk until the next run's
+// gate truncates it (load.DropLoaded). Exit 8 (a foreign key) and exit 7 (a row
+// count or a sequence) are not that: the loaded rows are what an operator
+// diagnoses the failure against, so they stay, exactly as the task names it.
+//
+// Both load.DropLoaded and pg.FinishRun run on a context of this function's
+// own, detached from ctx and bounded by load.MarkerCloseTimeout — the same
+// thing load.Load's own close does on its failure path (load.go), and for the
+// same reason (2026-09-14 review finding 2): a run whose ctx is already
+// cancelled by the time closeRun is reached — Ctrl-C, a deadline, exactly the
+// state a residual scan that itself blew a deadline leaves behind — still has
+// a target to empty and a marker row to close, and the signal that ended the
+// run must not also cancel the cleanup that follows it. Passing ctx here used
+// to mean every statement DropLoaded and FinishRun issued failed immediately
+// with context.Canceled: the drop never ran, the confirmed leak stayed in the
+// target, and the marker was left at running rather than failed.
+func (r *run) closeRun(ctx context.Context, w pipeline.Writer, lr *pipeline.LoadResult, verifyErr error) {
+	if r.runID == "" {
+		return
+	}
+	closing, cancel := context.WithTimeout(context.WithoutCancel(ctx), load.MarkerCloseTimeout)
+	defer cancel()
+
+	status := pg.StatusComplete
+	if verifyErr != nil {
+		status = pg.StatusFailed
+		var refusal *verify.Refusal
+		if errors.As(verifyErr, &refusal) && refusal.Exit == exitResidual {
+			if dropErr := load.DropLoaded(closing, w, r.schema, r.sink); dropErr != nil {
+				// DropLoaded is best-effort across the whole table list
+				// (2026-09-14 review finding 1): it returns every table's
+				// failure, joined, rather than the first, so every one gets
+				// its own warning here — a single warning naming only the
+				// first failure would tell a transcript reader far less is
+				// still in the target than actually is.
+				for _, one := range joinedErrors(dropErr) {
+					var lr *load.Refusal
+					table := ref.TableRef{}
+					if errors.As(one, &lr) {
+						table = lr.Table
+					}
+					r.send(event.Verify, event.Warn, CodeQuarantineFailed, event.Args{event.ArgTable: table.String()})
+				}
+			}
+		}
+	}
+	//nolint:errcheck // Best effort, the same as load.Load's own close on its
+	// failure path: a marker this cannot close stays at StatusRunning, which
+	// authorises the next run to truncate exactly as StatusFailed does
+	// (ARCHITECTURE.md section 11.2), so there is nothing further to do with
+	// the error, and the verify failure (when there is one) is already what
+	// this run reports and exits non-zero for.
+	pg.FinishRun(closing, w, r.runID, status, load.TotalRows(lr))
+}
+
+// joinedErrors returns the constituent errors of an error built by
+// errors.Join (load.DropLoaded's return, once it failed on more than zero
+// tables), or err itself as a single-element slice when it was not one — so a
+// caller iterating the failures never has to know which shape DropLoaded chose
+// this time.
+func joinedErrors(err error) []error {
+	if u, ok := err.(interface{ Unwrap() []error }); ok {
+		return u.Unwrap()
+	}
+	return []error{err}
 }
 
 // loadRun is what the marker table records (ARCHITECTURE.md section 11.2).

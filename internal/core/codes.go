@@ -140,6 +140,16 @@ const (
 	// counted", and this is where the count is printed — once, at the end, so
 	// that a transcript missing progress lines says why (channel.go).
 	CodeProgressDropped event.Code = "run.progress.dropped"
+
+	// CodeQuarantineFailed is a warning: a residual-class verify failure (exit
+	// 9) means the target holds personal data, closeRun tried to drop every
+	// table this run loaded (load.DropLoaded), and that drop itself failed on
+	// {table}. The run still exits on the verify failure's own code — that is
+	// the finding worth reporting — but the operator needs to know the target
+	// was not actually emptied, because the next run's gate will still truncate
+	// it, and until then the data named in the verify failure is still there
+	// (T-0133, 2026-09-14).
+	CodeQuarantineFailed event.Code = "run.quarantine.failed"
 )
 
 // The exit codes ADR-005 assigns, as core needs them. They are repeated here
@@ -153,7 +163,14 @@ const (
 	exitCredential   = 5
 	exitWritableRole = 6
 	exitExtractLoad  = 7
-	exitDrift        = 10
-	exitReviewed     = 12
-	exitInterrupted  = 130
+	// exitResidual is 9: verify's residual scan, an unconfirmable hit, or the
+	// second net. closeRun compares a *verify.Refusal's Exit against this to
+	// decide whether a verify failure is the residual-class one T-0133 makes
+	// core drop every table the run loaded for (verify/codes.go defines the
+	// same 9 as its own unexported exitResidual; this is core's copy of the
+	// number for the same reason exitExtractLoad above is one).
+	exitResidual    = 9
+	exitDrift       = 10
+	exitReviewed    = 12
+	exitInterrupted = 130
 )

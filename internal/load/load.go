@@ -194,25 +194,48 @@ func (l loader) Load(
 		// marker row to close, and a row left at running authorises the next
 		// run to truncate exactly as failed does, so a failure here changes
 		// nothing about what happens next.
-		closing, cancel := context.WithTimeout(context.WithoutCancel(ctx), markerCloseTimeout)
+		closing, cancel := context.WithTimeout(context.WithoutCancel(ctx), MarkerCloseTimeout)
 		defer cancel()
 		//nolint:errcheck // A marker this cannot close stays at running, which
 		// authorises the next run to truncate exactly as failed does (§11.2),
 		// so there is nothing to do with the error and the failure being
 		// returned is the one worth printing.
-		pg.FinishRun(closing, w, runID, pg.StatusFailed, totalRows(res))
+		pg.FinishRun(closing, w, runID, pg.StatusFailed, TotalRows(res))
 		return nil, err
 	}
 	res.Elapsed = time.Since(started)
-	if err := pg.FinishRun(ctx, w, runID, pg.StatusComplete, totalRows(res)); err != nil {
-		return nil, err
-	}
+
+	// The row is deliberately left at StatusRunning here (T-0133, 2026-09-14,
+	// docs/reviews/2026-09-09 finding 4): this package used to close it at
+	// StatusComplete right here, before core had run verify at all, so a run
+	// that went on to fail verification — a value the run masked still present
+	// in the target, confirmed against the source — exited non-zero over a
+	// target whose own marker said complete. core is the caller that holds
+	// both halves of that question: whether Load succeeded, which this return
+	// answers, and whether verify then passed, which happens after Load has
+	// already returned. So core.Run closes this run's row now, at
+	// StatusComplete once verify has actually passed and at StatusFailed after
+	// any verify failure (internal/pg/marker.go has the reasoning for why that
+	// is StatusFailed and not a fourth status).
+	//
+	// A run that dies between this return and core's close — kill -9, a crash,
+	// core losing its connection — leaves the row at StatusRunning, which is
+	// exactly the state a run killed mid-copy already leaves it in, and the
+	// gate already treats running and complete identically: truncate and
+	// print (ARCHITECTURE.md section 11.2). Nothing downstream of this
+	// function needs a fourth status to know the row does not yet authorise
+	// anything beyond that.
 	return res, nil
 }
 
-// markerCloseTimeout bounds the marker update on a failure path, where the
-// run's own context may already be cancelled.
-const markerCloseTimeout = 5 * time.Second
+// MarkerCloseTimeout bounds a marker update — or, since T-0133, a quarantine
+// drop — made on a detached context after the run's own context may already be
+// cancelled. It is exported so that core.closeRun can derive the same bounded,
+// detached context for load.DropLoaded and pg.FinishRun that this package
+// derives for its own close on Load's failure path (below): a cancelled run
+// still has cleanup to do, and the signal that ended the run is not a reason to
+// cancel it.
+const MarkerCloseTimeout = 5 * time.Second
 
 func (l loader) markerRow(plan *pipeline.Plan, fingerprint string) pg.MarkerRow {
 	return pg.MarkerRow{
@@ -810,7 +833,11 @@ func (tc *tableCopy) wait() copyResult {
 	return res
 }
 
-func totalRows(res *pipeline.LoadResult) int64 {
+// TotalRows sums a LoadResult's per-table counts. It is exported so that
+// core.Run's own close of the marker row — now that Load no longer closes it
+// on success (T-0133) — records the same rows_loaded value this package always
+// has, rather than a second definition of the same sum.
+func TotalRows(res *pipeline.LoadResult) int64 {
 	if res == nil {
 		return 0
 	}
@@ -819,6 +846,128 @@ func totalRows(res *pipeline.LoadResult) int64 {
 		n += v
 	}
 	return n
+}
+
+// DropLoaded drops every table section 11.1 recreates, after a residual-class
+// verify failure (a *verify.Refusal whose Exit is 9: the residual scan, an
+// unconfirmable hit, or the second net). core calls this, not Load, because
+// verify — and therefore whether the failure is residual-class at all — runs
+// after Load has already returned (T-0133, 2026-09-09 review finding 4): the
+// target then holds personal data by definition, the check that just failed is
+// what found it, and waiting for the next run's gate to truncate it leaves that
+// data on disk in the meantime.
+//
+// It is best-effort across the whole list, not an abort on the first failure
+// (2026-09-14 review finding 1). A single failing drop — a stray session
+// holding a lock, a dependent object CASCADE cannot reach, a privilege error —
+// used to end the loop right there, and every table after it in drop's order,
+// every one of which holds the personal data this call exists to remove, was
+// left exactly as it was. THREAT_MODEL.md's stated property is that the target
+// ends the run either empty or holding nothing this run wrote; a caller that
+// stops at the first failure cannot make that true for the tables it never
+// tried. So this tries every table regardless of whether an earlier one
+// failed, and returns every failure it collected, joined, rather than the
+// first — core reports one warning per table named in the returned error
+// rather than one for the whole call, so a transcript reader is told exactly
+// how much is still there and not just that something is.
+//
+// Each drop takes its own ACCESS EXCLUSIVE lock NOWAIT first and retries a
+// contended lock the same bounded way drop's dropTable does (lockAttempts,
+// lockRetryPause): the lock a freshly loaded target most often loses a race to
+// is autovacuum's, and a transient hold the ordinary reload survives should
+// not be the reason a confirmed leak is left in the target. It is still
+// deliberately not dropOne's lock-and-recheck: recheck re-verifies an *outside
+// party's* authorisation for a truncation approved a moment earlier by
+// something other than this run, and there is no such party here — every table
+// this drops is one this same run recreated and copied into itself, seconds
+// ago. lazyslice_meta is left alone, same as drop, so the row core is about to
+// close to StatusFailed still has somewhere to land. sink may be nil.
+func DropLoaded(ctx context.Context, w pipeline.Writer, schema *pipeline.Schema, sink event.Sink) error {
+	if sink == nil {
+		sink = event.Discard
+	}
+	if w == nil || schema == nil {
+		return nil
+	}
+	var failures []error
+	for _, d := range ddl.DropTables(schema, nil) {
+		if d.Table.Name == pg.MarkerTable {
+			continue
+		}
+		sink.Send(event.Event{
+			At: time.Now(), Stage: event.Load, Kind: event.Info,
+			Code: CodeQuarantineDropping, Table: d.Table,
+			Args: event.Args{event.ArgTable: d.Table.String()},
+		})
+		if err := dropLoadedTable(ctx, w, d); err != nil {
+			failures = append(failures, err)
+		}
+	}
+	if len(failures) == 0 {
+		return nil
+	}
+	return errors.Join(failures...)
+}
+
+// dropLoadedTable drops one table for DropLoaded, retried only for a lock that
+// was not free — the same bound drop's dropTable uses (lockAttempts,
+// lockRetryPause). A plain DROP TABLE with no NOWAIT lock ahead of it would
+// simply wait behind whatever holds the table, which is a quarantine that
+// cannot afford to wait on a confirmed leak.
+func dropLoadedTable(ctx context.Context, w pipeline.Writer, d ddl.TableDrop) error {
+	for attempt := 1; ; attempt++ {
+		err := dropLoadedOne(ctx, w, d)
+		if err == nil {
+			return nil
+		}
+		var refusal *Refusal
+		if attempt >= lockAttempts || !errors.As(err, &refusal) || refusal.Code != CodeRefusedTargetLocked {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(lockRetryPause):
+		}
+	}
+}
+
+// dropLoadedOne takes the table's own ACCESS EXCLUSIVE lock NOWAIT and drops
+// it in one transaction: the lock so a contended table fails fast and retries
+// rather than DROP TABLE blocking indefinitely, and not dropOne's recheck, for
+// the reason DropLoaded's own comment gives.
+func dropLoadedOne(ctx context.Context, w pipeline.Writer, d ddl.TableDrop) error {
+	tx, err := w.Begin(ctx)
+	if err != nil {
+		return refuse(CodeRefusedDDL, exitLoad, d.Table, "", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			rollback(ctx, tx)
+		}
+	}()
+
+	present, err := tableExists(ctx, tx, d.Table)
+	if err != nil {
+		return refuse(CodeRefusedDDL, exitLoad, d.Table, "", err)
+	}
+	if present {
+		if lockErr := tx.Exec(ctx, lockStatement(d.Table)); lockErr != nil {
+			if !lockNotAvailable(lockErr) {
+				return refuse(CodeRefusedDDL, exitLoad, d.Table, "", lockErr)
+			}
+			return refuse(CodeRefusedTargetLocked, exitTarget, d.Table, "", lockErr)
+		}
+	}
+	if dropErr := tx.Exec(ctx, d.SQL); dropErr != nil {
+		return refuse(CodeRefusedDDL, exitLoad, d.Table, "", dropErr)
+	}
+	if commitErr := tx.Commit(ctx); commitErr != nil {
+		return refuse(CodeRefusedDDL, exitLoad, d.Table, "", commitErr)
+	}
+	committed = true
+	return nil
 }
 
 // drain empties the batch channel so that a producer blocked on a full channel

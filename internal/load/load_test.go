@@ -333,6 +333,14 @@ func TestOneTransactionPerTableCommittedAtLast(t *testing.T) {
 // the first drop. Without that ordering a run killed between the first drop and
 // the marker leaves a target with tables gone and nothing saying who did it, and
 // the next run's gate refuses it as a non-empty stranger.
+//
+// A successful Load no longer closes that row itself (T-0133, 2026-09-14,
+// THREAT_MODEL.md T8 amendment): it used to send the UPDATE last, before core
+// had run verify at all, which is docs/reviews/2026-09-09 finding 4 — a marker
+// saying complete over a target a later verify failure found still held
+// personal data. Closing the row is core's job now, once verify has had its
+// say, so a Load that succeeds sends no UPDATE to lazyslice_meta at all and
+// leaves the row at running for core to close.
 func TestTheMarkerRowIsWrittenBeforeTheFirstDrop(t *testing.T) {
 	w := &fakeWriter{}
 	l := New(Run{ToolVersion: "test"}, nil)
@@ -347,16 +355,16 @@ func TestTheMarkerRowIsWrittenBeforeTheFirstDrop(t *testing.T) {
 		if drop < 0 && strings.HasPrefix(s, "DROP TABLE") {
 			drop = i
 		}
+		if strings.HasPrefix(s, "UPDATE lazyslice_meta") {
+			t.Errorf("a successful Load sent %q; closing the marker row is core's job since T-0133,"+
+				" once verify has passed", s)
+		}
 	}
 	if insert < 0 || drop < 0 {
 		t.Fatalf("expected an insert into the marker and a drop; got %v", w.log())
 	}
 	if insert > drop {
 		t.Errorf("the marker row is written at statement %d, after the first drop at %d", insert, drop)
-	}
-	last := w.log()[len(w.log())-1]
-	if !strings.HasPrefix(last, "UPDATE lazyslice_meta") {
-		t.Errorf("the run is not closed in the marker last; the last statement is %q", last)
 	}
 }
 
