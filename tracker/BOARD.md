@@ -7,15 +7,14 @@
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 1 | 0 | 9 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
-| E5 Hardening | 5 | 13 | 1 | 55 | 0 | 0 |
+| E5 Hardening | 5 | 12 | 1 | 56 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 19 | 0 | 20 | 3 | 0 |
+| E9 Later | later | 21 | 0 | 20 | 4 | 0 |
 
 ## Open and in progress
 
 - T-0019 [open] E9 · Go vs Python COPY throughput benchmark to validate ADR-001 (opus)
 - T-0028 [open] E3 · Create GitHub repository Liarea/lazyslice and homebrew-tap, push main, add HOMEBREW_TAP_TOKEN secret (human)
-- T-0029 [open] E9 · Before going public: git-crypt the AI-specific paths and rewrite pre-encryption history (fable)
 - T-0031 [open] E9 · Licence for the lazyslice.yml schema and docs; confirm copyright holder statement (fable)
 - T-0048 [open] E9 · Explicit --key on an uncomparable column type surfaces a raw pgx error instead of a refusal (opus)
 - T-0064 [open] E5 · Dogfood: two sessions against a real project of Gareth's choosing, logged in docs/DOGFOOD_LOG.md (human)
@@ -44,13 +43,16 @@
 - T-0146 [open] E9 · internal/verify: a residual hit on an array element cannot be confirmed by either probe of section 6 item 3 ()
 - T-0154 [open] E9 · Equality groups over inferred edges: virtual_fks and polymorphic pairs ()
 - T-0155 [open] E5 · v0.0.1 proves the release pipeline end to end: goreleaser, the tap cask, brew install prints a version (sonnet)
-- T-0156 [open] E5 · Go public: git-crypt decision, tap initial commit, flip visibility, branch protection (human)
 - T-0157 [open] E9 · Performance: the 20,000,000-row child run and byte-budget accounting (0.2) (sonnet)
 - T-0158 [open] E9 · Export the closed-value label list from mask so plan compares labels, not CHECK text ()
 - T-0159 [open] E9 · FK equality group: members with different type families can still mask differently ()
+- T-0161 [open] E9 · core fills pipeline.PlanRequest.Key so a masked column's DEFAULT is masked instead of refused ()
+- T-0162 [open] E9 · move the SQL literal scanner out of internal/pipeline into a leaf package beside internal/textsig ()
+- T-0163 [open] E9 · the plan-time DDL literal rule does not read index predicates or domain CHECKs ()
 
 ## Recently closed
 
+- T-0029 [cancelled] E9 · Before going public: git-crypt the AI-specific paths and rewrite pre-encryption history → cancelled
 - T-0118 [done] E5 · internal/transform: mask an array whose sample arrives as a text literal element-wise → done
 - T-0127 [done] E5 · internal/plan: drop the arrayArrivesAsLiteral stand-in now that transform masks a literal array element-wise → done
 - T-0129 [done] E5 · internal/verify: an array column that arrives as a text literal is not residual-scanned element-wise → done
@@ -66,6 +68,7 @@
 - T-0151 [cancelled] E9 · Key the polymorphic value digest on the run's actual mask key, not the published schema fingerprint → cancelled
 - T-0152 [cancelled] E9 · ADR for T-0131's published-fingerprint value digest, or promote T-0151 → cancelled
 - T-0153 [done] E9 · plan.refused.equality_group: a code of its own for the FK equality-group refusal → done
+- T-0156 [done] E5 · Go public: git-crypt decision, tap initial commit, flip visibility, branch protection → done
 - T-0160 [done] E9 · Regenerate docs/ERRORS.md for plan.refused.equality_group → done
 - T-0093 [done] E5 · Move RegisterTypes onto pipeline.Writer so the load's type registration is compiler-checked → done: in T-HARD-C (4f9a186)
 - T-0094 [done] E5 · A composite column now loads, and no rule pack category accepts its type family: decide refuse or mask field-wise (THREAT_MODEL.md T1) → done: in T-HARD-B (78530ef)
@@ -74,5 +77,3 @@
 - T-0103 [done] E5 · An array of an extension type is sampled as one opaque string, so the classifier never sees the values inside it → done: in T-HARD-B (78530ef)
 - T-0104 [done] E5 · The credential and online_id name rules miss the spellings an auth schema actually uses → done: in T-HARD-B (78530ef)
 - T-0105 [done] E5 · .golangci.yml does not lint the torture build tag → done: in T-HARD-C (4f9a186)
-- T-0109 [done] E5 · T-HARD-B: composite fail-closed, extension-type array splitter, auth-schema rules, URL not credential (T-0094, T-0103, T-0104, T-0100) → done: 78530ef; composite fail-closed, array-literal splitter, auth-schema rules, URL is online_id, key-child exemption
-- T-0110 [done] E5 · T-HARD-C: RegisterTypes on Writer, torture tag linted, testdata docs (T-0093, T-0105, T-0096) → done: 4f9a186; RegisterTypes on Writer, torture tag linted, testdata docs, online_id in the second net, regressions re-cut, make torture exits 0, torture re-measured, public_key is credential
