@@ -3,12 +3,12 @@ id: T-0132
 title: "The masker is chosen per FK-connected equality group, not per column"
 epic: E5
 phase: 5
-status: open
+status: done
 owner: opus
 created: 2026-09-14
-started: ""
-closed: ""
-outcome: ""
+started: 2026-09-14
+closed: 2026-09-14
+outcome: done
 ---
 
 # T-0132 · The masker is chosen per FK-connected equality group, not per column
@@ -25,6 +25,10 @@ classify propagates a category along foreign keys (internal/classify/classify.go
 
 - 2026-09-14 created
 
+- 2026-09-14 started
+
+- 2026-09-14 closed: done
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+went well: equality groups over declared FKs with one masker per group and a code of its own (plan.refused.equality_group); regression 010 passes under make torture; ARCHITECTURE section 5 amended in place; two bounds recorded as T-0158 and T-0159 rather than hidden | went badly: blocked after two fix rounds on docs/ERRORS.md regeneration alone, the third task to do so; the orchestrator landed it by hand after make check, make torture and the three integration packages passed (Opus dev, 760k tokens) | change next time: done, generated docs are inside every task's paths and the check gate is make check (implement.js, 2026-09-14)

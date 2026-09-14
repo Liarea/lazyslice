@@ -3,12 +3,12 @@ id: T-0153
 title: "plan.refused.equality_group: a code of its own for the FK equality-group refusal"
 epic: E9
 phase: ""
-status: open
+status: done
 owner: ""
 created: 2026-09-14
-started: ""
-closed: ""
-outcome: ""
+started: 2026-09-14
+closed: 2026-09-14
+outcome: done
 ---
 
 # T-0153 · plan.refused.equality_group: a code of its own for the FK equality-group refusal
@@ -25,6 +25,10 @@ T-0132 made the group refusal reuse plan.refused.unique_domain (internal/plan/eq
 
 - 2026-09-14 created
 
+- 2026-09-14 started
+
+- 2026-09-14 closed: done
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+went well: landed inside T-0132's fix round (internal/plan/codes.go CodeEqualityGroup, raised in equality.go) | change next time: a code of its own from the start when the message would otherwise lie

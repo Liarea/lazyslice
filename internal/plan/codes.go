@@ -73,6 +73,17 @@ const (
 	// d_required and the three escapes; unique.go is the check.
 	CodeUniqueDomain event.Code = "plan.refused.unique_domain"
 
+	// CodeEqualityGroup is exit 12: a set of masked columns joined by declared
+	// foreign keys, which therefore have to mask to the same value, and no one
+	// registered generator fits all of them (ARCHITECTURE.md §5's 2026-09-14
+	// amendment; equality.go's fitsGroup). It is deliberately not
+	// CodeUniqueDomain, which this refusal borrowed when T-0132 landed: two of
+	// the three causes — a generator no member's type can hold, and members that
+	// would not mask alike — reach it with no member under a unique index at
+	// all, and "is under a unique index" is then a false statement about the
+	// operator's schema (T-0132 review).
+	CodeEqualityGroup event.Code = "plan.refused.equality_group"
+
 	// CodeNotRecreatable is exit 13: a foreign key the target's schema cannot
 	// carry (ARCHITECTURE.md §11.1, ForeignKey.NotRecreatable). It is raised at
 	// plan, before the snapshot is used for keys and before anything in the

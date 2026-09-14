@@ -7,7 +7,6 @@ import (
 	"fmt"
 
 	"github.com/Liarea/lazyslice/internal/event"
-	"github.com/Liarea/lazyslice/internal/pipeline"
 	"github.com/Liarea/lazyslice/internal/ref"
 	"github.com/Liarea/lazyslice/mask"
 )
@@ -64,84 +63,113 @@ import (
 // the target, so nothing can collide in it, and refusing on a table this run
 // will never write would be refusing on the source's shape rather than on the
 // plan's — the same reason checkWriteBack runs after the skip and privilege pass.
+//
+// Since T-0132 the unit of the choice is the equality group and not the column:
+// a masker is picked for every foreign-key-connected set of masked columns at
+// once (equality.go), because changing one column's masker and not its
+// neighbour's is how equal inputs came to mask to different outputs and the load
+// died at exit 8 with the foreign key unvalidatable (finding 3 of
+// docs/reviews/2026-09-09/REVIEW.md). A column no foreign key touches is a group
+// of one and this is exactly the check it always was.
 func (p *run) checkUniqueDomain() error {
 	if p.cls == nil {
 		return nil
 	}
-	for i := range p.tables {
-		t := &p.tables[i]
-		rows := p.plannedRows(t.Ref)
-		if rows <= 0 {
-			continue
-		}
-		for _, col := range t.Columns {
-			cref := ref.ColumnRef{Table: t.Ref, Column: col.Name}
-			d, ok := p.cls.Decisions[cref]
-			if !ok || !d.Masked || !d.UniqueIndex {
-				continue
-			}
-			if d.Category == "" || d.Category == pipeline.CatNone {
-				// A masked column with no category has no generator to choose
-				// between. checkWriteBack leaves it alone for the same reason
-				// and internal/transform refuses it as "the decision names no
-				// masker", which is the defect this would otherwise rename.
-				continue
-			}
-			c, judged := p.constraintsOf(col)
-			if !judged {
-				// An enum, or a type mask has no family for. Every generator
-				// answers a labelled column with one of its own labels (§5), so
-				// the question this check asks is not the one that decides such
-				// a column, and constraintsOf carries no labels to ask it with.
-				// checkWriteBack skips the same set.
-				continue
-			}
-			c.Unique = true
-			c.Rows = rows
-
-			id, err := mask.Pick(mask.Category(d.Category), c)
-			switch {
-			case err == nil:
-			case errors.Is(err, mask.ErrNoRoom):
-				// No masked value fits the column at all, whatever the row
-				// count. checkWriteBack has already refused it as
-				// plan.refused.unwritable, which names the type; saying it
-				// again here in terms of d_required would name the wrong cause.
-				continue
-			case errors.Is(err, mask.ErrNoCategory):
-				// No generator is registered for the category. transform's own
-				// refusal names that, and it is a classification defect rather
-				// than a domain one.
-				continue
-			default:
-				var de *mask.DomainError
-				if !errors.As(err, &de) {
-					return refuse(CodeUniqueDomain, exitPlan, t.Ref,
-						fmt.Sprintf("%s.%s is under a unique index and no masker for %s could be chosen: %v",
-							t.Ref, col.Name, d.Category, err),
-						event.Args{
-							event.ArgTable:  t.Ref.String(),
-							event.ArgColumn: col.Name,
-							event.ArgReason: err.Error(),
-						})
-				}
-				return refuse(CodeUniqueDomain, exitPlan, t.Ref,
-					fmt.Sprintf("%s.%s is under a unique index: %s", t.Ref, col.Name, uniqueDomainReason(t.Ref, col.Name, de)),
-					event.Args{
-						event.ArgTable:  t.Ref.String(),
-						event.ArgColumn: col.Name,
-						event.ArgCount:  fmt.Sprintf("%d", de.Rows),
-						event.ArgReason: uniqueDomainReason(t.Ref, col.Name, de),
-					})
-			}
-
-			if id != d.Masker {
-				d.Masker = id
-				p.cls.Decisions[cref] = d
-			}
+	for _, g := range p.equalityGroups(p.maskedMembers()) {
+		if err := p.chooseGroupMasker(g); err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// chooseGroupMasker applies §5's rule to one equality group: ask mask.Pick what
+// each member needs, take the widest of those answers, check it against every
+// member, and write it onto every member's decision.
+//
+// internal/transform masks with Decision.Masker, so the decisions are where the
+// choice has to land; writing it onto every member is the whole of "transform
+// masks every member identically".
+func (p *run) chooseGroupMasker(g []groupMember) error {
+	cat := g[0].cat
+	needed := make([]mask.ID, 0, len(g))
+	for _, m := range g {
+		id, err := mask.Pick(cat, m.cons)
+		switch {
+		case err == nil:
+			needed = append(needed, id)
+		case errors.Is(err, mask.ErrNoRoom), errors.Is(err, mask.ErrNoCategory):
+			// No masked value fits one of the members at all, whatever the row
+			// count, or the category has no generator. checkWriteBack has
+			// already refused both — plan.refused.unwritable, which names the
+			// type — so this is unreachable after that pass; saying it again
+			// here in terms of d_required would name the wrong cause. The whole
+			// group is left alone rather than the member skipped, because a
+			// group missing a member is a masker chosen for a set narrower than
+			// the one that has to agree.
+			return nil
+		default:
+			var de *mask.DomainError
+			if !errors.As(err, &de) {
+				return refuse(CodeUniqueDomain, exitPlan, m.tbl,
+					fmt.Sprintf("%s.%s is under a unique index and no masker for %s could be chosen: %v",
+						m.tbl, m.col, cat, err),
+					event.Args{
+						event.ArgTable:  m.tbl.String(),
+						event.ArgColumn: m.col,
+						event.ArgReason: err.Error(),
+					})
+			}
+			reason := uniqueDomainReason(m.tbl, m.col, de)
+			if len(g) > 1 {
+				reason += equalityNote(g)
+			}
+			return refuse(CodeUniqueDomain, exitPlan, m.tbl,
+				fmt.Sprintf("%s.%s is under a unique index: %s", m.tbl, m.col, reason),
+				event.Args{
+					event.ArgTable:  m.tbl.String(),
+					event.ArgColumn: m.col,
+					event.ArgCount:  fmt.Sprintf("%d", de.Rows),
+					event.ArgReason: reason,
+				})
+		}
+	}
+
+	best := widest(g, needed)
+	if best == "" {
+		return nil
+	}
+	if err := fitsGroup(g, best); err != nil {
+		return err
+	}
+	for _, m := range g {
+		if m.cur == best {
+			continue
+		}
+		d := p.cls.Decisions[m.cref]
+		d.Masker = best
+		p.cls.Decisions[m.cref] = d
+	}
+	return nil
+}
+
+// equalityNote is what a per-column refusal has to add when the column is not
+// alone: the escape the operator is offered has to be applied across the group,
+// and naming one end of a foreign key is naming half the problem.
+//
+// It corrects uniqueDomainReason's --unmask escape rather than only widening the
+// refusal, because that sentence names a single column and applying it to a
+// single member of a group is the failure this whole file exists to prevent:
+// maskedMembers skips a column whose decision is not Masked, so the unmasked end
+// keeps its production values while the other end is still masked, the key does
+// not validate, and the real values are in the target as well (T-0132 review,
+// finding 2).
+func equalityNote(g []groupMember) string {
+	return fmt.Sprintf(
+		"; %s are joined by foreign keys and mask alike, so this refusal covers all of them and the "+
+			"--unmask above has to name every one of them, each with its own =REASON — unmasking one end "+
+			"of a foreign key copies that end's real values into the target and still leaves the key "+
+			"unvalidatable", groupColumns(g))
 }
 
 // uniqueDomainReason is §5's refusal sentence: d, d_required and the three

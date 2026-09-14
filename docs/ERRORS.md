@@ -32,6 +32,7 @@ One row per code in the catalogue, in the file's own order. Exit is only meaning
 | `plan.refused.memory_budget` | plan | 11 | {table} takes the estimated key and filter memory past {count} bytes: raise {flag}, or lower --take, --cap or --depth |
 | `plan.refused.unwritable` | plan | 12 | {table}.{column} cannot be masked in place: {reason} |
 | `plan.refused.unique_domain` | plan | 12 | {table}.{column} is under a unique index and cannot be masked without collisions: {reason} |
+| `plan.refused.equality_group` | plan | 12 | {table}.{column} is in a group of columns joined by foreign keys that must mask alike, and no masker fits all of them: {reason} |
 | `target.schema.not_recreatable` | plan | 13 | the foreign key on {table} ({column}) into {reason} cannot be recreated in the target |
 | `extract.refused.standby_cancelled` | extract | 7 | the source cancelled the read of {table}: the snapshot conflicts with recovery on a standby (SQLSTATE {reason}); retry, or run against the primary |
 | `transform.refused.masker` | transform | 7 | masker {reason} refused a value in {table}.{column}: it is not copied through |
