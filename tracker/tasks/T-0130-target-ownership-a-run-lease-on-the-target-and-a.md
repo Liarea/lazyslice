@@ -3,12 +3,12 @@ id: T-0130
 title: "Target ownership: a run lease on the target and a lock-and-recheck before every destructive DDL"
 epic: E5
 phase: 5
-status: open
+status: done
 owner: opus
 created: 2026-09-14
-started: ""
-closed: ""
-outcome: ""
+started: 2026-09-14
+closed: 2026-09-14
+outcome: done
 ---
 
 # T-0130 · Target ownership: a run lease on the target and a lock-and-recheck before every destructive DDL
@@ -25,6 +25,10 @@ Target.Gate (internal/pg/target.go:198) checks emptiness and releases its connec
 
 - 2026-09-14 created
 
+- 2026-09-14 started
+
+- 2026-09-14 closed: done
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+went well: b7d58a6 after two fix rounds; the lease became a transaction-scoped advisory lock (pg_try_advisory_xact_lock in an open READ ONLY transaction) because the reviewer's finding was measured against a real PgBouncer: the second run was handed the first run's idle server connection and re-took its own session lock; idle_in_transaction_session_timeout set to 0 locally; leaseLeavesRoom refuses a one-connection pooler | went badly: first regression test hung ten minutes twice instead of failing; internal/pg flaked twice on the T-0052 port race; docs/ERRORS.md regeneration owed (T-0148) because docs/ was outside the paths | change next time: put docs/ERRORS.md in the paths of any task that adds catalogue rows

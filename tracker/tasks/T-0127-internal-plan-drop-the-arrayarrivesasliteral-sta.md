@@ -3,12 +3,12 @@ id: T-0127
 title: "internal/plan: drop the arrayArrivesAsLiteral stand-in now that transform masks a literal array element-wise"
 epic: E5
 phase: 5
-status: open
+status: done
 owner: ""
 created: 2026-09-09
-started: ""
-closed: ""
-outcome: ""
+started: 2026-09-14
+closed: 2026-09-14
+outcome: done
 ---
 
 # T-0127 · internal/plan: drop the arrayArrivesAsLiteral stand-in now that transform masks a literal array element-wise
@@ -33,6 +33,10 @@ T-0118 landed the transform half: internal/transform/array.go parses a Postgres 
 
 - 2026-09-09 moved to E5 phase 5
 
+- 2026-09-14 started
+
+- 2026-09-14 closed: done
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+went well: doc-only fix round, 819ef4e; regression 009 flipped to ok and its leak assertion now runs | went badly: reviewers found the moved-failure constraint sentence had been dropped; the grammar gap between classify and transform is closed by argument (array_out never emits the divergent forms) rather than a plan-time parse check | change next time: when a brief says 'record the constraint', the reviewer should check the recorded sentence exists

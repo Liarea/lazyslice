@@ -3,12 +3,12 @@ id: T-0133
 title: "Core owns the run lifecycle: complete is written only after verify passes, and a residual failure empties the target"
 epic: E5
 phase: 5
-status: open
+status: done
 owner: sonnet
 created: 2026-09-14
-started: ""
-closed: ""
-outcome: ""
+started: 2026-09-14
+closed: 2026-09-14
+outcome: done
 ---
 
 # T-0133 · Core owns the run lifecycle: complete is written only after verify passes, and a residual failure empties the target
@@ -25,6 +25,10 @@ load.Load writes status = complete (internal/load/load.go:184) before core runs 
 
 - 2026-09-14 created
 
+- 2026-09-14 started
+
+- 2026-09-14 closed: done
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+went well: b626d77 after one fix round; complete is written by core after verify; exit-9 class failures drop every loaded table (best-effort across the list, ACCESS EXCLUSIVE NOWAIT with bounded retries) under a detached bounded context; deterministic direct closeRun test | went badly: one transient integration failure under -count=5 on a 1970MB Docker VM; core and load CLAUDE.md notes not updated; docs/ERRORS.md owed (T-0149) | change next time: same as T-0130, docs/ERRORS.md in paths
