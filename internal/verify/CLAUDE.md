@@ -81,8 +81,11 @@ statement allowlist this stage needs registered before `Verify` runs, as
 - `reasons.go` — the fixed phrases a `Refusal.Reason` may hold.
 - `residual.go` — §6 items 1 to 3: the scan, the hit, the two probes, the cap.
 - `secondnet.go`, `validators.go` — §6 item 4: the scan and the scoring, and
-  the eleven validators attached to their categories, in nine entries. The validators and the name
-  dictionary themselves are `internal/textsig`, which `internal/classify`
+  the eleven validators attached to their categories, in eleven entries here
+  (T-0136 split Luhn and IBAN back apart, then split Luhn again by family —
+  strong on the character side, ratio on the digits side, its review round's
+  finding 2; only IP and MAC still share one entry). The validators and the
+  name dictionary themselves are `internal/textsig`, which `internal/classify`
   imports too (T-0055).
 - `fk.go`, `counts.go`, `sample.go` — §6 item 5.
 - `sql.go`, `shapes.go` — every statement, and the shapes the source ones match.
@@ -153,6 +156,58 @@ was chosen and is recorded here rather than only in a comment.
     exactly the two-row address column, which is the case this branch exists
     for. Whoever revisits it owes a tracker task and this note updated, not a
     quiet threshold change.
+    - **That narrowing was taken, but only above `minValues`, and by a
+      different name** (`strong`, T-0136). The 2026-09-09 review's finding 7
+      found the branch this note did not anticipate: a *proven* column, where
+      the ratio is supposed to be the answer, still let a single strong hit
+      through as long as it stayed under `validatorThreshold` — one email
+      address among nineteen ordinary strings is 5%, and the net said nothing.
+      So `validator.strong` (`validators.go`) now marks the five entries
+      that carry a real parse — email, phone, network_id, the Luhn half of
+      financial_account, online_id — and `netColumn` fails a proven column on
+      any hit from one of them, exactly as it already did below `minValues`;
+      `address` and `credential` keep the ratio at every size, which is this
+      paragraph's own answer restated rather than reopened. **IBAN is the
+      one of the six parse-shaped categories that is not strong**, split back
+      into its own entry for exactly that (T-0136's own review round): it is
+      a mod-97 checksum over fifteen to thirty-four letters-and-digits rather
+      than over a run of digits, so an ordinary all-caps string passes it
+      about as often as any string of the right shape would — five of
+      pagila's own film titles do, and `TestVerifyPassesACorrectTarget` is
+      what found it, failing on `public.film.title: financial_account` the
+      first time this branch shipped with IBAN still joined to Luhn. The two
+      "any hit" branches are independent and still say different things below
+      `minValues`: every non-dict validator fails on any hit there, strong or
+      not, because a ratio over one or two values means nothing at all —
+      narrowing *that* branch to the parse validators (five now, not four) is
+      still the open question this paragraph names.
+    - **Luhn is `strong` on the character side only; the digits side keeps
+      the ratio** (T-0136 review round, finding 2). The entry above marked
+      the whole Luhn validator strong regardless of family, so *any* hit —
+      whatever the ratio — failed an `integer`/`bigint`/`numeric` column too.
+      Roughly one in ten 12-to-19-digit identifiers passes the Luhn check
+      digit by chance (snowflake IDs, epoch-millisecond timestamps, EAN-13
+      barcodes, order numbers), so an ordinary unmasked bigint id column of
+      any realistic size holds at least one, and this net failed it at exit
+      9 with no ratio escape and no `--unmask` on a column that carried no
+      personal data — "a refusal an operator cannot act on and would learn
+      to route around with `--unmask`", the same sentence the dictionary
+      rule above argues against, and the state such a column reaches once
+      `internal/classify`'s matching gate (finding 1, same review; see
+      `internal/classify/CLAUDE.md`'s `strongHit` note) stops routing it to
+      an unwritable `free_text` and leaves it unmasked instead. `validators`
+      now carries the Luhn entry twice: `{text: true, strong: true}` for a
+      digit run inside a character column, where the claim is still a
+      precise parse over a typed-in card number and any hit still fails;
+      `{digits: true}` (no `strong`) for the numeric families, where the
+      ratio rule applies exactly as it does to `address` and `credential` —
+      `proven && ratio < validatorThreshold` is what decides it, and a
+      column below `minValues` still fails on any hit (T-0058's floor,
+      unaffected). This is the family split IBAN already has (`text` only,
+      never `digits`), applied to the other half of `financial_account`;
+      what makes it a *different* split from IBAN's is that IBAN never
+      reaches `digits` at all, where Luhn now reaches `digits` at the
+      ordinary ratio rather than not reaching it.
 - **The exit code is the first failure in §6's order and the failing check is
   also returned as an error.** Every check runs whatever the ones before it
   found, so one report names everything wrong with the target; the report's

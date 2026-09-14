@@ -291,40 +291,72 @@ type valueSignal struct {
 var validators = []struct {
 	cat    pipeline.Category
 	phrase string
+	// strong marks the validators internal/verify's second net also marks
+	// strong: a precise parse rather than a shape guess. It is read only by
+	// bestSignal's strongHit tracking below (docs/reviews/2026-09-09/
+	// REVIEW.md finding 7) -- it does not change which validator decides a
+	// column outright, only what happens when none of them reaches
+	// validatorThreshold. See internal/verify/validators.go's own `strong`
+	// field, which this mirrors validator for validator; keep the two in
+	// step. IBAN is the one exception among the six parse-shaped categories:
+	// it is a checksum over letters and digits rather than over a run of
+	// digits, so an ordinary all-caps string is about as likely to pass its
+	// mod-97 check as any other string of the right length is -- five of
+	// pagila's own film titles do. Luhn does not share that problem, because
+	// nothing in ordinary text is a run of digits, so it stays strong.
+	strong bool
 	ok     func(*textsig.Dict, string) bool
 }{
-	{pipeline.CatEmail, phraseAddresses, func(_ *textsig.Dict, s string) bool { return textsig.ValidEmail(s) }},
-	{pipeline.CatFinancial, phraseIBAN, func(_ *textsig.Dict, s string) bool { return textsig.ValidIBAN(s) }},
-	{pipeline.CatFinancial, phraseLuhn, func(_ *textsig.Dict, s string) bool { return textsig.ValidLuhn(s) }},
-	{pipeline.CatPhone, phraseE164, func(_ *textsig.Dict, s string) bool { return textsig.ValidPhone(s) }},
-	{pipeline.CatNetworkID, phraseIP, func(_ *textsig.Dict, s string) bool { return textsig.ValidIP(s) }},
-	{pipeline.CatNetworkID, phraseMAC, func(_ *textsig.Dict, s string) bool { return textsig.ValidMAC(s) }},
+	{pipeline.CatEmail, phraseAddresses, true, func(_ *textsig.Dict, s string) bool { return textsig.ValidEmail(s) }},
+	{pipeline.CatFinancial, phraseIBAN, false, func(_ *textsig.Dict, s string) bool { return textsig.ValidIBAN(s) }},
+	{pipeline.CatFinancial, phraseLuhn, true, func(_ *textsig.Dict, s string) bool { return textsig.ValidLuhn(s) }},
+	{pipeline.CatPhone, phraseE164, true, func(_ *textsig.Dict, s string) bool { return textsig.ValidPhone(s) }},
+	{pipeline.CatNetworkID, phraseIP, true, func(_ *textsig.Dict, s string) bool { return textsig.ValidIP(s) }},
+	{pipeline.CatNetworkID, phraseMAC, true, func(_ *textsig.Dict, s string) bool { return textsig.ValidMAC(s) }},
 	// Ahead of the secrets one, and that order is the whole of tracker T-0100:
 	// a URL clears every guard in textsig.LooksSecret, so mastodon's
 	// accounts.uri was `credential` on every row -- masked to the fixed
 	// literal, and refused at plan under the unique index it carries. A URL
 	// that names a person is an online_id, whose generator has a domain large
 	// enough for a unique column.
-	{pipeline.CatOnlineID, phraseURL, func(_ *textsig.Dict, s string) bool { return textsig.ValidURL(s) }},
-	{pipeline.CatCredential, phraseSecrets, func(_ *textsig.Dict, s string) bool { return textsig.LooksSecret(s) }},
-	{pipeline.CatPersonName, phraseNameDict, func(d *textsig.Dict, s string) bool { return d.LooksLikeName(s) }},
-	{pipeline.CatAddress, phraseAddrShape, func(_ *textsig.Dict, s string) bool { return textsig.AddressShape(s) }},
-	{pipeline.CatFreeText, phraseProse, func(d *textsig.Dict, s string) bool { return d.Prose(s) }},
+	{pipeline.CatOnlineID, phraseURL, true, func(_ *textsig.Dict, s string) bool { return textsig.ValidURL(s) }},
+	// credential and address are deliberately not strong: LooksSecret is an
+	// entropy guess and AddressShape is a mixed-digits-and-words guess,
+	// neither a parse, so one occurrence of either is not the same claim as
+	// one occurrence of a valid email address.
+	{pipeline.CatCredential, phraseSecrets, false, func(_ *textsig.Dict, s string) bool { return textsig.LooksSecret(s) }},
+	{pipeline.CatPersonName, phraseNameDict, false, func(d *textsig.Dict, s string) bool { return d.LooksLikeName(s) }},
+	{pipeline.CatAddress, phraseAddrShape, false, func(_ *textsig.Dict, s string) bool { return textsig.AddressShape(s) }},
+	{pipeline.CatFreeText, phraseProse, false, func(d *textsig.Dict, s string) bool { return d.Prose(s) }},
 }
 
 // signals is what the validators said about one column's samples.
 //
-// The three are kept apart because ARCHITECTURE.md §4's accepted-types gate
+// The four are kept apart because ARCHITECTURE.md §4's accepted-types gate
 // applies to a value signal exactly as it does to a name signal (T-0054; see
 // internal/classify/CLAUDE.md). strong and weak are validators whose category
 // the column's type family can hold; refused is one it cannot, recorded so that
 // the reason can say why the column was *not* decided on it, and never so that a
 // decision can be made from it.
 type signals struct {
-	strong  *valueSignal
-	weak    *valueSignal
-	refused *valueSignal
-	total   int
+	strong *valueSignal
+	weak   *valueSignal
+	// strongHit is the first *strong* validator (see the validators list
+	// above) that matched at least one proven sample without reaching
+	// validatorThreshold -- so neither strong nor weak was set from it.
+	// decide() reads this as "mask this column as free_text rather than let a
+	// minority strong hit through as `none`" (docs/reviews/2026-09-09/
+	// REVIEW.md finding 7): a strong validator is a precise parse, so one
+	// email address among nineteen ordinary strings is still one email
+	// address, and a column ratio is the wrong question to ask about whether
+	// it should reach the target unmasked. It is never set below minSamples --
+	// a minority hit there is already covered by the strong branch above (a
+	// ratio over one or two values is either both of them or none), and
+	// internal/verify's own minValues floor already fails any hit on an
+	// unproven column, so there is no gap at that size for this to close.
+	strongHit *valueSignal
+	refused   *valueSignal
+	total     int
 }
 
 // base gives every column its name, type and value decision.
@@ -455,6 +487,31 @@ func bestSignal(dict *textsig.Dict, values []string, p *compiledPack, family str
 		if ratio >= validatorThreshold {
 			sig.strong = hit
 			return sig
+		}
+		if proven && v.strong && matched > 0 && sig.strongHit == nil &&
+			!silencedByType(p, pipeline.CatFreeText, family) {
+			// finding 7: a strong validator below validatorThreshold is still
+			// a precise parse over at least one sample, which is stronger
+			// evidence than the weak branch below asks for and is scored
+			// separately from it in decide() -- see signals.strongHit.
+			//
+			// decide() always assigns this hit's *column* the category
+			// free_text (not the hit's own category), because the column is
+			// only proven mixed, not reliably the hit's category -- so the
+			// gate here has to ask whether free_text itself can be written
+			// into this family, not whether the hit's own category can
+			// (T-0136 review finding 1). A bigint column with one Luhn hit
+			// passes silencedByType(p, financial_account, bigint) == false
+			// (financial_account accepts bigint) but free_text accepts only
+			// text/varchar/bpchar/citext (rules.yml), so deciding it here
+			// produced Category=free_text, Masked=true on a family
+			// mask.Writable refuses, and internal/plan/writeback.go refused
+			// the whole run at exit 12. A column this excludes is not
+			// silenced outright: it is left for sig.weak/sig.refused/none as
+			// before T-0136, and internal/verify's second net (T-0136's
+			// matching fix on validators.go) is what catches the loaded
+			// value on the family this branch cannot reach.
+			sig.strongHit = hit
 		}
 		if proven && sig.weak == nil && ratio >= weakThreshold {
 			sig.weak = hit
@@ -688,6 +745,38 @@ func (st *state) decide(w *work, col pipeline.Column, ct columnType, values []st
 		w.d.Confidence = pipeline.ConfLikely
 		w.frags = append(w.frags,
 			render("samples", best.matched, best.total, best.phrase),
+			render("no_name_signal"))
+
+	case sig.strongHit != nil:
+		// docs/reviews/2026-09-09/REVIEW.md finding 7,
+		// evidence/sparse_email.log: one email address among nineteen
+		// ordinary strings is a ratio of 5%, which reaches neither
+		// validatorThreshold (best above) nor weakThreshold (sig.weak
+		// below), so before this case existed the column fell all the way
+		// to `none` and internal/transform copied the email verbatim.
+		//
+		// A *strong* validator (see the validators list above) is a precise
+		// parse rather than a shape guess, so any hit at all among proven
+		// samples is one production value of that category sitting in an
+		// otherwise ordinary column -- category inference asks "what is this
+		// column", which the 80% ratio answers well; residual detection asks
+		// "does this column hold a recognisable value", which it answers
+		// badly. Deciding the column `free_text` rather than the hit's own
+		// category (email, phone, ...) is deliberate: the column is not
+		// reliably that category, only mixed, and free_text's masker
+		// replaces the whole value, so the minority of rows that do carry
+		// personal data are covered without claiming the majority are
+		// something they are not. This is also what keeps
+		// internal/verify's second net from having to refuse an
+		// already-loaded target over the same column: the fix on that side
+		// (validators.go's strong field) fails any strong hit outright, with
+		// no green path short of --unmask, so a column this case reaches
+		// first is one refusal fewer.
+		w.d.Category = pipeline.CatFreeText
+		w.d.Confidence = pipeline.ConfPossible
+		w.frags = append(w.frags,
+			render("samples", sig.strongHit.matched, sig.strongHit.total, sig.strongHit.phrase),
+			render("strong_hit_free_text"),
 			render("no_name_signal"))
 
 	case sig.weak != nil:

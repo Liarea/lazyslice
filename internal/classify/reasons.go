@@ -294,6 +294,16 @@ var fragments = []*fragment{
 		format:  "jsonb in a log-shaped table: the document is replaced whole",
 		pattern: `jsonb in a log-shaped table: the document is replaced whole`,
 	},
+	{
+		// docs/reviews/2026-09-09/REVIEW.md finding 7: a strong validator
+		// (a precise parse) matched at least one proven sample without the
+		// column reaching validatorThreshold. The column is mixed rather
+		// than reliably one category, so it is masked as free_text instead
+		// of being copied on the strength of a minority ratio.
+		name:    "strong_hit_free_text",
+		format:  "a strong validator hit below the category threshold: masked as free_text, --unmask to keep it unmasked",
+		pattern: `a strong validator hit below the category threshold: masked as free_text, --unmask to keep it unmasked`,
+	},
 }
 
 // phraseAlternation is the closed validator vocabulary, as a regexp branch. It

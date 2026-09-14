@@ -7,6 +7,8 @@ import (
 	"errors"
 	"reflect"
 	"sort"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -14,6 +16,7 @@ import (
 	"github.com/Liarea/lazyslice/internal/pg"
 	"github.com/Liarea/lazyslice/internal/pipeline"
 	"github.com/Liarea/lazyslice/internal/ref"
+	"github.com/Liarea/lazyslice/internal/textsig"
 	"github.com/Liarea/lazyslice/mask"
 )
 
@@ -527,27 +530,41 @@ func (c oneColumn) Query(context.Context, string, ...any) (pipeline.Rows, error)
 //
 // So the two halves are pinned together here. Two values, one of them an email
 // address: 1/2 is below validatorThreshold and the column still fails, naming
-// the table, the column and the category. And the same 0.5 ratio over
-// minValues values does not fail, because there the ratio is the answer and
-// this net is not a per-row scanner.
+// the table, the column and the category.
+//
+// The fourth case used to be the other half of that pin -- the same 0.5 ratio
+// over minValues values did not fail, because there the ratio was the answer
+// and this net was not a per-row scanner. **That stopped being true for a
+// strong validator** (docs/reviews/2026-09-09/REVIEW.md finding 7,
+// evidence/sparse_email.log): email is a precise parse, not a shape guess, so
+// two email addresses among four values is still two email addresses in the
+// target, whatever the ratio -- and the case now pins `strong` failing on any
+// hit once the column is proven, not only below minValues. The fifth case is
+// what the fourth case used to pin, restated over a validator that is not
+// strong: `address` is a shape guess (mixed digits and words), so the same
+// 0.5 ratio over four proven values still does not fail, and stays the
+// evidence that the ratio rule was narrowed rather than removed.
 func TestAColumnBelowMinValuesFailsOnAnyHit(t *testing.T) {
 	table := customers()
 	col := ref.ColumnRef{Table: table, Column: "note"}
 
 	cases := []struct {
-		name     string
-		vals     []any
-		wantFail bool
+		name      string
+		vals      []any
+		wantFail  bool
+		wantCount int64
 	}{
 		{
-			name:     "two values, one an email address",
-			vals:     []any{"ada.lovelace@fixture.test", "nothing to see"},
-			wantFail: true,
+			name:      "two values, one an email address",
+			vals:      []any{"ada.lovelace@fixture.test", "nothing to see"},
+			wantFail:  true,
+			wantCount: 1,
 		},
 		{
-			name:     "one value, an email address",
-			vals:     []any{"ada.lovelace@fixture.test", nil},
-			wantFail: true,
+			name:      "one value, an email address",
+			vals:      []any{"ada.lovelace@fixture.test", nil},
+			wantFail:  true,
+			wantCount: 1,
 		},
 		{
 			name:     "two values, neither an email address",
@@ -555,11 +572,22 @@ func TestAColumnBelowMinValuesFailsOnAnyHit(t *testing.T) {
 			wantFail: false,
 		},
 		{
-			// minValues values at the same 0.5 ratio: the threshold is what
-			// decides once there are enough values for a ratio to mean
-			// anything, and half of four is below it.
-			name:     "four values, two email addresses",
-			vals:     []any{"ada.lovelace@fixture.test", "grace.hopper@fixture.test", "nothing to see", "still nothing"},
+			// email is strong (validators.go): a proven column still fails on
+			// any hit, not only a ratio at or over validatorThreshold. The
+			// review's finding 3 asked for Refusal.Count to be asserted too
+			// -- the brief names it as part of the required message, and a
+			// change that miscounted the hits (rather than only whether any
+			// existed) previously passed unnoticed.
+			name:      "four values, two email addresses (strong: any hit fails)",
+			vals:      []any{"ada.lovelace@fixture.test", "grace.hopper@fixture.test", "nothing to see", "still nothing"},
+			wantFail:  true,
+			wantCount: 2,
+		},
+		{
+			// address is not strong: the ratio rule stays, and half of four
+			// is below validatorThreshold.
+			name:     "four values, two addresses (heuristic: the ratio rule stays)",
+			vals:     []any{"742 Evergreen Terrace", "10 Downing Street", "nothing to see", "still nothing"},
 			wantFail: false,
 		},
 	}
@@ -600,8 +628,128 @@ func TestAColumnBelowMinValuesFailsOnAnyHit(t *testing.T) {
 			if got.Exit != exitResidual {
 				t.Errorf("the refusal exits %d, want %d", got.Exit, exitResidual)
 			}
+			if got.Count != c.wantCount {
+				t.Errorf("the refusal counts %d hits, want %d", got.Count, c.wantCount)
+			}
+			// THREAT_MODEL.md T4: no value ever reaches a Refusal. The
+			// message is a fixed phrase ("email") and neither of the sample
+			// values may appear in it, whatever they are.
+			for _, v := range c.vals {
+				if s, ok := v.(string); ok && strings.Contains(got.Reason, s) {
+					t.Errorf("the refusal reason %q carries a sample value %q", got.Reason, s)
+				}
+			}
 		})
 	}
+}
+
+// TestLuhnOnANumericColumnKeepsTheRatioRule is the T-0136 review's finding 2:
+// the Luhn entry used to be marked strong for both families it runs over, so
+// a numeric column with a single Luhn-passing value among ordinary
+// identifiers failed on that one hit with no ratio escape. Roughly one in ten
+// twelve-to-nineteen-digit identifiers passes the check digit by chance
+// (snowflake IDs, epoch-millisecond timestamps, EAN-13 barcodes, order
+// numbers), so an ordinary unmasked bigint id column of any realistic size
+// held at least one and this net refused an already-loaded target with no
+// green path short of --unmask, over a column holding no personal data.
+// validators.go now carries two Luhn entries: strong over character columns,
+// ratio-scored over integer/bigint/numeric ones -- this pins the numeric
+// side both ways, the same shape TestAColumnBelowMinValuesFailsOnAnyHit pins
+// for email and address.
+func TestLuhnOnANumericColumnKeepsTheRatioRule(t *testing.T) {
+	table := customers()
+	col := ref.ColumnRef{Table: table, Column: "reference"}
+
+	// luhnValidID(13) is a Luhn-valid thirteen-digit number; the ids from
+	// thirteenDigitIDs are ordinary thirteen-digit identifiers that do not
+	// pass the check digit.
+	cases := []struct {
+		name     string
+		vals     []any
+		wantFail bool
+	}{
+		{
+			name:     "one Luhn hit among nineteen ordinary thirteen-digit ids (below the ratio, proven column)",
+			vals:     append(append([]any{}, thirteenDigitIDs(19)...), luhnValidID(1300000000000)),
+			wantFail: false,
+		},
+		{
+			name:     "sixteen Luhn hits out of twenty (at or over the ratio)",
+			vals:     luhnMajority(),
+			wantFail: true,
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s := &state{
+				schema: &pipeline.Schema{},
+				target: oneColumn{vals: c.vals},
+				steps:  []pipeline.Step{{Table: table, Mode: pipeline.ChildOK}},
+				tables: map[ref.TableRef]*pipeline.Table{
+					table: {Ref: table, Columns: []pipeline.Column{{Name: col.Column, TypeName: "bigint"}}},
+				},
+				cls: &pipeline.Classification{Decisions: map[ref.ColumnRef]pipeline.Decision{
+					col: {Col: col, Category: pipeline.CatNone, Source: pipeline.ByClassifier},
+				}},
+			}
+			if err := s.secondNet(context.Background()); err != nil {
+				t.Fatalf("secondNet: %v", err)
+			}
+			if !c.wantFail {
+				if len(s.failures) != 0 {
+					t.Fatalf("the net failed %s on a numeric column with a minority Luhn hit: %s "+
+						"(the digits side of the Luhn entry must not be strong)", col, s.failures[0].Reason)
+				}
+				return
+			}
+			if len(s.failures) != 1 {
+				t.Fatalf("the net recorded %d failures, want one", len(s.failures))
+			}
+			if s.failures[0].Reason != "financial_account" {
+				t.Errorf("the refusal names the category %q, want %q", s.failures[0].Reason, "financial_account")
+			}
+		})
+	}
+}
+
+// thirteenDigitIDs returns n ordinary thirteen-digit identifiers, none of
+// which passes the Luhn check digit.
+func thirteenDigitIDs(n int) []any {
+	out := make([]any, 0, n)
+	for i := 0; i < n; i++ {
+		v := int64(1300000000000) + int64(i)
+		for textsig.ValidLuhn(strconv.FormatInt(v, 10)) {
+			v++
+		}
+		out = append(out, v)
+	}
+	return out
+}
+
+// luhnValidID returns the smallest value at or above base whose decimal form
+// passes the Luhn check digit -- the digit-family counterpart of
+// thirteenDigitIDs, which walks the other way.
+func luhnValidID(base int64) int64 {
+	v := base
+	for !textsig.ValidLuhn(strconv.FormatInt(v, 10)) {
+		v++
+	}
+	return v
+}
+
+// luhnMajority is twenty values, sixteen of which are Luhn-valid -- at or
+// over validatorThreshold, where even the ratio-scored digits side of the
+// Luhn entry fails.
+func luhnMajority() []any {
+	out := make([]any, 0, 20)
+	for i := 0; i < 16; i++ {
+		out = append(out, luhnValidID(int64(1300000000000)+int64(i)*7))
+	}
+	for i := 0; i < 4; i++ {
+		out = append(out, thirteenDigitIDs(1)[0])
+	}
+	return out
 }
 
 // The dictionary rule (tracker T-0055 and its review): person_name and
