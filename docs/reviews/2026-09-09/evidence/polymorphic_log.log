@@ -1,0 +1,13 @@
+  source s_polymorphic_log on 127.0.0.1 as postgres (flag) — --source
+! the role postgres can write to 1 table(s) in s_polymorphic_log — recommend a read-only role: CREATE ROLE lazyslice_ro LOGIN PASSWORD '…'; GRANT CONNECT ON DATABASE s_polymorphic_log TO lazyslice_ro; GRANT USAGE ON SCHEMA public TO lazyslice_ro; GRANT SELECT ON ALL TABLES IN SCHEMA public TO lazyslice_ro;
+  target t_polymorphic_log on 127.0.0.1 — --target
+  1 tables on Postgres 180006: 3 columns, 0 foreign keys
+  public.items.id: no name or value signal; surrogate key: preserved verbatim
+  public.items.thing_id: no name or value signal
+  public.items.thing_type: 1/1 samples parse as addresses; no name signal
+  public.items: 1 rows, child_ok; root
+! polymorphic pair detected, not followed: no constraint — public.items (thing_type, thing_id)
+! not followed: no constraint — public.items.thing_type value "poly.canary@example.org" maps to no table
+  1 rows, 0 KiB of keys, 0 KiB of residual filter; the snapshot is held about 0.0s, assuming 20,000 rows/s
+  dropping public.items in the target
+  public.items: 1 rows

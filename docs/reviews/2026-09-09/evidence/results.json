@@ -1,0 +1,46 @@
+[
+  {
+    "case": "json_keys",
+    "exit": 0,
+    "target": "JSON object key: canary.person@example.org (the value was replaced)",
+    "log": "json_keys.log"
+  },
+  {
+    "case": "ddl_default",
+    "exit": 0,
+    "target": "ivan.conti@example.net\n'ddl.canary@example.org'::text",
+    "log": "ddl_default.log"
+  },
+  {
+    "case": "sparse_email",
+    "exit": 0,
+    "target": "1",
+    "log": "sparse_email.log"
+  },
+  {
+    "case": "verify_failure",
+    "exit": 9,
+    "target": "complete\nverify.canary@example.org",
+    "log": "verify_failure.log"
+  },
+  {
+    "case": "fk_masker",
+    "exit": 8,
+    "target": "lazyslice-invalid-snvurpjganvkv\n$lazyslice$invalid\nfailed",
+    "log": "fk_masker.log"
+  },
+  {
+    "case": "polymorphic_log",
+    "exit": 0,
+    "target": "javier.nakamura@example.net",
+    "log": "polymorphic_log.log"
+  },
+  {
+    "exit": 0,
+    "inserted_after_gate": "1",
+    "remaining_after_load": "0",
+    "target_ids": "1",
+    "log": "race.log",
+    "case": "target_race"
+  }
+]

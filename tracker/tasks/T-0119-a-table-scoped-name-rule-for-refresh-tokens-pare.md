@@ -1,8 +1,8 @@
 ---
 id: T-0119
 title: "A table-scoped name rule, for refresh_tokens.parent and its kind"
-epic: E9
-phase: ""
+epic: E5
+phase: 5
 status: open
 owner: ""
 created: 2026-09-08
@@ -26,6 +26,8 @@ T-0104's tenth miss has no fix in T-HARD-B and needs a rule-pack feature rather 
 - 2026-09-08 created
 
 - 2026-09-09 Orchestrator 2026-09-09: stays in Later; a table-scoped rule is a rule-pack refinement, not a gap in coverage (the column is masked by its type family today).
+
+- 2026-09-14 moved to E5 phase 5
 
 ## Post-mortem
 

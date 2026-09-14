@@ -32,7 +32,7 @@ The human's plan has session usage limits that reset at fixed times. A phase-1 r
 
 ## Review policy
 
-Every implementation task is followed, in the same workflow, by three parallel reviewers with distinct lenses, then at most two fix rounds by the original developer, then a final verify. A task that still fails after two rounds is returned to the orchestrator as blocked with the findings, not merged.
+Every implementation task is followed, in the same workflow, by one Opus reviewer reading through a merged correctness-and-safety lens (three parallel reviewers with distinct lenses only when the task opts in; see the correction above), then at most two fix rounds by the original developer, then a final verify. A task that still fails after two rounds is returned to the orchestrator as blocked with the findings, not merged.
 
 Tasks are capped at roughly 400 changed lines so review happens in real time. Bigger work is split before it starts.
 

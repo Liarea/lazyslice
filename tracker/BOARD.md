@@ -1,4 +1,4 @@
-# Board · 2026-09-09
+# Board · 2026-09-14
 
 | Epic | Phase | Open | In progress | Done | Cancelled | Blocked |
 |---|---|---|---|---|---|---|
@@ -7,9 +7,9 @@
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 1 | 0 | 9 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
-| E5 Hardening | 5 | 5 | 1 | 47 | 0 | 1 |
+| E5 Hardening | 5 | 18 | 1 | 47 | 0 | 1 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 11 | 0 | 14 | 1 | 0 |
+| E9 Later | later | 14 | 0 | 14 | 1 | 0 |
 
 ## Open and in progress
 
@@ -26,13 +26,29 @@
 - T-0090 [open] E5 · T-PERF: performance baseline and CI throughput guard (opus)
 - T-0102 [open] E9 · A text column holding a JSON document is invisible to ARCHITECTURE.md 4's JSON rule ()
 - T-0118 [blocked] E5 · internal/transform: mask an array whose sample arrives as a text literal element-wise ()
-- T-0119 [open] E9 · A table-scoped name rule, for refresh_tokens.parent and its kind ()
+- T-0119 [open] E5 · A table-scoped name rule, for refresh_tokens.parent and its kind ()
 - T-0124 [open] E9 · testdata/regressions covers plan.refused.unique_domain no longer ()
 - T-0125 [open] E9 · Makefile's vet-tagged comment still says .golangci.yml does not lint the torture tag ()
 - T-0126 [open] E9 · internal/textsig/CLAUDE.md still says internal/verify has no URL entry (T-0122 has landed) ()
 - T-0127 [open] E5 · internal/plan: drop the arrayArrivesAsLiteral stand-in now that transform masks a literal array element-wise ()
 - T-0128 [open] E9 · A multidimensional array carried as a text literal is flattened to one dimension at CopyFrom ()
 - T-0129 [open] E5 · internal/verify: an array column that arrives as a text literal is not residual-scanned element-wise ()
+- T-0130 [open] E5 · Target ownership: a run lease on the target and a lock-and-recheck before every destructive DDL (opus)
+- T-0131 [open] E5 · Events carry no source value: polymorphic inference reports unknown type values by count and keyed digest, and an output-sink canary test proves it (sonnet)
+- T-0132 [open] E5 · The masker is chosen per FK-connected equality group, not per column (opus)
+- T-0133 [open] E5 · Core owns the run lifecycle: complete is written only after verify passes, and a residual failure empties the target (sonnet)
+- T-0134 [open] E5 · Recreated DDL carries no sensitive literal: defaults on masked columns are masked, strong hits elsewhere refuse, verify scans the target catalog (opus)
+- T-0135 [open] E5 · dsn.Ref keeps the non-secret transport parameters so a rerun preserves sslmode and certificate paths (sonnet)
+- T-0136 [open] E5 · Second net: one strong hit in an unmasked column is a finding; classify masks a mixed column that carries a strong hit (sonnet)
+- T-0137 [open] E5 · JSON object keys that a strong validator hits are masked (sonnet)
+- T-0138 [open] E5 · mapping_file is refused explicitly until it is implemented; ADR-012 records the deferral (sonnet)
+- T-0139 [open] E5 · Torture suite fingerprints the source before the run, with a negative control (sonnet)
+- T-0140 [open] E5 · CI runs the torture suite on main and the release workflow requires a green CI run for the tagged commit (sonnet)
+- T-0141 [open] E5 · README.md and SECURITY.md no longer claim every stage is a no-op (haiku)
+- T-0142 [open] E9 · Implement the mapping_file contract of ADR-006 (opus)
+- T-0143 [open] E9 · Decide the arbitrary-JSON policy: structure-preserving masking versus whole-document replacement (human)
+- T-0144 [open] E9 · The memory budget accounts for samples, pending traversal, channels and batch bytes; rename the flag help to what it measures (sonnet)
+- T-0145 [open] E9 · A read-only verify command that checks the current target without dropping it (opus)
 
 ## Recently closed
 
