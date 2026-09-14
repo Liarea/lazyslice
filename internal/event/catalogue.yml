@@ -364,6 +364,18 @@
   message: "dropping {table} in the target"
   args: [table]
 
+# T-0133, 2026-09-14 (docs/reviews/2026-09-09 finding 4): core.Run sends this
+# through load.DropLoaded when a residual-class verify failure (exit 9) means
+# the target this run just loaded holds personal data. It is a code of its own,
+# not a reuse of load.target.dropping above, because the two happen at
+# different moments a transcript reader must be able to tell apart: before the
+# rows go in, and after a verify failure says they should not have.
+- code: load.target.quarantine_dropping
+  kind: info
+  stage: load
+  message: "dropping {table} in the target: the last run left personal data in it"
+  args: [table]
+
 - code: load.table.loaded
   kind: progress
   stage: load
@@ -864,6 +876,18 @@
   stage: emit
   message: "{count} progress event(s) were dropped: the renderer could not keep up with the pipeline"
   args: [count]
+
+# T-0133, 2026-09-14 (docs/reviews/2026-09-09 finding 4): a residual-class
+# verify failure (exit 9) means the target holds personal data, so core tries to
+# drop every table the run just loaded (load.DropLoaded) before closing the
+# marker row to failed. This is printed when that drop itself fails on {table}:
+# the run still exits on the verify failure's own code, but the target was not
+# actually emptied and the data the verify failure named is still there.
+- code: run.quarantine.failed
+  kind: warn
+  stage: verify
+  message: "the target could not be emptied after the failure above: dropping {table} did not succeed, and it may still hold personal data"
+  args: [table]
 
 # ---------- discovery (ARCHITECTURE.md §9, ADR-008) ----------
 #

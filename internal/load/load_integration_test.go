@@ -410,16 +410,19 @@ WHERE c.contype = 'f' AND NOT r.relispartition`)
 		}
 	})
 
-	t.Run("the marker records a complete run", func(t *testing.T) {
+	t.Run("the marker is left running, for core to close once verify passes", func(t *testing.T) {
+		// T-0133, 2026-09-14 (THREAT_MODEL.md T8 amendment): a Load that
+		// succeeds no longer closes its own row. It used to write
+		// StatusComplete here, before whoever called it had a chance to run
+		// verify, which is docs/reviews/2026-09-09 finding 4. core.Run is the
+		// caller that closes the row now (run.go's closeRun), once verify has
+		// actually passed; this test drives Load directly, the way
+		// load_integration_test.go always has, so the row it sees is exactly
+		// what Load itself leaves behind.
 		status := scalar[string](ctx, t, targetConn,
 			`SELECT status FROM lazyslice_meta ORDER BY started_at DESC LIMIT 1`)
-		if status != pg.StatusComplete {
-			t.Errorf("the marker says %q", status)
-		}
-		rows := scalar[int64](ctx, t, targetConn,
-			`SELECT rows_loaded FROM lazyslice_meta ORDER BY started_at DESC LIMIT 1`)
-		if rows == 0 {
-			t.Error("the marker records no rows loaded")
+		if status != pg.StatusRunning {
+			t.Errorf("the marker says %q, want %q: closing it is core's job now", status, pg.StatusRunning)
 		}
 		root := scalar[string](ctx, t, targetConn,
 			`SELECT root_table FROM lazyslice_meta ORDER BY started_at DESC LIMIT 1`)
@@ -528,10 +531,13 @@ func TestLoadPagilaIntoAMarkedTarget(t *testing.T) {
 	if runs != 2 {
 		t.Errorf("the marker holds %d rows after two runs", runs)
 	}
-	complete := scalar[int64](ctx, t, targetConn,
-		`SELECT count(*) FROM lazyslice_meta WHERE status = 'complete'`)
-	if complete != 2 {
-		t.Errorf("%d of the two runs are recorded complete", complete)
+	// T-0133: both rows are left at running by Load itself — closing either to
+	// complete is core's job, once verify has passed, and this test drives Load
+	// directly.
+	running := scalar[int64](ctx, t, targetConn,
+		`SELECT count(*) FROM lazyslice_meta WHERE status = 'running'`)
+	if running != 2 {
+		t.Errorf("%d of the two runs are recorded running, want 2", running)
 	}
 	// The reload must not have doubled anything: one table's rows are the
 	// reloaded ones, not the first run's plus the second's.
@@ -649,10 +655,12 @@ func TestLoadNastyResetsAMixedCaseSequence(t *testing.T) {
 			`SELECT count(*) FROM pg_namespace WHERE nspname = 'billing'`); n != 1 {
 			t.Error("the billing schema was not created in the target")
 		}
+		// T-0133: Load leaves a successful run's row at StatusRunning for core
+		// to close; this test drives Load directly, so that is what it sees.
 		status := scalar[string](ctx, t, targetConn,
 			`SELECT status FROM lazyslice_meta ORDER BY started_at DESC LIMIT 1`)
-		if status != pg.StatusComplete {
-			t.Errorf("the marker says %q", status)
+		if status != pg.StatusRunning {
+			t.Errorf("the marker says %q, want %q", status, pg.StatusRunning)
 		}
 	})
 }

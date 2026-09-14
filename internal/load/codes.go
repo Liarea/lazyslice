@@ -31,6 +31,16 @@ const (
 	// dropped (ARCHITECTURE.md section 11.1, ADR-005 "Target").
 	CodeDropping event.Code = "load.target.dropping"
 
+	// CodeQuarantineDropping is the line printed before each table DropLoaded
+	// drops, after core found the target holds personal data on a
+	// residual-class verify failure (T-0133, 2026-09-14). It is a code of its
+	// own rather than a reuse of CodeDropping because the two happen at
+	// different, easily confused moments — before the rows go in, and after a
+	// verify failure says they should not have — and a transcript reader
+	// deserves to be able to tell "the ordinary reload truncation" from "your
+	// last run leaked and this is the cleanup" apart.
+	CodeQuarantineDropping event.Code = "load.target.quarantine_dropping"
+
 	// CodeTableLoaded reports one table's committed row count.
 	CodeTableLoaded event.Code = "load.table.loaded"
 

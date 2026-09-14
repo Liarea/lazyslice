@@ -29,6 +29,30 @@ const MarkerSchemaVersion = 1
 // The three values of lazyslice_meta.status. A row still at StatusRunning is a
 // run that died — SIGKILL, OOM, power loss — and the next run truncates the
 // target exactly as it would after a complete one.
+//
+// T-0133, 2026-09-14 (THREAT_MODEL.md T8 amendment, docs/reviews/2026-09-09
+// finding 4): internal/load used to write StatusComplete itself, the moment its
+// own copy finished — before core had run verify at all — so a run whose verify
+// then failed left a marker saying complete over a target that still held
+// personal data. internal/load/load.go no longer writes StatusComplete on
+// success at all; it leaves the row at StatusRunning, and core.Run closes it
+// once verify has had its say: StatusComplete only after verify passes,
+// StatusFailed after any verify failure (load's own failure path is unchanged —
+// it still closes its own row to StatusFailed itself, because nothing
+// downstream of load runs on that path for core to close it instead).
+//
+// This reused StatusRunning rather than adding a fourth status (StatusLoaded,
+// say) for "load finished, verify has not run yet". Every reader that decides
+// anything from status already treats running the way this state needs to be
+// treated: the gate (target.go, section 11.2) authorises truncation on a bound
+// marker at running exactly as it does at complete, so a run that dies between
+// load returning and core closing the row — kill -9, a crash, core losing the
+// target connection — truncates on the next run exactly as a run killed
+// mid-copy already does, which is the correct outcome in both cases: the row
+// does not yet vouch for what is in the target, so the next run should not
+// trust it either way. A fourth status would have meant teaching the gate a
+// value it treats identically to two it already has, to mark a distinction only
+// a person reading the table by hand would ever use.
 const (
 	StatusRunning  = "running"
 	StatusComplete = "complete"
