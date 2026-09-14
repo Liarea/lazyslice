@@ -7,9 +7,9 @@
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 1 | 0 | 9 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
-| E5 Hardening | 5 | 14 | 1 | 52 | 0 | 0 |
+| E5 Hardening | 5 | 13 | 1 | 53 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 17 | 0 | 16 | 3 | 0 |
+| E9 Later | later | 15 | 0 | 18 | 3 | 0 |
 
 ## Open and in progress
 
@@ -30,7 +30,6 @@
 - T-0125 [open] E9 · Makefile's vet-tagged comment still says .golangci.yml does not lint the torture tag ()
 - T-0126 [open] E9 · internal/textsig/CLAUDE.md still says internal/verify has no URL entry (T-0122 has landed) ()
 - T-0128 [open] E9 · A multidimensional array carried as a text literal is flattened to one dimension at CopyFrom ()
-- T-0131 [open] E5 · Events carry no source value: polymorphic inference reports unknown type values by count and keyed digest, and an output-sink canary test proves it (sonnet)
 - T-0132 [open] E5 · The masker is chosen per FK-connected equality group, not per column (opus)
 - T-0134 [open] E5 · Recreated DDL carries no sensitive literal: defaults on masked columns are masked, strong hits elsewhere refuse, verify scans the target catalog (opus)
 - T-0135 [open] E5 · dsn.Ref keeps the non-secret transport parameters so a rerun preserves sslmode and certificate paths (sonnet)
@@ -45,8 +44,6 @@
 - T-0144 [open] E9 · The memory budget accounts for samples, pending traversal, channels and batch bytes; rename the flag help to what it measures (sonnet)
 - T-0145 [open] E9 · A read-only verify command that checks the current target without dropping it (opus)
 - T-0146 [open] E9 · internal/verify: a residual hit on an array element cannot be confirmed by either probe of section 6 item 3 ()
-- T-0147 [open] E9 · internal/classify/CLAUDE.md array-literal section is stale after T-0118/T-0129/T-0127 ()
-- T-0150 [open] E9 · ARCHITECTURE.md §3.2 amendment (2026-09-08) still says a _type value is truncated and printed at 64 bytes ()
 
 ## Recently closed
 
@@ -54,9 +51,12 @@
 - T-0127 [done] E5 · internal/plan: drop the arrayArrivesAsLiteral stand-in now that transform masks a literal array element-wise → done
 - T-0129 [done] E5 · internal/verify: an array column that arrives as a text literal is not residual-scanned element-wise → done
 - T-0130 [done] E5 · Target ownership: a run lease on the target and a lock-and-recheck before every destructive DDL → done
+- T-0131 [done] E5 · Events carry no source value: polymorphic inference reports unknown type values by count and keyed digest, and an output-sink canary test proves it → done
 - T-0133 [done] E5 · Core owns the run lifecycle: complete is written only after verify passes, and a residual failure empties the target → done
+- T-0147 [done] E9 · internal/classify/CLAUDE.md array-literal section is stale after T-0118/T-0129/T-0127 → done
 - T-0148 [done] E9 · Regenerate docs/ERRORS.md for the four exit-4 target-ownership codes → done
 - T-0149 [done] E9 · Regenerate docs/ERRORS.md for T-0133's two new codes → done
+- T-0150 [done] E9 · ARCHITECTURE.md §3.2 amendment (2026-09-08) still says a _type value is truncated and printed at 64 bytes → done
 - T-0151 [cancelled] E9 · Key the polymorphic value digest on the run's actual mask key, not the published schema fingerprint → cancelled
 - T-0152 [cancelled] E9 · ADR for T-0131's published-fingerprint value digest, or promote T-0151 → cancelled
 - T-0093 [done] E5 · Move RegisterTypes onto pipeline.Writer so the load's type registration is compiler-checked → done: in T-HARD-C (4f9a186)
@@ -72,6 +72,3 @@
 - T-0113 [done] E5 · Regressions 004 and 007 expect exit 12 and now exit 0: credential_unique made their headers stale → done: in T-HARD-C (4f9a186)
 - T-0114 [done] E5 · mask/CLAUDE.md and gen_credential.go still say the torture counts are un-re-measured → done: in T-HARD-C (4f9a186)
 - T-0115 [done] E5 · docs/TORTURE.md: re-measure supabase-auth recall after T-0104's name rules → done: in T-HARD-C (4f9a186)
-- T-0116 [done] E5 · Re-measure the torture flag counts after T-0100 and T-0104 → done: in T-HARD-C (4f9a186)
-- T-0117 [done] E9 · THREAT_MODEL.md T1 and ARCHITECTURE.md owe the composite decision (T-0094 closed) → done: THREAT_MODEL T1 and ARCHITECTURE §4 record the composite fail-closed decision
-- T-0120 [done] E9 · internal/classify: a masked FK child whose parent is copied orphans the row → done: in T-HARD-B (78530ef)

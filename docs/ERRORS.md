@@ -83,7 +83,7 @@ One row per code in the catalogue, in the file's own order. Exit is only meaning
 | `plan.step` | plan | - | {table}: {count} rows, {reason} |
 | `plan.estimate` | plan | - | {count} rows, {reason}; the snapshot is held about {seconds}s, assuming 20,000 rows/s |
 | `plan.polymorphic.detected` | plan | - | polymorphic pair detected, not followed: no constraint — {reason} |
-| `plan.polymorphic.unmapped` | plan | - | not followed: no constraint — {reason} maps to no table |
+| `plan.polymorphic.unmapped` | plan | - | {reason} |
 | `plan.polymorphic.inferred` | plan | - | {column}: inferred {table} -> {reason}, followed as a virtual parent edge |
 | `secret.gitignore.added` | transform | - | added {path} to .gitignore |
 | `secret.file.written` | transform | - | wrote a new masking key to {path} |

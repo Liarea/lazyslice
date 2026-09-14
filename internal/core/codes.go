@@ -77,7 +77,8 @@ const (
 	// actually walk and not only the pairs it declined.
 	CodePlanPolymorphicInferred event.Code = "plan.polymorphic.inferred"
 
-	// CodePlanUnmapped names a sampled _type value that maps to no table. It is
+	// CodePlanUnmapped reports, per polymorphic pair, how many distinct sampled
+	// _type values map to no table; it never carries a value (T-0131). It is
 	// the other half of section 3.2 and stays unemitted until the mapping half
 	// ships; it is declared because the planner's Unmapped list is what feeds
 	// it, and a list with no code to print it is a finding nobody sees.

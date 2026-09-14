@@ -48,15 +48,27 @@ import (
 // (owner_type, owner_id)`, with the cap named when the cap is what stopped it,
 // because that reason is a threshold of ours rather than a property of the
 // schema. A single value of an otherwise resolved pair that names a table this
-// run cannot follow is reported the same way with the value named. A value the
-// *walk* met that the sample never produced is reported the same way again,
-// saying so (noteUnknownType): the sample is a sample, and a pair reported as
-// resolved while an unknown number of its references were dropped is the
-// silence FK-10 describes — but only a value the sample really did miss is said
-// that way, because one it produced has already been reported under its own
-// reason (pairPlan.sampled). A value that names no table at all is the other
-// finding and goes under Unmapped, which is what research/COMPLAINTS.md FK-10 —
-// the silently empty slice — exists to make impossible.
+// run cannot follow is reported the same way, naming the parent table it
+// resolved to — an identifier, and the one thing about this finding an
+// operator can act on. A value the *walk* met that the sample never produced
+// is reported the same way again, saying so (noteUnknownType): the sample is a
+// sample, and a pair reported as resolved while an unknown number of its
+// references were dropped is the silence FK-10 describes — but only a value
+// the sample really did miss is said that way, because one it produced has
+// already been reported under its own reason (pairPlan.sampled). A value that
+// names no table at all is the other finding and goes under Unmapped, which is
+// what research/COMPLAINTS.md FK-10 — the silently empty slice — exists to
+// make impossible.
+//
+// No `_type` value is ever printed, and no digest of one either. An event, a
+// reason, a refusal or an explanation carries a column identifier and a count
+// of distinct values, never the values themselves (THREAT_MODEL.md T4). A
+// keyed HMAC digest stood here briefly and was dropped: it is still an oracle
+// for anyone holding the run key it was keyed under (THREAT_MODEL.md T13,
+// 2026-09-14 review finding 1), and the operator who needs the actual values
+// does not need this run to grant them — they can read the column at the
+// source themselves. unmappedFinding and unknownFindings, below, are what
+// replaced it (T-0131).
 
 // polymorphicValueCap is how many distinct `_type` values a pair may carry and
 // still be followed. Past it the column is not a discriminator, and the pair is
@@ -69,12 +81,6 @@ import (
 // CLAUDE.md and owed an §3.2 amendment or an ADR (see the return value of
 // T-POLY).
 const polymorphicValueCap = 50
-
-// polymorphicValueMaxLen bounds the length of a `_type` value in a message. The
-// value is an identifier of a class rather than a row (ARCHITECTURE.md §14),
-// and a column that turned out to hold something else must not be able to print
-// it at length (THREAT_MODEL.md T4).
-const polymorphicValueMaxLen = 64
 
 // djangoContentTypeTable is the table Django's generic relations resolve
 // through, and the three columns this reads from it.
@@ -282,23 +288,34 @@ func (p *run) inferPair(ctx context.Context, pair polymorphicPair) (*pairPlan, p
 	for _, v := range values {
 		pp.sampled[v] = true
 	}
+	var unmappedCount int
 	for _, v := range values {
 		parent, ok, err := p.mapTypeValue(ctx, pair, v)
 		if err != nil {
 			return nil, found, err
 		}
 		if !ok {
-			found.unmapped = append(found.unmapped,
-				pair.Table.String()+"."+pair.TypeCol+" value "+showValue(v))
+			// The value itself is not kept anywhere past this point — only that
+			// there was one. unmappedFinding turns the count into the one
+			// finding this pair's unmapped values become (T-0131).
+			unmappedCount++
 			continue
 		}
 		edge, ok := p.virtualEdgeTo(pair, v, parent, idType)
 		if !ok {
+			// Unlike the unmapped case above, mapTypeValue already resolved this
+			// value to a real table — virtualEdgeTo only declined to build an
+			// edge into it (out of scope, no usable key). That table name is an
+			// identifier, not a source-row value (§10/§14 admit it freely), and
+			// it is the one thing here an operator can act on.
 			found.unfollowed = append(found.unfollowed,
-				pair.String()+" where "+pair.TypeCol+" = "+showValue(v))
+				pair.String()+" resolves to "+parent.String()+", which this run cannot follow")
 			continue
 		}
 		pp.edges = append(pp.edges, edge)
+	}
+	if unmappedCount > 0 {
+		found.unmapped = append(found.unmapped, unmappedFinding(pair, unmappedCount))
 	}
 	return pp, found, nil
 }
@@ -349,9 +366,10 @@ func (p *run) distinctSQL(tbl *pipeline.Table, cols []string, types []keyType) s
 	return distinctSampleSQL(tbl.Ref, cols, types, num, den, probeSampleRows)
 }
 
-// renderTypeValue is the text form of one `_type` value, and it is both the map
-// key the walk splits on and the text a message prints. A uuid discriminator is
-// refused: it names no class in either framework.
+// renderTypeValue is the text form of one `_type` value: the map key the walk
+// splits on (pairPlan.sampled, virtualParents' byValue), and nothing else — no
+// message prints it (T-0131 removed the last one that did). A uuid
+// discriminator is refused: it names no class in either framework.
 func renderTypeValue(ty keyType, v keyValue) (string, bool) {
 	switch ty.kind {
 	case kindInt:
@@ -364,14 +382,41 @@ func renderTypeValue(ty keyType, v keyValue) (string, bool) {
 	return "", false
 }
 
-// showValue renders a `_type` value for a message: quoted, escaped and bounded.
-// §14 admits the value into the log because it identifies a class and not a row;
-// the bound is there for the column that turned out to hold something else.
-func showValue(v string) string {
-	if len(v) > polymorphicValueMaxLen {
-		v = v[:polymorphicValueMaxLen] + "..."
+// noDigestRemedy is the one remedy a count-only `_type` finding ends with,
+// and it is fixed because the finding itself gives the operator nothing more
+// specific to act on: no value, and no digest of one either (THREAT_MODEL.md
+// T4). A keyed HMAC digest stood here first and was dropped — it is still an
+// oracle for anyone holding the run key it was keyed under (THREAT_MODEL.md
+// T13, 2026-09-14 review finding 1) — and the operator who needs the actual
+// values does not need this run to grant them: they can read the column at
+// the source themselves (T-0131).
+func noDigestRemedy(pair polymorphicPair) string {
+	return "inspect the distinct values of " + pair.TypeCol + " on " + pair.Table.String() +
+		" in the source to see what they are"
+}
+
+// distinctCount renders how many distinct values a finding is about, and
+// nothing about which ones: "3 distinct values", or, past the cap
+// noteUnknownType stops counting at, "more than 50 distinct values".
+func distinctCount(n int, capped bool) string {
+	if capped {
+		return "more than " + strconv.Itoa(polymorphicValueCap) + " distinct values"
 	}
-	return strconv.Quote(v)
+	s := strconv.Itoa(n) + " distinct value"
+	if n != 1 {
+		s += "s"
+	}
+	return s
+}
+
+// unmappedFinding is the whole of what one column's unmapped `_type` values
+// become: an identifier and a count, never a value and never a digest of one.
+// It replaces valueDigest (T-0131; the orchestrator's answer to
+// docs/reviews/2026-09-09/REVIEW.md finding 2 and to the 2026-09-14 finding
+// on the digest that briefly stood in its place is no digest at all).
+func unmappedFinding(pair polymorphicPair, count int) string {
+	return pair.Table.String() + "." + pair.TypeCol + ": " + distinctCount(count, false) +
+		" mapping to no table; " + noDigestRemedy(pair)
 }
 
 // mapTypeValue maps one sampled `_type` value to a table. The Django spelling
@@ -643,8 +688,10 @@ func (p *run) virtualEdgeTo(pair polymorphicPair, value string, parent ref.Table
 			// `virtual_fks:`, and ARCHITECTURE.md §10 says every value in that
 			// file is an identifier, a count, a fingerprint or a flag value with
 			// literals withheld; a sampled column value is none of those. The
-			// value stays where §14 does admit it — the log, through Step.Why
-			// and through the unmapped and unfollowable findings.
+			// log never carries the value either (T-0131): Step.Why names the
+			// pair and the parent, and the unmapped and unknown findings carry
+			// a column identifier and a count — never a value or a digest of
+			// one.
 			//
 			// It names the discriminator and stops there because emit's
 			// virtualList renders `Name Child (cols) -> Parent (cols)`: a name
@@ -748,8 +795,10 @@ func (p *run) pushVirtual(ctx context.Context, it item, pp pairPlan, byValue map
 		if pending.Len() == 0 {
 			continue
 		}
-		p.noteWhy(e.fk.Parent, "parent of "+it.table.String()+" via the polymorphic pair "+
-			it.table.String()+"."+pp.pair.IDCol+" where "+pp.pair.TypeCol+" = "+showValue(e.value))
+		// No digest either (T-0131): every value of this pair that resolves to
+		// e.fk.Parent is one edge (inferPolymorphic dedupes on name and
+		// parent), so nothing here needs to say which value it was.
+		p.noteWhy(e.fk.Parent, "parent of "+it.table.String()+" via the polymorphic pair "+pp.pair.String())
 		out = append(out, item{table: e.fk.Parent, keys: pending, mode: pipeline.ParentOnly, depth: it.depth})
 	}
 	return out, nil
@@ -824,10 +873,10 @@ func (p *run) noteUnknownType(pair polymorphicPair, value string) {
 	u.values[value] = true
 }
 
-// unknownFindings is what noteUnknownType collected, in pair order and then in
-// value order, spelled like the unfollowable-value finding beside it: both are
-// "detected, not followed", and this one says which half of the pair went
-// unanswered and why.
+// unknownFindings is what noteUnknownType collected, in pair order, one
+// finding per pair: a column identifier and a count of the distinct values
+// the walk met that the sample did not produce, never the values themselves
+// or a digest of one (T-0131).
 func (p *run) unknownFindings() []string {
 	pairs := make([]polymorphicPair, 0, len(p.unknownTypes))
 	for pair := range p.unknownTypes {
@@ -843,19 +892,8 @@ func (p *run) unknownFindings() []string {
 	var out []string
 	for _, pair := range pairs {
 		u := p.unknownTypes[pair]
-		values := make([]string, 0, len(u.values))
-		for v := range u.values {
-			values = append(values, v)
-		}
-		sort.Strings(values)
-		for _, v := range values {
-			out = append(out, pair.String()+" where "+pair.TypeCol+" = "+showValue(v)+
-				", a value the sample did not produce")
-		}
-		if u.more {
-			out = append(out, pair.String()+" carries more than "+strconv.Itoa(polymorphicValueCap)+
-				" further "+pair.TypeCol+" values the sample did not produce")
-		}
+		out = append(out, pair.String()+": "+distinctCount(len(u.values), u.more)+" of "+pair.TypeCol+
+			" the sample did not produce; "+noDigestRemedy(pair))
 	}
 	return out
 }

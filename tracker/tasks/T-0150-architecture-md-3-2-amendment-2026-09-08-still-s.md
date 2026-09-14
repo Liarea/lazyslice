@@ -3,12 +3,12 @@ id: T-0150
 title: "ARCHITECTURE.md §3.2 amendment (2026-09-08) still says a _type value is truncated and printed at 64 bytes"
 epic: E9
 phase: ""
-status: open
+status: done
 owner: ""
 created: 2026-09-14
-started: ""
-closed: ""
-outcome: ""
+started: 2026-09-14
+closed: 2026-09-14
+outcome: done
 ---
 
 # T-0150 · ARCHITECTURE.md §3.2 amendment (2026-09-08) still says a _type value is truncated and printed at 64 bytes
@@ -25,6 +25,10 @@ T-0131 replaced showValue's quote-and-truncate with a value-free HMAC digest (in
 
 - 2026-09-14 created
 
+- 2026-09-14 started
+
+- 2026-09-14 closed: done
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+went well: folded into the T-0131 landing by the orchestrator (ARCHITECTURE 3.2 sentence and internal/classify/CLAUDE.md array-literal section corrected) | change next time: doc corrections owed by a task go into the same landing, not a separate task

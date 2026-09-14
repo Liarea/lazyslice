@@ -174,8 +174,9 @@ reason for each.
     holding free text is not a discriminator, and one virtual edge per value
     would be an unbounded fan-out of parent tables from one column. The cap is a
     product decision this file introduced and ARCHITECTURE.md §3.2's amendment
-    of 2026-09-08 now records, together with the 64-byte message bound. What it
-    is no longer
+    of 2026-09-08 now records (the message bound it records is superseded by
+    T-0131's count-only findings — see below, and ARCHITECTURE.md's own
+    2026-09-14 amendment). What it is no longer
     is *silent*: a pair the cap stopped is reported as `public.attachments
     (owner_type, owner_id), the sample carries more than 50 distinct owner_type
     values`, so the one reason that is a threshold of ours rather than a
@@ -245,18 +246,50 @@ reason for each.
     attachment no declared edge reaches, so its pair is never read and the
     assertion there could not fail.
   - **Three findings, three lists, and the v1 sentence is kept for the third.**
-    `Plan.Virtual` is what was inferred and followed; `Plan.Unmapped` is a
-    sampled value that names no table, spelled `public.attachments.owner_type
-    value "widgets"`; `Plan.Polymorphic` is what inference could not resolve and
-    still prints `polymorphic pair detected, not followed: no constraint`. A
-    pair whose sample produced no followable value at all is listed whole
-    (`public.attachments (owner_type, owner_id)`), and a single unfollowable
-    value of an otherwise resolved pair is listed as `public.attachments
-    (owner_type, owner_id) where owner_type = "events"` — saying nothing about
-    it is the silence FK-10 exists to make impossible. A `_type` value is
-    admitted into a message because §14 says it identifies a class and not a
-    row, and it is quoted and truncated at 64 bytes for the column that turned
-    out to hold something else (THREAT_MODEL.md T4).
+    `Plan.Virtual` is what was inferred and followed; `Plan.Unmapped` is one
+    finding per column of sampled values that name no table, spelled
+    `public.attachments.owner_type: 3 distinct values mapping to no table;
+    inspect the distinct values of owner_type on public.attachments in the
+    source to see what they are`; `Plan.Polymorphic` is what inference could
+    not resolve and still prints `polymorphic pair detected, not followed: no
+    constraint`. A pair whose sample produced no followable value at all is
+    listed whole (`public.attachments (owner_type, owner_id)`), and a single
+    unfollowable value of an otherwise resolved pair is listed as
+    `public.attachments (owner_type, owner_id) resolves to public.widgets,
+    which this run cannot follow` — the parent name, because `mapTypeValue`
+    already resolved the value to that table and only `virtualEdgeTo` declined
+    the edge (out of scope, no usable key); the table name is an identifier,
+    not a source-row value (§10/§14), and it is the one part of this finding
+    an operator can act on. Saying nothing about the value at all is the
+    silence FK-10 exists to make impossible.
+
+    **No `_type` value is ever printed, and no digest of one either (T-0131,
+    decided 2026-09-14).** `showValue` used to quote whatever the sample read
+    into `Plan.Unmapped`, `Plan.Polymorphic` and `Step.Why`, and the
+    2026-09-09 review (finding 2) reproduced that string reaching stdout,
+    `--json` and any log with a masked column's real value in it. The fix
+    that landed first replaced it with an HMAC-SHA256 digest keyed on
+    `schema.Fingerprint`, so two findings about the same value would still
+    read as the same finding without naming it — but that fingerprint is not
+    secret: `internal/emit` writes it to `lazyslice.yml` and `internal/load`
+    writes it into the target's `lazyslice_meta` (ARCHITECTURE.md §10, §11),
+    so anyone holding a transcript plus either artifact could recompute
+    `HMAC(fingerprint, candidate)` for a guessed value and confirm it — a
+    membership oracle, THREAT_MODEL.md T4. Keying the digest on the actual run
+    key instead would not have closed that: it would only hand the same
+    oracle to everyone who holds the run key, which THREAT_MODEL.md T13
+    already treats as a real population, not a hypothetical one. The
+    orchestrator's decision was therefore no digest at all, keyed or not.
+    `unmappedFinding` and `unknownFindings` (`polymorphic.go`) report a
+    column's unmapped or unknown values as a count and nothing else, with one
+    fixed remedy: an operator who needs the actual values can run `SELECT
+    DISTINCT <type_col> FROM <table>` on the source themselves — this run
+    does not grant that access and must not act as though it could.
+    `TestUnmappedFindingCarriesOnlyAnIdentifierAndACount` and
+    `TestUnknownTypeValuesAreReportedNotDropped` (`polymorphic_test.go`) hold
+    the format at the unit level; the canary test in `cmd/lazyslice` holds it
+    at the output-sink level, over every text column of a fixture, not only a
+    polymorphic one.
   - **A fourth finding, and the walk is what produces it.** A `_type` value the
     walk meets that the sample never produced has no edge, so its rows' parents
     are not followed — and the first version of this file dropped it in silence

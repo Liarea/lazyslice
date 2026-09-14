@@ -746,9 +746,13 @@
 
 # §3.2's two findings, one code each. A detected pair is not followed in v1, and
 # saying so is what keeps research/COMPLAINTS.md FK-10's silently empty slice
-# impossible. {reason} carries the pair as "schema.table (type_col, id_col)" and
-# the unmapped value as the _type value itself, which is an identifier of a
-# class and not a row (ARCHITECTURE.md §14).
+# impossible. {reason} carries the pair as "schema.table (type_col, id_col)"
+# for plan.polymorphic.detected. plan.polymorphic.unmapped's {reason} is the
+# whole finding, already assembled by internal/plan (unmappedFinding,
+# polymorphic.go): a column identifier and a count of the distinct values that
+# map to no table, never a value and never a digest of one (THREAT_MODEL.md T4
+# and T13; T-0131, decided 2026-09-14 — a keyed digest is still an oracle for
+# anyone holding the run key it was keyed under).
 - code: plan.polymorphic.detected
   kind: warn
   stage: plan
@@ -758,7 +762,7 @@
 - code: plan.polymorphic.unmapped
   kind: warn
   stage: plan
-  message: "not followed: no constraint — {reason} maps to no table"
+  message: "{reason}"
   args: [reason]
 
 # §3.2 amendment (2026-09-08, T-POLY): one line per followed virtual edge,
