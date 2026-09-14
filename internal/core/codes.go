@@ -84,6 +84,16 @@ const (
 	// it, and a list with no code to print it is a finding nobody sees.
 	CodePlanUnmapped event.Code = "plan.polymorphic.unmapped"
 
+	// CodePlanPendingKeyDefault is section 11.1 arm 1's finding for a run with
+	// no masking key yet: a plan-only run with neither $LAZYSLICE_SECRET nor a
+	// committed secret file plans anyway rather than refusing (T-0161), and
+	// this is the one line it prints instead of masking — which masked
+	// defaults will be masked once a key exists. It carries plan.Plan's
+	// PendingKeyDefaults joined into one sentence, never fired for a run that
+	// writes: internal/core resolves a key in full before planStage for any
+	// such run, so PendingKeyDefaults is always empty there.
+	CodePlanPendingKeyDefault event.Code = "plan.masked_default.pending_key"
+
 	// CodeSecretWritten, CodeSecretEphemeral, CodeSecretUnprotected and
 	// CodeSecretTracked are ARCHITECTURE.md section 9 "The repository", one
 	// code per branch, because every branch prints what it did.

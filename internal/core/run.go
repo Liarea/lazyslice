@@ -343,6 +343,12 @@ func (r *run) execute(ctx context.Context) (*pipeline.Report, error) {
 	if r.req.Mode == ModeClassify {
 		return nil, nil
 	}
+	// The masking key, resolved ahead of the plan stage (T-0161): §11.1 arm 1
+	// masks a masked column's DEFAULT at plan, in internal/plan/ddlliteral.go,
+	// and needs the key there rather than at move, a stage later.
+	if err := r.keyBeforePlan(); err != nil {
+		return nil, err
+	}
 	if err := r.planStage(ctx); err != nil {
 		return nil, err
 	}
@@ -353,7 +359,7 @@ func (r *run) execute(ctx context.Context) (*pipeline.Report, error) {
 	if err := r.refingerprint(); err != nil {
 		return nil, err
 	}
-	if r.req.Mode == ModePlan || r.req.PlanOnly {
+	if r.planOnly() {
 		return nil, r.emitPlanOnly()
 	}
 	report, err := r.move(ctx)
@@ -680,8 +686,8 @@ func (r *run) openTarget(ctx context.Context) error {
 	}
 	// The verdict is kept, not consumed: section 11.2's three warnings compare
 	// the marker against this run's secret fingerprint and classification, and
-	// neither exists until classify and resolveKey have run. markerWarnings is
-	// called from move, before the first write to the target.
+	// neither exists until classify and keyBeforePlan have run. markerWarnings
+	// is called from move, before the first write to the target.
 	r.gate = e
 
 	// The read side of the target. pipeline.Writer writes and registers types and
@@ -757,11 +763,12 @@ func holderName(holder string) string {
 //
 // It is called from move and not from openTarget, which is where the gate runs.
 // All three comparisons need something the gate does not have: the secret
-// fingerprint comes from resolveKey (the first thing move does) and the
-// classification fingerprint from classifyStage, both of which run after
-// discover. Called from openTarget every branch was guarded on a field that was
-// still zero, so none of the three could ever print — which is the whole of what
-// section 11.2 asks for, silently missing.
+// fingerprint comes from keyBeforePlan (T-0161; resolveKey until it moved
+// ahead of the plan stage) and the classification fingerprint from
+// classifyStage, both of which run after discover. Called from openTarget
+// every branch was guarded on a field that was still zero, so none of the
+// three could ever print — which is the whole of what section 11.2 asks for,
+// silently missing.
 //
 // It runs before the loader's first write, so a developer reloading a marked
 // target is told before it is truncated, not after.
@@ -1254,6 +1261,15 @@ func (r *run) planStage(ctx context.Context) error {
 	for _, value := range p.Unmapped {
 		r.send(event.Plan, event.Warn, CodePlanUnmapped, event.Args{event.ArgReason: value})
 	}
+	// §11.1 arm 1's finding for a plan-only run with no key yet (T-0161): one
+	// line naming every masked default this run would mask if it held a key,
+	// rather than the exit-13 refusal a writing run's key-bearing plan would
+	// hit if it, too, could not rewrite them.
+	if len(p.PendingKeyDefaults) > 0 {
+		r.send(event.Plan, event.Info, CodePlanPendingKeyDefault, event.Args{
+			event.ArgReason: strings.Join(p.PendingKeyDefaults, ", "),
+		})
+	}
 	r.send(event.Plan, event.Info, CodePlanEstimate, event.Args{
 		event.ArgCount:   strconv.FormatInt(p.Estimate.Rows, 10),
 		event.ArgSeconds: strconv.FormatFloat(p.Estimate.HoldSeconds, 'f', 1, 64),
@@ -1279,6 +1295,16 @@ func (r *run) planRequest() (pipeline.PlanRequest, error) {
 		Keys:      map[ref.TableRef][]string{},
 		Priv:      r.priv,
 	}
+	// T-0161: keyBeforePlan has already run by the time planStage calls this
+	// (execute), so r.keyFP is set exactly when a key was resolved — by a
+	// writing run in full, or by a plan-only run that found one already
+	// present. A plan-only run with no key leaves it unset, and req.Key stays
+	// nil: internal/plan/ddlliteral.go reports what it would mask instead of
+	// refusing over the absence of a secret nobody asked to create.
+	if r.keyFP != "" {
+		req.Key = &r.key
+	}
+	req.KeyPending = r.planOnly()
 	budget, err := emit.ParseSize(r.req.MemoryBudget)
 	if err != nil {
 		return req, wrap(CodeUsage, exitUsage, err, "--memory-budget")
@@ -1373,12 +1399,24 @@ func (r *run) planRequest() (pipeline.PlanRequest, error) {
 // introspect to the end of extract" and every second past that is an xmin pin on
 // production (THREAT_MODEL.md T9).
 func (r *run) move(ctx context.Context) (*pipeline.Report, error) {
-	if err := r.resolveKey(); err != nil {
-		return nil, err
+	// The key is already resolved: execute calls keyBeforePlan ahead of
+	// planStage now (T-0161), because ARCHITECTURE.md section 11.1 arm 1 masks
+	// a masked column's DEFAULT at plan and needs it there. move is reached
+	// only by a run that writes, and keyBeforePlan resolves such a run's key in
+	// full, so r.key and r.keyFP are already what they used to become here.
+	//
+	// Belt: move must never mask with a key it never resolved. keyBeforePlan
+	// leaves r.key and r.keyFP unresolved for a plan-only run (planOnly()), and
+	// mask.Key is a fixed-size array, so a zero r.key is structurally valid and
+	// silently masks every value under an all-zero key instead of failing. A
+	// drifted plan-only dispatch (execute's early return narrowing relative to
+	// planOnly()) must not reach here; if it does, refuse instead of writing.
+	if r.keyFP == "" {
+		return nil, wrap(CodeInternal, exitInternal, errors.New("move: masking key not resolved"), "the masking key was not resolved before load")
 	}
-	// Section 11.2's bound-marker warnings, here because this is the first point
-	// at which all three of their inputs exist and the last before the loader
-	// truncates the target.
+
+	// Section 11.2's bound-marker warnings still run here, the last point
+	// before the loader truncates the target.
 	r.markerWarnings()
 	if err := r.registerShapes(); err != nil {
 		return nil, err
@@ -1676,60 +1714,48 @@ func (r *run) buildConfig(report *pipeline.Report) (*pipeline.Config, error) {
 
 // ---------- the masking key ----------
 
+// keyBeforePlan resolves the run key ahead of the plan stage (T-0161), which
+// ARCHITECTURE.md section 11.1 arm 1 needs to mask a masked column's DEFAULT:
+// the rewrite happens at plan, in internal/plan/ddlliteral.go, and until this
+// call moved there the key did not exist until move() ran a stage later, so
+// every masked default was refused at exit 13 under arm 2's last clause
+// instead of masked (testdata/regressions/011).
+//
+// A run that will write resolves the key in full — creating and persisting
+// one if section 9 allows it and none exists yet, exactly what resolveKey
+// always did, just a stage earlier. A plan-only run (ModePlan, or Preview's
+// forced PlanOnly) must not conjure a secret nobody asked for merely by being
+// planned, so it resolves only a key that already exists and leaves r.key
+// unresolved otherwise; ddlliteral.go's columnDefault then reports what it
+// would mask once a key exists (Plan.PendingKeyDefaults) rather than
+// refusing over the absence of one.
+func (r *run) keyBeforePlan() error {
+	if r.planOnly() {
+		return r.resolveKeyIfPresent()
+	}
+	return r.resolveKey()
+}
+
+// planOnly reports whether this run must not create a masking key merely by
+// being planned: ModePlan (`lazyslice plan`), or Preview's forced PlanOnly.
+//
+// It exists so keyBeforePlan and planRequest read one condition rather than
+// two hand-kept copies of it (2026-09-14 review of T-0161, finding 1):
+// planRequest's pipeline.PlanRequest.KeyPending has to agree with which
+// branch keyBeforePlan took, or internal/plan/ddlliteral.go's "no key yet"
+// case and internal/core's "this run may not create one" case can drift
+// apart silently.
+func (r *run) planOnly() bool {
+	return r.req.Mode == ModePlan || r.req.PlanOnly
+}
+
 // resolveKey finds the masking key, in the order ARCHITECTURE.md section 8 and
 // section 9 give: $LAZYSLICE_SECRET, then --secret-file, then a new key written
 // to that file — but only where section 9's repository rules allow it.
 func (r *run) resolveKey() error {
-	if text, ok := os.LookupEnv("LAZYSLICE_SECRET"); ok {
-		// The environment variable is the one branch with no file, so section 9's
-		// repository rules have nothing to protect: the key is not on disk, and
-		// .gitignore cannot ignore what is not there.
-		k, err := mask.ParseKey(text)
-		if err != nil {
-			return wrap(CodeSecretRefusedKey, exitCredential, err, "$LAZYSLICE_SECRET is not a key")
-		}
-		r.key, r.keyFP = k, k.Fingerprint()
-		return nil
-	}
-
-	// Section 9 "The repository" runs before the file is written *or used*, not
-	// only before it is created. A lazyslice.secret that is already in the
-	// worktree is exactly the state of a clone whose key was committed, and that
-	// is the case the tracked check exists for (THREAT_MODEL.md T6): checking
-	// only on the create path made it fire solely for a key that is in the index
-	// and missing from the worktree, which is nobody's repository.
-	state, protectErr := repo.Protect(r.req.SecretFile, nil)
-	if protectErr != nil {
-		return wrap(CodeInternal, exitInternal, protectErr, "the repository could not be checked")
-	}
-	for _, added := range state.Added {
-		r.send(event.Transform, event.Info, CodeGitignoreAdded, event.Args{event.ArgPath: added})
-	}
-	if len(state.Tracked) > 0 {
-		return &Stop{
-			Code: CodeSecretTracked, Exit: exitUsage,
-			Args: event.Args{
-				event.ArgPath:      state.Tracked[0],
-				event.ArgStatement: repo.RemoveFromIndex(state.Tracked[0]),
-			},
-			Message: fmt.Sprintf("%s is tracked by git", state.Tracked[0]),
-		}
-	}
-	if state.Root != "" && !state.GitFound {
-		r.send(event.Transform, event.Warn, CodeGitAbsent, event.Args{event.ArgPath: r.req.SecretFile})
-	}
-
-	body, err := os.ReadFile(r.req.SecretFile)
-	if err == nil {
-		k, parseErr := mask.ParseKey(string(body))
-		if parseErr != nil {
-			return wrap(CodeSecretRefusedKey, exitCredential, parseErr, "%s is not a key", r.req.SecretFile)
-		}
-		r.key, r.keyFP = k, k.Fingerprint()
-		return nil
-	}
-	if !errors.Is(err, fs.ErrNotExist) {
-		return wrap(CodeSecretRefusedKey, exitCredential, err, "%s could not be read", r.req.SecretFile)
+	found, state, err := r.resolveKeyState()
+	if err != nil || found {
+		return err
 	}
 
 	// No key yet, and the repository has already said whether one may be written.
@@ -1757,6 +1783,103 @@ func (r *run) resolveKey() error {
 		r.send(event.Transform, event.Warn, CodeSecretUnprotected, event.Args{event.ArgPath: r.req.SecretFile})
 	}
 	return nil
+}
+
+// resolveKeyIfPresent fills r.key and r.keyFP from a key that already
+// exists — the environment variable, or the committed secret file — and
+// leaves both at their zero value when neither does. It never creates a key
+// and never writes lazyslice.secret (T-0161): a plan-only run must not
+// conjure a secret nobody asked for merely by being planned.
+//
+// It is deliberately its own read path and does not call resolveKeyState or
+// repo.Protect (2026-09-14 review of T-0161, finding 2): repo.Protect is not
+// read-only — appendMissing opens .gitignore O_APPEND|O_WRONLY and writes
+// lazyslice.secret and snapshots/ into it — so `lazyslice plan` and the TUI's
+// Preview pass were mutating the operator's .gitignore and could hard-abort
+// at CodeSecretTracked on a command that writes nothing to the database or
+// the filesystem otherwise. The tracked-file check (THREAT_MODEL.md T6) is
+// therefore not run on this path either: it exists to stop a *write* using a
+// key a clone should not trust, and a plan-only run performs no write for it
+// to protect. A writing run still gets the full check, through resolveKey.
+func (r *run) resolveKeyIfPresent() error {
+	if text, ok := os.LookupEnv("LAZYSLICE_SECRET"); ok {
+		k, kerr := mask.ParseKey(text)
+		if kerr != nil {
+			return wrap(CodeSecretRefusedKey, exitCredential, kerr, "$LAZYSLICE_SECRET is not a key")
+		}
+		r.key, r.keyFP = k, k.Fingerprint()
+		return nil
+	}
+	body, err := os.ReadFile(r.req.SecretFile)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return nil
+	case err != nil:
+		return wrap(CodeSecretRefusedKey, exitCredential, err, "%s could not be read", r.req.SecretFile)
+	}
+	k, err := mask.ParseKey(string(body))
+	if err != nil {
+		return wrap(CodeSecretRefusedKey, exitCredential, err, "%s is not a key", r.req.SecretFile)
+	}
+	r.key, r.keyFP = k, k.Fingerprint()
+	return nil
+}
+
+// resolveKeyState is resolveKey's read half: the environment variable, then
+// section 9's repository check, then the committed file, in that order.
+// found is true once r.key and r.keyFP are filled; state is repo.Protect's
+// answer, which only resolveKey's own create branch below needs.
+//
+// resolveKeyIfPresent does not call this — see its own comment — so this is
+// no longer shared between the two, and the tracked-file check below runs
+// only for a run that may write.
+func (r *run) resolveKeyState() (found bool, state repo.State, err error) {
+	if text, ok := os.LookupEnv("LAZYSLICE_SECRET"); ok {
+		// The environment variable is the one branch with no file, so section 9's
+		// repository rules have nothing to protect: the key is not on disk, and
+		// .gitignore cannot ignore what is not there.
+		k, kerr := mask.ParseKey(text)
+		if kerr != nil {
+			return false, state, wrap(CodeSecretRefusedKey, exitCredential, kerr, "$LAZYSLICE_SECRET is not a key")
+		}
+		r.key, r.keyFP = k, k.Fingerprint()
+		return true, state, nil
+	}
+
+	state, protectErr := repo.Protect(r.req.SecretFile, nil)
+	if protectErr != nil {
+		return false, state, wrap(CodeInternal, exitInternal, protectErr, "the repository could not be checked")
+	}
+	for _, added := range state.Added {
+		r.send(event.Transform, event.Info, CodeGitignoreAdded, event.Args{event.ArgPath: added})
+	}
+	if len(state.Tracked) > 0 {
+		return false, state, &Stop{
+			Code: CodeSecretTracked, Exit: exitUsage,
+			Args: event.Args{
+				event.ArgPath:      state.Tracked[0],
+				event.ArgStatement: repo.RemoveFromIndex(state.Tracked[0]),
+			},
+			Message: fmt.Sprintf("%s is tracked by git", state.Tracked[0]),
+		}
+	}
+	if state.Root != "" && !state.GitFound {
+		r.send(event.Transform, event.Warn, CodeGitAbsent, event.Args{event.ArgPath: r.req.SecretFile})
+	}
+
+	body, readErr := os.ReadFile(r.req.SecretFile)
+	if readErr == nil {
+		k, parseErr := mask.ParseKey(string(body))
+		if parseErr != nil {
+			return false, state, wrap(CodeSecretRefusedKey, exitCredential, parseErr, "%s is not a key", r.req.SecretFile)
+		}
+		r.key, r.keyFP = k, k.Fingerprint()
+		return true, state, nil
+	}
+	if !errors.Is(readErr, fs.ErrNotExist) {
+		return false, state, wrap(CodeSecretRefusedKey, exitCredential, readErr, "%s could not be read", r.req.SecretFile)
+	}
+	return false, state, nil
 }
 
 // ---------- events and teardown ----------

@@ -851,6 +851,19 @@
   message: "{column}: inferred {table} -> {reason}, followed as a virtual parent edge"
   args: [column, table, reason]
 
+# ARCHITECTURE.md §11.1 arm 1's finding for a run with no masking key yet
+# (T-0161): a plan-only run with neither $LAZYSLICE_SECRET nor a committed
+# secret file plans rather than refusing, and this is what it prints instead
+# of masking a masked column's DEFAULT. {reason} is plan.Plan.PendingKeyDefaults
+# joined with ", " — schema.table.column identifiers, never a value
+# (THREAT_MODEL.md T4). Never fired for a run that writes: internal/core
+# resolves a key in full before the plan stage for any such run.
+- code: plan.masked_default.pending_key
+  kind: info
+  stage: plan
+  message: "no masking key yet, so these masked defaults still carry the source's literal and will be masked once one exists: {reason}"
+  args: [reason]
+
 # ARCHITECTURE.md §9 "The repository", one code per branch, because every branch
 # prints what it did. The stage is transform: the masking key is transform's
 # input, and the key is what these are about.

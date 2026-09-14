@@ -18,8 +18,8 @@ import (
 //
 // testdata/regressions/011-masked-column-default-holds-a-literal.sql is the
 // end-to-end half and asserts one exit code. These are the four arms of the
-// rule, and the one that cannot be asserted through the CLI at all until
-// pipeline.PlanRequest.Key is filled (T-0161): a masked column's default really
+// rule, including the one that needed pipeline.PlanRequest.Key filled before
+// the CLI could reach it at all (T-0161): a masked column's default really
 // being rewritten, to the value mask.Apply gives for that literal.
 
 // literalTable is finding 5's schema: a masked email column carrying an address
@@ -32,6 +32,31 @@ func literalTable() (ref.TableRef, *pipeline.Schema) {
 			Columns: []pipeline.Column{
 				{Name: "id", TypeName: "bigint", TypeOID: 20},
 				{Name: "email", TypeName: "text", Default: "'ddl.canary@example.org'::text"},
+				{Name: "note", TypeName: "text"},
+			},
+			PK: []string{"id"},
+		}},
+	}
+}
+
+// literalNextvalTable is literalTable's shape-unrewritable twin: the same
+// column, still text (so checkWriteBack, which only judges the column's type
+// against the category, has nothing to say about it), but its DEFAULT calls
+// nextval — one of the three shapes defaultIsRewritable declines whatever key
+// this run holds, because its literal is a relation name and a masked one is
+// a CREATE TABLE that fails after every table has been dropped.
+func literalNextvalTable() (ref.TableRef, *pipeline.Schema) {
+	t := ref.TableRef{Schema: "public", Name: "items"}
+	return t, &pipeline.Schema{
+		Tables: []pipeline.Table{{
+			Ref: t,
+			Columns: []pipeline.Column{
+				{Name: "id", TypeName: "bigint", TypeOID: 20},
+				{
+					Name:     "email",
+					TypeName: "text",
+					Default:  "COALESCE(nextval('legacy_email_seq'::regclass)::text, 'ddl.canary@example.org')",
+				},
 				{Name: "note", TypeName: "text"},
 			},
 			PK: []string{"id"},
@@ -52,6 +77,15 @@ func planLiterals(t *testing.T, schema *pipeline.Schema, cls *pipeline.Classific
 	root := schema.Tables[0].Ref
 	_, err := New().Plan(context.Background(), &countingReader{}, schema, cls,
 		pipeline.PlanRequest{Root: &root, Key: key})
+	return err
+}
+
+// planLiteralsWithRequest is planLiterals for a caller that needs to set a
+// field planLiterals does not expose, such as KeyPending — the drift-guard
+// test needs a PlanRequest with both Key and KeyPending at their zero value.
+func planLiteralsWithRequest(t *testing.T, schema *pipeline.Schema, cls *pipeline.Classification, req pipeline.PlanRequest) error {
+	t.Helper()
+	_, err := New().Plan(context.Background(), &countingReader{}, schema, cls, req)
 	return err
 }
 
@@ -82,12 +116,13 @@ func TestAMaskedColumnsDefaultIsMaskedThroughItsOwnMasker(t *testing.T) {
 
 func TestAMaskedColumnsDefaultThatCannotBeRewrittenIsRefused(t *testing.T) {
 	t.Parallel()
-	tbl, schema := literalTable()
+	tbl, schema := literalNextvalTable()
 	cls := masking(tbl, "email", pipeline.CatEmail, mask.MaskerEmail)
 
-	// No key: nothing here can produce a value for the column, and the literal
-	// is plainly an address, so it may neither be shipped nor replaced.
-	err := planLiterals(t, schema, cls, nil)
+	// A key exists; the shape (a default calling nextval) is what refuses this
+	// one — the literal is a relation name, and a masked one is a CREATE TABLE
+	// that fails after every table has been dropped.
+	err := planLiterals(t, schema, cls, literalKey(0x99))
 	var refusal *Refusal
 	if !errors.As(err, &refusal) {
 		t.Fatalf("Plan returned %v, want a *plan.Refusal", err)
@@ -103,6 +138,66 @@ func TestAMaskedColumnsDefaultThatCannotBeRewrittenIsRefused(t *testing.T) {
 		strings.Contains(refusal.Args["reason"], "ddl.canary@example.org") {
 		t.Fatalf("the refusal quotes the literal: %q / %q (THREAT_MODEL.md T4)",
 			refusal.Message, refusal.Args["reason"])
+	}
+}
+
+// T-0161: a masked default with no key *yet* is not the same finding as one
+// this stage can never rewrite. Before this task wired
+// pipeline.PlanRequest.Key ahead of the plan stage, a nil key reached here
+// only from a direct caller — there was no other way to get one, and the old
+// version of this test (over literalTable, the rewritable shape) asserted the
+// same exit-13 refusal as the case above. Now a nil key with KeyPending set is
+// exactly what internal/core's keyBeforePlan leaves a plan-only run with when
+// neither $LAZYSLICE_SECRET nor lazyslice.secret exists, and the CLI must
+// still be able to plan such a run: this is what it reports instead of
+// refusing. KeyPending is what internal/core sets for that state (2026-09-14
+// review, finding 1) — see TestAMaskedDefaultWithNoKeyAndNoKeyPendingIsRefused
+// for the case where a nil key is *not* accompanied by it.
+func TestAMaskedDefaultWithNoKeyIsPendingNotRefused(t *testing.T) {
+	t.Parallel()
+	tbl, schema := literalTable()
+	cls := masking(tbl, "email", pipeline.CatEmail, mask.MaskerEmail)
+	root := schema.Tables[0].Ref
+
+	p, err := New().Plan(context.Background(), &countingReader{}, schema, cls,
+		pipeline.PlanRequest{Root: &root, Key: nil, KeyPending: true})
+	if err != nil {
+		t.Fatalf("Plan with no key: %v", err)
+	}
+	if want := []string{"public.items.email"}; len(p.PendingKeyDefaults) != 1 || p.PendingKeyDefaults[0] != want[0] {
+		t.Fatalf("Plan.PendingKeyDefaults = %v, want %v", p.PendingKeyDefaults, want)
+	}
+	if got := schema.Tables[0].Columns[1].Default; got != "'ddl.canary@example.org'::text" {
+		t.Fatalf("the default changed to %q with no key to mask it with", got)
+	}
+}
+
+// The drift guard (2026-09-14 review of T-0161, finding 1): a nil Key with
+// KeyPending left false is not the plan-only state PendingKeyDefaults exists
+// for — internal/core's keyBeforePlan sets KeyPending only for a run it is
+// deliberately leaving without a key, and a writing run always resolves one
+// before planStage runs. A caller that reaches this stage with neither (a
+// bug in internal/core, or a caller that never went through keyBeforePlan at
+// all) must not silently recreate the source's literal in the target's DDL;
+// it refuses exactly as the "cannot be rewritten" shapes do.
+func TestAMaskedDefaultWithNoKeyAndNoKeyPendingIsRefused(t *testing.T) {
+	t.Parallel()
+	tbl, schema := literalTable()
+	cls := masking(tbl, "email", pipeline.CatEmail, mask.MaskerEmail)
+	root := schema.Tables[0].Ref
+
+	err := planLiteralsWithRequest(t, schema, cls,
+		pipeline.PlanRequest{Root: &root, Key: nil, KeyPending: false})
+	var refusal *Refusal
+	if !errors.As(err, &refusal) {
+		t.Fatalf("Plan returned %v, want a *plan.Refusal", err)
+	}
+	if refusal.Code != CodeLiteralNotRewritable || refusal.Exit != exitSchema {
+		t.Fatalf("Plan refused with %s exit %d, want %s exit %d",
+			refusal.Code, refusal.Exit, CodeLiteralNotRewritable, exitSchema)
+	}
+	if refusal.Column != "email" {
+		t.Fatalf("the refusal names %q, want the column it is about", refusal.Column)
 	}
 }
 

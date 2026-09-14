@@ -159,6 +159,22 @@ type PlanRequest struct {
 	// reads it, no row reaches it, and it never leaves the process.
 	Key *mask.Key
 
+	// KeyPending is true when internal/core's keyBeforePlan deliberately did
+	// not create a key for this run — a plan-only run with neither
+	// $LAZYSLICE_SECRET nor a committed secret file — and is false for every
+	// other run, including a writing run.
+	//
+	// internal/plan/ddlliteral.go reads this, not a nil Key alone, to decide
+	// whether a masked default with no key yet is §11.1 arm 1's "report and
+	// carry on" case (T-0161) or a defect: a writing run's key is always
+	// resolved in full before planStage runs, so a nil Key on a run with
+	// KeyPending false is not the plan-only state this field names, and that
+	// stage refuses instead of silently skipping the column (2026-09-14
+	// review of T-0161, finding 1 — two hand-kept copies of "is this a
+	// plan-only run" agreeing only by construction, with nothing pinning
+	// them together).
+	KeyPending bool
+
 	// Take, Cap and Depth are taken as given: an int cannot tell an unset field
 	// from an explicit zero, so internal/core substitutes section 3's defaults
 	// before it calls Plan and cmd/lazyslice refuses --take 0, --cap 0 and
@@ -189,6 +205,16 @@ type Plan struct {
 	Unreadable []TableRef // unreachable tables the role cannot read, dropped to SchemaOnly
 	Estimate   Estimate
 	SnapshotID SnapshotID
+	// PendingKeyDefaults names, as "schema.table.column", every masked
+	// column whose DEFAULT arm 1 of section 11.1's literal rule would mask
+	// through the column's own masker if this run held a key. It is filled
+	// only when PlanRequest.Key was nil and the column's default was
+	// otherwise rewritable (T-0161): a plan-only run resolves a key only
+	// when one already exists, so a run with none plans anyway rather than
+	// refusing, and this is what it reports instead of masking. Empty on
+	// every run that carries a key, since PlanRequest.Key is nil only for
+	// such a run.
+	PendingKeyDefaults []string
 }
 
 // Planner computes the subset. It is a client-side monotone worklist with

@@ -838,28 +838,56 @@ a row (`docs/reviews/2026-09-09/evidence/ddl_default.log`).
   no implementation, so this is a stated exception with a task against it:
   **T-0162** moves `Literal`, `Literals`, `RewriteLiterals` and `QuoteLiteral`
   into a leaf beside `internal/textsig`.
-- **Owed, and filed. Arm 1 is dormant in the CLI and this task did not land
-  it.** `internal/core`'s `planRequest()` does not fill
-  `pipeline.PlanRequest.Key` — `resolveKey()` does not run until `move()`, after
-  `planStage` — so masking a masked column's default is implemented, unit-tested
-  and unreachable outside a caller that injects a key: every masked default whose
-  literal a strong validator hits is refused at exit 13 under arm 2's last clause
-  instead of masked. **T-0161** is the wiring (it is in `internal/core`, outside
-  this task's paths), and it flips
-  `testdata/regressions/011-masked-column-default-holds-a-literal.sql`'s header
-  from `exit 13` to `ok` and asserts the target's `pg_attrdef` holds a masked
-  address. Until then this rule is a **partial landing**: arms 2 and 3 are live
-  and arm 1 is not. What the gap does *not* do is loosen the second control:
-  `internal/verify`'s catalog pass exempts a masked column's `DEFAULT` only
-  where `pipeline.Column.DefaultOriginal` says this rewrite ran, so with arm 1
-  dormant nothing is exempt and every masked default is scanned in the target
-  (`internal/verify/catalog.go`'s `rewroteDefault`). The pair is a cross-package
-  contract: the field is written here and read there. **T-0163** is the other gap: this pass reads no index
-  predicate and no domain `CHECK`, although §11.1 recreates both — the
-  `internal/verify` catalog pass reads both, so what the miss costs is the
-  earlier and cheaper refusal, not the control.
+- **Arm 1 runs from the CLI (T-0161, 2026-09-14).** `internal/core`'s
+  `planRequest()` fills `pipeline.PlanRequest.Key` from `r.key`, and `execute`
+  now calls `keyBeforePlan` ahead of `planStage` for a run that will write —
+  `resolveKey()` used to run only inside `move()`, a stage after the plan, so
+  every masked default whose literal a strong validator hits reached this file
+  with a nil key and was refused at exit 13 under arm 2's last clause instead
+  of masked. `testdata/regressions/011-masked-column-default-holds-a-literal.sql`'s
+  header is `ok`, its `masked-default:` key asserts the target's `pg_attrdef`
+  holds a masked address, and this rule is a full landing: all three arms are
+  live from the CLI. `internal/verify`'s catalog pass is unaffected by any of
+  this — it always exempted a masked column's `DEFAULT` only where
+  `pipeline.Column.DefaultOriginal` says this rewrite ran
+  (`internal/verify/catalog.go`'s `rewroteDefault`), so nothing about closing
+  the arm-1 gap changed what that pass judges; the pair stays a cross-package
+  contract, the field written here and read there. **T-0163** is a gap that
+  remains: this pass reads no index predicate and no domain `CHECK`, although
+  §11.1 recreates both — the `internal/verify` catalog pass reads both, so
+  what the miss costs is the earlier and cheaper refusal, not the control.
+  A run with no key at all — a plan-only run with neither $LAZYSLICE_SECRET
+  nor a committed `lazyslice.secret` — is not a gap either: `keyBeforePlan`
+  resolves only a key that already exists for such a run rather than creating
+  one nobody asked for, `columnDefault` treats that nil `Key` as "no key yet",
+  not "cannot be rewritten", and reports the column on `Plan.PendingKeyDefaults`
+  instead of refusing (`TestAMaskedDefaultWithNoKeyIsPendingNotRefused`).
+
+  **The pending state is read off `PlanRequest.KeyPending`, not inferred from
+  a nil `Key` alone (2026-09-14 review of T-0161).** The first landing took
+  "this is a plan-only run" from `p.req.Key == nil`, held up only by two
+  hand-kept copies of the same condition agreeing in `internal/core/run.go`
+  (`keyBeforePlan` and the plan-only early return in `execute`) — nothing
+  pinned them together, and a fourth entry point calling `planStage` without
+  `keyBeforePlan` would have reached this branch with a nil key on a writing
+  run and recreated the source's literal in the target's DDL with no refusal.
+  `internal/core` now sets `KeyPending` from one shared `planOnly()` method
+  read by both `keyBeforePlan` and `planRequest`, and this file's gate is
+  `shapeRewritable && Key == nil && KeyPending`: a nil `Key` with `KeyPending`
+  false — the drift case — falls through to the same refusal a
+  not-rewritable shape gets, rather than being silently skipped.
+  `TestAMaskedDefaultWithNoKeyAndNoKeyPendingIsRefused` (`ddlliteral_test.go`)
+  and `internal/core`'s `TestKeyBeforePlanRunsBeforePlanStage` (the AST
+  ordering pin, in the style of `refingerprint_test.go`'s) hold the two
+  halves. `resolveKeyIfPresent` also stopped sharing `resolveKeyState` with
+  `resolveKey` in the same review round: it no longer calls `repo.Protect`,
+  because that call appends to `.gitignore` and can refuse on a tracked
+  secret file, and a plan-only run (`lazyslice plan`, and the TUI's Preview
+  pass) must not mutate the repository or hard-abort merely by being asked
+  what it would mask — see `internal/core/CLAUDE.md`'s own note on this, and
+  `internal/core/run.go`'s comment on `resolveKeyIfPresent`.
 - **The guards.** `ddlliteral_test.go` holds all four arms without a database,
-  including the one the CLI cannot reach until T-0161: a masked column's default
-  really being rewritten, to the byte, to what `mask.Apply` gives for that
-  literal, under the same `mask.Constraints` its rows go through. Replacing
+  including the one the CLI could not reach before T-0161: a masked column's
+  default really being rewritten, to the byte, to what `mask.Apply` gives for
+  that literal, under the same `mask.Constraints` its rows go through. Replacing
   `checkDDLLiterals`'s body with `return nil` fails four of its tests.

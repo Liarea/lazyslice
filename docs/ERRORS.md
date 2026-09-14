@@ -90,6 +90,7 @@ One row per code in the catalogue, in the file's own order. Exit is only meaning
 | `plan.polymorphic.detected` | plan | - | polymorphic pair detected, not followed: no constraint — {reason} |
 | `plan.polymorphic.unmapped` | plan | - | {reason} |
 | `plan.polymorphic.inferred` | plan | - | {column}: inferred {table} -> {reason}, followed as a virtual parent edge |
+| `plan.masked_default.pending_key` | plan | - | no masking key yet, so these masked defaults still carry the source's literal and will be masked once one exists: {reason} |
 | `secret.gitignore.added` | transform | - | added {path} to .gitignore |
 | `secret.file.written` | transform | - | wrote a new masking key to {path} |
 | `secret.file.unprotected` | transform | - | not a git repository — {path} is not protected by .gitignore |
