@@ -3,15 +3,20 @@
 Snapshot a production SQL database into a safe local copy: subset by a root
 table, follow foreign keys, mask personal data, load.
 
-## Status: pre-release, and not yet usable
+## Status: pre-release, PostgreSQL only
 
-This repository is a scaffold. The command-line surface is real and the
-architecture is written down; **every pipeline stage is a documented no-op**. A
-run announces the nine stages and exits non-zero. Nothing connects to a
-database, nothing is masked, and nothing is written.
+The pipeline runs end to end against PostgreSQL 14 to 18: it discovers a
+source and a target, refuses a target that is not empty or not its own,
+subsets from a root table across foreign keys, masks personal data
+deterministically, loads, and verifies the copy (foreign keys, row counts, a
+residual scan of the target against the source). It is in hardening: an
+independent review on 2026-09-09 found leak-class defects that are being fixed
+in the open ([docs/reviews/](docs/reviews/), tracked in [tracker/](tracker/)),
+and there is no supported version until `v0.1.0` is tagged.
 
-Do not point this at a production database expecting a snapshot. There is not
-yet anything to point it at.
+Until then, point it only at data you are already allowed to hold on the
+machine that runs it. What a snapshot does not hide is listed below and in
+[THREAT_MODEL.md](THREAT_MODEL.md).
 
 - What it will do, and what it refuses to do: [CONCEPT.md](CONCEPT.md)
 - How it is built: [ARCHITECTURE.md](ARCHITECTURE.md) and

@@ -64,9 +64,30 @@ Not in this phase:
 - Public launch, README rewrite, docs site — that is phase 6.
 - New pipeline capability that is neither in ARCHITECTURE.md section 14's phase-5 list nor a fix for something torture testing or the red team found.
 
+## Versioning and releases (decided 2026-09-14)
+
+Semantic versioning. Tags are `vX.Y.Z` for the tool and `mask/vX.Y.Z` for the mask module, which has its own module path. goreleaser builds the binaries and the Homebrew cask from a tag, and the release workflow refuses a tag whose commit has not passed CI (T-0140).
+
+- **v0.0.x** are throwaway tags whose only job is to prove the release pipeline: goreleaser runs, the tap receives a cask, and `brew install Liarea/tap/lazyslice` prints a version on a machine that never built it. Gate 3 defined that check and it has never been run, because the tap is empty. The first is cut the day the repository goes public (T-0153).
+- **v0.1.0 closes gate 5**, not phase 6 as the build plan said: torture, red team, performance baseline and the 2026-09-09 review findings landed. Marked pre-release on GitHub. It is the first version a stranger may install. The yml schema, flags and exit codes may still change between minors.
+- **v0.2.0 closes gate 6**, the launch: README as landing page, the GIF, the docs. Every further 0.x minor may break the yml, a flag or an exit code, with the change named in the release notes and, where the yml is concerned, a tightening or migration note in the tool's own output; 0.x.y patches never do.
+- **v1.0.0 is a compatibility promise, not a feature count.** It is cut when the lazyslice.yml schema, exit codes and flag set have gone two consecutive minors without a breaking change; the torture and red-team suites run green in CI on every supported Postgres major; at least five schemas from people other than the author have run unattended with no leak report open for thirty days; and a written stability policy says what a breaking change is and how long a deprecation lasts. A second engine, `mapping_file`, keyed remap and TUI polish are 1.x minors, not 1.0 requirements. Cutting 1.0 earlier would freeze a config schema nobody outside has used; cutting it only when everything imaginable works would never ship it, and 0.x would never signal that the tool can be trusted.
+
+Release notes come from goreleaser's changelog grouped by the commit prefix (`stage: title (T-id)`); CHANGELOG.md is a pointer at GitHub releases until 1.0. The steps are in docs/RUNBOOK.md, "Cutting a release".
+
+### Go-public checklist (inside phase 5, because gate 5 needs public CI minutes)
+
+- [x] Tree and history scanned 2026-09-14: no tokens, personal emails, password-bearing DSNs or non-synthetic data. gitleaks was not installed; run `gitleaks git .` once before flipping (human).
+- [x] README and SECURITY state the real status (T-0141, 2026-09-14).
+- [ ] git-crypt decision on the AI-specific files (T-0029). Recommendation: cancel, keep them public; nothing in them is a secret, encrypting them costs tokens on every read and write and blocks contributors, and the operating model is part of what the project shows.
+- [ ] The tap repository has an initial commit, so goreleaser's first cask push has a branch to land on (human, or the orchestrator with a go).
+- [ ] Visibility flipped to public (human, or the orchestrator with a go).
+- [ ] Branch protection on main: `ci` and DCO required, no force pushes (human).
+- [ ] v0.0.1 tagged and the pipeline proven (T-0153).
+
 ## Phase 6: Launch
 
-Ship v0.1.0 in public with a README that works as the landing page, and get it in front of strangers.
+Ship v0.2.0 with a README that works as the landing page, and get it in front of strangers. (v0.1.0 is cut at gate 5, not here; see "Versioning and releases" below. docs/BUILD_PLAN.md's "v0.1.0 in public" at weeks 11 to 12 is superseded by this.)
 
 Gate 6:
 

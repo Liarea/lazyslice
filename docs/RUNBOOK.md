@@ -52,3 +52,12 @@ See docs/OPERATING_MODEL.md. Do not downgrade reviewers to save tokens.
 ## What only the human can do
 
 Create the GitHub repository and push. Publish posts. Buy a domain. Anything involving an account, payment, or legal step. Leave these as open tasks in the tracker with owner "human".
+
+## Cutting a release
+
+1. The commit is on main and its `ci` run is green (public runners; `make torture` included since T-0140). No tag on a red or unfinished commit: the release workflow refuses it, and the refusal is the point.
+2. `git tag -a vX.Y.Z -m "vX.Y.Z"` then `git push origin vX.Y.Z`. goreleaser builds, signs, publishes the GitHub release (pre-release while `.goreleaser.yaml` says `prerelease: true`) and pushes the cask to `Liarea/homebrew-tap` with `HOMEBREW_TAP_TOKEN`.
+3. On a machine that did not build it: `brew install Liarea/tap/lazyslice && lazyslice --version`. If the version does not print, the release is withdrawn, not patched in place.
+4. Edit the release notes on GitHub only to name a breaking change the commit prefixes did not make obvious.
+
+Versioning policy: ROADMAP.md, "Versioning and releases".
