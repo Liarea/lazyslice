@@ -3,12 +3,12 @@ id: T-0148
 title: "Regenerate docs/ERRORS.md for the four exit-4 target-ownership codes"
 epic: E9
 phase: ""
-status: open
+status: done
 owner: ""
 created: 2026-09-14
-started: ""
-closed: ""
-outcome: ""
+started: 2026-09-14
+closed: 2026-09-14
+outcome: done
 ---
 
 # T-0148 · Regenerate docs/ERRORS.md for the four exit-4 target-ownership codes
@@ -25,6 +25,10 @@ T-0130 added target.refused.lease_held, load.refused.target_locked, load.refused
 
 - 2026-09-14 created
 
+- 2026-09-14 started
+
+- 2026-09-14 closed: done
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+went well: make docs regenerated docs/ERRORS.md with the six rows T-0130 and T-0133 added; committed by the orchestrator | change next time: docs/ERRORS.md in the paths of any task that touches internal/event/catalogue.yml

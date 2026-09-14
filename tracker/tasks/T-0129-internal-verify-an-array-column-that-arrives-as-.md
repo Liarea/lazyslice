@@ -3,12 +3,12 @@ id: T-0129
 title: "internal/verify: an array column that arrives as a text literal is not residual-scanned element-wise"
 epic: E5
 phase: 5
-status: open
+status: done
 owner: ""
 created: 2026-09-09
-started: ""
-closed: ""
-outcome: ""
+started: 2026-09-14
+closed: 2026-09-14
+outcome: done
 ---
 
 # T-0129 · internal/verify: an array column that arrives as a text literal is not residual-scanned element-wise
@@ -29,6 +29,10 @@ internal/transform (T-0118) masks such a column element-wise and records one res
 
 - 2026-09-09 moved to E5 phase 5
 
+- 2026-09-14 started
+
+- 2026-09-14 closed: done
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+went well: split-or-refuse decided from T-0127's log before code; every new test proven to fail on the reverted code; f40de6a with zero fix rounds | went badly: third copy of the array-literal grammar (classify liberal, transform strict, verify parse-only) with no shared home; element hits end unconfirmable because the probe binds an element against an array column (T-0146) | change next time: a grammar shared by the three readers is owed before a fourth copy appears

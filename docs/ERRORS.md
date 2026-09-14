@@ -15,6 +15,7 @@ One row per code in the catalogue, in the file's own order. Exit is only meaning
 | `target.refused.table_cap` | discover | 4 | target {database} holds {count} user tables, more than lazyslice will check |
 | `target.refused.not_empty` | discover | 4 | {table} in the target is not empty: {reason} |
 | `target.refused.probe_failed` | discover | 4 | could not check the target {database}: {reason} |
+| `target.refused.lease_held` | discover | 4 | the target {database} is held by {reason}: one lazyslice run writes a target at a time |
 | `classify.masked.column` | classify | - | {table}.{column}: {reason} |
 | `classify.copied.column` | classify | - | {table}.{column}: {reason} |
 | `classify.column.drift` | classify | - | {table}.{column} is not in {path}: classified fresh and masked at or above possible |
@@ -35,10 +36,14 @@ One row per code in the catalogue, in the file's own order. Exit is only meaning
 | `extract.refused.standby_cancelled` | extract | 7 | the source cancelled the read of {table}: the snapshot conflicts with recovery on a standby (SQLSTATE {reason}); retry, or run against the primary |
 | `transform.refused.masker` | transform | 7 | masker {reason} refused a value in {table}.{column}: it is not copied through |
 | `load.target.dropping` | load | - | dropping {table} in the target |
+| `load.target.quarantine_dropping` | load | - | dropping {table} in the target: the last run left personal data in it |
 | `load.table.loaded` | load | - | {table}: {count} rows |
 | `load.refused.ddl` | load | 7 | the target refused the statement that recreates {table} ({column}): SQLSTATE {reason} |
 | `load.refused.copy` | load | 7 | the rows of {table} did not go in: SQLSTATE {reason}; the table is empty, not half loaded |
 | `load.refused.fk_invalid` | load | 8 | the foreign key {column} on {table} does not validate: the slice is missing rows it references |
+| `load.refused.target_locked` | load | 4 | {table} in the target could not be locked for dropping: something else is using this database |
+| `load.refused.target_changed` | load | 4 | {table} was approved empty and now holds {count} rows: the target changed after it was approved, and nothing was dropped |
+| `load.refused.marker_changed` | load | 4 | the lazyslice_meta row that authorised truncating this target is gone or has changed: nothing was dropped ({table}) |
 | `target.schema.not_recreatable.function` | plan | 13 | {table}.{column} depends on {reason}, a function lazyslice does not recreate in the target |
 | `target.schema.not_recreatable.collation` | plan | 13 | {table}.{column} uses the collation {reason}, which lazyslice does not recreate in the target |
 | `verify.refused.fk` | verify | 8 | the foreign key {column} on {table} does not hold: {count} rows reference a parent row the target does not have |
@@ -94,6 +99,7 @@ One row per code in the catalogue, in the file's own order. Exit is only meaning
 | `run.refused.internal` | plan | 1 | lazyslice failed for a reason it has no code for; run with --debug |
 | `run.interrupted` | extract | 130 | interrupted: the target transaction was rolled back, and tables already committed were left as they are |
 | `run.progress.dropped` | emit | - | {count} progress event(s) were dropped: the renderer could not keep up with the pipeline |
+| `run.quarantine.failed` | verify | - | the target could not be emptied after the failure above: dropping {table} did not succeed, and it may still hold personal data |
 | `discover.candidate.found` | discover | - | {provenance}: {host} — postgres {version}, {count} table(s), {reason} |
 | `discover.candidate.unreachable` | discover | - | {provenance}: {host} did not answer — {reason} |
 | `discover.docker.endpoint` | discover | - | docker: {host} ({provenance}) |
