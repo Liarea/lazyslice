@@ -81,7 +81,7 @@ Release notes come from goreleaser's changelog grouped by the commit prefix (`st
 - [x] README and SECURITY state the real status (T-0141, 2026-09-14).
 - [x] git-crypt cancelled (T-0029, Gareth 2026-09-14): the AI-specific files stay public; nothing in them is a secret, and the operating model is part of what the project shows.
 - [x] The tap repository has an initial commit (README, 2026-09-14), so goreleaser's first cask push has a branch to land on.
-- [x] Visibility flipped to public 2026-09-14, with THIRD_PARTY_NOTICES.md for the ten torture schemas committed first (f4f37d7).
+- [x] Visibility flipped to public 2026-09-14, with THIRD_PARTY_NOTICES.md for the ten torture schemas committed first (f4f37d7). The first public CI run, 34901076717 on c6fb76d, is green on every job: lint, forbidden, unsafe-flags, docs, release-config, govulncheck, tests on Ubuntu, macOS and Windows, and integration on Postgres 14 to 18; the first green CI since 2026-09-09 04:23 UTC.
 - [x] Branch protection on main 2026-09-14: no force pushes, no deletion, linear history. Required status checks are deliberately not set: they would reject the orchestrator's direct pushes (every new commit has unfinished checks at push time); the enforced gate is the release workflow, which refuses a tag whose commit has not passed `ci` (T-0140). DCO runs on pull requests, which is where outside commits arrive.
 - [ ] v0.0.1 tagged and the pipeline proven (T-0155). The human steps above are T-0156.
 
