@@ -1,0 +1,18 @@
+# gitleaks configuration. The repository is scanned before every public push
+# (docs/RUNBOOK.md). Every entry here is a test fixture that must look like a
+# secret to exercise a detector or a masker, and is documented as such in the
+# file itself; none protects anything. A real credential is never allowlisted:
+# it is removed and rotated.
+title = "lazyslice"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Test fixtures shaped like secrets, verified 2026-09-14"
+paths = [
+  '''internal/textsig/textsig_test\.go''',   # secret-shape validator cases, incl. Stripe's documentation placeholder key
+  '''mask/corpus_test\.go''',                # masker corpus: a UUID-shaped credential fixture
+  '''mask/key_test\.go''',                   # testKeyHex, a patterned 64-hex test key
+  '''internal/invariants/harness_test\.go''', # fixedSecret, documented as public and test-only
+]
