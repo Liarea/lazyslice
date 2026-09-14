@@ -77,12 +77,12 @@ Release notes come from goreleaser's changelog grouped by the commit prefix (`st
 
 ### Go-public checklist (inside phase 5, because gate 5 needs public CI minutes)
 
-- [x] Tree and history scanned 2026-09-14: no tokens, personal emails, password-bearing DSNs or non-synthetic data. gitleaks was not installed; run `gitleaks git .` once before flipping (human).
+- [x] Tree and history scanned 2026-09-14: no tokens, personal emails, password-bearing DSNs or non-synthetic data; `gitleaks git .` over all 147 commits reports none after allowlisting four secret-shaped test fixtures (`.gitleaks.toml`).
 - [x] README and SECURITY state the real status (T-0141, 2026-09-14).
-- [ ] git-crypt decision on the AI-specific files (T-0029). Recommendation: cancel, keep them public; nothing in them is a secret, encrypting them costs tokens on every read and write and blocks contributors, and the operating model is part of what the project shows.
-- [ ] The tap repository has an initial commit, so goreleaser's first cask push has a branch to land on (human, or the orchestrator with a go).
-- [ ] Visibility flipped to public (human, or the orchestrator with a go).
-- [ ] Branch protection on main: `ci` and DCO required, no force pushes (human).
+- [x] git-crypt cancelled (T-0029, Gareth 2026-09-14): the AI-specific files stay public; nothing in them is a secret, and the operating model is part of what the project shows.
+- [x] The tap repository has an initial commit (README, 2026-09-14), so goreleaser's first cask push has a branch to land on.
+- [x] Visibility flipped to public 2026-09-14, with THIRD_PARTY_NOTICES.md for the ten torture schemas committed first (f4f37d7).
+- [x] Branch protection on main 2026-09-14: no force pushes, no deletion, linear history. Required status checks are deliberately not set: they would reject the orchestrator's direct pushes (every new commit has unfinished checks at push time); the enforced gate is the release workflow, which refuses a tag whose commit has not passed `ci` (T-0140). DCO runs on pull requests, which is where outside commits arrive.
 - [ ] v0.0.1 tagged and the pipeline proven (T-0155). The human steps above are T-0156.
 
 ## Phase 6: Launch
