@@ -42,6 +42,15 @@ const (
 	// validates as a category (ARCHITECTURE.md section 6 item 4).
 	CodeRefusedSecondNet event.Code = "verify.refused.second_net"
 
+	// CodeRefusedCatalogLiteral is exit 9: the target's own catalog carries a
+	// string literal that parses as an email address, a telephone number or a
+	// payment card, in a column default, a generated expression or a CHECK
+	// constraint (ARCHITECTURE.md section 11.1's 2026-09-14 amendment,
+	// THREAT_MODEL.md T1). A row scan cannot see it and the application's next
+	// INSERT can put it back into a row, which is what
+	// docs/reviews/2026-09-09 finding 5 demonstrated under exit 0.
+	CodeRefusedCatalogLiteral event.Code = "verify.refused.catalog_literal"
+
 	// CodeRefusedRowCount is exit 7: a step does not hold the rows the plan
 	// says it holds. ADR-005's table has no code of its own for this, and a
 	// count that disagrees with the plan is a failure of the movement of rows;
@@ -81,6 +90,7 @@ const (
 	CodeResidualPassed  event.Code = "verify.residual.passed"
 	CodeResidualProbes  event.Code = "verify.residual.probes"
 	CodeSecondNetPassed event.Code = "verify.second_net.passed"
+	CodeCatalogPassed   event.Code = "verify.catalog.passed"
 	CodeRowCountPassed  event.Code = "verify.row_count.passed"
 	CodeSequencesPassed event.Code = "verify.sequences.passed"
 	CodeSamplePassed    event.Code = "verify.sample.passed"
@@ -101,6 +111,7 @@ const (
 	checkResidual       = "residual"
 	checkUnconfirmable  = "residual_unconfirmable"
 	checkSecondNet      = "second_net"
+	checkCatalog        = "catalog"
 	checkSequences      = "sequences"
 	checkRowCount       = "row_count"
 	checkUnmaskedSameAs = "unmasked_identical"
@@ -113,6 +124,7 @@ var order = []string{
 	checkResidual,
 	checkUnconfirmable,
 	checkSecondNet,
+	checkCatalog,
 	checkFK,
 	checkRowCount,
 	checkSequences,

@@ -84,6 +84,25 @@ const (
 	// operator's schema (T-0132 review).
 	CodeEqualityGroup event.Code = "plan.refused.equality_group"
 
+	// CodeDDLLiteral is exit 12: a string literal inside a column default, a
+	// CHECK constraint or a generated expression on a column this run does not
+	// mask, which a strong validator reads as an email address, a telephone
+	// number or a payment card. §11.1 recreates that text verbatim, so the
+	// literal would cross into the target as it stands (ARCHITECTURE.md §11.1's
+	// 2026-09-14 amendment; ddlliteral.go). The escape is the per-column
+	// --unmask, with its reason.
+	CodeDDLLiteral event.Code = "plan.refused.ddl_literal"
+
+	// CodeLiteralNotRewritable is exit 13: the same literal inside an object on
+	// a *masked* column, where lazyslice can neither leave it nor rewrite it —
+	// a CHECK or generated expression, whose meaning is the application's, or a
+	// default this stage has no way to substitute into (an array, a document,
+	// a nextval, or a run with no key). It is a target-schema refusal for the
+	// same reason target.schema.not_recreatable is: the target cannot be built
+	// from this source without either leaking or changing what the application
+	// checks.
+	CodeLiteralNotRewritable event.Code = "target.schema.literal_not_rewritable"
+
 	// CodeNotRecreatable is exit 13: a foreign key the target's schema cannot
 	// carry (ARCHITECTURE.md §11.1, ForeignKey.NotRecreatable). It is raised at
 	// plan, before the snapshot is used for keys and before anything in the

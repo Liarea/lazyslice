@@ -525,3 +525,106 @@ times). Reusing it here would turn the loudest evidence of THREAT_MODEL.md T8 �
 a target that looks complete with its sequences at 1 — into a passing note, and
 `sequences()` counts the sequence as checked before the call, so the pass would
 have counted it too.
+
+## The catalog pass (T-0134)
+
+`catalog.go` is the eighth check and the first whose subject is not a row. Every
+other check here reads what the target holds in a *row*; this reads what it
+holds in its *schema* — `pg_attrdef`, which carries both the column defaults and
+the generated-column expressions `internal/load/ddl` wrote, `pg_constraint`,
+which carries the `CHECK` and exclusion definitions (a domain's `CHECK` with
+them, since `conrelid` is 0 there rather than absent), and `pg_index`, which is
+where a partial index's predicate and an expression index's key expressions
+live. Every string literal in each text goes through the three strong validators
+and a hit is **exit 9** naming the table and the object
+(`verify.refused.catalog_literal`, `checkCatalog`, between the second net and the
+FK check in `order`).
+
+Why it exists: the 2026-09-09 review's finding 5 put `DEFAULT
+'ddl.canary@example.org'` on a masked email column, and every control in §6
+passed — the rows *were* masked, the filter held their digests, the second net
+found nothing — while the address sat in the target's `pg_attrdef` waiting for
+the application's next `INSERT` to put it back into a row. A scan of the rows
+cannot establish that the database artefact holds no sensitive literal.
+
+- **It is the second look, not the first.** `internal/plan/ddlliteral.go`
+  refuses or rewrites before anything is dropped (ARCHITECTURE.md §11.1's
+  2026-09-14 amendment). The two are deliberately not one code path: the planner
+  reads the source's `*pipeline.Schema` and this reads the target's catalog, so
+  a literal that reached the target by a route the planner does not walk — an
+  index predicate, a domain's `CHECK`, an object somebody added to the target by
+  hand — is still found here.
+  - **The index read is not decoration, and the third statement exists because
+    the sentence above was false without it** (T-0134's review round).
+    `internal/plan` never reads `t.Indexes`, and `catalogConstraintsSQL` reads
+    `pg_constraint` with `contype IN ('c','x')` — a partial index's predicate
+    lives in `pg_index.indpred` and has no `pg_constraint` row — so
+    `CREATE UNIQUE INDEX ... WHERE email = 'x@y.test'` crossed into the target
+    unseen by *both* halves while the file comment claimed the route was covered.
+    `catalogIndexesSQL` reads `pg_get_expr(indpred, indrelid)` and
+    `pg_get_expr(indexprs, indrelid)` as two arms of one `UNION ALL`, so the kind
+    the refusal names is `index predicate` or `index expression` rather than one
+    word covering both. **T-0163** is still open and is the *plan-side* half: an
+    index predicate is refused here at exit 9 with the target already loaded,
+    where §11.1's own rule would refuse it at exit 12 or 13 before anything is
+    dropped.
+- **One exemption, and it is about provenance rather than shape**
+  (`catalogExempt`). A column this run **masked** is exempt for its own
+  `DEFAULT` **when the planner actually rewrote that default**, and a column
+  carrying an `--unmask` opt-out is exempt for its
+  `DEFAULT` and its generated expression. Without the first arm this pass made
+  §11.1's central case unreachable: `internal/plan` masks a masked column's
+  default through that column's own masker, and an email masker's output is a
+  valid address by construction (`mask.Apply` over the review's
+  `ddl.canary@example.org` gives another working address), so a correctly masked
+  default was exit 9 on every run. This stage cannot tell the masker's output
+  from the source's value by inspection — it holds no key, and the residual
+  filter holds cells the transformer masked, never a default — so the
+  classification is the only thing that can answer, which is exactly what
+  `netMode` does on the row side (`case has && d.Masked: return netMode{},
+  false`). The second arm is ARCHITECTURE.md §8's escape meaning the same thing
+  at both ends: `internal/plan`'s `optedOut` does not refuse that column's DDL
+  either.
+  - **The masked arm asks the rewrite, not the decision** (`rewroteDefault`,
+    T-0134's review round). `d.Masked` says the *rows* were masked; it does not
+    say the masker's output is what stands in `pg_attrdef`. The planner records
+    the catalog's own text on `pipeline.Column.DefaultOriginal` when it rewrites
+    a default, `internal/core` hands one `*pipeline.Schema` to both stages, and
+    this arm reads that field — so it is closed on a column whose default was
+    left exactly as the source wrote it. That distinction is not academic while
+    **T-0161** is open: `internal/core` does not fill
+    `pipeline.PlanRequest.Key`, the planner therefore rewrites *no* default on
+    any real run, and an arm keyed on `d.Masked` alone would exempt an object
+    nothing ever rewrote — the whole masked-default class, unjudged, for a
+    control that exists because a masked column's default was the leak.
+    `catalog_test.go` pins both: the rewritten default passes and the
+    unrewritten one is exit 9.
+  - **It is per object class, not per column.** A `CHECK`, an exclusion
+    constraint, a generated expression on a *masked* column and an index
+    predicate are never rewritten by anything, so a strong hit in one of them is
+    the source's own literal whatever the classification says about the columns
+    it names — and this pass is a second look at the artefact, not a re-run of
+    the planner's judgement. `catalog_test.go` pins both directions: the masked
+    column's masked default passes, and a `CHECK` on the same masked column does
+    not.
+- **Only the three strong validators**, where the second net runs nine. This
+  text is SQL and not data: a `CHECK` is full of English words and a default is
+  full of identifiers, and the dictionary-backed validators would fail an
+  already-loaded target over a column named after a street, with `--unmask` no
+  help because the refusal is not about a column's contents. THREAT_MODEL.md T1
+  states the narrowing.
+- **`strongCatalogHit` is the second copy of `internal/plan`'s `strongHit`**,
+  for the reason `textOf` and the identifier quoting are copies: a stage package
+  may not import another. What is shared is the *scanner* —
+  `pipeline.Literals` — because that is the part that decides what is inside the
+  data boundary, and two answers to that question is the failure this file's own
+  validator note records. The three-validator list is a shorter contract and is
+  stated in both places; **T-0162** gives the scanner a leaf home and is the
+  task that should take the list with it.
+- **It reads no parameter and needs no shape.** All three statements are
+  constants in `sql.go` and go to the target, which this package reads directly;
+  the source allowlist is not involved.
+- `catalog_test.go` holds it against a double that answers the three statements
+  separately, so a test can say which object class carried the literal, and
+  asserts the refusal names no literal (THREAT_MODEL.md T4) and that no passing
+  catalog check sits beside it.

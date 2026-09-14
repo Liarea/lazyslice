@@ -1,8 +1,8 @@
 ---
 id: T-0161
 title: "core fills pipeline.PlanRequest.Key so a masked column's DEFAULT is masked instead of refused"
-epic: E9
-phase: ""
+epic: E5
+phase: 5
 status: open
 owner: ""
 created: 2026-09-14
@@ -24,6 +24,8 @@ T-0134 landed ARCHITECTURE.md 11.1's literal rule in internal/plan/ddlliteral.go
 ## Log
 
 - 2026-09-14 created
+
+- 2026-09-14 moved to E5 phase 5
 
 ## Post-mortem
 

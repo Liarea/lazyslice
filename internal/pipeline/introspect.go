@@ -19,8 +19,17 @@ type Column struct {
 	Collation string // "" when the type's default collation
 	Nullable  bool
 	Default   string // pg_get_expr(adbin, adrelid); "" when none
-	Generated string // pg_get_expr of a generated column's expression; "" when not generated
-	Identity  string // "", "a" (always), "d" (by default)
+	// DefaultOriginal holds the catalog's own text of Default from before
+	// internal/plan masked the literals in it (ARCHITECTURE.md §11.1's
+	// 2026-09-14 amendment), and is "" on a column whose default has not been
+	// rewritten. It is what makes that rewrite idempotent: a second Plan over
+	// the same in-memory Schema — the TUI re-plans against a cached one — masks
+	// this text again rather than masking the already-masked value, so two plans
+	// over one schema produce one default and a re-plan under a different key
+	// produces that key's value rather than a composition of both.
+	DefaultOriginal string
+	Generated       string // pg_get_expr of a generated column's expression; "" when not generated
+	Identity        string // "", "a" (always), "d" (by default)
 	// IdentitySeq holds the parameters of the identity sequence when Identity is
 	// not empty.
 	IdentitySeq *SequenceDef

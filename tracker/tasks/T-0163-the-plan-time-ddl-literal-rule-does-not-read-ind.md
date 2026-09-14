@@ -25,6 +25,8 @@ internal/plan/ddlliteral.go (T-0134) walks every recreated column default, gener
 
 - 2026-09-14 created
 
+- 2026-09-14 Narrowed by T-0134's review round (2026-09-14): internal/verify/catalog.go now reads pg_index.indpred and pg_index.indexprs as well as pg_attrdef and pg_constraint, so the verify half of this task is done and an index predicate carrying a strong literal is exit 9 after the load. What remains is the plan half only: extend checkDDLLiterals over Table.Indexes and Schema.Domains so the same literal is exit 12 or 13 before anything is dropped.
+
 ## Post-mortem
 
 _(filled on close: what went well, what went badly, what we change next time)_

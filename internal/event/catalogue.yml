@@ -318,6 +318,41 @@
 # to the task that adds an ArgKey for it (e.g. ArgParent): add the key and
 # re-template this message; do not leave a refusal that names one end of an edge.
 
+# The recreated-DDL literal rule (ARCHITECTURE.md §11.1, amended 2026-09-14,
+# T-0134; internal/plan/ddlliteral.go). A string literal inside a column
+# default, a CHECK constraint or a generated expression is recreated in the
+# target verbatim, so it is inside the data boundary exactly as a row value is:
+# the 2026-09-09 review put DEFAULT 'ddl.canary@example.org' on a masked email
+# column, saw every row masked and the default survive into pg_attrdef, and the
+# run exited 0 (finding 5).
+#
+# Two codes, because the two cases have different remedies. On an *unmasked*
+# column the operator can say in writing that the literal is not a person's, and
+# {reason} carries the --unmask spelling that does it. On a *masked* column
+# there is nothing to say: the object is a predicate or a derivation lazyslice
+# may not rewrite, or a default it has no way to substitute into, so the target
+# cannot be built from this source and it is a target-schema refusal beside
+# target.schema.not_recreatable.
+#
+# {column} carries a column name for a default or a generated expression and a
+# constraint name for a CHECK, as target.schema.not_recreatable.function's does,
+# and for the same reason: event.ArgKey has no key for a constraint. {reason} is
+# a category name -- email, phone, financial_account -- and never the literal.
+
+- code: plan.refused.ddl_literal
+  kind: error
+  stage: plan
+  exit: 12
+  message: "{table}.{column} is not masked and its recreated DDL carries a literal that parses as personal data: {reason}"
+  args: [table, column, reason]
+
+- code: target.schema.literal_not_rewritable
+  kind: error
+  stage: plan
+  exit: 13
+  message: "{table}.{column} is masked and its recreated DDL carries a literal lazyslice cannot rewrite: {reason}"
+  args: [table, column, reason]
+
 - code: target.schema.not_recreatable
   kind: error
   stage: plan
@@ -528,6 +563,19 @@
   message: "{table}.{column} is not masked and {count} of its values validate as {reason}"
   args: [table, column, count, reason]
 
+# The catalog pass (internal/verify/catalog.go, T-0134). The other checks read
+# the target's rows; this reads its pg_attrdef and pg_constraint, because a
+# literal in a recreated default is a value no row scan can see and the
+# application's next INSERT writes it into a row. {reason} is a fixed phrase
+# naming the object class and the category, never the literal.
+
+- code: verify.refused.catalog_literal
+  kind: error
+  stage: verify
+  exit: 9
+  message: "the target's schema carries a literal that parses as personal data in {table}.{column}: {reason}"
+  args: [table, column, count, reason]
+
 - code: verify.refused.row_count
   kind: error
   stage: verify
@@ -600,6 +648,12 @@
   kind: info
   stage: verify
   message: "{count} columns the target holds unmasked were scanned and none of them validates as a category"
+  args: [count]
+
+- code: verify.catalog.passed
+  kind: info
+  stage: verify
+  message: "{count} defaults, generated expressions and constraints in the target's schema carry no personal literal"
   args: [count]
 
 - code: verify.row_count.passed
