@@ -96,20 +96,30 @@ func TestTableNamedPrefersThePairsOwnSchema(t *testing.T) {
 	}
 }
 
-// The pair is what the plan reports, and a `_type` value never reaches a message
-// unbounded: §14 admits it because it identifies a class rather than a row, and
-// a column that turned out to hold something else must not print it at length
-// (THREAT_MODEL.md T4).
-func TestShowValueIsQuotedAndBounded(t *testing.T) {
-	if got, want := showValue(`Ad"min`), `"Ad\"min"`; got != want {
-		t.Errorf("showValue = %s, want %s", got, want)
+// The pair is what the plan reports, and a `_type` value never reaches a
+// message at all: no event, reason, refusal or explanation string carries a
+// value read from a source row, and no digest of one either
+// (docs/reviews/2026-09-09/REVIEW.md finding 2, THREAT_MODEL.md T4 and T13,
+// T-0131). unmappedFinding and unknownFindings take an identifier and a
+// count — never the value — so a value cannot reach one of these strings by
+// construction. A keyed HMAC digest stood here briefly; the orchestrator's
+// answer to the 2026-09-14 review finding on it was no digest at all, keyed
+// or not, because a keyed digest is still an oracle for anyone holding the
+// run key, and the operator who needs the actual values can read the column
+// at the source themselves.
+func TestUnmappedFindingCarriesOnlyAnIdentifierAndACount(t *testing.T) {
+	pair := polymorphicPair{
+		Table:   ref.TableRef{Schema: "public", Name: "attachments"},
+		TypeCol: "owner_type",
+		IDCol:   "owner_id",
 	}
-	long := make([]byte, polymorphicValueMaxLen*2)
-	for i := range long {
-		long[i] = 'x'
+	want := "public.attachments.owner_type: 3 distinct values mapping to no table; " +
+		"inspect the distinct values of owner_type on public.attachments in the source to see what they are"
+	if got := unmappedFinding(pair, 3); got != want {
+		t.Errorf("unmappedFinding(pair, 3) = %q, want %q", got, want)
 	}
-	if got, want := len(showValue(string(long))), polymorphicValueMaxLen+len(`"..."`); got != want {
-		t.Errorf("showValue of a %d-byte value renders %d bytes, want %d", len(long), got, want)
+	if got := unmappedFinding(pair, 1); !strings.Contains(got, "1 distinct value mapping to no table") {
+		t.Errorf("unmappedFinding(pair, 1) = %q, want the singular form", got)
 	}
 }
 
@@ -142,29 +152,43 @@ func TestUnknownTypeValuesAreReportedNotDropped(t *testing.T) {
 	p.noteUnknownType(attachments, "Event")
 	p.noteUnknownType(attachments, "Widget")
 
+	// One finding per pair, not per value: an identifier and a count, never a
+	// value or a digest of one (T-0131).
 	want := []string{
-		`public.attachments (owner_type, owner_id) where owner_type = "Event", a value the sample did not produce`,
-		`public.attachments (owner_type, owner_id) where owner_type = "Widget", a value the sample did not produce`,
-		`public.comments (subject_type, subject_id) where subject_type = "Ticket", a value the sample did not produce`,
+		`public.attachments (owner_type, owner_id): 2 distinct values of owner_type the sample did not produce; ` +
+			`inspect the distinct values of owner_type on public.attachments in the source to see what they are`,
+		`public.comments (subject_type, subject_id): 1 distinct value of subject_type the sample did not produce; ` +
+			`inspect the distinct values of subject_type on public.comments in the source to see what they are`,
 	}
-	if got := p.unknownFindings(); fmt.Sprint(got) != fmt.Sprint(want) {
+	got := p.unknownFindings()
+	if fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Errorf("unknownFindings() =\n%v\nwant\n%v", got, want)
+	}
+	// None of the three sampled values themselves may appear in the findings:
+	// the count is the whole point (T-0131).
+	for _, raw := range []string{"Event", "Widget", "Ticket"} {
+		for _, line := range got {
+			if strings.Contains(line, raw) {
+				t.Errorf("unknownFindings() line %q carries the raw value %q", line, raw)
+			}
+		}
 	}
 
 	// The findings are bounded like the sample is: a `_type` column holding
-	// free text must not turn the list into a copy of the column, and what is
-	// past the bound is a finding of its own rather than a silence.
+	// free text must not turn the list into a copy of the column, and it stays
+	// one finding for the pair — past the bound is a bigger count, not a
+	// second line.
 	q := &run{unknownTypes: map[polymorphicPair]*unknownValues{}}
 	for i := 0; i < polymorphicValueCap*3; i++ {
 		q.noteUnknownType(attachments, fmt.Sprintf("value-%03d", i))
 	}
-	got := q.unknownFindings()
-	if len(got) != polymorphicValueCap+1 {
-		t.Fatalf("unknownFindings() returned %d entries, want %d: the cap plus the line that says there are more",
-			len(got), polymorphicValueCap+1)
+	got = q.unknownFindings()
+	if len(got) != 1 {
+		t.Fatalf("unknownFindings() returned %d entries, want 1: one finding per column regardless of how many "+
+			"distinct values were seen", len(got))
 	}
-	if last := got[len(got)-1]; !strings.Contains(last, "more than 50 further owner_type values") {
-		t.Errorf("the last finding is %q, want it to say the cap was reached", last)
+	if !strings.Contains(got[0], "more than 50 distinct values") {
+		t.Errorf("the finding is %q, want it to say the cap was reached", got[0])
 	}
 }
 

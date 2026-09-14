@@ -1205,9 +1205,18 @@ func TestPlanVirtualEdgeToADanglingRow(t *testing.T) {
 	// become a second finding saying the sample never produced it: the sample
 	// did, the reason would be false, and the remedy it points at (widen the
 	// sample) would change nothing.
-	wantUnmapped := []string{`public.note_links.target_type value "Ghost"`}
+	// 'Ghost' itself never appears: T-0131 replaced the quoted value, and then
+	// the digest that stood in for it, with a count — this only checks the
+	// shape and that the sampled value is not in it anywhere.
+	wantUnmapped := []string{
+		"public.note_links.target_type: 1 distinct value mapping to no table; " +
+			"inspect the distinct values of target_type on public.note_links in the source to see what they are",
+	}
 	if fmt.Sprint(p.Unmapped) != fmt.Sprint(wantUnmapped) {
 		t.Errorf("Unmapped = %v, want %v", p.Unmapped, wantUnmapped)
+	}
+	if strings.Contains(fmt.Sprint(p.Unmapped), "Ghost") {
+		t.Errorf("Unmapped = %v, carries the raw sampled value %q", p.Unmapped, "Ghost")
 	}
 	for _, f := range p.Polymorphic {
 		if strings.Contains(f, "Ghost") {

@@ -470,16 +470,22 @@ flattening, and the two callers that use it (`tableWasSampled`,
 `sampleDistinct`) want it: a unique index is over the whole array, not over the
 strings inside it.
 
-**The transform half is still owed (T-0118), and `internal/plan` refuses in
-front of it.** `internal/transform`'s `maskArray` fires only on a `[]any`, so
-such a column would be masked as one scalar string and `CopyFrom` would fail
-with "cannot find encode plan" at exit 7 mid-load, with the tables before it
-already committed. Landing this half alone would therefore have turned a silent
-leak into a half-loaded target, so `internal/plan/writeback.go`
-(`arrayArrivesAsLiteral`) refuses such a column at exit 12 with `--skip-table`
-and `--unmask`, asking the samples rather than the type because the samples are
-the only place the driver's answer is recorded. When T-0118 lands, that refusal
-goes.
+**The transform half has landed (T-0118), and so has verify's (T-0129); plan no
+longer refuses in front of them (T-0127).** `internal/transform`'s `maskArray`
+used to fire only on a `[]any`, so such a column was masked as one scalar
+string and `CopyFrom` failed with "cannot find encode plan" at exit 7 mid-load,
+with the tables before it already committed — which is why
+`internal/plan/writeback.go` (`arrayArrivesAsLiteral`) refused such a column at
+exit 12 instead, with `--skip-table` and `--unmask`, asking the samples rather
+than the type because the samples are the only place the driver's answer is
+recorded. T-0118 taught `internal/transform` to parse this same literal
+grammar (`internal/transform/array.go`) and mask it element-wise, writing back
+a literal `array_in` accepts for the same element count and dimensions; T-0129
+taught `internal/verify` to split the target's literal the same way for the
+residual scan (`internal/verify/arrayliteral.go`), so a hit inside the braces
+is not missed either. With both halves in place, T-0127 removed the
+`arrayArrivesAsLiteral` refusal: the column this section used to describe as
+refused at plan time is now planned, masked and verified like any other array.
 
 ## A URL is online_id and never credential (T-0100, T-HARD-B)
 
