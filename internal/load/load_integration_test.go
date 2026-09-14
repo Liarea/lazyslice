@@ -168,7 +168,16 @@ func pagilaSource(ctx context.Context, t *testing.T) string {
 
 // loadInto runs extract → load with no transform between them: this suite is
 // about the loader.
-func loadInto(ctx context.Context, s *source, targetURL string) (*pipeline.LoadResult, error) {
+// loadInto loads s into targetURL as core would.
+//
+// gate is what the target gate approved, and it is variadic because most of
+// these tests load into a fresh, empty container: the zero Eligibility says
+// "approved because it was empty", which is what ARCHITECTURE.md §11.2's
+// lock-and-recheck then re-verifies under the ACCESS EXCLUSIVE lock it takes
+// before each drop (T-0130). A test that reloads a target this package already
+// wrote has to pass the gate's real verdict, because the tables there are full
+// by design and the thing that authorises truncating them is the marker row.
+func loadInto(ctx context.Context, s *source, targetURL string, gate ...pipeline.Eligibility) (*pipeline.LoadResult, error) {
 	target, err := pg.OpenTarget(ctx, dsn.DSN(targetURL))
 	if err != nil {
 		return nil, err
@@ -193,12 +202,18 @@ func loadInto(ctx context.Context, s *source, targetURL string) (*pipeline.LoadR
 		extractErr <- extract.New(s.schema).Extract(ctx, s.reader, s.plan, batches)
 	}()
 
-	res, loadErr := New(Run{
+	run := Run{
 		ToolVersion:               "test",
 		SourceFingerprint:         sourceRef.Fingerprint(),
 		ClassificationFingerprint: "none",
 		SecretFingerprint:         "00000000",
-	}, nil).Load(ctx, w, s.plan, s.schema, batches)
+	}
+	if len(gate) == 1 {
+		run.MarkerBound = gate[0].MarkerBound
+		run.MarkerRunID = gate[0].MarkerRunID
+		run.MarkerStatus = gate[0].MarkerStatus
+	}
+	res, loadErr := New(run, nil).Load(ctx, w, s.plan, s.schema, batches)
 
 	if err := <-extractErr; err != nil {
 		return res, fmt.Errorf("extract: %w", err)
@@ -492,7 +507,10 @@ func TestLoadPagilaIntoAMarkedTarget(t *testing.T) {
 
 	// The second load is authorised by that verdict and not by assumption.
 	second := openSource(ctx, t, sourceURL, planRequest())
-	secondRes, err := loadInto(ctx, second, targetURL)
+	// The gate's own verdict, not a constructed one: it is what authorises the
+	// truncation, and the loader re-reads the marker row it names under the lock
+	// it takes before each drop (§11.2's lock-and-recheck).
+	secondRes, err := loadInto(ctx, second, targetURL, e)
 	if err != nil {
 		t.Fatalf("the second load into the target the first one wrote: %v", err)
 	}
@@ -814,7 +832,17 @@ func TestKillNineLeavesEveryTableEmptyOrComplete(t *testing.T) {
 	// And the property that makes the marker worth writing: the next run is
 	// authorised to truncate, and does.
 	again := openSource(ctx, t, sourceURL, planRequest())
-	if _, err := loadInto(ctx, again, targetURL); err != nil {
+	// A row still at running is a run that died, and §11.2 says the next run
+	// truncates exactly as it would after a complete one — so the reload carries
+	// that row as its authorisation, which is what the lock-and-recheck
+	// re-verifies before each drop.
+	authorised := pipeline.Eligibility{
+		MarkerBound: true,
+		MarkerRunID: scalar[string](ctx, t, targetConn,
+			`SELECT run_id::text FROM lazyslice_meta ORDER BY started_at DESC LIMIT 1`),
+		MarkerStatus: pg.StatusRunning,
+	}
+	if _, err := loadInto(ctx, again, targetURL, authorised); err != nil {
 		t.Fatalf("the run after the killed one: %v", err)
 	}
 	for table, n := range want {

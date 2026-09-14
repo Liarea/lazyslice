@@ -10,7 +10,10 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgconn"
+
 	"github.com/Liarea/lazyslice/internal/event"
+	"github.com/Liarea/lazyslice/internal/load/ddl"
 	"github.com/Liarea/lazyslice/internal/pg"
 	"github.com/Liarea/lazyslice/internal/pipeline"
 	"github.com/Liarea/lazyslice/internal/ref"
@@ -36,6 +39,10 @@ type fakeWriter struct {
 	txs      []*fakeTx
 	failCopy map[ref.TableRef]error
 	failExec func(sql string) error
+	// answer is how a test says what the target replies to the reads the
+	// lock-and-recheck makes inside a drop's transaction (T-0130). nil keeps the
+	// default below: a target that holds no tables at all.
+	answer func(sql string, args []any) (pipeline.Rows, error)
 }
 
 func (w *fakeWriter) Exec(_ context.Context, sql string, args ...any) error {
@@ -68,6 +75,25 @@ func (w *fakeWriter) Begin(context.Context) (pipeline.Tx, error) {
 	return tx, nil
 }
 
+// copyTxs are the transactions a table's rows went into.
+//
+// Since T-0130 the drops open transactions of their own — one per table, taking
+// its ACCESS EXCLUSIVE lock and re-verifying what the gate approved before the
+// DROP (ARCHITECTURE.md §11.2) — so `one transaction per table` is a statement
+// about the copies and this is how a test says so. A transaction that reached
+// CopyFrom is a copy's, whether or not the copy succeeded.
+func (w *fakeWriter) copyTxs() []*fakeTx {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	out := make([]*fakeTx, 0, len(w.txs))
+	for _, tx := range w.txs {
+		if tx.copied {
+			out = append(out, tx)
+		}
+	}
+	return out
+}
+
 func (w *fakeWriter) log() []string {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -91,17 +117,128 @@ type fakeTx struct {
 	rows      int64
 	committed bool
 	rolled    bool
-	local     []string
+	// copied marks a transaction a table's rows went into, which is what tells
+	// it apart from the transaction each drop now opens (copyTxs).
+	copied bool
+	local  []string
 }
 
-func (tx *fakeTx) Exec(_ context.Context, sql string, _ ...any) error {
+// Exec records on the transaction and on the writer behind it.
+//
+// The writer's log is the one place a test can read the whole run in order, and
+// since T-0130 the drops happen inside a transaction rather than on the writer
+// (ARCHITECTURE.md §11.2's lock-and-recheck): without the forwarding, the two
+// tests that assert the marker is written before the first drop, and that every
+// drop is announced before it runs, would be asserting over a log the drops had
+// left. failExec is applied here for the same reason — it is how a test makes
+// one statement fail, and a DROP is now one of the statements it has to reach.
+func (tx *fakeTx) Exec(_ context.Context, sql string, args ...any) error {
 	tx.local = append(tx.local, sql)
+	tx.w.mu.Lock()
+	tx.w.statements = append(tx.w.statements, sql)
+	tx.w.args = append(tx.w.args, args)
+	tx.w.mu.Unlock()
+	if tx.w.failExec != nil {
+		return tx.w.failExec(sql)
+	}
 	return nil
 }
+
+// Query is pipeline.Tx's read, which the lock-and-recheck needs (T-0130).
+//
+// With no answer set the fake target holds no tables, so to_regclass answers
+// "not there", the recheck is not reached, and a whole-Load test is about the
+// transaction contract rather than about the recheck. A test that is about the
+// recheck sets fakeWriter.answer (recheckAnswers below) and drives dropOne or
+// dropTable directly; what a *real* target answers under a real lock is asserted
+// in load_integration_test.go and in internal/core's race suite.
+func (tx *fakeTx) Query(_ context.Context, sql string, args ...any) (pipeline.Rows, error) {
+	tx.local = append(tx.local, sql)
+	if tx.w.answer != nil {
+		return tx.w.answer(sql, args)
+	}
+	return &fakeRows{values: []any{false}}, nil
+}
+
+// recheckAnswers is a target's replies to the three reads a drop can make:
+// to_regclass, the row count of an approved-empty table, and the status of the
+// marker row that authorised a truncation. An empty status means that row is
+// gone, which is one of the two things CodeRefusedMarkerChanged is for.
+type recheckAnswers struct {
+	present bool
+	count   int64
+	status  string
+}
+
+func (a recheckAnswers) answer(sql string, _ []any) (pipeline.Rows, error) {
+	switch {
+	case strings.Contains(sql, "to_regclass"):
+		return &fakeRows{values: []any{a.present}}, nil
+	case strings.Contains(sql, "FROM "+pg.MarkerTable):
+		if a.status == "" {
+			return &fakeRows{none: true}, nil
+		}
+		return &fakeRows{values: []any{a.status}}, nil
+	case strings.Contains(sql, "count(*)"):
+		return &fakeRows{values: []any{a.count}}, nil
+	}
+	return nil, errors.New("the fake target was asked something the recheck does not ask: " + sql)
+}
+
+// fakeRows is one row of one column, or none when the query matched nothing.
+type fakeRows struct {
+	values []any
+	none   bool
+	done   bool
+}
+
+func (r *fakeRows) Next() bool {
+	if r.none || r.done {
+		return false
+	}
+	r.done = true
+	return true
+}
+
+func (r *fakeRows) Scan(dest ...any) error {
+	if len(dest) != len(r.values) {
+		return errors.New("the fake target was asked for a different number of columns")
+	}
+	for i, d := range dest {
+		switch target := d.(type) {
+		case *bool:
+			v, ok := r.values[i].(bool)
+			if !ok {
+				return errors.New("the fake target was asked for a bool it does not hold")
+			}
+			*target = v
+		case *int64:
+			v, ok := r.values[i].(int64)
+			if !ok {
+				return errors.New("the fake target was asked for a count it does not hold")
+			}
+			*target = v
+		case *string:
+			v, ok := r.values[i].(string)
+			if !ok {
+				return errors.New("the fake target was asked for a string it does not hold")
+			}
+			*target = v
+		default:
+			return errors.New("the fake target holds no column of that type")
+		}
+	}
+	return nil
+}
+
+func (r *fakeRows) Err() error { return nil }
+
+func (r *fakeRows) Close() {}
 
 func (tx *fakeTx) CopyFrom(ctx context.Context, table ref.TableRef, cols []string, rows <-chan []any) (int64, error) {
 	tx.table = table
 	tx.cols = cols
+	tx.copied = true
 	if err := tx.w.failCopy[table]; err != nil {
 		return 0, err
 	}
@@ -172,10 +309,11 @@ func TestOneTransactionPerTableCommittedAtLast(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if len(w.txs) != 2 {
-		t.Fatalf("expected one transaction per table, got %d", len(w.txs))
+	txs := w.copyTxs()
+	if len(txs) != 2 {
+		t.Fatalf("expected one transaction per table, got %d", len(txs))
 	}
-	for i, tx := range w.txs {
+	for i, tx := range txs {
 		if !tx.committed || tx.rolled {
 			t.Errorf("transaction %d: committed=%v rolled=%v", i, tx.committed, tx.rolled)
 		}
@@ -183,8 +321,8 @@ func TestOneTransactionPerTableCommittedAtLast(t *testing.T) {
 			t.Errorf("transaction %d did not set synchronous_commit off: %v", i, tx.local)
 		}
 	}
-	if w.txs[0].table != orders || w.txs[1].table != items {
-		t.Errorf("the transactions are for %v and %v", w.txs[0].table, w.txs[1].table)
+	if txs[0].table != orders || txs[1].table != items {
+		t.Errorf("the transactions are for %v and %v", txs[0].table, txs[1].table)
 	}
 	if res.Rows[orders] != 3 || res.Rows[items] != 1 {
 		t.Errorf("row counts are %v", res.Rows)
@@ -274,11 +412,12 @@ func TestACopyFailureRollsBackAndStopsTheLoad(t *testing.T) {
 	if refusal.Code != CodeRefusedCopy || refusal.Exit != exitLoad || refusal.Table != orders {
 		t.Errorf("the refusal is %s exit %d on %v", refusal.Code, refusal.Exit, refusal.Table)
 	}
-	if len(w.txs) != 1 {
-		t.Fatalf("the load opened %d transactions after the first one failed", len(w.txs))
+	txs := w.copyTxs()
+	if len(txs) != 1 {
+		t.Fatalf("the load opened %d transactions after the first one failed", len(txs))
 	}
-	if w.txs[0].committed || !w.txs[0].rolled {
-		t.Errorf("the failed table was committed=%v rolled=%v", w.txs[0].committed, w.txs[0].rolled)
+	if txs[0].committed || !txs[0].rolled {
+		t.Errorf("the failed table was committed=%v rolled=%v", txs[0].committed, txs[0].rolled)
 	}
 	log := w.log()
 	if !strings.HasPrefix(log[len(log)-1], "UPDATE lazyslice_meta") {
@@ -327,7 +466,7 @@ func TestABatchStreamThatBreaksTheContractIsAnError(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), c.want) {
 				t.Fatalf("expected an error containing %q, got %v", c.want, err)
 			}
-			for i, tx := range w.txs {
+			for i, tx := range w.copyTxs() {
 				if tx.committed {
 					t.Errorf("transaction %d was committed on a broken stream", i)
 				}
@@ -405,8 +544,8 @@ func TestATableWithNoCopiedColumnsOpensNoTransaction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if len(w.txs) != 0 {
-		t.Errorf("a table with no copied columns opened %d transactions", len(w.txs))
+	if n := len(w.copyTxs()); n != 0 {
+		t.Errorf("a table with no copied columns opened %d transactions", n)
 	}
 	if n, ok := res.Rows[orders]; !ok || n != 0 {
 		t.Errorf("the table is missing from the row counts: %v", res.Rows)
@@ -558,7 +697,7 @@ func TestLoadRegistersTheSourcesUserTypesBeforeTheFirstCopy(t *testing.T) {
 	if lastCreate < 0 {
 		t.Errorf("no CREATE ran before the registration; the target had no types to register: %v", log[:w.at])
 	}
-	if len(w.txs) == 0 {
+	if len(w.copyTxs()) == 0 {
 		t.Fatal("the load opened no transaction, so there was no copy for the registration to precede")
 	}
 }
@@ -581,11 +720,225 @@ func TestALoadWhoseTypeRegistrationFailsCopiesNothing(t *testing.T) {
 	if !strings.Contains(err.Error(), "money_amount") {
 		t.Errorf("Load failed with %q, want the registration's own reason", err)
 	}
-	if len(w.txs) != 0 {
-		t.Errorf("the load opened %d transactions after a failed registration, want none", len(w.txs))
+	if n := len(w.copyTxs()); n != 0 {
+		t.Errorf("the load opened %d transactions after a failed registration, want none", n)
 	}
 	last := w.log()[len(w.log())-1]
 	if !strings.HasPrefix(last, "UPDATE lazyslice_meta") {
 		t.Errorf("the marker was not closed after the failure; the last statement is %q", last)
+	}
+}
+
+// The lock-and-recheck's own refusals (T-0130, ARCHITECTURE.md §11.2).
+//
+// These drive dropOne and dropTable directly rather than Load, because the
+// branch each is about is reached only when the target still holds the table,
+// and a fake target that says so through a whole Load would be a fake target
+// pretending to be a database for the rest of the run as well. What is asserted
+// is the part that is a statement about this package: which of the three
+// refusals is raised, at which exit, with which count, and that the transaction
+// rolled back with no DROP in it. That a real lock is taken, and that a real
+// concurrent writer is what trips this, is asserted in internal/core's race
+// suite against a real server.
+
+// dropOf is the drop statement for one table, as ddl.DropTables writes it.
+func dropOf(table ref.TableRef) ddl.TableDrop {
+	return ddl.TableDrop{Table: table, SQL: "DROP TABLE IF EXISTS " + ddl.TableName(table) + " CASCADE"}
+}
+
+// refusalFrom is the *Refusal an error must be, or the test fails here.
+func refusalFrom(t *testing.T, err error) *Refusal {
+	t.Helper()
+
+	var r *Refusal
+	if !errors.As(err, &r) {
+		t.Fatalf("the drop returned %v, want a *Refusal", err)
+	}
+	return r
+}
+
+// requireNothingDropped fails unless the transaction rolled back without ever
+// issuing its DROP. A refusal that cost the table is not a refusal.
+func requireNothingDropped(t *testing.T, w *fakeWriter) {
+	t.Helper()
+
+	if len(w.txs) == 0 {
+		t.Fatal("the drop opened no transaction")
+	}
+	for _, tx := range w.txs {
+		if tx.committed {
+			t.Error("the refusing transaction committed")
+		}
+		if !tx.rolled {
+			t.Error("the refusing transaction was not rolled back, so the table is left locked until the connection ends")
+		}
+		for _, sql := range tx.local {
+			if strings.HasPrefix(sql, "DROP TABLE") {
+				t.Errorf("the refusal ran %q; a refusal must cost nothing", sql)
+			}
+		}
+	}
+}
+
+// An unmarked target was approved because every table was empty. A table that
+// is not empty any more is somebody else's rows.
+func TestADropRefusesWhenATableApprovedEmptyHasRows(t *testing.T) {
+	w := &fakeWriter{answer: recheckAnswers{present: true, count: 3}.answer}
+	l := loader{sink: event.Discard}
+
+	r := refusalFrom(t, l.dropOne(t.Context(), w, dropOf(tref("public", "orders"))))
+	if r.Code != CodeRefusedTargetChanged || r.Exit != exitTarget {
+		t.Errorf("refusal = %s/exit %d, want %s/exit %d", r.Code, r.Exit, CodeRefusedTargetChanged, exitTarget)
+	}
+	if r.Rows != 3 {
+		t.Errorf("the refusal names %d rows, want the 3 the table holds", r.Rows)
+	}
+	requireNothingDropped(t, w)
+}
+
+// A marked target was approved because a bound marker row authorised the
+// truncation. The row being gone is that authorisation being gone.
+func TestADropRefusesWhenTheMarkerRowThatAuthorisedItIsGone(t *testing.T) {
+	w := &fakeWriter{answer: recheckAnswers{present: true}.answer}
+	l := loader{
+		run:  Run{MarkerBound: true, MarkerRunID: "3f1f0b6a-0000-4000-8000-000000000001", MarkerStatus: pg.StatusComplete},
+		sink: event.Discard,
+	}
+
+	r := refusalFrom(t, l.dropOne(t.Context(), w, dropOf(tref("public", "orders"))))
+	if r.Code != CodeRefusedMarkerChanged || r.Exit != exitTarget {
+		t.Errorf("refusal = %s/exit %d, want %s/exit %d", r.Code, r.Exit, CodeRefusedMarkerChanged, exitTarget)
+	}
+	requireNothingDropped(t, w)
+}
+
+// The same refusal when the row is there and says something else: the gate read
+// a status, and a row at another status is not the row it read.
+func TestADropRefusesWhenTheMarkerRowChangedStatus(t *testing.T) {
+	w := &fakeWriter{answer: recheckAnswers{present: true, status: pg.StatusRunning}.answer}
+	l := loader{
+		run:  Run{MarkerBound: true, MarkerRunID: "3f1f0b6a-0000-4000-8000-000000000001", MarkerStatus: pg.StatusComplete},
+		sink: event.Discard,
+	}
+
+	r := refusalFrom(t, l.dropOne(t.Context(), w, dropOf(tref("public", "orders"))))
+	if r.Code != CodeRefusedMarkerChanged || r.Exit != exitTarget {
+		t.Errorf("refusal = %s/exit %d, want %s/exit %d", r.Code, r.Exit, CodeRefusedMarkerChanged, exitTarget)
+	}
+	requireNothingDropped(t, w)
+}
+
+// The fail-closed arm: a caller that says a marker bound the target and cannot
+// say which row did has given nothing to check, and the drop refuses without
+// asking the target anything. core fills all three fields together, so nothing
+// in the tree reaches this today — which is why it is asserted here rather than
+// left as a branch nobody has ever run.
+func TestADropRefusesWhenTheRunNamesNoMarkerRow(t *testing.T) {
+	w := &fakeWriter{answer: recheckAnswers{present: true}.answer}
+	l := loader{run: Run{MarkerBound: true, MarkerStatus: pg.StatusComplete}, sink: event.Discard}
+
+	r := refusalFrom(t, l.dropOne(t.Context(), w, dropOf(tref("public", "orders"))))
+	if r.Code != CodeRefusedMarkerChanged || r.Exit != exitTarget {
+		t.Errorf("refusal = %s/exit %d, want %s/exit %d", r.Code, r.Exit, CodeRefusedMarkerChanged, exitTarget)
+	}
+	for _, sql := range w.log() {
+		if strings.Contains(sql, pg.MarkerTable) {
+			t.Errorf("the drop read %q with no run id to read it by", sql)
+		}
+	}
+	requireNothingDropped(t, w)
+}
+
+// And the other direction, so that a recheck stubbed out to return nil would not
+// pass: a marker row still as the gate read it lets the drop through.
+func TestADropProceedsWhenTheMarkerRowIsStillAsApproved(t *testing.T) {
+	w := &fakeWriter{answer: recheckAnswers{present: true, status: pg.StatusComplete}.answer}
+	l := loader{
+		run:  Run{MarkerBound: true, MarkerRunID: "3f1f0b6a-0000-4000-8000-000000000001", MarkerStatus: pg.StatusComplete},
+		sink: event.Discard,
+	}
+
+	if err := l.dropOne(t.Context(), w, dropOf(tref("public", "orders"))); err != nil {
+		t.Fatalf("the drop refused a target still as the gate approved it: %v", err)
+	}
+	if !w.txs[0].committed {
+		t.Error("the drop did not commit")
+	}
+	if !slices.ContainsFunc(w.txs[0].local, func(s string) bool { return strings.HasPrefix(s, "DROP TABLE") }) {
+		t.Error("the drop committed without dropping anything")
+	}
+}
+
+// pgErr is a server error carrying one SQLSTATE and nothing a row could hide in.
+func pgErr(code string) error {
+	return &pgconn.PgError{Code: code, Message: "from the fake target"}
+}
+
+// A lock that is not free is retried, three attempts a tenth of a second apart,
+// and then refused as a contended target at exit 4.
+func TestALockThatIsNotFreeIsRetriedAndRefused(t *testing.T) {
+	w := &fakeWriter{answer: recheckAnswers{present: true}.answer}
+	w.failExec = func(sql string) error {
+		if strings.HasPrefix(sql, "LOCK TABLE") {
+			return pgErr(sqlStateLockNotAvailable)
+		}
+		return nil
+	}
+	l := loader{sink: event.Discard}
+
+	r := refusalFrom(t, l.dropTable(t.Context(), w, dropOf(tref("public", "orders"))))
+	if r.Code != CodeRefusedTargetLocked || r.Exit != exitTarget {
+		t.Errorf("refusal = %s/exit %d, want %s/exit %d", r.Code, r.Exit, CodeRefusedTargetLocked, exitTarget)
+	}
+	if r.SQLState != sqlStateLockNotAvailable {
+		t.Errorf("the refusal carries SQLSTATE %q, want %q", r.SQLState, sqlStateLockNotAvailable)
+	}
+	var locks int
+	for _, sql := range w.log() {
+		if strings.HasPrefix(sql, "LOCK TABLE") {
+			locks++
+		}
+	}
+	if locks != lockAttempts {
+		t.Errorf("the drop took the lock %d times, want %d", locks, lockAttempts)
+	}
+	requireNothingDropped(t, w)
+}
+
+// Every other failure of that statement is the load failing, not the target
+// being used by somebody else. to_regclass answers non-NULL for any relation
+// kind, so "is not a table" (42809) is reachable; so are 42501 and a relation
+// that went away between the two statements (42P01). None of them is retried,
+// and none of them tells an operator to go and find who is using the database.
+func TestALockFailureThatIsNotContentionIsALoadFailure(t *testing.T) {
+	for _, state := range []string{"42809", "42501", "42P01"} {
+		t.Run(state, func(t *testing.T) {
+			w := &fakeWriter{answer: recheckAnswers{present: true}.answer}
+			w.failExec = func(sql string) error {
+				if strings.HasPrefix(sql, "LOCK TABLE") {
+					return pgErr(state)
+				}
+				return nil
+			}
+			l := loader{sink: event.Discard}
+
+			r := refusalFrom(t, l.dropTable(t.Context(), w, dropOf(tref("public", "orders"))))
+			if r.Code != CodeRefusedDDL || r.Exit != exitLoad {
+				t.Errorf("refusal = %s/exit %d, want %s/exit %d", r.Code, r.Exit, CodeRefusedDDL, exitLoad)
+			}
+			if r.SQLState != state {
+				t.Errorf("the refusal carries SQLSTATE %q, want %q", r.SQLState, state)
+			}
+			var locks int
+			for _, sql := range w.log() {
+				if strings.HasPrefix(sql, "LOCK TABLE") {
+					locks++
+				}
+			}
+			if locks != 1 {
+				t.Errorf("the drop took the lock %d times; only a lock that was held is worth retrying", locks)
+			}
+			requireNothingDropped(t, w)
+		})
 	}
 }

@@ -127,6 +127,32 @@ func withAfterConnect(f func(context.Context, *pgx.Conn) error) ConnectOption {
 	return func(cfg *pgxpool.Config) { cfg.AfterConnect = f }
 }
 
+// targetPoolFloor is the smallest target pool that can hold a run lease.
+//
+// AcquireLease takes one connection out of the target pool and never gives it
+// back until the run is over (lease.go), and pool_max_conns is a connection
+// string parameter an operator can write: `--target '...?pool_max_conns=1'` is
+// legal, and pgxpool would hand the lease the pool's only connection. The very
+// next acquire — Target.Gate's — would then wait for a connection that cannot be
+// released until the run it is blocking has finished, so the run hangs on
+// startup until its context expires instead of refusing. Two is the minimum that
+// is not that: the lease plus one worker.
+//
+// It raises MaxConns and never lowers it, so an operator who asked for more
+// still gets what they asked for. It is the target's only, because the source
+// pool holds no lease.
+const targetPoolFloor int32 = 2
+
+// withMinMaxConns raises the pool's MaxConns to n when the parsed connection
+// string left it lower.
+func withMinMaxConns(n int32) ConnectOption {
+	return func(cfg *pgxpool.Config) {
+		if cfg.MaxConns < n {
+			cfg.MaxConns = n
+		}
+	}
+}
+
 // RenderError turns a Postgres error into something safe to print: Message and
 // SQLSTATE. Detail, Where and Hint are dropped unless
 // --show-row-values-in-errors, because a unique-violation Detail quotes the

@@ -600,9 +600,13 @@ read-only-transaction, type-registration and pooler behaviour need
 `go test -tags integration ./internal/pg/...` (the `TestGate*` suite in
 THREAT_MODEL.md T2, `TestAWriteInsideASourceTransactionIsRefusedByTheServer`
 and `TestSystemIDRunsInsideAReadOnlyTransaction` for T9, and
-`pooler_integration_test.go` for ADR-005's pooled endpoints and for
+`pooler_integration_test.go` for ADR-005's pooled endpoints, for
 `TestAPooledRunLeavesThePoolerWritableForOtherClients`, which is the only test
-that can see the leak T-0076 fixed). Every branch of the gate has a case there: the three
+that can see the leak T-0076 fixed, and for
+`TestAPooledTargetLeaseIsReleasedForTheNextRun`, which is the only test that can
+see the same shape on the target's run lease, together with
+`TestALeaseOnAPoolerWithOneServerConnectionIsRefusedByName`;
+`lease_integration_test.go` is the lease's other server-side half). Every branch of the gate has a case there: the three
 ARCHITECTURE.md §9 names them — `TestGateRefusesRLSTable`,
 `TestGateRefusesTargetAboveTableCap`, `TestGateRefusesRemoteTargetWithoutFlag` —
 plus `TestGateRefusesTheSourceUnderAnotherName` for the half of rule 1 that
@@ -657,3 +661,123 @@ on the target instead, from `Schema.Extensions`.
   this happens on the source — which is why a `citext[]` there is *sampled* as
   one opaque string and the classifier never sees inside it. That is T-0103, and
   it is a different problem in a different direction.
+
+## The run lease (T-0130)
+
+`lease.go` is the target's other half of ARCHITECTURE.md §9: the gate is a
+decision, and `Lease` is the ownership that decision rests on. `AcquireLease`
+takes one connection out of the target pool, opens a `READ COMMITTED READ ONLY`
+transaction on it, names the run inside that transaction
+(`application_name = 'lazyslice run <run_id>'`, `set_config` with
+`is_local = true`), and takes `pg_try_advisory_xact_lock` over
+`LeaseKey(current_database())`. The transaction stays open for the life of the
+lease. `internal/core` calls it **before** `Gate`'s first probe and releases it
+in `run.close`, so the lock is held for the whole interval between the verdict
+and the last thing the run writes.
+
+- **The key is the server's name for the database, not the endpoint.** Two runs
+  can reach one database through a loopback address, a container alias and a
+  pooler; all three must collide. The read is `sqlLeaseIdentity`, which is rule
+  1's `current_database()` and `pg_backend_pid()` in one round trip: the name the
+  key is built from, and the backend `Release` checks it is still talking to.
+- **The name goes on before the lock, not after.** A second run reads the
+  holder out of `pg_locks` joined to `pg_stat_activity`; a holder that named
+  itself only after locking would leave that window unattributable. A holder
+  whose `application_name` cannot be read — a role that may not see another
+  session's row — is still a refusal, with `Holder` empty and `internal/core`
+  printing "another lazyslice run".
+- **The connection is held, never returned, and its transaction is never
+  committed.** A transaction-level advisory lock lives on its transaction, so
+  the whole mechanism *is* holding that transaction open on a connection that
+  does not go back. It costs one connection out of a pool that needs the gate,
+  one drop transaction and one `CopyFrom` at a time.
+- **The lock is transaction-scoped because the target can be behind a pooler,
+  and the first version of this was T-0076 again** (review round 1). It took
+  `pg_try_advisory_lock` — a *session* lock — on a pooled connection outside any
+  transaction, and set `application_name` session-wide. ARCHITECTURE.md §9 names
+  a pooler as a path to the target, and nothing refuses one. In transaction mode
+  the pooler takes its server connection back when the statement's implicit
+  transaction commits, so: the name was set on a backend PgBouncer then handed to
+  another application; the lock was left on a backend lazyslice no longer owned;
+  `pg_advisory_unlock` in `Release` was routed to whatever backend came next,
+  returned false, and had its result discarded by an explicit `//nolint:errcheck`
+  — so the orphan sat on the shared connection until `server_lifetime` (3600 s by
+  default) recycled it, refusing every later run at exit 4 naming a holder that
+  does not exist, with no command to clear it. **Measured, and worse than that
+  in one direction**: with a real PgBouncer the second run's client was handed
+  the same idle server connection the first run's lock was sitting on, and
+  `pg_try_advisory_lock` *succeeded* for it — the same session re-locking its own
+  key — so the lease permitted exactly the thing it exists to refuse.
+  `pg_try_advisory_xact_lock` inside a held-open transaction closes both: a
+  transaction lock is released by `COMMIT`, by `ROLLBACK`, by the backend dying
+  and by the client going away and by nothing else, and an open transaction pins
+  the pooler's server connection to this client for the run, so the backend is
+  ours while we hold it. `TestAPooledTargetLeaseIsReleasedForTheNextRun`
+  (`pooler_integration_test.go`) is the guard, and it fails on the old mechanism
+  by name in both places: the lock is held by a session with no open transaction,
+  and the second run is not refused.
+- **Nothing is left on the session, on the target side either.** Both settings
+  the lease makes — `application_name` and
+  `idle_in_transaction_session_timeout` — are `set_config(..., true)`, local to
+  the lease's transaction and put back when it ends. The timeout is disarmed
+  because this transaction is idle from the moment the lock is taken until the
+  run is over, and a target that sets that timeout — a managed service, or an
+  operator bitten once by a forgotten `psql` — would terminate the lease's
+  session mid-run and leave the run writing a target it no longer owned, with no
+  error anywhere, because the connection is not touched again until `Release`.
+  That is a reach the session-level lock did not have and the open transaction
+  does, so it is tested rather than asserted:
+  `TestTheLeaseOutlivesAnIdleInTransactionTimeout` (`lease_integration_test.go`)
+  sets one second on the database, leaves the lease idle for three, and requires
+  a second run to still be refused.
+- **The room check is the cost of the open transaction, paid where it can be
+  named** (`leaseLeavesRoom`). The lease occupies a server connection for the
+  whole run, so a pooler with a single server connection cannot serve the rest of
+  it. Without the check the gate's very next statement waits out the pooler's
+  `query_wait_timeout` and comes back as an opaque `08P01` from inside the
+  driver; with it, the lease spends one round trip on a second pooled connection
+  and returns an error that says what happened, which `internal/core` renders as
+  the target refusal it already has. The wait is the same wait; the sentence is
+  what is bought. `TestALeaseOnAPoolerWithOneServerConnectionIsRefusedByName` is
+  the guard, and it asserts what the refusal is *not* as well as what it is: a
+  target nobody holds must never be refused as `LeaseHeld`, which would send an
+  operator looking for a run that does not exist.
+- **That the pool has a second connection is enforced, not assumed**
+  (`targetPoolFloor`, `withMinMaxConns`, pg.go). `Connect` takes whatever
+  `pgxpool.ParseConfig` makes of the operator's DSN and `pool_max_conns` is a
+  legal connection-string parameter, so `--target '...?pool_max_conns=1'` would
+  have handed the lease the pool's only connection and left `Gate`'s very next
+  `pool.Acquire` waiting for a connection that cannot come back until the run it
+  is blocking has finished — a hang on startup rather than a refusal, and a
+  failure mode the lease itself introduced. `OpenTarget` puts a floor of 2 under
+  `MaxConns` (the lease plus one worker) and raises only, never lowers.
+  `TestATargetPoolHasRoomForTheRunLeaseAndAWorker` is the guard. The source pool
+  holds no lease and gets no floor.
+- **`Release` is quiet and idempotent**, and it is quiet because every way it
+  can fail still ends the lock: the `ROLLBACK` succeeds and the transaction's end
+  releases it; the `ROLLBACK` fails and the connection is closed here (`discard`,
+  source.go's `endTx` discipline), which ends the session and the lock with it;
+  or `Release` is never reached because the process died, and the lock goes with
+  the connection. `pgxpool`'s own `Release` destroys a connection whose
+  transaction status is not idle, which is a fourth net under the same
+  guarantee. There is no outcome in which a lock survives for a later run to
+  trip over — which is exactly what the session-level lock could not say.
+  `Release` also compares `pg_backend_pid()` against the pid it recorded at
+  acquire and closes the connection instead of returning it to the pool on a
+  mismatch: under an open transaction the backend cannot move, so the check is
+  the assertion of that invariant rather than a remedy for it.
+- **A lease that cannot be taken is not a lease that is free.** Every non-`LeaseHeld`
+  error is `internal/core`'s `unreachableTarget` — the gate's reachability
+  precondition arriving one statement earlier than it used to, with the same
+  code, exit and `{host}`/`{reason}`.
+- **`NewRunID` exists because the id is needed before the marker row is.**
+  `StartRun` still makes one when the caller brought none, which is what a direct
+  caller with no lease gets; `internal/core` brings one, so the refusal a second
+  run prints and the row this one writes carry the same id.
+
+`Eligibility.MarkerRunID` and `.MarkerStatus` are filled by rule 4 for the same
+reason: `internal/load` re-reads that row under the `ACCESS EXCLUSIVE` lock it
+takes before each drop, because by then the gate's verdict is a remembered fact
+(ARCHITECTURE.md §11.2, THREAT_MODEL.md T2, both amended 2026-09-14). **Never**
+treat the gate's verdict as continuing ownership of the target, and never make
+the lease optional behind a flag: it is a T2 rail.

@@ -78,6 +78,15 @@ func (t *tx) Exec(ctx context.Context, sql string, args ...any) error {
 	return nil
 }
 
+// Query is pipeline.Tx's read. The loader uses it for exactly one thing: the
+// lock-and-recheck of ARCHITECTURE.md §11.2, which has to read the target
+// between LOCK TABLE and DROP TABLE and therefore inside this transaction. The
+// rows it reads are a count, an existence answer and a marker status — never a
+// row of the loaded data.
+func (t *tx) Query(ctx context.Context, sql string, args ...any) (pipeline.Rows, error) {
+	return t.tx.Query(ctx, sql, args...)
+}
+
 func (t *tx) CopyFrom(ctx context.Context, table ref.TableRef, cols []string, rows <-chan []any) (int64, error) {
 	return copyFromTx(ctx, t.tx, table, cols, rows)
 }

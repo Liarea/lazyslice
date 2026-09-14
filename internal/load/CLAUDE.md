@@ -314,3 +314,105 @@ package enforces it. `core.Run` does; `load_integration_test.go` calls
 guard on `Load`. A direct caller that skips it drops every table in the target
 and then fails at `CREATE TABLE` with `42883` under exit 7 — the failure the
 check used to prevent from here.
+
+## Lock-and-recheck before every drop (T-0130)
+
+`drop` no longer runs `DROP TABLE` on the writer in autocommit. Each table goes
+through `dropOne`: one transaction that asks `to_regclass` whether the table is
+there, takes `LOCK TABLE ... IN ACCESS EXCLUSIVE MODE NOWAIT` when it is,
+re-verifies what the gate approved, drops, and commits. The order is the whole
+of it — the lock first so the recheck is about a table nobody else can be
+writing to, the recheck before the `DROP` so a refusal costs nothing, and both
+inside the transaction the `DROP` commits in, so no moment passes between "still
+as approved" and "gone".
+
+- **Which question the recheck asks is which question the gate answered.**
+  `Run.MarkerBound` false — the zero value — means an unmarked target approved
+  for being empty, so the table must still be empty; true means a bound marker
+  authorised the truncation, so `Run.MarkerRunID`'s row must still be there with
+  `Run.MarkerStatus`. Asking the wrong one either refuses every reload (a marked
+  target's tables are full by design) or approves a stranger's rows. **The
+  fail-closed direction is the default**: a caller that says nothing gets the
+  stricter check. That is why `load_integration_test.go`'s `loadInto` takes the
+  gate's real `pipeline.Eligibility` for the two tests that reload a target this
+  package wrote, and nothing for the ones that load into a fresh container.
+- **The refusals are exit 4, not exit 7.** None of the three is a load that went
+  wrong: each is ARCHITECTURE.md §9's target refusal arriving later, because the
+  evidence arrived later. `Refusal.Rows` carries the count the message names; it
+  is a number, and it is zero for every other refusal.
+- **What a refusal undoes is one transaction, not the loop.** The transaction
+  that refuses rolls back, so the table it refused about is untouched; tables
+  `drop` already dropped in *earlier* transactions stay dropped, because those
+  drops committed after their own lock-and-recheck. Nothing unauthorised is
+  destroyed — an unmarked target's earlier tables were each verified empty under
+  their own lock, a bound marker's truncation was authorised — but table
+  definitions are gone and the target is left part-way through a rebuild, which
+  the next run's gate refuses (its marker no longer binds against a half-dropped
+  catalog, so the gate falls through to the emptiness check and prints the
+  command that clears the database). The first wording of both amendments said
+  "nothing was destroyed", which is a claim about the refusing transaction and
+  not about the loop; both are corrected, and
+  `internal/core`'s `TestARefusalOnTheSecondTableLeavesTheFirstDropped` is what
+  holds them to it. **One transaction over every drop is deliberately not what
+  this does**: the gate admits up to 2,000 user tables, `DROP ... CASCADE` takes
+  a lock per dependent index, sequence and toast relation, and one transaction
+  over all of them meets `max_locks_per_transaction` instead of finishing.
+- **Only SQLSTATE 55P03 is a contended target.** `sqlTableExists` asks
+  `to_regclass`, which answers non-NULL for any relation kind, so the `LOCK
+  TABLE` can also raise 42809 ("is not a table" — a sequence or an index under
+  that name), 42501 or 42P01 (the relation went away between the two
+  statements). Turning every one of those into `CodeRefusedTargetLocked` told an
+  operator to go and find who is using the database, after a third of a second
+  of retry, for a load failure that is exit 7. `lockNotAvailable` (codes.go) is
+  the discrimination and `TestALockFailureThatIsNotContentionIsALoadFailure` is
+  the guard.
+- **`lockAttempts`/`lockRetryPause` are three attempts a tenth of a second
+  apart.** NOWAIT is the point — a `DROP` that waits can sit behind an
+  application's long transaction, and waiting also lengthens the window this
+  mechanism exists to close — but the lock a freshly loaded target most often
+  loses a race to is autovacuum's, which a *waiting* `DROP` would have cancelled
+  automatically and a NOWAIT one simply fails against. A third of a second is
+  still bounded, and it is the difference between an honest refusal and a coin
+  toss.
+- **`ddl.TableName` is exported for this.** The `LOCK`, the recheck and the
+  `DROP` must name one relation; two spellings of a quoted identifier are two
+  things to keep in step.
+- **`pipeline.Tx` grew `Query` for this and for nothing else.** The recheck has
+  to read between `LOCK TABLE` and `DROP TABLE`, inside that transaction; a read
+  anywhere else answers a question about a moment that has already passed, which
+  is the defect this closes.
+
+- **The three refusals are unit-tested against a programmable fake, because the
+  fake's `Query` used to answer "no such table" unconditionally.** Every unit
+  test therefore stopped short of `recheck`, and a `recheck` stubbed to return
+  `nil` passed all of them; the only real coverage was the unmarked/empty branch,
+  through `internal/core`'s race suite. `fakeWriter.answer` and `recheckAnswers`
+  (load_test.go) are how a test says what the target replies, and the tests drive
+  `dropOne`/`dropTable` directly rather than `Load`, because a fake that claims
+  to hold tables would have to keep pretending for the rest of a run.
+  `TestADropRefusesWhenATableApprovedEmptyHasRows`,
+  `TestADropRefusesWhenTheMarkerRowThatAuthorisedItIsGone`,
+  `TestADropRefusesWhenTheMarkerRowChangedStatus`,
+  `TestADropRefusesWhenTheRunNamesNoMarkerRow` (the `MarkerRunID == ""`
+  fail-closed arm, which nothing in the tree reaches because `core` fills all
+  three fields together), `TestADropProceedsWhenTheMarkerRowIsStillAsApproved`
+  (the other direction, so a stub returning `nil` fails),
+  `TestALockThatIsNotFreeIsRetriedAndRefused` and
+  `TestALockFailureThatIsNotContentionIsALoadFailure`.
+
+Why: docs/reviews/2026-09-09 finding 1 inserted a row into an empty unmarked
+target after the gate approved it, and the run deleted the row and exited 0.
+`internal/core/race_integration_test.go`'s
+`TestARowInsertedAfterTheGateIsNotDropped` is that script as a regression, and it
+fails the old way — exit 0, row gone — with the recheck removed.
+`TestAMarkerDeletedAfterTheGateIsNotTruncated` is the same instrument on the
+marked-target branch — the production reload path — deleting the gate-approved
+marker row between the gate and the load and asserting exit 4
+`load.refused.marker_changed` with the previous run's rows still in place. The residual is
+in THREAT_MODEL.md T2: a writer that inserts *after* the drop commits is blocked
+by the lock until then and afterwards writes into the fresh table, which is the
+application behaving normally.
+
+`internal/event/catalogue.yml` carries the four new rows; **docs/ERRORS.md is
+generated from it and was outside this task's paths**, so `make docs-check` fails
+until someone runs `make docs` and commits the result — tracker **T-0148**.

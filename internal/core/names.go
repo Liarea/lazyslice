@@ -105,6 +105,11 @@ func asStop(err error) error {
 				event.ArgTable:  loadRefusal.Table.String(),
 				event.ArgColumn: loadRefusal.Object,
 				event.ArgReason: loadRefusal.SQLState,
+				// The count a lock-and-recheck refusal names: how many rows the
+				// table held when the gate had approved it as empty
+				// (ARCHITECTURE.md section 11.2). It is zero for every other load
+				// refusal, whose templates do not reference {count}.
+				event.ArgCount: strconv.FormatInt(loadRefusal.Rows, 10),
 			},
 			Message: loadRefusal.Error(), err: err,
 		}

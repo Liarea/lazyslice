@@ -46,12 +46,36 @@ const (
 	// table gives foreign-key verification its own code, and this is that
 	// failure found one stage earlier than verify.
 	CodeRefusedFKInvalid event.Code = "load.refused.fk_invalid"
+
+	// The three refusals of ARCHITECTURE.md section 11.2's lock-and-recheck
+	// (T-0130, 2026-09-14). All three are exit 4 and not exit 7, because none of
+	// them is a load that went wrong: each is the target turning out not to be
+	// the database the gate approved, which is the same refusal the gate itself
+	// makes, arriving later because the evidence arrived later.
+
+	// CodeRefusedTargetLocked is exit 4: the table about to be dropped could not
+	// be locked without waiting, so something else is using the target.
+	CodeRefusedTargetLocked event.Code = "load.refused.target_locked"
+
+	// CodeRefusedTargetChanged is exit 4: the gate approved this table because
+	// it was empty and, under the drop's own ACCESS EXCLUSIVE lock, it is not.
+	// Somebody wrote to the target after it was approved, and their rows are
+	// not ours to delete.
+	CodeRefusedTargetChanged event.Code = "load.refused.target_changed"
+
+	// CodeRefusedMarkerChanged is exit 4: the gate approved the truncation
+	// because a bound marker row authorised it, and that row is gone or has
+	// changed since. The authorisation is the row, so a row that is not the one
+	// the gate read authorises nothing.
+	CodeRefusedMarkerChanged event.Code = "load.refused.marker_changed"
 )
 
-// The exit codes ADR-005 assigns: 7 "extract or load", 8 "FK verification".
+// The exit codes ADR-005 assigns: 4 "target refused", 7 "extract or load",
+// 8 "FK verification".
 const (
-	exitLoad = 7
-	exitFK   = 8
+	exitTarget = 4
+	exitLoad   = 7
+	exitFK     = 8
 )
 
 // Refusal is a load failure core can render from the catalogue. It carries the
@@ -66,6 +90,11 @@ type Refusal struct {
 	// SQLState is the server's five-character code, which is an identifier and
 	// not a value. It is the whole of what is kept from the driver's error.
 	SQLState string
+	// Rows is the row count a lock-and-recheck refusal names (T-0130): the
+	// number of rows the table held when the gate had approved it as empty. It
+	// is a count and therefore printable (THREAT_MODEL.md T4); it is zero for
+	// every other refusal, whose templates do not reference it.
+	Rows int64
 	// err is the underlying error, kept so that a caller which needs the
 	// driver's own words (--show-row-values-in-errors) can still reach them.
 	err error
@@ -97,4 +126,34 @@ func refuse(code event.Code, exit int, table ref.TableRef, object string, err er
 		r.SQLState = pgErr.Code
 	}
 	return r
+}
+
+// refuseChanged builds the lock-and-recheck refusal: exit 4, the table, and the
+// count that says what changed. rows is a number and nothing else.
+func refuseChanged(code event.Code, table ref.TableRef, rows int64, because string) *Refusal {
+	r := refuse(code, exitTarget, table, "", errors.New(because))
+	r.Rows = rows
+	return r
+}
+
+// sqlStateLockNotAvailable is 55P03, which is the only thing LOCK TABLE ...
+// NOWAIT raises when the lock is simply held by somebody else.
+//
+// Every other failure of that statement is a load failure and not a contended
+// target, and telling them apart matters twice: CodeRefusedTargetLocked is exit
+// 4 with a message that says "something else is using this database", and
+// dropTable retries it three times. sqlTableExists asks to_regclass, which
+// answers non-NULL for any relation kind, so the statement can also raise 42809
+// (a sequence or an index under that name: "is not a table"), 42501
+// (insufficient privilege) or 42P01 (the relation went away between the
+// existence check and the LOCK). None of those becomes free by waiting a tenth
+// of a second, and none of them means another session holds the target.
+const sqlStateLockNotAvailable = "55P03"
+
+// lockNotAvailable reports whether err is the server saying the lock was taken.
+// An error carrying no SQLSTATE at all — a dropped connection, a cancelled
+// context — is not it either: those are the load failing, which is exit 7.
+func lockNotAvailable(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == sqlStateLockNotAvailable
 }

@@ -225,9 +225,20 @@ type run struct {
 	targetLabel string
 	target      *pg.Target
 	targetPool  *pgxpool.Pool
-	reader      pipeline.Reader
-	snapshot    pipeline.SnapshotID
-	released    bool
+	// lease is this run's ownership of the target: a dedicated target
+	// connection holding an open transaction with pg_try_advisory_xact_lock over
+	// a key derived from the target database name, taken before the gate's first
+	// probe and released when the run is over (internal/pg's Lease,
+	// THREAT_MODEL.md T2 amended 2026-09-14). The lock is transaction-scoped
+	// because a target can be behind a transaction-pooling pooler, where a
+	// session lock is left on a server connection somebody else is handed.
+	// runID is the id it names itself with, and the id the marker row carries,
+	// so a second run's refusal names the run that actually holds the target.
+	lease    *pg.Lease
+	runID    string
+	reader   pipeline.Reader
+	snapshot pipeline.SnapshotID
+	released bool
 
 	priv   pipeline.RolePrivileges
 	schema *pipeline.Schema
@@ -612,6 +623,16 @@ func (r *run) openTarget(ctx context.Context) error {
 	}
 	r.target = tgt
 
+	// The run lease, before the gate's first probe. The gate's verdict is acted
+	// on several stages later — introspect, classify and plan all run between it
+	// and the first DROP — and until T-0130 nothing owned the target across that
+	// interval, so two runs could each pass the gate and take the same database
+	// apart together. A lease that cannot be taken is a refusal, never a
+	// fall-through (THREAT_MODEL.md T2).
+	if leaseErr := r.acquireLease(ctx, tgt, targetRef); leaseErr != nil {
+		return leaseErr
+	}
+
 	systemID, err := r.source.SystemID(ctx)
 	if err != nil {
 		// A source that will not answer pg_control_system is not a refusal: the
@@ -675,6 +696,58 @@ func (r *run) openTarget(ctx context.Context) error {
 	}
 	r.targetPool = pool
 	return nil
+}
+
+// acquireLease takes this run's ownership of the target (ARCHITECTURE.md
+// section 11.2, amended 2026-09-14).
+//
+// The run id is made here rather than by the marker row, because the lease
+// names itself with it on the target connection before the gate runs and the
+// marker row is not written until halfway through the load: a second run
+// refused at the lease can then name the run that holds the target, and that
+// name is the same one the marker will carry.
+//
+// A held lease is exit 4 with the holder named. Anything else that goes wrong
+// is exit 4 too: a lease that could not be taken is not a lease that is free.
+func (r *run) acquireLease(ctx context.Context, tgt *pg.Target, targetRef dsn.Ref) error {
+	id, err := pg.NewRunID()
+	if err != nil {
+		return wrap(CodeInternal, exitInternal, err, "a run id could not be made")
+	}
+	r.runID = id
+
+	lease, err := tgt.AcquireLease(ctx, id)
+	if err != nil {
+		var held *pg.LeaseHeld
+		if errors.As(err, &held) {
+			return &Stop{
+				Code: pg.CodeLeaseHeld, Exit: exitTarget,
+				Args: event.Args{
+					event.ArgDatabase: targetRef.Database,
+					event.ArgHost:     targetRef.Host,
+					event.ArgReason:   holderName(held.Holder),
+				},
+				Message: held.Error(), err: err,
+			}
+		}
+		// Anything else is a target that would not answer the one question the
+		// lease asks, which is the gate's reachability precondition arriving a
+		// statement earlier than it used to: same code, same exit, same
+		// {host}/{reason} in the rendered line.
+		return unreachableTarget(targetRef, err, "the target would not answer")
+	}
+	r.lease = lease
+	return nil
+}
+
+// holderName is what the refusal prints for the run that holds the target. A
+// holder that could not be identified — a role that may not see another
+// session's application_name — is still a refusal; only the name is missing.
+func holderName(holder string) string {
+	if holder == "" {
+		return "another lazyslice run"
+	}
+	return holder
 }
 
 // markerWarnings prints what section 11.2 requires of a bound marker written by
@@ -1419,11 +1492,17 @@ func (r *run) loadRun() load.Run {
 		systemID = id
 	}
 	return load.Run{
+		RunID:                     r.runID,
 		ToolVersion:               Version,
 		SourceFingerprint:         r.sourceRef.Fingerprint(),
 		SourceSystemID:            systemID,
 		ClassificationFingerprint: r.cls.Fingerprint,
 		SecretFingerprint:         r.keyFP,
+		// What the gate approved, carried to the loader so that each drop can
+		// re-verify it under its own lock (ARCHITECTURE.md section 11.2).
+		MarkerBound:  r.gate.MarkerBound,
+		MarkerRunID:  r.gate.MarkerRunID,
+		MarkerStatus: r.gate.MarkerStatus,
 	}
 }
 
@@ -1649,6 +1728,14 @@ func (r *run) releaseSnapshot(ctx context.Context) {
 // close gives every connection back, whichever way the run ended.
 func (r *run) close(ctx context.Context) {
 	r.releaseSnapshot(ctx)
+	// The lease is given up before the pool it lives on is closed, and last of
+	// the target's business: it is held "until the marker is finished"
+	// (ARCHITECTURE.md section 11.2), and the marker is closed inside Load, so by
+	// the time close runs there is nothing left of this run that writes.
+	if r.lease != nil {
+		r.lease.Release(context.WithoutCancel(ctx))
+		r.lease = nil
+	}
 	if r.targetPool != nil {
 		r.targetPool.Close()
 	}

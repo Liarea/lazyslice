@@ -890,6 +890,15 @@ func mentionsType(def, name string) bool {
 	return false
 }
 
+// TableName is the qualified, quoted name of a table, spelled the way every
+// statement this package builds spells it.
+//
+// It is exported for internal/load's lock-and-recheck (ARCHITECTURE.md §11.2,
+// T-0130): the LOCK TABLE that precedes a DROP, and the recheck between them,
+// have to name the same relation the DROP names, and two spellings of a
+// quoted identifier are two things to keep in step.
+func TableName(t ref.TableRef) string { return tableName(t) }
+
 func tableName(t ref.TableRef) string {
 	return quoteIdent(t.Schema) + "." + quoteIdent(t.Name)
 }

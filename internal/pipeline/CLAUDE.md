@@ -50,3 +50,14 @@ own); `TestNoValueBearingFieldSerialised`, `TestReasonGrammar` and
 
 **Never:** add an implementation; import a stage package; add a field that
 `TestNoValueBearingFieldSerialised` would need to special-case rather than walk.
+
+**`Tx` has a `Query` (T-0130, 2026-09-14).** ARCHITECTURE.md §2 prints it, and
+this file records it in the same commit, as the rule above requires. `Writer`
+still has no read and should not get one: verify reads the target through a
+reader `internal/core` opens for it. The exception is the lock-and-recheck of
+§11.2 — `LOCK TABLE ... NOWAIT`, re-verify what the gate approved, `DROP` — whose
+read has to happen inside the transaction the drop commits in. A read made
+anywhere else is an answer about a moment that has already passed, which is the
+defect the recheck exists to close. `Eligibility` grew `MarkerRunID` and
+`MarkerStatus` for the same reason: they are what the loader re-verifies, and
+both are identifiers rather than values.

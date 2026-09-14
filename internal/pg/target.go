@@ -154,7 +154,14 @@ func OpenTarget(ctx context.Context, d dsn.DSN, opts ...TargetOption) (*Target, 
 		return nil, err
 	}
 	types := &typeRegistry{}
-	pool, err := Connect(ctx, d, nil, withAfterConnect(types.afterConnect))
+	pool, err := Connect(ctx, d, nil,
+		withAfterConnect(types.afterConnect),
+		// The run lease holds one of these connections for the whole run, so a
+		// target pool of one would hand it the only connection and leave the
+		// gate's own acquire waiting on a run it is itself blocking
+		// (targetPoolFloor).
+		withMinMaxConns(targetPoolFloor),
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -279,6 +286,11 @@ func (t *Target) Gate(ctx context.Context, source dsn.Ref, sourceSystemID, allow
 	if found {
 		e.PrevKeyFP = marker.SecretFingerprint
 		e.PrevClassFP = marker.ClassificationFingerprint
+		// The identity of the row this verdict is about to rest on. The loader
+		// re-reads it under its own lock before each drop, because by then the
+		// verdict is a remembered fact (§11.2, amended 2026-09-14).
+		e.MarkerRunID = marker.RunID
+		e.MarkerStatus = marker.Status
 		bound, err := t.markerBound(ctx, conn, marker, source, sourceSystemID)
 		if err != nil {
 			e.Reason = CodeProbeFailed

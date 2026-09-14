@@ -112,3 +112,35 @@ func TestConnectSetsNoSessionStateOnASourceConnection(t *testing.T) {
 		t.Errorf("the allowlist refused %q, which every source statement now runs inside", sqlBeginReadOnly)
 	}
 }
+
+// A target pool always has room for the run lease and a worker at the same time.
+//
+// AcquireLease takes one connection out of the target pool and never returns it
+// until the run is over, and pool_max_conns is a legal connection-string
+// parameter: with `pool_max_conns=1` the lease would hold the pool's only
+// connection and Target.Gate's own acquire would then wait for a connection that
+// cannot be released until the run it is blocking has finished — a hang on
+// startup rather than a refusal, and one this package introduced when it took
+// the lease. OpenTarget puts a floor under MaxConns, and raises it only.
+func TestATargetPoolHasRoomForTheRunLeaseAndAWorker(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		dsn  string
+		want int32
+	}{
+		{"one connection is raised to the floor", testDSN + "?pool_max_conns=1", targetPoolFloor},
+		{"more than the floor is left alone", testDSN + "?pool_max_conns=9", 9},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			target, err := OpenTarget(context.Background(), dsn.DSN(tc.dsn))
+			if err != nil {
+				t.Fatalf("OpenTarget: %v", err)
+			}
+			defer target.Close()
+
+			if got := target.pool.Config().MaxConns; got != tc.want {
+				t.Errorf("the target pool holds %d connections, want %d", got, tc.want)
+			}
+		})
+	}
+}

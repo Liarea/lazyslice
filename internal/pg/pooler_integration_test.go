@@ -6,6 +6,7 @@ package pg
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -428,5 +429,213 @@ func TestAPoolerWithOneServerConnectionSerialisesTheExtract(t *testing.T) {
 	}
 	if err := src.Violation(); err != nil {
 		t.Errorf("the allowlist refused a statement: %v", err)
+	}
+}
+
+// The run lease on a *target* reached through a pooler (T-0130, review round 1).
+//
+// The lease is the second control of ARCHITECTURE.md §11.2, and a pooler is a
+// named path to the target (§9). Its first version took a session-level
+// pg_try_advisory_lock outside any transaction, which is the T-0076 shape
+// exactly: in transaction mode the server connection goes back to the pooler at
+// the end of the statement's implicit transaction, so the lock was left on a
+// backend lazyslice no longer owned, pg_advisory_unlock at the end of the run
+// was routed to whatever backend came next, and the orphan sat on the shared
+// connection until server_lifetime recycled it — refusing every later run at
+// exit 4 with a holder that does not exist.
+//
+// This is the half where PgBouncer answers, and it asserts the mechanism rather
+// than only its happy path: while the lease is held, the lock is a *transaction*
+// lock inside an open transaction on the holder's own backend (read on a direct
+// connection to the server, past the pooler, which is the only place the truth
+// about a backend is visible); a second run through the pooler is refused by
+// name; and once the first run has released, the lock is gone from the server
+// and the next run takes it.
+func TestAPooledTargetLeaseIsReleasedForTheNextRun(t *testing.T) {
+	ctx := context.Background()
+	testutil.SkipWithoutDocker(ctx, t)
+
+	pooled, direct := testutil.PgBouncer(ctx, t, "")
+
+	// The server's own view, past the pooler: pg_locks and pg_stat_activity are
+	// about backends, and through a pooler a client cannot even be sure which
+	// backend it is looking at.
+	server, err := pgxpool.New(ctx, direct)
+	if err != nil {
+		t.Fatalf("opening a direct connection to the server behind the pooler: %v", err)
+	}
+	defer server.Close()
+
+	var database string
+	if scanErr := server.QueryRow(ctx, `SELECT current_database()`).Scan(&database); scanErr != nil {
+		t.Fatalf("reading the database name on the direct connection: %v", scanErr)
+	}
+	key := LeaseKey(database)
+	// The two halves pg_locks stores the key in, split as leaseHolder splits them.
+	hi := int64(uint32(uint64(key) >> 32))
+	lo := int64(uint32(uint64(key)))
+
+	// count, the holder's name, and whether every holder is inside an open
+	// transaction. xact_start is NULL for a session that holds a lock with no
+	// transaction under it, which is what the session-level lock left behind.
+	const leaseOnServer = `SELECT count(*), coalesce(max(a.application_name), ''),
+       coalesce(bool_and(a.xact_start IS NOT NULL), false)
+FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
+WHERE l.locktype = 'advisory' AND l.granted
+  AND l.classid::bigint = $1 AND l.objid::bigint = $2 AND l.objsubid = 1
+  AND l.database = (SELECT d.oid FROM pg_database d WHERE d.datname = current_database())`
+
+	first, err := OpenTarget(ctx, dsn.DSN(pooled))
+	if err != nil {
+		t.Fatalf("opening the target through the pooler: %v", err)
+	}
+	defer first.Close()
+
+	lease, err := first.AcquireLease(ctx, "run-one")
+	if err != nil {
+		t.Fatalf("taking the run lease on a pooled target: %v", err)
+	}
+	// Release is idempotent, and the explicit release below is the one this test
+	// is about. This is here so that a failure between the two does not leave the
+	// lease's connection checked out of the pool, where the deferred Close would
+	// wait for it for the whole of `make integration`'s timeout: a regression in
+	// the lease must fail this test, not hang the suite.
+	defer lease.Release(context.WithoutCancel(ctx))
+
+	var (
+		held      int
+		holder    string
+		inTxBlock bool
+	)
+	if scanErr := server.QueryRow(ctx, leaseOnServer, hi, lo).Scan(&held, &holder, &inTxBlock); scanErr != nil {
+		t.Fatalf("reading the lease's lock on the server: %v", scanErr)
+	}
+	if held != 1 {
+		t.Fatalf("the server holds %d advisory locks for this target's lease key, want 1", held)
+	}
+	if holder != "lazyslice run run-one" {
+		t.Errorf("the lease's application_name on the server is %q, want %q", holder, "lazyslice run run-one")
+	}
+	if !inTxBlock {
+		t.Error("the lease's lock is held by a session with no open transaction: it is a session-level " +
+			"lock, and through a transaction-pooling pooler that leaves it on a shared server connection " +
+			"after the run exits (T-0076's shape, lease.go). The lease's lock must be " +
+			"pg_try_advisory_xact_lock inside the transaction the lease holds open")
+	}
+
+	// A second run through the same pooler, which is a different client and so a
+	// different backend: the lease has to refuse it, by name.
+	second, err := OpenTarget(ctx, dsn.DSN(pooled))
+	if err != nil {
+		t.Fatalf("opening the second run's target through the pooler: %v", err)
+	}
+	defer second.Close()
+
+	stolen, err := second.AcquireLease(ctx, "run-two")
+	if stolen != nil {
+		// Only reachable when the lease did not protect the target, which is the
+		// failure below. It is released anyway, because a lease left checked out
+		// of its pool makes the deferred Close wait for it rather than return,
+		// and a hang is a worse regression report than a failure.
+		defer stolen.Release(context.WithoutCancel(ctx))
+	}
+	var alreadyHeld *LeaseHeld
+	if !errors.As(err, &alreadyHeld) {
+		t.Fatalf("the second run's AcquireLease = %v, want a *LeaseHeld: on a pooled target the lease "+
+			"must still be the ownership it is on a direct one", err)
+	}
+	if alreadyHeld.Holder != "run-one" {
+		t.Errorf("the refusal names %q as the holder, want %q", alreadyHeld.Holder, "run-one")
+	}
+
+	// The run is over.
+	lease.Release(ctx)
+
+	if scanErr := server.QueryRow(ctx, leaseOnServer, hi, lo).Scan(&held, &holder, &inTxBlock); scanErr != nil {
+		t.Fatalf("reading the lease's lock on the server after the release: %v", scanErr)
+	}
+	if held != 0 {
+		t.Fatalf("%d advisory locks for this target's lease key survive the run (held by %q).\n"+
+			"An orphaned lease refuses every later run at exit 4 naming a holder that does not exist, "+
+			"until the pooler recycles the server connection (server_lifetime, 3600 s by default), and "+
+			"there is no command to clear it. The lock is transaction-scoped so that this cannot happen "+
+			"(lease.go)", held, holder)
+	}
+
+	// And the next run takes it, which is the whole point of the release.
+	next, err := second.AcquireLease(ctx, "run-three")
+	if err != nil {
+		t.Fatalf("the run after the lease was released: %v\n"+
+			"a run through this pooler is refused by a lock nobody holds", err)
+	}
+	defer next.Release(context.WithoutCancel(ctx))
+	next.Release(ctx)
+
+	// The neighbour: an unrelated application on the same pooler must not be
+	// wearing lazyslice's name. This can only see what reaches a *client*, so it
+	// is the weaker half of the claim — the assertion above, that the name is set
+	// inside the lease's own transaction, is what makes the leak impossible — but
+	// it is the T-0076 regression shape and it costs one statement.
+	neighbour, err := pgxpool.New(ctx, pooled)
+	if err != nil {
+		t.Fatalf("opening the neighbour's pool through the pooler: %v", err)
+	}
+	defer neighbour.Close()
+
+	var appName string
+	if scanErr := neighbour.QueryRow(ctx, `SELECT current_setting('application_name')`).Scan(&appName); scanErr != nil {
+		t.Fatalf("reading application_name as an unrelated client: %v", scanErr)
+	}
+	if strings.HasPrefix(appName, "lazyslice run ") {
+		t.Errorf("an unrelated client on this pooler has application_name %q: the lease set it on the "+
+			"shared server connection instead of locally to its own transaction (T-0076)", appName)
+	}
+}
+
+// The cost of the lease's open transaction, refused by name rather than waited
+// out (leaseLeavesRoom, T-0130 review round 1).
+//
+// A transaction-level advisory lock has to be held in an open transaction, and a
+// pooler pins its server connection for the length of one. Against a pooler with
+// a single server connection that means the lease occupies the only one there
+// is, and the gate's very next statement — the run's, not the test's — waits out
+// query_wait_timeout and comes back as an opaque 08P01 from inside the driver.
+// So the lease spends one round trip on a second connection to find that out
+// while it can still say what happened.
+func TestALeaseOnAPoolerWithOneServerConnectionIsRefusedByName(t *testing.T) {
+	ctx := context.Background()
+	testutil.SkipWithoutDocker(ctx, t)
+
+	pooled, _ := testutil.PgBouncer(ctx, t, "", map[string]string{
+		// One server connection for the whole pooler, which the lease's
+		// transaction takes and holds for the run.
+		"MAX_DB_CONNECTIONS": "1",
+		"DEFAULT_POOL_SIZE":  "1",
+		// PgBouncer's own default is 120 s, which would make this refusal look
+		// like a hang. The wait is the pooler's; nothing here cancels anything.
+		"QUERY_WAIT_TIMEOUT": "3",
+	})
+
+	tgt, err := OpenTarget(ctx, dsn.DSN(pooled))
+	if err != nil {
+		t.Fatalf("opening the target through the one-connection pooler: %v", err)
+	}
+	defer tgt.Close()
+
+	lease, err := tgt.AcquireLease(ctx, "run-one")
+	if lease != nil {
+		defer lease.Release(context.WithoutCancel(ctx))
+		t.Fatal("the lease was taken on a pooler that has no second server connection to give: the rest " +
+			"of the run — the gate first — would have waited out query_wait_timeout on a connection that " +
+			"cannot come back until the run it is blocking has finished")
+	}
+	var held *LeaseHeld
+	if errors.As(err, &held) {
+		t.Fatalf("the refusal is %v, a *LeaseHeld: nothing holds this target, and telling an operator that "+
+			"another run does would send them looking for a run that does not exist", err)
+	}
+	if !strings.Contains(err.Error(), "second connection") {
+		t.Errorf("the refusal is %q; it must name the second connection the run cannot get, because "+
+			"internal/core renders it as the reason the target would not answer", err)
 	}
 }
