@@ -25,6 +25,8 @@ machine that runs it. What a snapshot does not hide is listed below and in
   [THREAT_MODEL.md](THREAT_MODEL.md)
 - Reporting a masking miss, privately: [SECURITY.md](SECURITY.md)
 - Working on it: [CONTRIBUTING.md](CONTRIBUTING.md)
+- The ten third-party schemas under `testdata/torture/` and their licences:
+  [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
 
 ## What a snapshot will not hide
 
