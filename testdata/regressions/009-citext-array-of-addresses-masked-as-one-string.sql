@@ -60,14 +60,18 @@
 --
 -- What that leak check is *not* is the residual scan. It is this suite's own
 -- external grep of the target, and it covers this fixture only. Inside the
--- product, ARCHITECTURE.md §6 item 1's residual scan is blind to a masked array
--- that arrives as a literal (T-0129: internal/verify reads the column back as
--- one string, so the per-element filter entries transform makes match nothing
--- and the scan passes green). That blindness is free while `arrayArrivesAsLiteral`
--- stands, because no such column reaches a target at all. The change that flips
--- this header is the change that ends that, so T-0127 is ordered behind T-0129
--- and its log says so: a green run here would otherwise be the only evidence,
--- and one fixture's grep is not the control T12 is owed.
+-- product, ARCHITECTURE.md §6 item 1's residual scan used to be blind to a
+-- masked array that arrives as a literal: internal/verify read the column back
+-- as one string, so the per-element filter entries transform makes matched
+-- nothing and the scan passed green. **T-0129 has landed and that is fixed**:
+-- internal/verify/arrayliteral.go splits the literal with transform's own
+-- grammar and tests one filter entry per element, and a masked array column
+-- whose value it cannot split is exit 9 naming the column rather than a green
+-- tick (internal/verify/CLAUDE.md carries the rule). So when T-0127 flips this
+-- header, the second net and the residual scan are both looking inside the
+-- braces, and this file's own grep is corroboration rather than the only
+-- evidence — which is the order T-0127's log requires and the reason it was
+-- ordered behind T-0129.
 --
 -- The addresses are under `.test` rather than `example.com`, `example.net` or
 -- `example.org`: those three are the domains the email masker itself emits

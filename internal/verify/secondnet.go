@@ -110,13 +110,18 @@ type netMode struct {
 	// leaves is true for a masked JSON column, whose string leaves are the net's
 	// subject rather than the column's own value.
 	leaves bool
+	// array is true for an array column, whose elements are what the validators
+	// run over: ARCHITECTURE.md section 4 classifies an array on its element
+	// type, so the net has to ask the same question of the same values
+	// (netValues).
+	array bool
 	// text and digits say which validators apply, from the column's family.
 	text   bool
 	digits bool
 }
 
 func (s *state) netMode(col ref.ColumnRef, c pipeline.Column) (netMode, bool) {
-	family, _ := s.shapeOf(c)
+	family, array := s.shapeOf(c)
 	d, has := s.decision(col)
 	switch {
 	case has && optedOut(d):
@@ -131,9 +136,9 @@ func (s *state) netMode(col ref.ColumnRef, c pipeline.Column) (netMode, bool) {
 	case has && d.Masked:
 		return netMode{}, false
 	case netText(family):
-		return netMode{text: true}, true
+		return netMode{array: array, text: true}, true
 	case numeric(family):
-		return netMode{digits: true}, true
+		return netMode{array: array, digits: true}, true
 	}
 	return netMode{}, false
 }
@@ -291,5 +296,28 @@ func (s *state) netValues(v any, mode netMode) []string {
 		}
 		return out
 	}
-	return []string{textOf(v)}
+	text := textOf(v)
+	if mode.array {
+		// The other carrier an array arrives in: the server's own text output
+		// form, which is what an array of an element type the pool's map does
+		// not know comes back as — a citext[] is the single string
+		// "{a@b.test,c@d.test}" (arrayliteral.go, tracker T-0118 and T-0129).
+		// Unsplit, that value reaches the validators as one string holding two
+		// addresses and no validator recognises it, so the net that
+		// THREAT_MODEL.md T1 names as one of two controls on classifier recall
+		// sees nothing in exactly the column class §4 now classifies
+		// element-wise.
+		//
+		// A literal that will not parse falls through to the whole value
+		// rather than failing the run. This net's subject is a column nothing
+		// masked, so there is no masker to have failed open: reading the whole
+		// value is a recall hole of the kind famOther already is (columns.go),
+		// and exit 9 on a column the classifier had no reason to mask would be
+		// a refusal with no action behind it. The masked column, where the
+		// argument is the opposite one, is refused in residual.go.
+		if elems, err := arrayLiteralElements(text); err == nil {
+			return elems
+		}
+	}
+	return []string{text}
 }

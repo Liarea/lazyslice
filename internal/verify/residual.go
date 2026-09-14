@@ -99,7 +99,25 @@ func (s *state) scanMasked(
 		case document(family):
 			hits = s.documentHits(col, v)
 		case array:
-			hits = s.arrayHits(col, d.Category, v)
+			hs, err := s.arrayHits(col, d.Category, v)
+			if err != nil {
+				// A masked array column this stage cannot split is a column it
+				// cannot scan at all: every filter entry for it is per element
+				// and nothing here can produce an element to test. Item 3's
+				// rule for a finding that cannot be tested is exit 9 with the
+				// reason, and it applies to a value that cannot be *reached*
+				// for the same argument — the alternative is a green tick over
+				// the one column class ARCHITECTURE.md section 6 item 1 is
+				// blind to (tracker T-0129, THREAT_MODEL.md T12).
+				s.fail(&Refusal{
+					Code: CodeRefusedUnconfirmable, Exit: exitResidual, Check: checkUnconfirmable,
+					Table: col.Table, Column: col.Column, Count: 1,
+					Reason: reasonArrayLiteral, err: err,
+				})
+				stopped = true
+				return errStop
+			}
+			hits = hs
 		default:
 			hits = s.scalarHits(col, d.Category, v)
 		}
@@ -155,19 +173,55 @@ func (s *state) scalarHits(col ref.ColumnRef, cat pipeline.Category, v any) []hi
 
 // arrayHits tests each element of an array column, which internal/transform
 // masked element-wise and recorded under the column's empty path.
-func (s *state) arrayHits(col ref.ColumnRef, cat pipeline.Category, v any) []hit {
-	elems, ok := v.([]any)
-	if !ok {
-		return s.scalarHits(col, cat, v)
+//
+// The carriers are internal/transform's own, in its order (its cell): a []any
+// for an array type the pool's map knows, and the server's text output form for
+// one it does not — a citext[], and every other array of an extension's base
+// type, which arrives as the single string "{a@b.test,c@d.test}" (T-0118).
+// Transform parses that literal and records one filter entry per element, so a
+// scan that canonicalised the whole literal would test bytes nothing ever added
+// and pass green over exactly the column class T-0118 enables (T-0129).
+//
+// A literal that will not parse is an error and never a fall back to the scalar
+// path: the scalar path would test the whole value against per-element entries,
+// which is the same green tick by a shorter route. The caller makes it exit 9
+// naming the column.
+//
+// Any other carrier falls through to the scalar path, because that is what
+// transform's cell does with it: it masks such a value as one scalar and
+// records one entry for the whole value, so one entry for the whole value is
+// what there is to test.
+func (s *state) arrayHits(col ref.ColumnRef, cat pipeline.Category, v any) ([]hit, error) {
+	switch t := v.(type) {
+	case []any:
+		var out []hit
+		for _, e := range t {
+			if e == nil {
+				continue
+			}
+			out = append(out, s.scalarHits(col, cat, e)...)
+		}
+		return out, nil
+	case string:
+		return s.literalHits(col, cat, t)
+	case []byte:
+		return s.literalHits(col, cat, string(t))
+	}
+	return s.scalarHits(col, cat, v), nil
+}
+
+// literalHits splits one array literal with internal/transform's own grammar
+// (arrayliteral.go) and tests each element.
+func (s *state) literalHits(col ref.ColumnRef, cat pipeline.Category, text string) ([]hit, error) {
+	elems, err := arrayLiteralElements(text)
+	if err != nil {
+		return nil, err
 	}
 	var out []hit
 	for _, e := range elems {
-		if e == nil {
-			continue
-		}
 		out = append(out, s.scalarHits(col, cat, e)...)
 	}
-	return out
+	return out, nil
 }
 
 // documentHits tests a json, jsonb or hstore column both ways internal/transform

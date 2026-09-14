@@ -234,6 +234,47 @@ was chosen and is recorded here rather than only in a comment.
   functions are a cross-package contract stated in both CLAUDE.md files and
   nothing else holds them together, so `TestArrayDomainIsScannedElementWise`
   pins the pair.
+- **An array that arrives as a text literal is split with
+  `internal/transform`'s grammar, and a masked one that will not split is exit 9
+  (T-0129).** The source pool registers no user types (T-0076) and pgx hands
+  back a slice only for an array type its own map knows, so a `citext[]` — and
+  every other array of an extension's base type — arrives as the single string
+  `{a@b.test,c@d.test}`. `internal/transform` masks such a column *element-wise*
+  anyway (T-0118, `internal/transform/array.go`): it parses the literal, masks
+  each element, and records one filter entry per element under the column's
+  empty path. `arrayHits` used to fall back to `scalarHits` on the whole value
+  whenever it was not a `[]any`, which canonicalised the whole literal, matched
+  none of those entries, and reported a green residual tick over exactly the
+  column class T-0118 enables — the masker failing open, with §6 item 1 the only
+  control T12 has against it. So `residual.go` now follows transform's own
+  carriers in transform's own order (`cell`): a `[]any` element-wise, a `string`
+  or `[]byte` split by `arrayLiteralElements` and tested element-wise, and any
+  other carrier through the scalar path, because that is what transform does
+  with it. **A masked array column whose literal will not parse is
+  `verify.refused.residual_unconfirmable` at exit 9 naming the column**
+  (`reasonArrayLiteral`), never a fall back to the scalar path: it is untestable
+  for the same reason a JSON leaf is — the entries are per element and there is
+  no element to test — and the scalar fall back is the same green tick by a
+  shorter route. `arrayliteral.go` is a **copy** of transform's reader, for the
+  reason `textOf` is one (a stage package may not import another), so the two
+  grammars are a cross-package contract: what transform accepts this accepts and
+  splits the same way, what transform refuses this refuses.
+  `TestArrayLiteralElementsAreSpeltAsTransformSpellsThem` and
+  `TestArrayLiteralRefusesWhatIsNotOne` carry
+  `internal/transform/array_test.go`'s own case lists; the fix for the third
+  copy is a shared home, as for `textOf` and the identifier quoting.
+  **The second net splits the same literal and does *not* refuse one it cannot
+  parse**, which is the deliberate asymmetry: its subject is a column nothing
+  masked, so there is no masker to have failed open, and reading the whole value
+  is a recall hole of the kind `famOther` already is, while exit 9 there would
+  be a refusal on a column the classifier had no reason to mask.
+  **The debt this leaves is `T-0146`**: both probes in `sql.go` ask whether the
+  *column* holds the candidate, and a hit here carries an *element*, so binding
+  it against an array column errors and every element hit — on this path and on
+  the `[]any` path, which has always behaved this way — is exit 9
+  *unconfirmable* rather than *residual*, after spending a probe that had to
+  fail. Fail-closed, so not a leak; a Bloom false positive on a masked array
+  column is a correct run refused with a reason naming no action.
 - **The second net reads the character families and four more, plus the integer
   families for the digit validators.** §6 says "canonicalisation and validator
   choice are driven by the column types in `Schema`". `text`/`varchar`/
@@ -408,7 +449,18 @@ exports (through a real `pg.Tracer`), the canonical bytes it reproduces are
 `mask.Apply`'s own and are computed under a `Constraints` `mask.Canonical` does
 not read, the leaf spelling is `internal/transform`'s, a domain over an array is
 still an array, a number leaf is not a hit, and the second net's two thresholds
-hold (`TestAColumnBelowMinValuesFailsOnAnyHit`, `TestTheDictionaryRule`).
+hold (`TestAColumnBelowMinValuesFailsOnAnyHit`, `TestTheDictionaryRule`). The
+`citext[]` fixture of `arrayliteral_test.go` is the T-0129 half: the grammar is
+transform's on both case lists, a masked array that arrives as a literal is
+tested one entry per element and never as one string
+(`TestAMaskedArrayLiteralIsScannedElementWise` asserts the *bytes*, because a
+scan that asks the wrong question passes for the wrong reason), an element the
+filter holds reaches confirmation
+(`TestAnElementOfAMaskedArrayLiteralIsFoundByTheScan`), a literal that will not
+parse is exit 9 naming the column with no green tick beside it
+(`TestAMaskedArrayValueThatIsNotALiteralIsRefused`), and the second net reads
+the same literal element-wise
+(`TestTheSecondNetReadsAnArrayLiteralElementWise`).
 
 Then `go test -tags integration ./internal/verify/...` for the green case and
 one case per failure §6 can produce, because a check nobody has ever seen fail
@@ -441,7 +493,9 @@ decided unmasked and copied.
 **Never:** use the run's own (released) snapshot; treat an unconfirmable
 residual hit as anything but exit 9; skip the cap on confirmation probes; treat
 a source-changed mismatch as a pass; let a value reach a refusal, a check or an
-event.
+event; scan a masked array column that arrived as a text literal as one string,
+or let a literal this stage cannot split be anything but exit 9 naming the
+column.
 
 ## Which sequence to read (T-TORTURE)
 
