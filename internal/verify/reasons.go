@@ -20,6 +20,14 @@ const (
 	// whose value is inside a document and not the column's own value. It is
 	// untestable, which item 3 makes exit 9.
 	reasonNoProbe = "a masked JSON leaf cannot be confirmed by an equality probe on the column"
+	// reasonArrayLiteral is a masked array column whose target value is neither
+	// a slice nor a Postgres array literal. internal/transform records one
+	// filter entry per element for such a column, so a value this stage cannot
+	// split into elements is a value none of those entries can be tested
+	// against — untestable for the same reason a leaf is, and therefore exit 9
+	// rather than a scan that passes green over it (tracker T-0129,
+	// THREAT_MODEL.md T12).
+	reasonArrayLiteral = "a value in this array column is not a Postgres array literal, so its elements cannot be tested one by one"
 
 	// The things section 6 item 5 reports rather than fails — a schema-only
 	// step, a lookup with no source rows, a sequence owned by no column, a step
