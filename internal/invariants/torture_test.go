@@ -237,9 +237,9 @@ func assertTortureNoLiteralSurvives(ctx context.Context, t *testing.T, source, t
 
 // ---------- the regressions ----------
 
-// regressionHeader parses the five required keys and the one optional key
+// regressionHeader parses the five required keys and the two optional keys
 // testdata/regressions/README.md defines.
-var regressionHeader = regexp.MustCompile(`(?m)^--\s+(root|take|expect|found|why|unique-masked):\s+(.*?)\s*$`)
+var regressionHeader = regexp.MustCompile(`(?m)^--\s+(root|take|expect|found|why|unique-masked|equal-masked):\s+(.*?)\s*$`)
 
 // TestTortureRegressions runs every file in testdata/regressions/ and asserts it
 // still behaves the way its header says.
@@ -321,6 +321,9 @@ func TestTortureRegressions(t *testing.T) {
 			for _, col := range r.uniqueMasked {
 				assertTortureColumnIsUniquelyMasked(ctx, t, connect(ctx, t, db.target), col)
 			}
+			for _, pair := range r.equalMasked {
+				assertTortureColumnsMaskAlike(ctx, t, connect(ctx, t, db.target), pair)
+			}
 			// Every regression that is expected to succeed is also expected not
 			// to leak. Some of these defects never changed an exit code at all:
 			// 008 exited 0 both before and after, and the only thing that told
@@ -344,7 +347,18 @@ type regression struct {
 	// mask.CredentialUniquePrefix values. Empty for every file that does not
 	// carry the key.
 	uniqueMasked []string
-	image        string
+	// equalMasked are the `equal-masked:` pairs: two columns joined by a
+	// foreign key whose masked values must still be equal in the target
+	// (T-0132). Empty for every file that does not carry the key.
+	equalMasked []equalPair
+	image       string
+}
+
+// equalPair is one `equal-masked: CHILD = PARENT` claim. Every non-NULL value
+// of child must also be a value of parent.
+type equalPair struct {
+	child  string
+	parent string
 }
 
 // parseRegression reads the header block. A missing or malformed key is a hard
@@ -386,6 +400,27 @@ func parseRegression(t *testing.T, path string) regression {
 				filepath.Base(path), spec)
 		}
 		r.uniqueMasked = append(r.uniqueMasked, spec)
+	}
+
+	// The second optional key: a comma-separated list of `CHILD = PARENT`.
+	for _, spec := range strings.Split(fields["equal-masked"], ",") {
+		spec = strings.TrimSpace(spec)
+		if spec == "" {
+			continue
+		}
+		ends := strings.SplitN(spec, "=", 2)
+		if len(ends) != 2 {
+			t.Fatalf("torture: %s: equal-masked: %q is not `schema.table.column = schema.table.column`",
+				filepath.Base(path), spec)
+		}
+		pair := equalPair{child: strings.TrimSpace(ends[0]), parent: strings.TrimSpace(ends[1])}
+		for _, end := range []string{pair.child, pair.parent} {
+			if len(strings.Split(end, ".")) != 3 {
+				t.Fatalf("torture: %s: equal-masked: %q is not schema.table.column",
+					filepath.Base(path), end)
+			}
+		}
+		r.equalMasked = append(r.equalMasked, pair)
 	}
 
 	// pgvector is not needed by any regression today; the field exists so that
@@ -452,6 +487,47 @@ func assertTortureColumnIsUniquelyMasked(ctx context.Context, t *testing.T, targ
 	case distinct != values:
 		t.Errorf("torture: %s holds %d distinct values over %d rows in the target; the column is under a "+
 			"unique index and a repeat is the collision this regression exists for", spec, distinct, values)
+	}
+}
+
+// assertTortureColumnsMaskAlike reads both ends of an `equal-masked:` pair out
+// of the loaded target and asserts the relation a foreign key is: every non-NULL
+// value of the child is also a value of the parent, and the child holds at least
+// one value to say it about.
+//
+// It exists because of T-0132 and finding 3 of docs/reviews/2026-09-09/REVIEW.md.
+// The plan used to escalate a unique column's masker on its own, so the parent
+// of a key became `lazyslice-invalid-…` while its child kept the fixed literal,
+// and the load ended at exit 8. `expect: ok` does catch *that* run — the loader
+// validates the key — but it would equally pass a run that copied both columns
+// verbatim, which is what `unique-masked:` on the parent rules out. The two keys
+// together are the whole claim: the parent's values are masked, distinct and
+// unusable, and the child holds the same ones.
+func assertTortureColumnsMaskAlike(ctx context.Context, t *testing.T, target *pgx.Conn, pair equalPair) {
+	t.Helper()
+
+	child := strings.Split(pair.child, ".")
+	parent := strings.Split(pair.parent, ".")
+	childTable := pgx.Identifier{child[0], child[1]}.Sanitize()
+	childCol := pgx.Identifier{child[2]}.Sanitize()
+	parentTable := pgx.Identifier{parent[0], parent[1]}.Sanitize()
+	parentCol := pgx.Identifier{parent[2]}.Sanitize()
+
+	var values, matched int64
+	q := fmt.Sprintf(`SELECT count(c.%[2]s),
+	       count(*) FILTER (WHERE c.%[2]s IS NOT NULL AND EXISTS (SELECT 1 FROM %[3]s p WHERE p.%[4]s = c.%[2]s))
+	  FROM %[1]s c`, childTable, childCol, parentTable, parentCol)
+	if err := target.QueryRow(ctx, q).Scan(&values, &matched); err != nil {
+		t.Fatalf("torture: comparing %s with %s in the target: %v", pair.child, pair.parent, err)
+	}
+	switch {
+	case values == 0:
+		t.Errorf("torture: %s holds no non-NULL value in the target, so masking it alike with %s proves "+
+			"nothing; the regression is supposed to load rows", pair.child, pair.parent)
+	case matched != values:
+		t.Errorf("torture: %d of %s's %d values in the target are not values of %s; the two are joined by a "+
+			"foreign key and must mask to the same value, which is the defect this regression exists for",
+			values-matched, pair.child, values, pair.parent)
 	}
 }
 

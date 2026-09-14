@@ -7,7 +7,9 @@ Every file here started as a failing run against one of the ten schemas in
 in one of them is not a test, it is an anecdote, so the rule is: **reduce it to
 the smallest schema that still fails, check that in here, and only then change
 `internal/`.** Each file names the schema it came from, the run that failed, the
-message, and what the correct behaviour is.
+message, and what the correct behaviour is. 010 is the one exception and says so
+in its own header: it came from the 2026-09-09 review's probe schema, which was
+already the smallest schema that fails.
 
 The files are loaded and run by `make torture` (`internal/invariants`'s
 `TestTortureRegressions`, behind the `integration` and `torture` build tags), so
@@ -23,7 +25,8 @@ a header comment block of exactly these keys, which the harness parses:
 -- root:   public.some_table     the --root the failing run used
 -- take:   20                    the --take it used
 -- expect: ok                    `ok`, or `exit <n> <event.code>`
--- found:  <schema name>         which testdata/torture/ schema found it
+-- found:  <schema name>         which testdata/torture/ schema found it (or,
+--                                for 010, which review did)
 -- why:    <one line>            what was wrong
 ```
 
@@ -33,8 +36,8 @@ run must fail *in that exact way* — some of these are refusals lazyslice is
 right to make, and the regression is that it made them badly (no code, exit 1,
 "run with --debug") rather than that it made them at all.
 
-There is one optional sixth key, and it exists because `expect: ok` is a weak
-assertion for a defect that was a *collision*:
+There are two optional keys, and both exist because `expect: ok` is a weak
+assertion for a defect that was a *collision* or an *inequality*:
 
 ```
 -- unique-masked: public.t.col, public.t.other   columns the target must hold
@@ -47,6 +50,24 @@ value, and hold no two rows alike. It is what 004 and 007 assert since **T-0113*
 made their runs exit 0: a run that copied the tokens verbatim also exits 0, and
 the prefix half is what tells the two apart, while the distinctness half is the
 original collision restated against the target instead of against an exit code.
+
+The second is the mirror image of it, and **T-0132** added it:
+
+```
+-- equal-masked: public.t.child_col = public.t2.parent_col   two columns joined
+                                                            by a foreign key
+                                                            that must still hold
+                                                            the same values
+```
+
+Each pair is read out of the loaded target: every non-NULL value of the
+left-hand column must also be a value of the right-hand one, and the left-hand
+column must hold at least one. That is the relation a foreign key is, asserted
+against the rows rather than inferred from the exit code — so it still says
+something if a change stops recreating the constraint. It is what 010 asserts,
+beside a `unique-masked:` on the parent: the parent's values are masked,
+distinct and unusable, and the child holds the same ones. Either key alone would
+pass a run that copied both columns verbatim.
 
 ## Files
 
@@ -61,6 +82,7 @@ original collision restated against the target instead of against an exit code.
 | `007-partial-unique-index-masked-column.sql` | supabase-auth | a masked column under a *partial* unique index collided when the index was recreated |
 | `008-name-hit-on-an-unaccepted-type-drops-the-type-signal.sql` | supabase-auth | **a leak**: a name hit the column's type does not accept removed the masking the type alone would have given, and a jsonb column of names, addresses and phone numbers was copied verbatim under exit 0 |
 | `009-citext-array-of-addresses-masked-as-one-string.sql` | plausible | **a leak, then a half-loaded target**: a `citext[]` of addresses arrives as one text literal, so the classifier saw one opaque value and copied it, and once it read inside the literal the transformer still masked it as one scalar and `CopyFrom` refused the result mid-load |
+| `010-fk-connected-columns-mask-differently.sql` | the 2026-09-09 review, finding 3 | the masker was chosen per column, so a unique column escalated to `credential_unique` while its foreign-key child kept the fixed literal: equal inputs masked to different outputs and the load ended at exit 8 |
 
 009's header now says `ok`. It did not always: `arrayArrivesAsLiteral` in
 `internal/plan/writeback.go` was written as a stand-in for the element-wise
@@ -83,6 +105,15 @@ email address or phone number of the source's may survive anywhere in the target
 (the grep half of invariant I2). Some of these defects never changed an exit code
 at all — 008 exited 0 before the fix and after it — so a suite that compared only
 exit codes would have had nothing to say about the one that mattered most.
+
+010 is the one file here that did not come from `testdata/torture/`. Its
+schema is the reduction the review itself made — `tokens(id PRIMARY KEY, token
+TEXT UNIQUE)` and `items(id PRIMARY KEY, token TEXT REFERENCES tokens(token))`,
+with rows enough to give the unique-index rule a row count — and its transcript
+is `docs/reviews/2026-09-09/evidence/fk_masker.log`. The rule that fixes it is
+in `internal/plan/equality.go` and in ARCHITECTURE.md §5's amendment of
+2026-09-14: one masker per foreign-key-connected set of masked columns, the
+widest any member needs, checked to fit every member.
 
 004 and 007 add the `unique-masked:` check described above. Both reduce a
 `credential` column under a unique index, and both said `expect: exit 12

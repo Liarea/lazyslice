@@ -291,6 +291,27 @@
   message: "{table}.{column} is under a unique index and cannot be masked without collisions: {reason}"
   args: [table, column, count, reason]
 
+# ARCHITECTURE.md §5's equality-group rule (the 2026-09-14 amendment, T-0132).
+# A set of masked columns joined by declared foreign keys must mask to the same
+# value or the key does not validate at load, so one generator is chosen for the
+# whole set; this is the refusal when none fits all of them. {reason} carries
+# every column of the group, the cause, and the escapes that apply to that cause
+# -- event.ArgKey has no key for a set of columns, the same borrowing
+# plan.refused.unique_domain above makes. {table} and {column} anchor the line on
+# one member, as every plan refusal does.
+#
+# It is a code of its own and not plan.refused.unique_domain, which it borrowed
+# when T-0132 landed: two of its three causes fire with no member under a unique
+# index at all, so that template stated a fact about the schema that was not
+# true (T-0132 review).
+
+- code: plan.refused.equality_group
+  kind: error
+  stage: plan
+  exit: 12
+  message: "{table}.{column} is in a group of columns joined by foreign keys that must mask alike, and no masker fits all of them: {reason}"
+  args: [table, column, count, reason]
+
 # {reason} carries the parent table of the edge. event.ArgKey has no key for the
 # other end of a foreign key (internal/event/event.go), and this message has to
 # name both ends and the columns to be actionable, so it borrows {reason}. Owed

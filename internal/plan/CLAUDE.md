@@ -660,6 +660,85 @@ in `testdata/torture/` died **in the loader** on a unique violation as a result
   count one only when there is one: `MaxRows` is zero for a generator with a
   domain of 1, which is what `credential` has, and "take at most 0 rows" is not
   advice (T-0098).
+- **The unit of the choice is the equality group, not the column (T-0132,
+  ARCHITECTURE.md §5's amendment of 2026-09-14).** Applying §5 per column is
+  what broke foreign keys: classification propagates a *category* along a key,
+  nothing propagated the *generator*, so a unique parent escalated to
+  `credential_unique` while its non-unique child kept the category default and
+  the load ended at **exit 8** with the key unvalidatable (finding 3 of the
+  2026-09-09 review, `docs/reviews/2026-09-09/evidence/fk_masker.log`).
+  `equality.go` is the rule and `checkUniqueDomain` is now its caller.
+  - **The group** is the transitive closure of "appears at either end of a
+    declared foreign key", intersected with the masked columns this run will
+    load, split by category. A column no key touches is a group of one and gets
+    exactly the check it always had, which is why `unique_test.go` is unchanged.
+  - **The masker is the widest generator *any member needs*** — each member's
+    own `mask.Pick` answer at its maximum — and not the widest the category has.
+    A group with no unique member needs the default and keeps it; the other
+    reading would move every non-unique masked column in the schema onto an
+    alternate nobody asked for.
+  - **`fitsGroup` asks four questions and a group has to pass all four**:
+    writable in every member, wide enough for *every* unique member's
+    `d_required` (not only the one the generator came from), drawing on the same
+    declared value list where any member is a closed column, and emitting the
+    same `Domain()` in every member — because `credential_unique` and the
+    free-text generator are length-fitted, so one masker over a `varchar(25)`
+    and a `text` column is still two mappings and the key still breaks. A
+    failure of any of them is exit 12 naming the group and every column in it.
+  - **The closed-column question is about the labels, not their count**
+    (T-0132 review, finding 1). Every generator answers a closed column with one
+    of *that column's own* labels (`mask/domain.go`'s `labelValue`), so a parent
+    under `CHECK (label IN ('c','d'))` and a child under `CHECK (label IN
+    ('a','b'))` both report `Domain() == 2`, sail through the count question that
+    was written to catch exactly this, and mask one input to `'c'` at one end and
+    `'a'` at the other. `closedColumn` asks `mask.ColumnDomain` whether the
+    declarations bound the column at all rather than re-parsing a `CHECK` here —
+    a second copy of that grammar is what `constraintsOf` above exists to avoid —
+    and `sameClosedSet` then compares the `CHECK` text verbatim, which is
+    *stricter* than comparing the parsed lists: two ends that spell one list two
+    ways are refused although they would mask alike. That is the recoverable
+    direction (a refusal at plan with an escape, against exit 8 in the loader
+    with rows already moved), and **T-0158** owes the exact comparison via an
+    exported label list from `mask`. What is still not compared is
+    `Constraints.TypeTag`: `inet` against `cidr`, `date` against `timestamp`, and
+    the other families a generator branches on, filed as **T-0159** rather than
+    guessed at, because a blanket tag-equality rule would refuse the ordinary
+    `text`-against-`varchar` pair that masks alike.
+  - **The refusal has its own code, `plan.refused.equality_group`** (T-0132
+    review, finding 3). It borrowed `plan.refused.unique_domain` when T-0132
+    landed, and that template opens "is under a unique index" — untrue of two of
+    the three causes, which fire with no member under one at all: the
+    length-mismatch branch is reachable on any foreign key between two masked
+    text columns of different declared lengths, which is ordinary, not a corner.
+    A group of one is the per-column unique refusal it always was and keeps the
+    old code. `docs/` is outside this task's paths, so **`make docs` has not been
+    run for the new row and `make docs-check` fails until it is** — **T-0160**.
+  - **The escapes are printed per cause** (T-0132 review, finding 2).
+    `groupEscapes` prints "lower the row count" only on the `d_required` path,
+    where rows are the cause; the other two causes are a type that cannot hold
+    the value and members that would not mask alike, and neither is fixed by a
+    smaller `--take`. And for a group of more than one the `--unmask` escape is
+    **every column of the group or none**, never "one of them": `maskedMembers`
+    skips a column whose decision is not `Masked`, so unmasking one end leaves
+    that end's production values in the target *and* the key still unvalidatable.
+    `equalityNote` carries the same correction onto `uniqueDomainReason`'s
+    single-column `--unmask` sentence when the refused column is in a group.
+  - **Only declared foreign keys are group edges.** `p.fks`, not the inferred
+    edges of §3.2: the target never carries a `virtual_fks:` or polymorphic
+    edge as a constraint, nothing validates one at load, and `internal/classify`
+    does not propagate a category along one either, so unifying maskers over one
+    would be a decision no other stage agrees exists. **T-0154** owes that
+    question an answer.
+  - **`internal/transform` is unchanged** and must stay so: it masks with
+    `Decision.Masker` (`transform.go`'s `plan`), so writing the group's choice
+    onto every member's decision *is* "transform masks every member
+    identically". Do not add a second place that decides a masker.
+  - **The guards are `equality_test.go` and
+    `testdata/regressions/010-fk-connected-columns-mask-differently.sql`.** The
+    regression is the review's own two-table reduction, asserted with `expect:
+    ok` plus `unique-masked:` on the parent and the new `equal-masked:` key on
+    the child — checked to fail on a revert of `equality.go`, which reproduces
+    the review's exit 8 verbatim.
 - **Both outcomes are held by a unit test** (`unique_test.go`), for the reason
   `writeback_test.go` exists: the evidence for this check is otherwise ten
   Docker-gated schemas and eight files under `testdata/regressions/`, none of
