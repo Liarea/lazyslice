@@ -9,7 +9,7 @@
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 18 | 1 | 47 | 0 | 1 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 16 | 0 | 14 | 1 | 0 |
+| E9 Later | later | 17 | 0 | 14 | 1 | 0 |
 
 ## Open and in progress
 
@@ -51,6 +51,7 @@
 - T-0145 [open] E9 · A read-only verify command that checks the current target without dropping it (opus)
 - T-0146 [open] E9 · internal/verify: a residual hit on an array element cannot be confirmed by either probe of section 6 item 3 ()
 - T-0147 [open] E9 · internal/classify/CLAUDE.md array-literal section is stale after T-0118/T-0129/T-0127 ()
+- T-0148 [open] E9 · Regenerate docs/ERRORS.md for the four exit-4 target-ownership codes ()
 
 ## Recently closed
 

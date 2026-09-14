@@ -88,6 +88,28 @@
   message: "could not check the target {database}: {reason}"
   args: [database, reason]
 
+# The run lease (ARCHITECTURE.md §11.2, THREAT_MODEL.md T2, both amended
+# 2026-09-14). The gate's verdict is reached several stages before the first
+# DROP acts on it, so one run holds the target for the whole of that interval
+# with a session-level advisory lock on a key derived from the target database
+# name, and a second run is refused here rather than allowed to pass a gate
+# whose answer is about a database being taken apart underneath it.
+#
+# {reason} is the run id named in the holder's application_name, or the words
+# "another lazyslice run" when the role may not read another session's
+# application_name. A run id is an identifier, not a value (THREAT_MODEL.md T4).
+
+# docs/ERRORS.md is generated from this file by tools/docgen, and docs/ was
+# outside the paths of the task that added the four rows below and this one;
+# tracker T-0148 is the regeneration.
+
+- code: target.refused.lease_held
+  kind: error
+  stage: discover
+  exit: 4
+  message: "the target {database} is held by {reason}: one lazyslice run writes a target at a time"
+  args: [database, reason]
+
 # The classify stage (ARCHITECTURE.md §4). Classifier.Classify takes no
 # event.Sink -- it is pure, and core.Run is the only producer -- so the codes
 # below are declared in internal/classify/codes.go beside the results that
@@ -368,6 +390,38 @@
   exit: 8
   message: "the foreign key {column} on {table} does not validate: the slice is missing rows it references"
   args: [table, column]
+
+# The three lock-and-recheck refusals (ARCHITECTURE.md §11.2, amended
+# 2026-09-14). Each drop takes its table's ACCESS EXCLUSIVE lock with NOWAIT and
+# re-verifies what the gate approved before it destroys anything; a target that
+# is no longer the database the gate approved is refused, the transaction rolls
+# back and the run's marker row is closed failed.
+#
+# The exit is 4 and not 7, because none of the three is a load that went wrong:
+# each is the target refusal of ARCHITECTURE.md §9 arriving later, because the
+# evidence for it arrived later. {count} is a row count, which is a number and
+# not a value (THREAT_MODEL.md T4).
+
+- code: load.refused.target_locked
+  kind: error
+  stage: load
+  exit: 4
+  message: "{table} in the target could not be locked for dropping: something else is using this database"
+  args: [table]
+
+- code: load.refused.target_changed
+  kind: error
+  stage: load
+  exit: 4
+  message: "{table} was approved empty and now holds {count} rows: the target changed after it was approved, and nothing was dropped"
+  args: [table, count]
+
+- code: load.refused.marker_changed
+  kind: error
+  stage: load
+  exit: 4
+  message: "the lazyslice_meta row that authorised truncating this target is gone or has changed: nothing was dropped ({table})"
+  args: [table]
 
 # The two schema-recreation refusals internal/load/ddl raises (§11.1). §11.1
 # raises them at plan -- before the snapshot is used for keys and before

@@ -110,6 +110,17 @@ type Eligibility struct {
 	MarkerBound bool               // marker present, readable, and bound to this source and this catalog
 	PrevKeyFP   string             // from the marker, "" when unbound
 	PrevClassFP string             // from the marker, "" when unbound
+	// MarkerRunID and MarkerStatus identify the marker row the gate actually
+	// read, so that the loader can re-verify under its own lock that the
+	// authorisation it is acting on is still the one the gate gave
+	// (ARCHITECTURE.md section 11.2, amended 2026-09-14). A gate decision is a
+	// remembered fact by the time the first DROP runs: on a bound marker the
+	// thing that authorised the drop is that row, so the loader re-reads it by
+	// run_id inside the transaction that drops each table and refuses at exit 4
+	// if it is gone or its status has changed. Both are identifiers — a uuid and
+	// one of running/complete/failed — never a value from either database.
+	MarkerRunID  string
+	MarkerStatus string
 	// PrevToolVersion is the marker's tool_version, "" when unbound or when the
 	// gate did not read it. ARCHITECTURE.md section 11.2 requires three warnings
 	// on a bound marker written by another run — secret changed, classification
@@ -165,6 +176,17 @@ type Writer interface {
 // commits it at Last (see RowBatch).
 type Tx interface {
 	Exec(ctx context.Context, sql string, args ...any) error
+	// Query reads inside the transaction. Writer has no way to read
+	// (see Writer), and for most of the load that is the right shape: the loader
+	// writes and the verifier reads through a reader of its own. The one read
+	// the loader cannot delegate is the re-verification of ARCHITECTURE.md
+	// section 11.2's lock-and-recheck — the existence of the table it is about
+	// to drop, that table's row count, or the marker row the gate approved —
+	// because it has to happen after LOCK TABLE and before DROP, inside this
+	// transaction and no other. A read outside it would be answering a question
+	// about a moment that has already passed, which is the defect the recheck
+	// exists to close (T-0130, 2026-09-14).
+	Query(ctx context.Context, sql string, args ...any) (Rows, error)
 	CopyFrom(ctx context.Context, table TableRef, cols []string, rows <-chan []any) (int64, error)
 	Commit(ctx context.Context) error
 	Rollback(ctx context.Context) error

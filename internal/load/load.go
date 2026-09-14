@@ -53,6 +53,29 @@ type Run struct {
 	ClassificationFingerprint string
 	SecretFingerprint         string
 
+	// RunID is the id this run's marker row carries. It is the caller's because
+	// the run lease on the target named itself with it before the gate ran
+	// (internal/pg's Lease), and a marker under a different id would leave the
+	// refusal a second run prints unconnected to the row this one writes. Empty
+	// means "make one", which is what a direct caller with no lease gets.
+	RunID string
+
+	// What the gate approved, as it approved it (ARCHITECTURE.md section 11.2,
+	// amended 2026-09-14). The loader re-verifies it under the ACCESS EXCLUSIVE
+	// lock it takes before each drop, because a gate verdict is a remembered
+	// decision by then and not continuing ownership of the target.
+	//
+	// MarkerBound false — the zero value, and what a caller that says nothing
+	// gets — means the gate approved an *unmarked* target, whose authorisation
+	// was that every user table was empty; the recheck is that each table it is
+	// about to drop is still empty. MarkerBound true means a bound marker
+	// authorised the truncation, and the recheck is that MarkerRunID's row is
+	// still there with MarkerStatus. The fail-closed direction is the default: a
+	// caller that forgets to say gets the stricter check, not the weaker one.
+	MarkerBound  bool
+	MarkerRunID  string
+	MarkerStatus string
+
 	// TargetTables are the user tables the target already holds, as the gate
 	// enumerated them. pipeline.Writer has no way to read (section 2), so a table
 	// the target holds under a name the source does not use is dropped only when
@@ -193,6 +216,7 @@ const markerCloseTimeout = 5 * time.Second
 
 func (l loader) markerRow(plan *pipeline.Plan, fingerprint string) pg.MarkerRow {
 	return pg.MarkerRow{
+		RunID:                     l.run.RunID,
 		ToolVersion:               l.run.ToolVersion,
 		SourceFingerprint:         l.run.SourceFingerprint,
 		SourceSystemID:            l.run.SourceSystemID,
@@ -275,6 +299,39 @@ func registerTypes(ctx context.Context, w pipeline.Writer, schema *pipeline.Sche
 // The marker table is never dropped: it is this run's own record, written a
 // moment ago, and a source table that happens to share its name is not a reason
 // to destroy it.
+//
+// Each table goes in a transaction of its own that takes the table's ACCESS
+// EXCLUSIVE lock and then re-verifies what the gate approved, before the DROP
+// (dropOne). Until T-0130 the drops ran on the writer in autocommit, and the
+// only thing standing between `DROP TABLE` and somebody else's rows was a gate
+// verdict reached several stages earlier: the 2026-09-09 review inserted a row
+// into an approved-empty target after the gate and lazyslice deleted it and
+// exited 0.
+//
+// What a refusal here does and does not undo, stated exactly, because the first
+// version of both amendments said "nothing was destroyed" and that is a claim
+// about one transaction and not about this loop. The transaction that refuses
+// rolls back, so the table it refused about is untouched — that is the property
+// the control exists for, and it holds for every table. Tables this loop already
+// dropped in *earlier* transactions stay dropped: their drops were committed,
+// each after its own lock-and-recheck, so nothing unauthorised was destroyed
+// (on an unmarked target each was verified empty under its own lock; on a bound
+// marker the truncation was authorised) — but their definitions are gone. The
+// run's marker row is then closed failed and the target is left part-way through
+// a rebuild, which the next run's gate refuses rather than silently finishes:
+// the marker no longer binds, because its schema fingerprint is the source's and
+// the target's catalog is now half of it, so the gate falls through to the
+// emptiness check, finds the rows that caused the refusal, and prints the
+// command that clears the database (ARCHITECTURE.md section 9, section 11.2 as
+// amended).
+//
+// One transaction over every table would make the loop itself atomic, and is not
+// what this does: the gate admits up to 2,000 user tables, DROP ... CASCADE
+// takes a lock per dependent index, sequence and toast relation, and a single
+// transaction over all of them is how a large target meets "out of shared
+// memory: You might need to increase max_locks_per_transaction" instead of
+// finishing. Refusing correctly on every table is worth more than undoing the
+// drops that were already authorised.
 func (l loader) drop(ctx context.Context, w pipeline.Writer, schema *pipeline.Schema) error {
 	for _, d := range ddl.DropTables(schema, l.run.TargetTables) {
 		if d.Table.Name == pg.MarkerTable {
@@ -288,8 +345,8 @@ func (l loader) drop(ctx context.Context, w pipeline.Writer, schema *pipeline.Sc
 			Table: d.Table,
 			Args:  event.Args{event.ArgTable: d.Table.String()},
 		})
-		if err := w.Exec(ctx, d.SQL); err != nil {
-			return refuse(CodeRefusedDDL, exitLoad, d.Table, "", err)
+		if err := l.dropTable(ctx, w, d); err != nil {
+			return err
 		}
 	}
 	for _, sql := range ddl.DropObjects(schema) {
@@ -299,6 +356,211 @@ func (l loader) drop(ctx context.Context, w pipeline.Writer, schema *pipeline.Sc
 	}
 	return nil
 }
+
+// lockAttempts and lockRetryPause bound the retry of a NOWAIT lock.
+//
+// NOWAIT is the point: a DROP that waits is a DROP that can sit behind an
+// application's long transaction until somebody notices, and waiting is also
+// how the window this whole mechanism closes gets *longer*. But the lock a
+// freshly loaded target most often loses a race to is autovacuum's, which a
+// waiting DROP would have cancelled automatically and a NOWAIT one simply fails
+// against. Three attempts a tenth of a second apart is still bounded — a third
+// of a second, not an application's transaction — and it is the difference
+// between an honest refusal and a coin toss.
+const (
+	lockAttempts   = 3
+	lockRetryPause = 100 * time.Millisecond
+)
+
+// dropTable is one table's drop, retried only for a lock that was not free.
+func (l loader) dropTable(ctx context.Context, w pipeline.Writer, d ddl.TableDrop) error {
+	for attempt := 1; ; attempt++ {
+		err := l.dropOne(ctx, w, d)
+		if err == nil {
+			return nil
+		}
+		var refusal *Refusal
+		if attempt >= lockAttempts || !errors.As(err, &refusal) || refusal.Code != CodeRefusedTargetLocked {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(lockRetryPause):
+		}
+	}
+}
+
+// dropOne is ARCHITECTURE.md section 11.2's lock-and-recheck for one table:
+// take the table's ACCESS EXCLUSIVE lock without waiting, re-verify the thing
+// that authorised the drop, drop, commit. A change refuses at exit 4 and the
+// deferred rollback leaves the table exactly as it was found.
+//
+// The order is the whole of it. The lock comes first so that the recheck is a
+// statement about a table nobody else can be writing to; the recheck comes
+// before the DROP so that a refusal costs nothing; and both are in the
+// transaction the DROP commits in, so no moment passes between "still as
+// approved" and "gone".
+func (l loader) dropOne(ctx context.Context, w pipeline.Writer, d ddl.TableDrop) error {
+	tx, err := w.Begin(ctx)
+	if err != nil {
+		return refuse(CodeRefusedDDL, exitLoad, d.Table, "", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			rollback(ctx, tx)
+		}
+	}()
+
+	present, err := tableExists(ctx, tx, d.Table)
+	if err != nil {
+		return refuse(CodeRefusedDDL, exitLoad, d.Table, "", err)
+	}
+	if present {
+		if lockErr := tx.Exec(ctx, lockStatement(d.Table)); lockErr != nil {
+			// Only 55P03 is a contended target. A LOCK TABLE that failed for any
+			// other reason is a load failure at exit 7, reported as itself
+			// rather than as "something else is using this database" after a
+			// third of a second of pointless retry (see lockNotAvailable).
+			if !lockNotAvailable(lockErr) {
+				return refuse(CodeRefusedDDL, exitLoad, d.Table, "", lockErr)
+			}
+			return refuse(CodeRefusedTargetLocked, exitTarget, d.Table, "", lockErr)
+		}
+		if recheckErr := l.recheck(ctx, tx, d.Table); recheckErr != nil {
+			return recheckErr
+		}
+	}
+	if dropErr := tx.Exec(ctx, d.SQL); dropErr != nil {
+		return refuse(CodeRefusedDDL, exitLoad, d.Table, "", dropErr)
+	}
+	if commitErr := tx.Commit(ctx); commitErr != nil {
+		return refuse(CodeRefusedDDL, exitLoad, d.Table, "", commitErr)
+	}
+	committed = true
+	return nil
+}
+
+// recheck re-verifies the gate's authorisation for this table.
+//
+// Which question it asks is which question the gate answered: an unmarked target
+// was approved because every user table was empty, so the table must still be
+// empty; a marked one was approved because a bound marker row authorised the
+// truncation, so that row must still be there unchanged. Asking the wrong one
+// would either refuse every reload (a marked target's tables are full by
+// design) or approve a stranger's rows.
+func (l loader) recheck(ctx context.Context, tx pipeline.Tx, table ref.TableRef) error {
+	if l.run.MarkerBound {
+		return l.recheckMarker(ctx, tx, table)
+	}
+	n, err := rowCount(ctx, tx, table)
+	if err != nil {
+		return refuse(CodeRefusedDDL, exitLoad, table, "", err)
+	}
+	if n > 0 {
+		return refuseChanged(CodeRefusedTargetChanged, table, n,
+			"the target was approved empty and this table is not; nothing was dropped")
+	}
+	return nil
+}
+
+// recheckMarker re-reads the marker row the gate approved, by its run id. The
+// row this run wrote a moment ago is a different row and is not what is checked:
+// the authorisation is the *previous* run's row, and it is what must not have
+// moved.
+func (l loader) recheckMarker(ctx context.Context, tx pipeline.Tx, table ref.TableRef) error {
+	if l.run.MarkerRunID == "" {
+		// A caller that says the marker bound the target and cannot say which
+		// row did has given no authorisation to check. Fail closed.
+		return refuseChanged(CodeRefusedMarkerChanged, table, 0,
+			"the run names no marker row, so nothing authorises truncating this target")
+	}
+	rows, err := tx.Query(ctx, sqlMarkerStatus, l.run.MarkerRunID)
+	if err != nil {
+		return refuse(CodeRefusedDDL, exitLoad, table, "", err)
+	}
+	defer rows.Close()
+
+	var status string
+	found := rows.Next()
+	if found {
+		if scanErr := rows.Scan(&status); scanErr != nil {
+			return refuse(CodeRefusedDDL, exitLoad, table, "", scanErr)
+		}
+	}
+	if rowsErr := rows.Err(); rowsErr != nil {
+		return refuse(CodeRefusedDDL, exitLoad, table, "", rowsErr)
+	}
+	if !found || status != l.run.MarkerStatus {
+		return refuseChanged(CodeRefusedMarkerChanged, table, 0,
+			"the marker row that authorised truncating this target is gone or has changed")
+	}
+	return nil
+}
+
+// sqlMarkerStatus reads one marker row's status by run id. The cast is explicit
+// because run_id is a uuid column and the id travels as text.
+const sqlMarkerStatus = `SELECT status FROM ` + pg.MarkerTable + ` WHERE run_id = $1::uuid`
+
+// sqlTableExists answers whether the target still holds a relation of this name,
+// so that the lock is taken on a table that is there. to_regclass returns NULL
+// rather than raising for a name that resolves to nothing.
+const sqlTableExists = `SELECT to_regclass($1) IS NOT NULL`
+
+func tableExists(ctx context.Context, tx pipeline.Tx, table ref.TableRef) (bool, error) {
+	rows, err := tx.Query(ctx, sqlTableExists, quoted(table))
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+
+	var present bool
+	if !rows.Next() {
+		if rowsErr := rows.Err(); rowsErr != nil {
+			return false, rowsErr
+		}
+		return false, fmt.Errorf("load: the target did not answer whether %s exists", table)
+	}
+	if scanErr := rows.Scan(&present); scanErr != nil {
+		return false, scanErr
+	}
+	return present, rows.Err()
+}
+
+// rowCount is the count the refusal names. The table is under ACCESS EXCLUSIVE
+// by the time this runs, so the count is exact and nobody can change it between
+// the count and the DROP; it is bounded in practice by whatever was written in
+// the seconds since the gate approved the table as empty.
+func rowCount(ctx context.Context, tx pipeline.Tx, table ref.TableRef) (int64, error) {
+	rows, err := tx.Query(ctx, `SELECT count(*) FROM `+quoted(table))
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	var n int64
+	if !rows.Next() {
+		if rowsErr := rows.Err(); rowsErr != nil {
+			return 0, rowsErr
+		}
+		return 0, fmt.Errorf("load: the target did not answer how many rows %s holds", table)
+	}
+	if scanErr := rows.Scan(&n); scanErr != nil {
+		return 0, scanErr
+	}
+	return n, rows.Err()
+}
+
+// lockStatement is the drop's own lock. NOWAIT, so that a target something else
+// is using is refused rather than waited on.
+func lockStatement(table ref.TableRef) string {
+	return `LOCK TABLE ` + quoted(table) + ` IN ACCESS EXCLUSIVE MODE NOWAIT`
+}
+
+// quoted is the qualified, quoted name of a table, taken from internal/load/ddl
+// so that the LOCK, the recheck and the DROP name one relation between them.
+func quoted(t ref.TableRef) string { return ddl.TableName(t) }
 
 // copy runs the extract → transform → load contract's receiving end.
 //

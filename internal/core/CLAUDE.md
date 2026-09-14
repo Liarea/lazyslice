@@ -373,3 +373,38 @@ for a refusal that was reaching people as an internal error.
   before being told the target could not be built. GitLab reaches the same
   refusal upstream on two objects its 43-table subset removes, so its fixture
   exits 0 (`docs/TORTURE.md`).
+- **The run lease is taken before the gate, and the run id is made here**
+  (`acquireLease`, T-0130). ARCHITECTURE.md §9's verdict is acted on several
+  stages later — introspect, classify and plan all run between it and the first
+  `DROP` — so `openTarget` takes `internal/pg`'s `Lease` on a target connection
+  of its own before `Gate`'s first probe, and `close` releases it after
+  everything else of the target's business, because §11.2 holds it "until the
+  marker is finished" and the marker is closed inside `Load`. That connection
+  holds an **open transaction** for the whole run — the lock is
+  `pg_try_advisory_xact_lock`, so that it cannot outlive the session on a target
+  behind a pooler (`internal/pg/CLAUDE.md`, "The run lease") — so a target
+  session sitting idle in transaction for the length of a run is the lease and
+  not a leak. A held lease is
+  exit 4 and `pg.CodeLeaseHeld` naming the holder; **anything else that goes
+  wrong is `unreachableTarget`**, which is the gate's reachability precondition
+  arriving one statement earlier than it used to — same code, same exit, same
+  `{host}`/`{reason}`, which is what `provenance_test.go`'s `fillCandidates`
+  pins. `pg.NewRunID` is called here rather than inside `pg.StartRun` because the
+  lease names itself with the id before the marker row exists; `loadRun` passes
+  the same id on, so the refusal a second run prints and the row this one writes
+  are one story. `loadRun` also carries `gate.MarkerBound/MarkerRunID/MarkerStatus`,
+  which is what `internal/load`'s lock-and-recheck re-verifies before each drop.
+  `asStop`'s `*load.Refusal` case now fills `{count}` from `Refusal.Rows`, which
+  is the row count a changed target is named with.
+  `race_integration_test.go` holds four regressions, all built on the same
+  instrument — the source held under `ACCESS EXCLUSIVE` by a session of the
+  test's own, so the run cannot pass introspect until the test lets it, which is
+  a point strictly after the gate and strictly before the first drop:
+  `TestARowInsertedAfterTheGateIsNotDropped` (the reviewer's script),
+  `TestASecondRunIsRefusedWhileAnotherHoldsTheTarget` (the lease),
+  `TestAMarkerDeletedAfterTheGateIsNotTruncated` (the marked-target branch of the
+  recheck, which is the production reload path) and
+  `TestARefusalOnTheSecondTableLeavesTheFirstDropped`, which pins the **scope**
+  of the rollback: the drops are one transaction each, so a refusal on a later
+  table leaves the earlier ones dropped, and both amendments say so in those
+  terms rather than "nothing was destroyed".

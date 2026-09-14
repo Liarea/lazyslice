@@ -105,16 +105,30 @@ func EnsureMarker(ctx context.Context, w pipeline.Writer) error {
 	return nil
 }
 
+// NewRunID is a run id, made before anything is written.
+//
+// The marker row is written halfway through the run, but the id it will carry
+// is needed earlier than that: the run lease names itself with it on the target
+// connection so that a second run refused at the lease can say which run holds
+// it (lease.go). core makes one id at the top of the run and it reaches both.
+func NewRunID() (string, error) { return uuidV4() }
+
 // StartRun writes this run's row at StatusRunning and returns its run id. Fields
-// the caller leaves empty are written as they are; the run id and the start time
-// are this function's, so two runs cannot collide on either.
+// the caller leaves empty are written as they are; the start time is this
+// function's, and so is the run id unless the caller brought one — core does,
+// because the run lease named itself with it before the gate ran and a marker
+// under a different id would leave the two unlinkable.
 func StartRun(ctx context.Context, w pipeline.Writer, row MarkerRow) (string, error) {
-	id, err := uuidV4()
-	if err != nil {
-		return "", err
+	id := row.RunID
+	if id == "" {
+		made, err := uuidV4()
+		if err != nil {
+			return "", err
+		}
+		id = made
 	}
 	started := time.Now().UTC()
-	err = w.Exec(ctx, sqlInsertMarker,
+	err := w.Exec(ctx, sqlInsertMarker,
 		id, row.ToolVersion, MarkerSchemaVersion, started, StatusRunning,
 		row.SourceFingerprint, nullIfEmpty(row.SourceSystemID), row.SchemaFingerprint,
 		row.ClassificationFingerprint, row.RootTable, row.Take, row.SecretFingerprint)
