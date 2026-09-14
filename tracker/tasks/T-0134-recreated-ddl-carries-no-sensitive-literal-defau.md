@@ -3,12 +3,12 @@ id: T-0134
 title: "Recreated DDL carries no sensitive literal: defaults on masked columns are masked, strong hits elsewhere refuse, verify scans the target catalog"
 epic: E5
 phase: 5
-status: open
+status: done
 owner: opus
 created: 2026-09-14
-started: ""
-closed: ""
-outcome: ""
+started: 2026-09-14
+closed: 2026-09-14
+outcome: partial
 ---
 
 # T-0134 · Recreated DDL carries no sensitive literal: defaults on masked columns are masked, strong hits elsewhere refuse, verify scans the target catalog
@@ -25,6 +25,10 @@ load/ddl copies a column default verbatim (internal/load/ddl/ddl.go:642), so DEF
 
 - 2026-09-14 created
 
+- 2026-09-14 started
+
+- 2026-09-14 closed: partial
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+went well: the literal rule landed in internal/plan/ddlliteral.go with pipeline support, verify gained a catalog pass over pg_attrdef and pg_constraint that fails closed, and the reviewer caught that verify's exemption was keyed on the classification rather than on evidence the rewrite ran; the developer re-keyed it on Column.DefaultOriginal so nothing is exempt while nothing rewrites | went badly: arm 1 (a masked default masked through its own masker) is unreachable from the CLI because core resolves the key after the plan stage; internal/core was outside the paths, so regression 011 headers exit 13 instead of ok; a masked default with a literal is refused, not masked, until T-0161 | change next time: when a plan-stage rule needs the key, put internal/core in the paths from the start

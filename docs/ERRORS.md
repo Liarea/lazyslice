@@ -33,6 +33,8 @@ One row per code in the catalogue, in the file's own order. Exit is only meaning
 | `plan.refused.unwritable` | plan | 12 | {table}.{column} cannot be masked in place: {reason} |
 | `plan.refused.unique_domain` | plan | 12 | {table}.{column} is under a unique index and cannot be masked without collisions: {reason} |
 | `plan.refused.equality_group` | plan | 12 | {table}.{column} is in a group of columns joined by foreign keys that must mask alike, and no masker fits all of them: {reason} |
+| `plan.refused.ddl_literal` | plan | 12 | {table}.{column} is not masked and its recreated DDL carries a literal that parses as personal data: {reason} |
+| `target.schema.literal_not_rewritable` | plan | 13 | {table}.{column} is masked and its recreated DDL carries a literal lazyslice cannot rewrite: {reason} |
 | `target.schema.not_recreatable` | plan | 13 | the foreign key on {table} ({column}) into {reason} cannot be recreated in the target |
 | `extract.refused.standby_cancelled` | extract | 7 | the source cancelled the read of {table}: the snapshot conflicts with recovery on a standby (SQLSTATE {reason}); retry, or run against the primary |
 | `transform.refused.masker` | transform | 7 | masker {reason} refused a value in {table}.{column}: it is not copied through |
@@ -51,6 +53,7 @@ One row per code in the catalogue, in the file's own order. Exit is only meaning
 | `verify.refused.residual` | verify | 9 | a value in {table}.{column} is in the target as the source holds it: the run masked that column and the source still has that value |
 | `verify.refused.residual_unconfirmable` | verify | 9 | residual hits in {table}.{column} could not be confirmed: {reason} |
 | `verify.refused.second_net` | verify | 9 | {table}.{column} is not masked and {count} of its values validate as {reason} |
+| `verify.refused.catalog_literal` | verify | 9 | the target's schema carries a literal that parses as personal data in {table}.{column}: {reason} |
 | `verify.refused.row_count` | verify | 7 | {table} holds {count} rows in the target: {reason} |
 | `verify.refused.sequence` | verify | 7 | the sequence behind {table}.{column} was not reset: {reason} |
 | `verify.residual.unconfirmed` | verify | - | {count} residual hits in {table}.{column} are absent from the source: a filter false positive, or the source changed since the snapshot |
@@ -63,6 +66,7 @@ One row per code in the catalogue, in the file's own order. Exit is only meaning
 | `verify.residual.passed` | verify | - | {count} masked values were tested against the residual filter and none of them is in the source |
 | `verify.residual.probes` | verify | - | {count} confirmation probes were sent to the source |
 | `verify.second_net.passed` | verify | - | {count} columns the target holds unmasked were scanned and none of them validates as a category |
+| `verify.catalog.passed` | verify | - | {count} defaults, generated expressions and constraints in the target's schema carry no personal literal |
 | `verify.row_count.passed` | verify | - | {count} steps hold exactly the rows the plan says they hold |
 | `verify.sequences.passed` | verify | - | {count} sequences are set to their column's maximum |
 | `verify.sample.passed` | verify | - | {count} sampled rows match the source in every column the run did not mask |

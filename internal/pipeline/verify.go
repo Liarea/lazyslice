@@ -10,8 +10,13 @@ import (
 )
 
 // Check is one verification result. Names are fixed: "fk", "residual",
-// "residual_unconfirmable", "second_net", "sequences", "row_count",
+// "residual_unconfirmable", "second_net", "catalog", "sequences", "row_count",
 // "unmasked_identical".
+//
+// "catalog" is the pass over the target's own pg_attrdef and pg_constraint
+// (ARCHITECTURE.md section 11.1, amended 2026-09-14): a string literal inside a
+// recreated default, generated expression or CHECK is inside the data boundary,
+// and no scan of the rows can see one.
 type Check struct {
 	Name   string
 	Passed bool

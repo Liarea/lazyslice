@@ -167,6 +167,14 @@ func (v verifier) Verify(
 	if err := s.secondNet(ctx); err != nil {
 		return nil, err
 	}
+	// The catalog pass is beside the second net and for the same reason: the
+	// second net looks at every value the target holds in a row, and this looks
+	// at every literal it holds in its *schema* (catalog.go, T-0134). A row scan
+	// cannot see a default, and a default is a value the application's next
+	// INSERT writes into a row.
+	if err := s.catalog(ctx); err != nil {
+		return nil, err
+	}
 	if err := s.foreignKeys(ctx); err != nil {
 		return nil, err
 	}

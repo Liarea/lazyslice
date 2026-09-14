@@ -749,3 +749,117 @@ in `testdata/torture/` died **in the loader** on a unique violation as a result
   `TestUniqueDomainSkipsATableThisRunWillNotLoad` is the guard against refusing
   on the source's shape. They call `checkUniqueDomain` directly because *n* is
   the planned row count and a `Plan` over a reader with no rows plans none.
+
+## The recreated-DDL literal rule (T-0134, ARCHITECTURE.md §11.1's 2026-09-14 amendment)
+
+`ddlliteral.go` is §11.1's new sentence: a string literal inside a column
+`DEFAULT`, a `CHECK` constraint or a generated-column expression is **inside the
+data boundary**, because §11.1 recreates all three as the catalog's own text and
+the target therefore receives the literal exactly as it receives a row value.
+Nothing in §6 could see it — the residual filter holds only cells the
+transformer masked and the second net scans columns — so the 2026-09-09 review's
+finding 5 is a leak under **exit 0**: `DEFAULT 'ddl.canary@example.org'` on a
+masked email column, every row masked, the default intact in the target's
+`pg_attrdef`, and the application's next `INSERT` putting the address back into
+a row (`docs/reviews/2026-09-09/evidence/ddl_default.log`).
+
+- **Where it runs, and why there.** After `checkUniqueDomain`, because a masked
+  column's default is rewritten with the masker its *rows* will go through and
+  `unique.go`/`equality.go` are what overwrite `Decision.Masker`. It is still
+  before `assemble`, so no key has left this stage and nothing in the target has
+  been touched — all §11.1 asks of a refusal raised "at plan".
+- **Which tables.** Every non-partition table of the schema, not the in-scope
+  ones. §11.1 recreates a `SchemaOnly` table's DDL too, so its default reaches
+  the target whether or not a row does, and a check that skipped it would let
+  `--skip-table` carry the literal through. That is the opposite of
+  `checkWriteBack`'s scope and deliberately so: that check is about a value this
+  run will write, and this one is about text the loader will write regardless.
+- **This is the one place the planner mutates `pipeline.Schema`, and the
+  mutation is idempotent.** The rewrite is written back through `p.byRef`, which
+  points into `p.schema`; `p.tables` holds copies — shallow ones, sharing the
+  same `Columns` backing array, so the two writes land in one slot. Every read
+  of a default in `ddlliteral.go` goes through `originalDefault`, and the
+  rewrite records the catalog's own text on `pipeline.Column.DefaultOriginal`:
+  a second `Plan` over the same in-memory schema therefore masks the *source's*
+  literal again rather than the first plan's output. That is not hypothetical —
+  `internal/tui` re-plans against a cached schema and
+  `plan_integration_test.go` plans twice over one snapshot to compare two plans
+  — and without it the default became `mask(mask(x))`, a different value on the
+  second plan than on the first.
+  `TestPlanningTwiceOverOneSchemaProducesOneDefault` is the guard, including the
+  re-plan under a *different* key, which is that key's value rather than a
+  composition of both. `internal/load/ddl` generates the target's DDL from that schema,
+  and `load.SchemaFingerprint` and `load.GateFingerprint` both hash generated
+  DDL, so both ends of §11.2's binding see the text the target actually
+  receives. `Schema.Fingerprint`, which `internal/core` filled right after
+  introspection, is the *source's* value and is not recomputed — it is what
+  `--tui`'s review pinning and `internal/emit` read, and both sides of that
+  comparison are pre-plan, so they still agree with each other.
+- **"Strong" is email, phone and payment card**, and nothing else. This text is
+  SQL: a `CHECK` is full of English words and a default is full of identifiers,
+  so the dictionary-backed signals of §4 over them would refuse ordinary schemas
+  over labels that are not personal data. A `CHECK (status IN
+  ('active','banned'))` on a masked column is a closed value list the masker
+  already honours (§5, `mask.Constraints.Checks`) and is not a refusal. The cost
+  — a name or a street address in a `CHECK` on an unmasked column is not found —
+  is stated in THREAT_MODEL.md T1 beside the rest of that row's admissions.
+- **The default is masked under the same `mask.Constraints` the rows are, and
+  `Unique` is the one that bites.** `constraintsOf` (writeback.go) deliberately
+  leaves `Unique` unset, because `mask.Writable` does not read it; a generator
+  does. `internal/transform` derives it from the table — its own `uniqueColumn`
+  over the primary key and the single-column, non-partial, non-expression unique
+  indexes — and then ORs `Decision.UniqueIndex` on top (`transform.go`), because
+  classify's field asks a narrower question than the schema does (`classify.go`
+  says so) and neither answer subsumes the other. `columnDefault` does both, and
+  `uniqueColumn` here is a **copy** of transform's for the reason `constraintsOf`
+  is one: a stage package may not import another. Taking only
+  `Decision.UniqueIndex`, as the first version did, gave a masked unique column's
+  default a value from the *non-unique* generator while every row got one from
+  the unique generator — a `DEFAULT` no row of that column can hold.
+  `TestAMaskedDefaultUnderAUniqueIndexIsMaskedAsAUniqueColumn` pins the pair by
+  asserting the bytes (and asserts the two generators really do differ on that
+  literal, so it cannot pass for the wrong reason), and
+  `TestUniqueColumnIsSpeltAsTransformSpellsIt` carries the case list.
+  **T-0164** owes the two spellings a shared home, as T-0162 owes the scanner
+  one.
+- **`defaultIsRewritable` declines three shapes, and each is exit 13 when the
+  literal is plainly personal data rather than a pass**: an array column (§5
+  masks element-wise, and a text[] default is one literal holding the whole
+  array's text form — `testdata/regressions/009` is the row-side version of that
+  mistake), a `json`/`jsonb`/`hstore` column (§4 replaces a document per leaf),
+  and a default calling `nextval` (its literal is a relation name, and a masked
+  one is a `CREATE TABLE` that fails after every table has been dropped).
+- **The scanner is `internal/pipeline`'s**, not this package's, because
+  `internal/verify`'s catalog pass needs the same one and a stage package may
+  not import another (internal/CLAUDE.md). A second copy of a scanner that
+  decides what is and is not inside the data boundary is the failure
+  `internal/verify/validators.go` already records from its own hand copy of the
+  classifier's validators. `internal/pipeline/CLAUDE.md` says that package holds
+  no implementation, so this is a stated exception with a task against it:
+  **T-0162** moves `Literal`, `Literals`, `RewriteLiterals` and `QuoteLiteral`
+  into a leaf beside `internal/textsig`.
+- **Owed, and filed. Arm 1 is dormant in the CLI and this task did not land
+  it.** `internal/core`'s `planRequest()` does not fill
+  `pipeline.PlanRequest.Key` — `resolveKey()` does not run until `move()`, after
+  `planStage` — so masking a masked column's default is implemented, unit-tested
+  and unreachable outside a caller that injects a key: every masked default whose
+  literal a strong validator hits is refused at exit 13 under arm 2's last clause
+  instead of masked. **T-0161** is the wiring (it is in `internal/core`, outside
+  this task's paths), and it flips
+  `testdata/regressions/011-masked-column-default-holds-a-literal.sql`'s header
+  from `exit 13` to `ok` and asserts the target's `pg_attrdef` holds a masked
+  address. Until then this rule is a **partial landing**: arms 2 and 3 are live
+  and arm 1 is not. What the gap does *not* do is loosen the second control:
+  `internal/verify`'s catalog pass exempts a masked column's `DEFAULT` only
+  where `pipeline.Column.DefaultOriginal` says this rewrite ran, so with arm 1
+  dormant nothing is exempt and every masked default is scanned in the target
+  (`internal/verify/catalog.go`'s `rewroteDefault`). The pair is a cross-package
+  contract: the field is written here and read there. **T-0163** is the other gap: this pass reads no index
+  predicate and no domain `CHECK`, although §11.1 recreates both — the
+  `internal/verify` catalog pass reads both, so what the miss costs is the
+  earlier and cheaper refusal, not the control.
+- **The guards.** `ddlliteral_test.go` holds all four arms without a database,
+  including the one the CLI cannot reach until T-0161: a masked column's default
+  really being rewritten, to the byte, to what `mask.Apply` gives for that
+  literal, under the same `mask.Constraints` its rows go through. Replacing
+  `checkDDLLiterals`'s body with `return nil` fails four of its tests.

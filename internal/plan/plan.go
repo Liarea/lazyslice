@@ -246,6 +246,14 @@ func (p *run) plan(ctx context.Context) (*pipeline.Plan, error) {
 	if err := p.checkUniqueDomain(); err != nil {
 		return nil, err
 	}
+	// §11.1's literal rule runs after the masker is finally chosen, because a
+	// masked column's default is rewritten with the masker its *rows* will go
+	// through and checkUniqueDomain is what overwrites that (ddlliteral.go,
+	// T-0134). It is still before assemble, so no key has left this stage and
+	// nothing in the target has been touched.
+	if err := p.checkDDLLiterals(); err != nil {
+		return nil, err
+	}
 	return p.assemble(root, rootReason), nil
 }
 

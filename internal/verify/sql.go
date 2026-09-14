@@ -202,3 +202,80 @@ func foldedProbeSQL(t ref.TableRef, column string) string {
 	return "SELECT EXISTS (SELECT 1 FROM " + quoteTable(t) + " t WHERE lower(t." +
 		quoteIdent(column) + "::text) = lower($1::text))"
 }
+
+// The two catalog reads of ARCHITECTURE.md section 6's catalog pass
+// (catalog.go). They are the target's own pg_attrdef and pg_constraint, read
+// back after the load, and they carry no parameter: the whole of what a literal
+// rule has to look at is every expression the target's schema holds.
+//
+// pg_attrdef holds a generated column's expression as well as an ordinary
+// default -- pg_attribute.attgenerated is what tells them apart -- so one read
+// covers two of the three object classes section 11.1 recreates that can carry
+// a literal. The system schemas are excluded by name and by the pg_ prefix,
+// because lazyslice never writes into one and pg_catalog's own defaults are
+// thousands of rows of noise.
+//
+// Both are ordered, so two runs over one target report the same object first.
+const catalogDefaultsSQL = `
+SELECT n.nspname,
+       c.relname,
+       a.attname,
+       CASE WHEN a.attgenerated <> '' THEN 'generated expression' ELSE 'default' END,
+       pg_get_expr(d.adbin, d.adrelid)
+  FROM pg_attrdef d
+  JOIN pg_class c ON c.oid = d.adrelid
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+  JOIN pg_attribute a ON a.attrelid = d.adrelid AND a.attnum = d.adnum
+ WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+   AND left(n.nspname, 3) <> 'pg_'
+ ORDER BY n.nspname, c.relname, a.attname`
+
+// catalogIndexesSQL is the third catalog read: a partial index's predicate and
+// an expression index's key expressions. Neither has a pg_constraint row —
+// pg_index.indpred and pg_index.indexprs are where they live — and
+// internal/load/ddl replays an index through pg_get_indexdef, so
+// `CREATE UNIQUE INDEX ... WHERE email = 'x@y.test'` carries its literal into
+// the target by a route internal/plan's own pass does not walk at all
+// (tracker T-0163). This is the only control over it, which is why the two
+// halves are read here rather than left to the comment above.
+const catalogIndexesSQL = `
+SELECT n.nspname,
+       c.relname,
+       ic.relname,
+       'index predicate',
+       pg_get_expr(i.indpred, i.indrelid)
+  FROM pg_index i
+  JOIN pg_class ic ON ic.oid = i.indexrelid
+  JOIN pg_class c ON c.oid = i.indrelid
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+ WHERE i.indpred IS NOT NULL
+   AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+   AND left(n.nspname, 3) <> 'pg_'
+UNION ALL
+SELECT n.nspname,
+       c.relname,
+       ic.relname,
+       'index expression',
+       pg_get_expr(i.indexprs, i.indrelid)
+  FROM pg_index i
+  JOIN pg_class ic ON ic.oid = i.indexrelid
+  JOIN pg_class c ON c.oid = i.indrelid
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+ WHERE i.indexprs IS NOT NULL
+   AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+   AND left(n.nspname, 3) <> 'pg_'
+ ORDER BY 1, 2, 3, 4`
+
+const catalogConstraintsSQL = `
+SELECT n.nspname,
+       coalesce(c.relname, ''),
+       t.conname,
+       'constraint',
+       pg_get_constraintdef(t.oid)
+  FROM pg_constraint t
+  JOIN pg_namespace n ON n.oid = t.connamespace
+  LEFT JOIN pg_class c ON c.oid = t.conrelid
+ WHERE t.contype IN ('c', 'x')
+   AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+   AND left(n.nspname, 3) <> 'pg_'
+ ORDER BY n.nspname, coalesce(c.relname, ''), t.conname`

@@ -2,7 +2,11 @@
 
 package pipeline
 
-import "context"
+import (
+	"context"
+
+	"github.com/Liarea/lazyslice/mask"
+)
 
 // Mode is how a table was reached, which decides whether its children are
 // followed. A row's mode is decided once, when it is first popped, and never
@@ -138,6 +142,22 @@ type PlanRequest struct {
 	// The planner does not read privileges itself — one run, one answer, and
 	// the header prints the same role the refusal names.
 	Priv RolePrivileges
+
+	// Key is the run key, for the one thing the planner masks: the string
+	// literals inside a masked column's DEFAULT (ARCHITECTURE.md section 11.1,
+	// amended 2026-09-14). Those literals are recreated in the target verbatim
+	// today, so a masked email column with DEFAULT 'ddl.canary@example.org'
+	// ships that address into the target's catalog and a later INSERT
+	// materialises it again (docs/reviews/2026-09-09 finding 5). Masking them
+	// through the column's own masker is what keeps the default a *working*
+	// default: the same key, category and generator the rows went through, so
+	// the default's value is the one a row holding that literal would have.
+	//
+	// It is a pointer because a nil key is a real state and not an error: the
+	// planner then cannot rewrite anything, and a literal a strong validator
+	// hits is refused at exit 13 instead of masked. Nothing else in this stage
+	// reads it, no row reaches it, and it never leaves the process.
+	Key *mask.Key
 
 	// Take, Cap and Depth are taken as given: an int cannot tell an unset field
 	// from an explicit zero, so internal/core substitutes section 3's defaults

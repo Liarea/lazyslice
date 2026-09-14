@@ -7,7 +7,7 @@
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 1 | 0 | 9 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
-| E5 Hardening | 5 | 12 | 1 | 56 | 0 | 0 |
+| E5 Hardening | 5 | 12 | 1 | 57 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
 | E9 Later | later | 21 | 0 | 20 | 4 | 0 |
 
@@ -29,7 +29,6 @@
 - T-0125 [open] E9 · Makefile's vet-tagged comment still says .golangci.yml does not lint the torture tag ()
 - T-0126 [open] E9 · internal/textsig/CLAUDE.md still says internal/verify has no URL entry (T-0122 has landed) ()
 - T-0128 [open] E9 · A multidimensional array carried as a text literal is flattened to one dimension at CopyFrom ()
-- T-0134 [open] E5 · Recreated DDL carries no sensitive literal: defaults on masked columns are masked, strong hits elsewhere refuse, verify scans the target catalog (opus)
 - T-0135 [open] E5 · dsn.Ref keeps the non-secret transport parameters so a rerun preserves sslmode and certificate paths (sonnet)
 - T-0136 [open] E5 · Second net: one strong hit in an unmasked column is a finding; classify masks a mixed column that carries a strong hit (sonnet)
 - T-0137 [open] E5 · JSON object keys that a strong validator hits are masked (sonnet)
@@ -46,9 +45,10 @@
 - T-0157 [open] E9 · Performance: the 20,000,000-row child run and byte-budget accounting (0.2) (sonnet)
 - T-0158 [open] E9 · Export the closed-value label list from mask so plan compares labels, not CHECK text ()
 - T-0159 [open] E9 · FK equality group: members with different type families can still mask differently ()
-- T-0161 [open] E9 · core fills pipeline.PlanRequest.Key so a masked column's DEFAULT is masked instead of refused ()
+- T-0161 [open] E5 · core fills pipeline.PlanRequest.Key so a masked column's DEFAULT is masked instead of refused ()
 - T-0162 [open] E9 · move the SQL literal scanner out of internal/pipeline into a leaf package beside internal/textsig ()
 - T-0163 [open] E9 · the plan-time DDL literal rule does not read index predicates or domain CHECKs ()
+- T-0164 [open] E9 · uniqueColumn is copied in internal/plan and internal/transform; give it a shared home ()
 
 ## Recently closed
 
@@ -60,6 +60,7 @@
 - T-0131 [done] E5 · Events carry no source value: polymorphic inference reports unknown type values by count and keyed digest, and an output-sink canary test proves it → done
 - T-0132 [done] E5 · The masker is chosen per FK-connected equality group, not per column → done
 - T-0133 [done] E5 · Core owns the run lifecycle: complete is written only after verify passes, and a residual failure empties the target → done
+- T-0134 [done] E5 · Recreated DDL carries no sensitive literal: defaults on masked columns are masked, strong hits elsewhere refuse, verify scans the target catalog → partial
 - T-0141 [done] E5 · README.md and SECURITY.md no longer claim every stage is a no-op → done
 - T-0147 [done] E9 · internal/classify/CLAUDE.md array-literal section is stale after T-0118/T-0129/T-0127 → done
 - T-0148 [done] E9 · Regenerate docs/ERRORS.md for the four exit-4 target-ownership codes → done
@@ -76,4 +77,3 @@
 - T-0100 [done] E5 · textsig.LooksSecret classifies a URL as a credential → done: in T-HARD-B (78530ef)
 - T-0103 [done] E5 · An array of an extension type is sampled as one opaque string, so the classifier never sees the values inside it → done: in T-HARD-B (78530ef)
 - T-0104 [done] E5 · The credential and online_id name rules miss the spellings an auth schema actually uses → done: in T-HARD-B (78530ef)
-- T-0105 [done] E5 · .golangci.yml does not lint the torture build tag → done: in T-HARD-C (4f9a186)
