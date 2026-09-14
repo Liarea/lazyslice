@@ -27,6 +27,8 @@ outcome: ""
 
 - 2026-09-14 2026-09-14 trimmed for v0.1.0: 2,000,000-row child, 60-second target, byte-limited batches kept; the 20M-row run moved to T-0155 (0.2)
 
+- 2026-09-14 2026-09-14 correction: the 20M-row follow-up is T-0157, not T-0155
+
 ## Post-mortem
 
 _(filled on close: what went well, what went badly, what we change next time)_

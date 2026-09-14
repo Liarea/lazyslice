@@ -25,6 +25,8 @@ The tap is empty and no tag has ever been cut, so gate 3 item "brew install from
 
 - 2026-09-14 created
 
+- 2026-09-14 2026-09-14 correction: the go-public prerequisite is T-0156, not T-0154
+
 ## Post-mortem
 
 _(filled on close: what went well, what went badly, what we change next time)_
