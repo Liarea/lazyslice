@@ -1,0 +1,9 @@
+  source s_race on 127.0.0.1 as postgres (flag) — --source
+! the role postgres can write to 1 table(s) in s_race — recommend a read-only role: CREATE ROLE lazyslice_ro LOGIN PASSWORD '…'; GRANT CONNECT ON DATABASE s_race TO lazyslice_ro; GRANT USAGE ON SCHEMA public TO lazyslice_ro; GRANT SELECT ON ALL TABLES IN SCHEMA public TO lazyslice_ro;
+  target t_race on 127.0.0.1 — --target
+  1 tables on Postgres 180006: 1 columns, 0 foreign keys
+  public.items.id: no name or value signal; surrogate key: preserved verbatim
+  public.items: 1 rows, child_ok; root
+  1 rows, 0 KiB of keys, 0 KiB of residual filter; the snapshot is held about 0.0s, assuming 20,000 rows/s
+  dropping public.items in the target
+  public.items: 1 rows

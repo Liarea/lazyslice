@@ -1,0 +1,36 @@
+2026/09/09 21:07:22 github.com/testcontainers/testcontainers-go - Connected to docker: 
+  Server Version: 28.5.2
+  API Version: 1.51
+  Operating System: Docker Desktop
+  Total Memory: 1970 MB
+  Labels:
+    com.docker.desktop.address=unix:///Users/gareth/Library/Containers/com.docker.docker/Data/docker-cli.sock
+  Testcontainers for Go Version: v0.44.0
+  Resolved Docker Host: unix:///var/run/docker.sock
+  Resolved Docker Socket Path: /var/run/docker.sock
+  Test SessionID: f1781d44fe184f2e4b70ce18ce09a65f5cbdefd5cd528ef1a702ba7c7b49d8f6
+  Test ProcessID: 9268687b-198f-4ba4-9e69-a72171b13757
+2026/09/09 21:07:22 🐳 Creating container for image postgres:16
+2026/09/09 21:07:22 🐳 Creating container for image testcontainers/ryuk:0.14.0
+2026/09/09 21:07:22 ✅ Container created: f194cba64ce4
+2026/09/09 21:07:22 🐳 Starting container: f194cba64ce4
+2026/09/09 21:07:22 ✅ Container started: f194cba64ce4
+2026/09/09 21:07:22 ⏳ Waiting for container id f194cba64ce4 image: testcontainers/ryuk:0.14.0. Waiting for: all of: [log message "Started", port 8080/tcp to be listening]
+2026/09/09 21:07:22 Shell not found in container
+2026/09/09 21:07:22 🔔 Container is ready: f194cba64ce4
+2026/09/09 21:07:22 ✅ Container created: 5caee9e94de9
+2026/09/09 21:07:22 🐳 Starting container: 5caee9e94de9
+2026/09/09 21:07:23 ✅ Container started: 5caee9e94de9
+2026/09/09 21:07:23 ⏳ Waiting for container id 5caee9e94de9 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:07:29 🔔 Container is ready: 5caee9e94de9
+2026/09/09 21:09:28 🐳 Stopping container: 5caee9e94de9
+2026/09/09 21:09:28 ✅ Container stopped: 5caee9e94de9
+2026/09/09 21:09:28 🐳 Terminating container: 5caee9e94de9
+2026/09/09 21:09:28 🚫 Container terminated: 5caee9e94de9
+--- FAIL: TestTwoExtractionsOverOneSnapshotAgree (126.39s)
+    extract_integration_test.go:264: testutil: resolving the mapped port of postgres:16: port not mapped after 30 attempts over 30s (known startup race between the container reporting ready and Docker's port table catching up, see T-0052): port "5432/tcp" not found
+FAIL
+FAIL	github.com/Liarea/lazyslice/internal/extract	126.671s
+ok  	github.com/Liarea/lazyslice/internal/load	3.094s
+ok  	github.com/Liarea/lazyslice/internal/pg	5.535s
+FAIL

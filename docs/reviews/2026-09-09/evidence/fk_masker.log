@@ -1,0 +1,17 @@
+  source s_fk_masker on 127.0.0.1 as postgres (flag) — --source
+! the role postgres can write to 2 table(s) in s_fk_masker — recommend a read-only role: CREATE ROLE lazyslice_ro LOGIN PASSWORD '…'; GRANT CONNECT ON DATABASE s_fk_masker TO lazyslice_ro; GRANT USAGE ON SCHEMA public TO lazyslice_ro; GRANT SELECT ON ALL TABLES IN SCHEMA public TO lazyslice_ro;
+  target t_fk_masker on 127.0.0.1 — --target
+  2 tables on Postgres 180006: 4 columns, 1 foreign keys
+  public.items.id: no name or value signal; surrogate key: preserved verbatim
+  public.items.token: name matches credential; 1/1 samples look like secrets
+  public.tokens.id: no name or value signal; surrogate key: preserved verbatim
+  public.tokens.token: name matches credential; 1/1 samples look like secrets
+  public.tokens: 1 rows, parent_only; parent of public.items via public.items.token
+  public.items: 1 rows, child_ok; root
+  2 rows, 0 KiB of keys, 0 KiB of residual filter; the snapshot is held about 0.0s, assuming 20,000 rows/s
+  dropping public.tokens in the target
+  dropping public.items in the target
+  public.tokens: 1 rows
+  public.items: 1 rows
+✗ the foreign key items_token_fkey on public.items does not validate: the slice is missing rows it references
+lazyslice: insert or update on table "items" violates foreign key constraint "items_token_fkey" (SQLSTATE 23503)

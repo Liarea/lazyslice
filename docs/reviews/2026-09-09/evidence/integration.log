@@ -1,0 +1,578 @@
+go test -tags integration -count=1 -timeout 30m  ./...
+ok  	github.com/Liarea/lazyslice/cmd/lazyslice	0.570s
+ok  	github.com/Liarea/lazyslice/internal/classify	0.377s
+ok  	github.com/Liarea/lazyslice/internal/config	0.447s
+ok  	github.com/Liarea/lazyslice/internal/core	4.770s
+2026/09/09 21:00:10 github.com/testcontainers/testcontainers-go - Connected to docker: 
+  Server Version: 28.5.2
+  API Version: 1.51
+  Operating System: Docker Desktop
+  Total Memory: 1970 MB
+  Labels:
+    com.docker.desktop.address=unix:///Users/gareth/Library/Containers/com.docker.docker/Data/docker-cli.sock
+  Testcontainers for Go Version: v0.44.0
+  Resolved Docker Host: unix:///var/run/docker.sock
+  Resolved Docker Socket Path: /var/run/docker.sock
+  Test SessionID: 56c50db8a0d2a218c38dc6e6c6f913c2da39079da4c4d3e4ccefe1389ad13e3f
+  Test ProcessID: 148cd6f0-e798-43de-8ea0-2db20fb4adab
+2026/09/09 21:00:10 🐳 Creating container for image postgres:16
+2026/09/09 21:00:10 ⏳ Waiting for Reaper "38d9d25a" to be ready
+2026/09/09 21:00:11 🔥 Reaper obtained from Docker for this test session 38d9d25a
+2026/09/09 21:00:11 ✅ Container created: 5f12bc43d51f
+2026/09/09 21:00:11 🐳 Starting container: 5f12bc43d51f
+2026/09/09 21:00:11 ✅ Container started: 5f12bc43d51f
+2026/09/09 21:00:11 ⏳ Waiting for container id 5f12bc43d51f image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:00:12 🔔 Container is ready: 5f12bc43d51f
+2026/09/09 21:00:13 🐳 Stopping container: 5f12bc43d51f
+2026/09/09 21:00:13 ✅ Container stopped: 5f12bc43d51f
+2026/09/09 21:00:13 🐳 Terminating container: 5f12bc43d51f
+2026/09/09 21:00:14 🚫 Container terminated: 5f12bc43d51f
+2026/09/09 21:00:14 🐳 Creating container for image postgres:16
+2026/09/09 21:00:14 ✅ Container created: 1fca6c4dfb4f
+2026/09/09 21:00:14 🐳 Starting container: 1fca6c4dfb4f
+2026/09/09 21:00:15 ✅ Container started: 1fca6c4dfb4f
+2026/09/09 21:00:15 ⏳ Waiting for container id 1fca6c4dfb4f image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:00:17 🔔 Container is ready: 1fca6c4dfb4f
+2026/09/09 21:00:18 🐳 Stopping container: 1fca6c4dfb4f
+2026/09/09 21:00:18 ✅ Container stopped: 1fca6c4dfb4f
+2026/09/09 21:00:18 🐳 Terminating container: 1fca6c4dfb4f
+2026/09/09 21:00:18 🚫 Container terminated: 1fca6c4dfb4f
+--- FAIL: TestAStoppedContainerIsOfferedAndStarted (1.49s)
+    discover_integration_test.go:169: provisioning the container this test then stops: provision: starting lazyslice-target-lazyslicerung4dlb8adiqzziw: Error response from daemon: failed to set up container networking: driver failed programming external connectivity on endpoint lazyslice-target-lazyslicerung4dlb8adiqzziw (efc9810e6ddb8630bde2f43f37965c45352292e369d5a3ead3d0bb143fec8cf6): Bind for 127.0.0.1:5433 failed: port is already allocated
+2026/09/09 21:00:20 🐳 Creating container for image postgres:16
+2026/09/09 21:00:20 ✅ Container created: f3628e4c8879
+2026/09/09 21:00:20 🐳 Starting container: f3628e4c8879
+2026/09/09 21:00:21 ✅ Container started: f3628e4c8879
+2026/09/09 21:00:21 ⏳ Waiting for container id f3628e4c8879 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:00:22 🔔 Container is ready: f3628e4c8879
+2026/09/09 21:00:22 🐳 Stopping container: f3628e4c8879
+2026/09/09 21:00:22 ✅ Container stopped: f3628e4c8879
+2026/09/09 21:00:22 🐳 Terminating container: f3628e4c8879
+2026/09/09 21:00:22 🚫 Container terminated: f3628e4c8879
+2026/09/09 21:00:26 🐳 Creating container for image postgres:16
+2026/09/09 21:00:26 ✅ Container created: 28dd0602ddf6
+2026/09/09 21:00:26 🐳 Starting container: 28dd0602ddf6
+2026/09/09 21:00:26 ✅ Container started: 28dd0602ddf6
+2026/09/09 21:00:26 ⏳ Waiting for container id 28dd0602ddf6 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:00:28 🔔 Container is ready: 28dd0602ddf6
+2026/09/09 21:00:28 🐳 Stopping container: 28dd0602ddf6
+2026/09/09 21:00:29 ✅ Container stopped: 28dd0602ddf6
+2026/09/09 21:00:29 🐳 Terminating container: 28dd0602ddf6
+2026/09/09 21:00:29 🚫 Container terminated: 28dd0602ddf6
+FAIL
+FAIL	github.com/Liarea/lazyslice/internal/discover	20.364s
+ok  	github.com/Liarea/lazyslice/internal/discover/dockerctx	0.924s
+ok  	github.com/Liarea/lazyslice/internal/discover/provision	14.802s
+ok  	github.com/Liarea/lazyslice/internal/dsn	1.246s
+ok  	github.com/Liarea/lazyslice/internal/emit	1.407s
+?   	github.com/Liarea/lazyslice/internal/event	[no test files]
+2026/09/09 21:00:11 github.com/testcontainers/testcontainers-go - Connected to docker: 
+  Server Version: 28.5.2
+  API Version: 1.51
+  Operating System: Docker Desktop
+  Total Memory: 1970 MB
+  Labels:
+    com.docker.desktop.address=unix:///Users/gareth/Library/Containers/com.docker.docker/Data/docker-cli.sock
+  Testcontainers for Go Version: v0.44.0
+  Resolved Docker Host: unix:///var/run/docker.sock
+  Resolved Docker Socket Path: /var/run/docker.sock
+  Test SessionID: 56c50db8a0d2a218c38dc6e6c6f913c2da39079da4c4d3e4ccefe1389ad13e3f
+  Test ProcessID: c0a5c6b3-4227-41ee-896b-ba04d3b7e632
+2026/09/09 21:00:11 🐳 Creating container for image postgres:16
+2026/09/09 21:00:11 ⏳ Waiting for Reaper "38d9d25a" to be ready
+2026/09/09 21:00:11 🔥 Reaper obtained from Docker for this test session 38d9d25a
+2026/09/09 21:00:11 ✅ Container created: 57aeb73f7877
+2026/09/09 21:00:11 🐳 Starting container: 57aeb73f7877
+2026/09/09 21:00:12 ✅ Container started: 57aeb73f7877
+2026/09/09 21:00:12 ⏳ Waiting for container id 57aeb73f7877 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:00:13 🔔 Container is ready: 57aeb73f7877
+2026/09/09 21:00:14 🐳 Stopping container: 57aeb73f7877
+2026/09/09 21:00:15 ✅ Container stopped: 57aeb73f7877
+2026/09/09 21:00:15 🐳 Terminating container: 57aeb73f7877
+2026/09/09 21:00:15 🚫 Container terminated: 57aeb73f7877
+2026/09/09 21:00:16 🐳 Creating container for image postgres:16
+2026/09/09 21:00:16 ✅ Container created: 6160589d81e6
+2026/09/09 21:00:16 🐳 Starting container: 6160589d81e6
+2026/09/09 21:00:16 ✅ Container started: 6160589d81e6
+2026/09/09 21:00:16 ⏳ Waiting for container id 6160589d81e6 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:00:18 🔔 Container is ready: 6160589d81e6
+2026/09/09 21:00:19 🐳 Stopping container: 6160589d81e6
+2026/09/09 21:00:20 ✅ Container stopped: 6160589d81e6
+2026/09/09 21:00:20 🐳 Terminating container: 6160589d81e6
+2026/09/09 21:00:20 🚫 Container terminated: 6160589d81e6
+2026/09/09 21:00:21 🐳 Creating container for image postgres:16
+2026/09/09 21:00:21 ✅ Container created: 15a93776d6ba
+2026/09/09 21:00:21 🐳 Starting container: 15a93776d6ba
+2026/09/09 21:00:21 ✅ Container started: 15a93776d6ba
+2026/09/09 21:00:21 ⏳ Waiting for container id 15a93776d6ba image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:00:27 🔔 Container is ready: 15a93776d6ba
+2026/09/09 21:02:27 🐳 Stopping container: 15a93776d6ba
+2026/09/09 21:02:27 ✅ Container stopped: 15a93776d6ba
+2026/09/09 21:02:27 🐳 Terminating container: 15a93776d6ba
+2026/09/09 21:02:27 🚫 Container terminated: 15a93776d6ba
+--- FAIL: TestTwoExtractionsOverOneSnapshotAgree (126.65s)
+    extract_integration_test.go:264: testutil: resolving the mapped port of postgres:16: port not mapped after 30 attempts over 30s (known startup race between the container reporting ready and Docker's port table catching up, see T-0052): port "5432/tcp" not found
+2026/09/09 21:02:27 🐳 Creating container for image postgres:16
+2026/09/09 21:02:27 ✅ Container created: a80a575ae826
+2026/09/09 21:02:27 🐳 Starting container: a80a575ae826
+2026/09/09 21:02:27 ✅ Container started: a80a575ae826
+2026/09/09 21:02:27 ⏳ Waiting for container id a80a575ae826 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:02:28 🔔 Container is ready: a80a575ae826
+2026/09/09 21:02:48 🐳 Stopping container: a80a575ae826
+2026/09/09 21:02:48 ✅ Container stopped: a80a575ae826
+2026/09/09 21:02:48 🐳 Terminating container: a80a575ae826
+2026/09/09 21:02:48 🚫 Container terminated: a80a575ae826
+2026/09/09 21:02:48 🐳 Creating container for image postgres:16
+2026/09/09 21:02:48 ✅ Container created: 3cb2e9154d66
+2026/09/09 21:02:48 🐳 Starting container: 3cb2e9154d66
+2026/09/09 21:02:48 ✅ Container started: 3cb2e9154d66
+2026/09/09 21:02:48 ⏳ Waiting for container id 3cb2e9154d66 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:02:49 🔔 Container is ready: 3cb2e9154d66
+2026/09/09 21:03:13 🐳 Stopping container: 3cb2e9154d66
+2026/09/09 21:03:13 ✅ Container stopped: 3cb2e9154d66
+2026/09/09 21:03:13 🐳 Terminating container: 3cb2e9154d66
+2026/09/09 21:03:13 🚫 Container terminated: 3cb2e9154d66
+FAIL
+FAIL	github.com/Liarea/lazyslice/internal/extract	183.702s
+ok  	github.com/Liarea/lazyslice/internal/introspect	21.489s
+ok  	github.com/Liarea/lazyslice/internal/invariants	72.667s
+2026/09/09 21:00:12 github.com/testcontainers/testcontainers-go - Connected to docker: 
+  Server Version: 28.5.2
+  API Version: 1.51
+  Operating System: Docker Desktop
+  Total Memory: 1970 MB
+  Labels:
+    com.docker.desktop.address=unix:///Users/gareth/Library/Containers/com.docker.docker/Data/docker-cli.sock
+  Testcontainers for Go Version: v0.44.0
+  Resolved Docker Host: unix:///var/run/docker.sock
+  Resolved Docker Socket Path: /var/run/docker.sock
+  Test SessionID: 56c50db8a0d2a218c38dc6e6c6f913c2da39079da4c4d3e4ccefe1389ad13e3f
+  Test ProcessID: ce05ec0b-99da-49cb-8670-805f0c180ad0
+2026/09/09 21:00:12 🐳 Creating container for image postgres:16
+2026/09/09 21:00:12 ⏳ Waiting for Reaper "38d9d25a" to be ready
+2026/09/09 21:00:12 🔥 Reaper obtained from Docker for this test session 38d9d25a
+2026/09/09 21:00:12 ✅ Container created: 01bcc67c79df
+2026/09/09 21:00:12 🐳 Starting container: 01bcc67c79df
+2026/09/09 21:00:13 ✅ Container started: 01bcc67c79df
+2026/09/09 21:00:13 ⏳ Waiting for container id 01bcc67c79df image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:00:15 🔔 Container is ready: 01bcc67c79df
+2026/09/09 21:00:18 🐳 Creating container for image postgres:16
+2026/09/09 21:00:18 ✅ Container created: f87cbddc5f5e
+2026/09/09 21:00:18 🐳 Starting container: f87cbddc5f5e
+2026/09/09 21:00:19 ✅ Container started: f87cbddc5f5e
+2026/09/09 21:00:19 ⏳ Waiting for container id f87cbddc5f5e image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:00:20 🔔 Container is ready: f87cbddc5f5e
+2026/09/09 21:00:22 🐳 Stopping container: f87cbddc5f5e
+2026/09/09 21:00:22 ✅ Container stopped: f87cbddc5f5e
+2026/09/09 21:00:22 🐳 Terminating container: f87cbddc5f5e
+2026/09/09 21:00:22 🚫 Container terminated: f87cbddc5f5e
+2026/09/09 21:00:22 🐳 Stopping container: 01bcc67c79df
+2026/09/09 21:00:23 ✅ Container stopped: 01bcc67c79df
+2026/09/09 21:00:23 🐳 Terminating container: 01bcc67c79df
+2026/09/09 21:00:23 🚫 Container terminated: 01bcc67c79df
+2026/09/09 21:00:23 🐳 Creating container for image postgres:16
+2026/09/09 21:00:23 ✅ Container created: bc3a07391e9e
+2026/09/09 21:00:23 🐳 Starting container: bc3a07391e9e
+2026/09/09 21:00:24 ✅ Container started: bc3a07391e9e
+2026/09/09 21:00:24 ⏳ Waiting for container id bc3a07391e9e image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:00:25 🔔 Container is ready: bc3a07391e9e
+2026/09/09 21:00:28 🐳 Creating container for image postgres:16
+2026/09/09 21:00:29 ✅ Container created: 2905382cbacc
+2026/09/09 21:00:29 🐳 Starting container: 2905382cbacc
+2026/09/09 21:00:29 ✅ Container started: 2905382cbacc
+2026/09/09 21:00:29 ⏳ Waiting for container id 2905382cbacc image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:00:30 🔔 Container is ready: 2905382cbacc
+2026/09/09 21:00:33 🐳 Stopping container: 2905382cbacc
+2026/09/09 21:00:33 ✅ Container stopped: 2905382cbacc
+2026/09/09 21:00:33 🐳 Terminating container: 2905382cbacc
+2026/09/09 21:00:33 🚫 Container terminated: 2905382cbacc
+2026/09/09 21:00:33 🐳 Stopping container: bc3a07391e9e
+2026/09/09 21:00:34 ✅ Container stopped: bc3a07391e9e
+2026/09/09 21:00:34 🐳 Terminating container: bc3a07391e9e
+2026/09/09 21:00:34 🚫 Container terminated: bc3a07391e9e
+2026/09/09 21:00:34 🐳 Creating container for image postgres:16
+2026/09/09 21:00:34 ✅ Container created: 8e2f1ac6c47e
+2026/09/09 21:00:34 🐳 Starting container: 8e2f1ac6c47e
+2026/09/09 21:00:34 ✅ Container started: 8e2f1ac6c47e
+2026/09/09 21:00:34 ⏳ Waiting for container id 8e2f1ac6c47e image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:00:35 🔔 Container is ready: 8e2f1ac6c47e
+2026/09/09 21:00:36 🐳 Creating container for image postgres:16
+2026/09/09 21:00:36 ✅ Container created: bf74b38e0c5e
+2026/09/09 21:00:36 🐳 Starting container: bf74b38e0c5e
+2026/09/09 21:00:36 ✅ Container started: bf74b38e0c5e
+2026/09/09 21:00:36 ⏳ Waiting for container id bf74b38e0c5e image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:00:37 🔔 Container is ready: bf74b38e0c5e
+2026/09/09 21:00:38 🐳 Stopping container: bf74b38e0c5e
+2026/09/09 21:00:39 ✅ Container stopped: bf74b38e0c5e
+2026/09/09 21:00:39 🐳 Terminating container: bf74b38e0c5e
+2026/09/09 21:00:39 🚫 Container terminated: bf74b38e0c5e
+2026/09/09 21:00:39 🐳 Stopping container: 8e2f1ac6c47e
+2026/09/09 21:00:39 ✅ Container stopped: 8e2f1ac6c47e
+2026/09/09 21:00:39 🐳 Terminating container: 8e2f1ac6c47e
+2026/09/09 21:00:39 🚫 Container terminated: 8e2f1ac6c47e
+2026/09/09 21:00:40 🐳 Creating container for image postgres:16
+2026/09/09 21:00:40 ✅ Container created: ffa1df7805a4
+2026/09/09 21:00:40 🐳 Starting container: ffa1df7805a4
+2026/09/09 21:00:40 ✅ Container started: ffa1df7805a4
+2026/09/09 21:00:40 ⏳ Waiting for container id ffa1df7805a4 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:00:41 🔔 Container is ready: ffa1df7805a4
+2026/09/09 21:00:42 🐳 Creating container for image postgres:16
+2026/09/09 21:00:42 ✅ Container created: fbb2dd1151a0
+2026/09/09 21:00:42 🐳 Starting container: fbb2dd1151a0
+2026/09/09 21:00:42 ✅ Container started: fbb2dd1151a0
+2026/09/09 21:00:42 ⏳ Waiting for container id fbb2dd1151a0 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:00:44 🔔 Container is ready: fbb2dd1151a0
+2026/09/09 21:00:44 🐳 Stopping container: fbb2dd1151a0
+2026/09/09 21:00:45 ✅ Container stopped: fbb2dd1151a0
+2026/09/09 21:00:45 🐳 Terminating container: fbb2dd1151a0
+2026/09/09 21:00:45 🚫 Container terminated: fbb2dd1151a0
+2026/09/09 21:00:45 🐳 Stopping container: ffa1df7805a4
+2026/09/09 21:00:46 ✅ Container stopped: ffa1df7805a4
+2026/09/09 21:00:46 🐳 Terminating container: ffa1df7805a4
+2026/09/09 21:00:46 🚫 Container terminated: ffa1df7805a4
+2026/09/09 21:00:46 🐳 Creating container for image postgres:16
+2026/09/09 21:00:46 ✅ Container created: 8964ef139e32
+2026/09/09 21:00:46 🐳 Starting container: 8964ef139e32
+2026/09/09 21:00:46 ✅ Container started: 8964ef139e32
+2026/09/09 21:00:46 ⏳ Waiting for container id 8964ef139e32 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:00:52 🔔 Container is ready: 8964ef139e32
+2026/09/09 21:02:52 🐳 Stopping container: 8964ef139e32
+2026/09/09 21:02:52 ✅ Container stopped: 8964ef139e32
+2026/09/09 21:02:52 🐳 Terminating container: 8964ef139e32
+2026/09/09 21:02:52 🚫 Container terminated: 8964ef139e32
+--- FAIL: TestKillNineLeavesEveryTableEmptyOrComplete (126.09s)
+    load_integration_test.go:729: testutil: resolving the mapped port of postgres:16: port not mapped after 30 attempts over 30s (known startup race between the container reporting ready and Docker's port table catching up, see T-0052): port "5432/tcp" not found
+FAIL
+FAIL	github.com/Liarea/lazyslice/internal/load	162.349s
+ok  	github.com/Liarea/lazyslice/internal/load/ddl	1.697s
+2026/09/09 21:00:12 github.com/testcontainers/testcontainers-go - Connected to docker: 
+  Server Version: 28.5.2
+  API Version: 1.51
+  Operating System: Docker Desktop
+  Total Memory: 1970 MB
+  Labels:
+    com.docker.desktop.address=unix:///Users/gareth/Library/Containers/com.docker.docker/Data/docker-cli.sock
+  Testcontainers for Go Version: v0.44.0
+  Resolved Docker Host: unix:///var/run/docker.sock
+  Resolved Docker Socket Path: /var/run/docker.sock
+  Test SessionID: 56c50db8a0d2a218c38dc6e6c6f913c2da39079da4c4d3e4ccefe1389ad13e3f
+  Test ProcessID: 1d7f1cc9-3a90-4335-991f-ee76478bae7f
+2026/09/09 21:00:13 🐳 Creating container for image postgres:16
+2026/09/09 21:00:13 ⏳ Waiting for Reaper "38d9d25a" to be ready
+2026/09/09 21:00:13 🔥 Reaper obtained from Docker for this test session 38d9d25a
+2026/09/09 21:00:13 ✅ Container created: afae3843a6a4
+2026/09/09 21:00:13 🐳 Starting container: afae3843a6a4
+2026/09/09 21:00:13 ✅ Container started: afae3843a6a4
+2026/09/09 21:00:13 ⏳ Waiting for container id afae3843a6a4 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:00:16 🔔 Container is ready: afae3843a6a4
+2026/09/09 21:00:16 🐳 Stopping container: afae3843a6a4
+2026/09/09 21:00:17 ✅ Container stopped: afae3843a6a4
+2026/09/09 21:00:17 🐳 Terminating container: afae3843a6a4
+2026/09/09 21:00:17 🚫 Container terminated: afae3843a6a4
+2026/09/09 21:00:17 🐳 Creating container for image postgres:16
+2026/09/09 21:00:18 ✅ Container created: e8ab99decdd0
+2026/09/09 21:00:18 🐳 Starting container: e8ab99decdd0
+2026/09/09 21:00:18 ✅ Container started: e8ab99decdd0
+2026/09/09 21:00:18 ⏳ Waiting for container id e8ab99decdd0 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:00:20 🔔 Container is ready: e8ab99decdd0
+2026/09/09 21:00:20 🐳 Stopping container: e8ab99decdd0
+2026/09/09 21:00:21 ✅ Container stopped: e8ab99decdd0
+2026/09/09 21:00:21 🐳 Terminating container: e8ab99decdd0
+2026/09/09 21:00:21 🚫 Container terminated: e8ab99decdd0
+2026/09/09 21:00:21 🐳 Creating container for image postgres:16
+2026/09/09 21:00:22 ✅ Container created: ff48613ab011
+2026/09/09 21:00:22 🐳 Starting container: ff48613ab011
+2026/09/09 21:00:22 ✅ Container started: ff48613ab011
+2026/09/09 21:00:22 ⏳ Waiting for container id ff48613ab011 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:00:23 🔔 Container is ready: ff48613ab011
+2026/09/09 21:00:23 🐳 Stopping container: ff48613ab011
+2026/09/09 21:00:24 ✅ Container stopped: ff48613ab011
+2026/09/09 21:00:24 🐳 Terminating container: ff48613ab011
+2026/09/09 21:00:24 🚫 Container terminated: ff48613ab011
+2026/09/09 21:00:24 🐳 Creating container for image postgres:16
+2026/09/09 21:00:25 ✅ Container created: 577ad59c3550
+2026/09/09 21:00:25 🐳 Starting container: 577ad59c3550
+2026/09/09 21:00:25 ✅ Container started: 577ad59c3550
+2026/09/09 21:00:25 ⏳ Waiting for container id 577ad59c3550 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:00:27 🔔 Container is ready: 577ad59c3550
+2026/09/09 21:00:27 🐳 Stopping container: 577ad59c3550
+2026/09/09 21:00:27 ✅ Container stopped: 577ad59c3550
+2026/09/09 21:00:27 🐳 Terminating container: 577ad59c3550
+2026/09/09 21:00:27 🚫 Container terminated: 577ad59c3550
+2026/09/09 21:00:28 🐳 Creating container for image postgres:16
+2026/09/09 21:00:28 ✅ Container created: 1726a06f9902
+2026/09/09 21:00:28 🐳 Starting container: 1726a06f9902
+2026/09/09 21:00:28 ✅ Container started: 1726a06f9902
+2026/09/09 21:00:28 ⏳ Waiting for container id 1726a06f9902 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:00:30 🔔 Container is ready: 1726a06f9902
+2026/09/09 21:00:30 🐳 Stopping container: 1726a06f9902
+2026/09/09 21:00:30 ✅ Container stopped: 1726a06f9902
+2026/09/09 21:00:30 🐳 Terminating container: 1726a06f9902
+2026/09/09 21:00:31 🚫 Container terminated: 1726a06f9902
+2026/09/09 21:00:31 🐳 Creating container for image postgres:16
+2026/09/09 21:00:31 ✅ Container created: 952c59756578
+2026/09/09 21:00:31 🐳 Starting container: 952c59756578
+2026/09/09 21:00:31 ✅ Container started: 952c59756578
+2026/09/09 21:00:31 ⏳ Waiting for container id 952c59756578 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:00:33 🔔 Container is ready: 952c59756578
+2026/09/09 21:00:33 🐳 Stopping container: 952c59756578
+2026/09/09 21:00:34 ✅ Container stopped: 952c59756578
+2026/09/09 21:00:34 🐳 Terminating container: 952c59756578
+2026/09/09 21:00:34 🚫 Container terminated: 952c59756578
+2026/09/09 21:00:34 🐳 Creating container for image postgres:16
+2026/09/09 21:00:35 ✅ Container created: ee89598bf6f6
+2026/09/09 21:00:35 🐳 Starting container: ee89598bf6f6
+2026/09/09 21:00:35 ✅ Container started: ee89598bf6f6
+2026/09/09 21:00:35 ⏳ Waiting for container id ee89598bf6f6 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:00:36 🔔 Container is ready: ee89598bf6f6
+2026/09/09 21:00:36 🐳 Stopping container: ee89598bf6f6
+2026/09/09 21:00:36 ✅ Container stopped: ee89598bf6f6
+2026/09/09 21:00:36 🐳 Terminating container: ee89598bf6f6
+2026/09/09 21:00:36 🚫 Container terminated: ee89598bf6f6
+2026/09/09 21:00:37 🐳 Creating container for image postgres:16
+2026/09/09 21:00:37 ✅ Container created: 4f218fe83597
+2026/09/09 21:00:37 🐳 Starting container: 4f218fe83597
+2026/09/09 21:00:37 ✅ Container started: 4f218fe83597
+2026/09/09 21:00:37 ⏳ Waiting for container id 4f218fe83597 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:00:38 🔔 Container is ready: 4f218fe83597
+2026/09/09 21:00:38 🐳 Stopping container: 4f218fe83597
+2026/09/09 21:00:39 ✅ Container stopped: 4f218fe83597
+2026/09/09 21:00:39 🐳 Terminating container: 4f218fe83597
+2026/09/09 21:00:40 🚫 Container terminated: 4f218fe83597
+2026/09/09 21:00:40 🐳 Creating container for image postgres:16
+2026/09/09 21:00:40 ✅ Container created: d1c1a1d1f1d5
+2026/09/09 21:00:40 🐳 Starting container: d1c1a1d1f1d5
+2026/09/09 21:00:40 ✅ Container started: d1c1a1d1f1d5
+2026/09/09 21:00:40 ⏳ Waiting for container id d1c1a1d1f1d5 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:00:42 🔔 Container is ready: d1c1a1d1f1d5
+2026/09/09 21:00:42 🐳 Stopping container: d1c1a1d1f1d5
+2026/09/09 21:00:42 ✅ Container stopped: d1c1a1d1f1d5
+2026/09/09 21:00:42 🐳 Terminating container: d1c1a1d1f1d5
+2026/09/09 21:00:42 🚫 Container terminated: d1c1a1d1f1d5
+2026/09/09 21:00:42 🐳 Creating container for image postgres:16
+2026/09/09 21:00:43 ✅ Container created: b8e740f302a8
+2026/09/09 21:00:43 🐳 Starting container: b8e740f302a8
+2026/09/09 21:00:43 ✅ Container started: b8e740f302a8
+2026/09/09 21:00:43 ⏳ Waiting for container id b8e740f302a8 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:00:44 🔔 Container is ready: b8e740f302a8
+2026/09/09 21:00:44 🐳 Stopping container: b8e740f302a8
+2026/09/09 21:00:44 ✅ Container stopped: b8e740f302a8
+2026/09/09 21:00:44 🐳 Terminating container: b8e740f302a8
+2026/09/09 21:00:44 🚫 Container terminated: b8e740f302a8
+2026/09/09 21:00:45 🐳 Creating container for image postgres:16
+2026/09/09 21:00:45 ✅ Container created: 29a1819605f4
+2026/09/09 21:00:45 🐳 Starting container: 29a1819605f4
+2026/09/09 21:00:46 ✅ Container started: 29a1819605f4
+2026/09/09 21:00:46 ⏳ Waiting for container id 29a1819605f4 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:00:47 🔔 Container is ready: 29a1819605f4
+2026/09/09 21:00:47 🐳 Creating container for image edoburu/pgbouncer:v1.25.2-p0
+2026/09/09 21:00:47 ✅ Container created: 9f603188d74b
+2026/09/09 21:00:47 🐳 Starting container: 9f603188d74b
+2026/09/09 21:00:48 ✅ Container started: 9f603188d74b
+2026/09/09 21:00:48 ⏳ Waiting for container id 9f603188d74b image: edoburu/pgbouncer:v1.25.2-p0. Waiting for: all of: [log message "process up: PgBouncer"]
+2026/09/09 21:00:48 🔔 Container is ready: 9f603188d74b
+2026/09/09 21:00:48 🐳 Stopping container: 9f603188d74b
+2026/09/09 21:00:48 ✅ Container stopped: 9f603188d74b
+2026/09/09 21:00:48 🐳 Terminating container: 9f603188d74b
+2026/09/09 21:00:48 🚫 Container terminated: 9f603188d74b
+2026/09/09 21:00:48 🐳 Stopping container: 29a1819605f4
+2026/09/09 21:00:49 ✅ Container stopped: 29a1819605f4
+2026/09/09 21:00:49 🐳 Terminating container: 29a1819605f4
+2026/09/09 21:00:49 🚫 Container terminated: 29a1819605f4
+2026/09/09 21:00:49 🐳 Creating container for image postgres:16
+2026/09/09 21:00:49 ✅ Container created: 779ca38db776
+2026/09/09 21:00:49 🐳 Starting container: 779ca38db776
+2026/09/09 21:00:49 ✅ Container started: 779ca38db776
+2026/09/09 21:00:49 ⏳ Waiting for container id 779ca38db776 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:00:51 🔔 Container is ready: 779ca38db776
+2026/09/09 21:00:51 🐳 Creating container for image edoburu/pgbouncer:v1.25.2-p0
+2026/09/09 21:00:51 ✅ Container created: 408dafe5e4d7
+2026/09/09 21:00:51 🐳 Starting container: 408dafe5e4d7
+2026/09/09 21:00:51 ✅ Container started: 408dafe5e4d7
+2026/09/09 21:00:51 ⏳ Waiting for container id 408dafe5e4d7 image: edoburu/pgbouncer:v1.25.2-p0. Waiting for: all of: [log message "process up: PgBouncer"]
+2026/09/09 21:00:51 🔔 Container is ready: 408dafe5e4d7
+2026/09/09 21:00:51 🐳 Stopping container: 408dafe5e4d7
+2026/09/09 21:00:52 ✅ Container stopped: 408dafe5e4d7
+2026/09/09 21:00:52 🐳 Terminating container: 408dafe5e4d7
+2026/09/09 21:00:52 🚫 Container terminated: 408dafe5e4d7
+2026/09/09 21:00:52 🐳 Stopping container: 779ca38db776
+2026/09/09 21:00:52 ✅ Container stopped: 779ca38db776
+2026/09/09 21:00:52 🐳 Terminating container: 779ca38db776
+2026/09/09 21:00:52 🚫 Container terminated: 779ca38db776
+2026/09/09 21:00:53 🐳 Creating container for image postgres:16
+2026/09/09 21:00:53 ✅ Container created: c921da355b12
+2026/09/09 21:00:53 🐳 Starting container: c921da355b12
+2026/09/09 21:00:53 ✅ Container started: c921da355b12
+2026/09/09 21:00:53 ⏳ Waiting for container id c921da355b12 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:00:54 🔔 Container is ready: c921da355b12
+2026/09/09 21:00:54 🐳 Creating container for image edoburu/pgbouncer:v1.25.2-p0
+2026/09/09 21:00:54 ✅ Container created: 274614c1f264
+2026/09/09 21:00:54 🐳 Starting container: 274614c1f264
+2026/09/09 21:00:55 ✅ Container started: 274614c1f264
+2026/09/09 21:00:55 ⏳ Waiting for container id 274614c1f264 image: edoburu/pgbouncer:v1.25.2-p0. Waiting for: all of: [log message "process up: PgBouncer"]
+2026/09/09 21:00:55 🔔 Container is ready: 274614c1f264
+2026/09/09 21:00:55 🐳 Stopping container: 274614c1f264
+2026/09/09 21:00:55 ✅ Container stopped: 274614c1f264
+2026/09/09 21:00:55 🐳 Terminating container: 274614c1f264
+2026/09/09 21:00:55 🚫 Container terminated: 274614c1f264
+2026/09/09 21:00:55 🐳 Stopping container: c921da355b12
+2026/09/09 21:00:55 ✅ Container stopped: c921da355b12
+2026/09/09 21:00:55 🐳 Terminating container: c921da355b12
+2026/09/09 21:00:56 🚫 Container terminated: c921da355b12
+2026/09/09 21:00:56 🐳 Creating container for image postgres:16
+2026/09/09 21:00:56 ✅ Container created: 44ccfb70b37b
+2026/09/09 21:00:56 🐳 Starting container: 44ccfb70b37b
+2026/09/09 21:00:56 ✅ Container started: 44ccfb70b37b
+2026/09/09 21:00:56 ⏳ Waiting for container id 44ccfb70b37b image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:00:58 🔔 Container is ready: 44ccfb70b37b
+2026/09/09 21:00:58 🐳 Creating container for image edoburu/pgbouncer:v1.25.2-p0
+2026/09/09 21:00:58 ✅ Container created: cb46d3dbbbe3
+2026/09/09 21:00:58 🐳 Starting container: cb46d3dbbbe3
+2026/09/09 21:00:58 ✅ Container started: cb46d3dbbbe3
+2026/09/09 21:00:58 ⏳ Waiting for container id cb46d3dbbbe3 image: edoburu/pgbouncer:v1.25.2-p0. Waiting for: all of: [log message "process up: PgBouncer"]
+2026/09/09 21:00:58 🔔 Container is ready: cb46d3dbbbe3
+2026/09/09 21:01:00 🐳 Stopping container: cb46d3dbbbe3
+2026/09/09 21:01:01 ✅ Container stopped: cb46d3dbbbe3
+2026/09/09 21:01:01 🐳 Terminating container: cb46d3dbbbe3
+2026/09/09 21:01:01 🚫 Container terminated: cb46d3dbbbe3
+2026/09/09 21:01:01 🐳 Stopping container: 44ccfb70b37b
+2026/09/09 21:01:01 ✅ Container stopped: 44ccfb70b37b
+2026/09/09 21:01:01 🐳 Terminating container: 44ccfb70b37b
+2026/09/09 21:01:01 🚫 Container terminated: 44ccfb70b37b
+2026/09/09 21:01:01 🐳 Creating container for image postgres:16
+2026/09/09 21:01:01 ✅ Container created: 390b506a7b02
+2026/09/09 21:01:01 🐳 Starting container: 390b506a7b02
+2026/09/09 21:01:01 ✅ Container started: 390b506a7b02
+2026/09/09 21:01:01 ⏳ Waiting for container id 390b506a7b02 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:01:07 🔔 Container is ready: 390b506a7b02
+2026/09/09 21:03:07 🐳 Stopping container: 390b506a7b02
+2026/09/09 21:03:07 ✅ Container stopped: 390b506a7b02
+2026/09/09 21:03:07 🐳 Terminating container: 390b506a7b02
+2026/09/09 21:03:07 🚫 Container terminated: 390b506a7b02
+--- FAIL: TestAPoolerWithOneServerConnectionSerialisesTheExtract (126.08s)
+    pooler_integration_test.go:373: testutil: resolving the mapped port of postgres:16: port not mapped after 30 attempts over 30s (known startup race between the container reporting ready and Docker's port table catching up, see T-0052): port "5432/tcp" not found
+2026/09/09 21:03:07 🐳 Creating container for image postgres:16
+2026/09/09 21:03:07 ✅ Container created: 725903ec6d79
+2026/09/09 21:03:07 🐳 Starting container: 725903ec6d79
+2026/09/09 21:03:07 ✅ Container started: 725903ec6d79
+2026/09/09 21:03:07 ⏳ Waiting for container id 725903ec6d79 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:03:08 🔔 Container is ready: 725903ec6d79
+2026/09/09 21:03:08 🐳 Stopping container: 725903ec6d79
+2026/09/09 21:03:08 ✅ Container stopped: 725903ec6d79
+2026/09/09 21:03:08 🐳 Terminating container: 725903ec6d79
+2026/09/09 21:03:08 🚫 Container terminated: 725903ec6d79
+2026/09/09 21:03:08 🐳 Creating container for image postgres:16
+2026/09/09 21:03:08 ✅ Container created: 8b2482c57968
+2026/09/09 21:03:08 🐳 Starting container: 8b2482c57968
+2026/09/09 21:03:09 ✅ Container started: 8b2482c57968
+2026/09/09 21:03:09 ⏳ Waiting for container id 8b2482c57968 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:03:09 🔔 Container is ready: 8b2482c57968
+2026/09/09 21:03:09 🐳 Stopping container: 8b2482c57968
+2026/09/09 21:03:10 ✅ Container stopped: 8b2482c57968
+2026/09/09 21:03:10 🐳 Terminating container: 8b2482c57968
+2026/09/09 21:03:10 🚫 Container terminated: 8b2482c57968
+2026/09/09 21:03:10 🐳 Creating container for image postgres:16
+2026/09/09 21:03:10 ✅ Container created: d5d0a6e7bbda
+2026/09/09 21:03:10 🐳 Starting container: d5d0a6e7bbda
+2026/09/09 21:03:10 ✅ Container started: d5d0a6e7bbda
+2026/09/09 21:03:10 ⏳ Waiting for container id d5d0a6e7bbda image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:03:11 🔔 Container is ready: d5d0a6e7bbda
+2026/09/09 21:03:11 🐳 Stopping container: d5d0a6e7bbda
+2026/09/09 21:03:11 ✅ Container stopped: d5d0a6e7bbda
+2026/09/09 21:03:11 🐳 Terminating container: d5d0a6e7bbda
+2026/09/09 21:03:11 🚫 Container terminated: d5d0a6e7bbda
+2026/09/09 21:03:11 🐳 Creating container for image postgres:16
+2026/09/09 21:03:11 ✅ Container created: f147e9160f8c
+2026/09/09 21:03:11 🐳 Starting container: f147e9160f8c
+2026/09/09 21:03:11 ✅ Container started: f147e9160f8c
+2026/09/09 21:03:11 ⏳ Waiting for container id f147e9160f8c image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:03:12 🔔 Container is ready: f147e9160f8c
+2026/09/09 21:03:12 🐳 Creating container for image postgres:16
+2026/09/09 21:03:12 ✅ Container created: 9cfa6d9df2fc
+2026/09/09 21:03:12 🐳 Starting container: 9cfa6d9df2fc
+2026/09/09 21:03:12 ✅ Container started: 9cfa6d9df2fc
+2026/09/09 21:03:12 ⏳ Waiting for container id 9cfa6d9df2fc image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:03:13 🔔 Container is ready: 9cfa6d9df2fc
+2026/09/09 21:03:13 🐳 Stopping container: 9cfa6d9df2fc
+2026/09/09 21:03:13 ✅ Container stopped: 9cfa6d9df2fc
+2026/09/09 21:03:13 🐳 Terminating container: 9cfa6d9df2fc
+2026/09/09 21:03:13 🚫 Container terminated: 9cfa6d9df2fc
+2026/09/09 21:03:13 🐳 Stopping container: f147e9160f8c
+2026/09/09 21:03:13 ✅ Container stopped: f147e9160f8c
+2026/09/09 21:03:13 🐳 Terminating container: f147e9160f8c
+2026/09/09 21:03:13 🚫 Container terminated: f147e9160f8c
+2026/09/09 21:03:13 🐳 Creating container for image postgres:16
+2026/09/09 21:03:13 ✅ Container created: 61a32b2149e5
+2026/09/09 21:03:13 🐳 Starting container: 61a32b2149e5
+2026/09/09 21:03:14 ✅ Container started: 61a32b2149e5
+2026/09/09 21:03:14 ⏳ Waiting for container id 61a32b2149e5 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:03:14 🔔 Container is ready: 61a32b2149e5
+2026/09/09 21:03:14 🐳 Creating container for image postgres:16
+2026/09/09 21:03:14 ✅ Container created: 1b030d936fb0
+2026/09/09 21:03:14 🐳 Starting container: 1b030d936fb0
+2026/09/09 21:03:14 ✅ Container started: 1b030d936fb0
+2026/09/09 21:03:14 ⏳ Waiting for container id 1b030d936fb0 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:03:15 🔔 Container is ready: 1b030d936fb0
+2026/09/09 21:03:15 🐳 Stopping container: 1b030d936fb0
+2026/09/09 21:03:15 ✅ Container stopped: 1b030d936fb0
+2026/09/09 21:03:15 🐳 Terminating container: 1b030d936fb0
+2026/09/09 21:03:15 🚫 Container terminated: 1b030d936fb0
+2026/09/09 21:03:15 🐳 Stopping container: 61a32b2149e5
+2026/09/09 21:03:15 ✅ Container stopped: 61a32b2149e5
+2026/09/09 21:03:15 🐳 Terminating container: 61a32b2149e5
+2026/09/09 21:03:15 🚫 Container terminated: 61a32b2149e5
+2026/09/09 21:03:15 🐳 Creating container for image postgres:16
+2026/09/09 21:03:15 ✅ Container created: c4a463f28b61
+2026/09/09 21:03:15 🐳 Starting container: c4a463f28b61
+2026/09/09 21:03:16 ✅ Container started: c4a463f28b61
+2026/09/09 21:03:16 ⏳ Waiting for container id c4a463f28b61 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:03:16 🔔 Container is ready: c4a463f28b61
+2026/09/09 21:03:16 🐳 Creating container for image postgres:16
+2026/09/09 21:03:16 ✅ Container created: f4bebd358b31
+2026/09/09 21:03:16 🐳 Starting container: f4bebd358b31
+2026/09/09 21:03:16 ✅ Container started: f4bebd358b31
+2026/09/09 21:03:16 ⏳ Waiting for container id f4bebd358b31 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:03:17 🔔 Container is ready: f4bebd358b31
+2026/09/09 21:03:17 🐳 Stopping container: f4bebd358b31
+2026/09/09 21:03:17 ✅ Container stopped: f4bebd358b31
+2026/09/09 21:03:17 🐳 Terminating container: f4bebd358b31
+2026/09/09 21:03:17 🚫 Container terminated: f4bebd358b31
+2026/09/09 21:03:17 🐳 Stopping container: c4a463f28b61
+2026/09/09 21:03:17 ✅ Container stopped: c4a463f28b61
+2026/09/09 21:03:17 🐳 Terminating container: c4a463f28b61
+2026/09/09 21:03:18 🚫 Container terminated: c4a463f28b61
+2026/09/09 21:03:18 🐳 Creating container for image postgres:16
+2026/09/09 21:03:18 ✅ Container created: 3429c0c5ff71
+2026/09/09 21:03:18 🐳 Starting container: 3429c0c5ff71
+2026/09/09 21:03:18 ✅ Container started: 3429c0c5ff71
+2026/09/09 21:03:18 ⏳ Waiting for container id 3429c0c5ff71 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:03:18 🔔 Container is ready: 3429c0c5ff71
+2026/09/09 21:03:18 🐳 Creating container for image postgres:16
+2026/09/09 21:03:18 ✅ Container created: d9e7a08db7d9
+2026/09/09 21:03:18 🐳 Starting container: d9e7a08db7d9
+2026/09/09 21:03:18 ✅ Container started: d9e7a08db7d9
+2026/09/09 21:03:18 ⏳ Waiting for container id d9e7a08db7d9 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:03:19 🔔 Container is ready: d9e7a08db7d9
+2026/09/09 21:03:19 🐳 Stopping container: d9e7a08db7d9
+2026/09/09 21:03:19 ✅ Container stopped: d9e7a08db7d9
+2026/09/09 21:03:19 🐳 Terminating container: d9e7a08db7d9
+2026/09/09 21:03:19 🚫 Container terminated: d9e7a08db7d9
+2026/09/09 21:03:19 🐳 Stopping container: 3429c0c5ff71
+2026/09/09 21:03:19 ✅ Container stopped: 3429c0c5ff71
+2026/09/09 21:03:19 🐳 Terminating container: 3429c0c5ff71
+2026/09/09 21:03:19 🚫 Container terminated: 3429c0c5ff71
+FAIL
+FAIL	github.com/Liarea/lazyslice/internal/pg	188.949s
+?   	github.com/Liarea/lazyslice/internal/pipeline	[no test files]
+ok  	github.com/Liarea/lazyslice/internal/plan	43.454s
+?   	github.com/Liarea/lazyslice/internal/ref	[no test files]
+ok  	github.com/Liarea/lazyslice/internal/render	0.616s
+ok  	github.com/Liarea/lazyslice/internal/repo	0.560s
+ok  	github.com/Liarea/lazyslice/internal/testutil	45.747s
+ok  	github.com/Liarea/lazyslice/internal/textsig	0.218s
+ok  	github.com/Liarea/lazyslice/internal/transform	0.487s
+ok  	github.com/Liarea/lazyslice/internal/tui	0.334s
+ok  	github.com/Liarea/lazyslice/internal/verify	52.236s
+ok  	github.com/Liarea/lazyslice/tools/docgen	0.266s
+FAIL
+make: *** [integration] Error 1

@@ -1,0 +1,460 @@
+=== RUN   TestTortureSchemas
+=== RUN   TestTortureSchemas/rails-activestorage
+2026/09/09 21:04:26 github.com/testcontainers/testcontainers-go - Connected to docker: 
+  Server Version: 28.5.2
+  API Version: 1.51
+  Operating System: Docker Desktop
+  Total Memory: 1970 MB
+  Labels:
+    com.docker.desktop.address=unix:///Users/gareth/Library/Containers/com.docker.docker/Data/docker-cli.sock
+  Testcontainers for Go Version: v0.44.0
+  Resolved Docker Host: unix:///var/run/docker.sock
+  Resolved Docker Socket Path: /var/run/docker.sock
+  Test SessionID: 880d73b775823e45290127d693053bad90e38e8811f5580c8125d14a5f7b55c2
+  Test ProcessID: feade5aa-a563-418e-936a-bef53a6ad533
+2026/09/09 21:04:26 🐳 Creating container for image postgres:16
+2026/09/09 21:04:26 🐳 Creating container for image testcontainers/ryuk:0.14.0
+2026/09/09 21:04:26 ✅ Container created: 37bde2a69660
+2026/09/09 21:04:26 🐳 Starting container: 37bde2a69660
+2026/09/09 21:04:27 ✅ Container started: 37bde2a69660
+2026/09/09 21:04:27 ⏳ Waiting for container id 37bde2a69660 image: testcontainers/ryuk:0.14.0. Waiting for: all of: [log message "Started", port 8080/tcp to be listening]
+2026/09/09 21:04:27 Shell not found in container
+2026/09/09 21:04:27 🔔 Container is ready: 37bde2a69660
+2026/09/09 21:04:27 ✅ Container created: 76761ea945b3
+2026/09/09 21:04:27 🐳 Starting container: 76761ea945b3
+2026/09/09 21:04:27 ✅ Container started: 76761ea945b3
+2026/09/09 21:04:27 ⏳ Waiting for container id 76761ea945b3 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:04:28 🔔 Container is ready: 76761ea945b3
+2026/09/09 21:04:28 🐳 Creating container for image postgres:16
+2026/09/09 21:04:28 ✅ Container created: f2f8c186c8f6
+2026/09/09 21:04:28 🐳 Starting container: f2f8c186c8f6
+2026/09/09 21:04:28 ✅ Container started: f2f8c186c8f6
+2026/09/09 21:04:28 ⏳ Waiting for container id f2f8c186c8f6 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:04:29 🔔 Container is ready: f2f8c186c8f6
+2026/09/09 21:04:30 🐳 Stopping container: f2f8c186c8f6
+2026/09/09 21:04:31 ✅ Container stopped: f2f8c186c8f6
+2026/09/09 21:04:31 🐳 Terminating container: f2f8c186c8f6
+2026/09/09 21:04:31 🚫 Container terminated: f2f8c186c8f6
+2026/09/09 21:04:31 🐳 Stopping container: 76761ea945b3
+2026/09/09 21:04:31 ✅ Container stopped: 76761ea945b3
+2026/09/09 21:04:31 🐳 Terminating container: 76761ea945b3
+2026/09/09 21:04:31 🚫 Container terminated: 76761ea945b3
+=== RUN   TestTortureSchemas/django
+2026/09/09 21:04:31 🐳 Creating container for image postgres:16
+2026/09/09 21:04:31 ✅ Container created: 6f605be40179
+2026/09/09 21:04:31 🐳 Starting container: 6f605be40179
+2026/09/09 21:04:31 ✅ Container started: 6f605be40179
+2026/09/09 21:04:31 ⏳ Waiting for container id 6f605be40179 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:04:32 🔔 Container is ready: 6f605be40179
+2026/09/09 21:04:32 🐳 Creating container for image postgres:16
+2026/09/09 21:04:32 ✅ Container created: d65398ba16a1
+2026/09/09 21:04:32 🐳 Starting container: d65398ba16a1
+2026/09/09 21:04:32 ✅ Container started: d65398ba16a1
+2026/09/09 21:04:32 ⏳ Waiting for container id d65398ba16a1 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:04:33 🔔 Container is ready: d65398ba16a1
+2026/09/09 21:04:33 🐳 Stopping container: d65398ba16a1
+2026/09/09 21:04:33 ✅ Container stopped: d65398ba16a1
+2026/09/09 21:04:33 🐳 Terminating container: d65398ba16a1
+2026/09/09 21:04:33 🚫 Container terminated: d65398ba16a1
+2026/09/09 21:04:33 🐳 Stopping container: 6f605be40179
+2026/09/09 21:04:33 ✅ Container stopped: 6f605be40179
+2026/09/09 21:04:33 🐳 Terminating container: 6f605be40179
+2026/09/09 21:04:33 🚫 Container terminated: 6f605be40179
+=== RUN   TestTortureSchemas/supabase-auth
+2026/09/09 21:04:34 🐳 Creating container for image postgres:16
+2026/09/09 21:04:34 ✅ Container created: 2cacbccf16b4
+2026/09/09 21:04:34 🐳 Starting container: 2cacbccf16b4
+2026/09/09 21:04:34 ✅ Container started: 2cacbccf16b4
+2026/09/09 21:04:34 ⏳ Waiting for container id 2cacbccf16b4 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:04:34 🔔 Container is ready: 2cacbccf16b4
+2026/09/09 21:04:34 🐳 Creating container for image postgres:16
+2026/09/09 21:04:34 ✅ Container created: d02269c7db9e
+2026/09/09 21:04:34 🐳 Starting container: d02269c7db9e
+2026/09/09 21:04:35 ✅ Container started: d02269c7db9e
+2026/09/09 21:04:35 ⏳ Waiting for container id d02269c7db9e image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:04:35 🔔 Container is ready: d02269c7db9e
+2026/09/09 21:04:36 🐳 Stopping container: d02269c7db9e
+2026/09/09 21:04:37 ✅ Container stopped: d02269c7db9e
+2026/09/09 21:04:37 🐳 Terminating container: d02269c7db9e
+2026/09/09 21:04:37 🚫 Container terminated: d02269c7db9e
+2026/09/09 21:04:37 🐳 Stopping container: 2cacbccf16b4
+2026/09/09 21:04:37 ✅ Container stopped: 2cacbccf16b4
+2026/09/09 21:04:37 🐳 Terminating container: 2cacbccf16b4
+2026/09/09 21:04:37 🚫 Container terminated: 2cacbccf16b4
+=== RUN   TestTortureSchemas/plausible
+2026/09/09 21:04:37 🐳 Creating container for image postgres:16
+2026/09/09 21:04:37 ✅ Container created: d423e3fa3b42
+2026/09/09 21:04:37 🐳 Starting container: d423e3fa3b42
+2026/09/09 21:04:37 ✅ Container started: d423e3fa3b42
+2026/09/09 21:04:37 ⏳ Waiting for container id d423e3fa3b42 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:04:38 🔔 Container is ready: d423e3fa3b42
+2026/09/09 21:04:38 🐳 Creating container for image postgres:16
+2026/09/09 21:04:38 ✅ Container created: 9436e503d152
+2026/09/09 21:04:38 🐳 Starting container: 9436e503d152
+2026/09/09 21:04:38 ✅ Container started: 9436e503d152
+2026/09/09 21:04:38 ⏳ Waiting for container id 9436e503d152 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:04:38 🔔 Container is ready: 9436e503d152
+2026/09/09 21:04:39 🐳 Stopping container: 9436e503d152
+2026/09/09 21:04:39 ✅ Container stopped: 9436e503d152
+2026/09/09 21:04:39 🐳 Terminating container: 9436e503d152
+2026/09/09 21:04:39 🚫 Container terminated: 9436e503d152
+2026/09/09 21:04:39 🐳 Stopping container: d423e3fa3b42
+2026/09/09 21:04:40 ✅ Container stopped: d423e3fa3b42
+2026/09/09 21:04:40 🐳 Terminating container: d423e3fa3b42
+2026/09/09 21:04:40 🚫 Container terminated: d423e3fa3b42
+=== RUN   TestTortureSchemas/metabase
+2026/09/09 21:04:40 🐳 Creating container for image postgres:16
+2026/09/09 21:04:40 ✅ Container created: d09b4ca92515
+2026/09/09 21:04:40 🐳 Starting container: d09b4ca92515
+2026/09/09 21:04:40 ✅ Container started: d09b4ca92515
+2026/09/09 21:04:40 ⏳ Waiting for container id d09b4ca92515 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:04:40 🔔 Container is ready: d09b4ca92515
+2026/09/09 21:04:41 🐳 Creating container for image postgres:16
+2026/09/09 21:04:41 ✅ Container created: 9b3ef2609ce8
+2026/09/09 21:04:41 🐳 Starting container: 9b3ef2609ce8
+2026/09/09 21:04:41 ✅ Container started: 9b3ef2609ce8
+2026/09/09 21:04:41 ⏳ Waiting for container id 9b3ef2609ce8 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:04:42 🔔 Container is ready: 9b3ef2609ce8
+2026/09/09 21:04:43 🐳 Stopping container: 9b3ef2609ce8
+2026/09/09 21:04:43 ✅ Container stopped: 9b3ef2609ce8
+2026/09/09 21:04:43 🐳 Terminating container: 9b3ef2609ce8
+2026/09/09 21:04:43 🚫 Container terminated: 9b3ef2609ce8
+2026/09/09 21:04:43 🐳 Stopping container: d09b4ca92515
+2026/09/09 21:04:43 ✅ Container stopped: d09b4ca92515
+2026/09/09 21:04:43 🐳 Terminating container: d09b4ca92515
+2026/09/09 21:04:43 🚫 Container terminated: d09b4ca92515
+=== RUN   TestTortureSchemas/calcom
+2026/09/09 21:04:44 🐳 Creating container for image postgres:16
+2026/09/09 21:04:44 ✅ Container created: ac5d7a1dec01
+2026/09/09 21:04:44 🐳 Starting container: ac5d7a1dec01
+2026/09/09 21:04:44 ✅ Container started: ac5d7a1dec01
+2026/09/09 21:04:44 ⏳ Waiting for container id ac5d7a1dec01 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:04:44 🔔 Container is ready: ac5d7a1dec01
+2026/09/09 21:04:45 🐳 Creating container for image postgres:16
+2026/09/09 21:04:45 ✅ Container created: 68d1036425c2
+2026/09/09 21:04:45 🐳 Starting container: 68d1036425c2
+2026/09/09 21:04:45 ✅ Container started: 68d1036425c2
+2026/09/09 21:04:45 ⏳ Waiting for container id 68d1036425c2 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:04:46 🔔 Container is ready: 68d1036425c2
+2026/09/09 21:04:48 🐳 Stopping container: 68d1036425c2
+2026/09/09 21:04:48 ✅ Container stopped: 68d1036425c2
+2026/09/09 21:04:48 🐳 Terminating container: 68d1036425c2
+2026/09/09 21:04:48 🚫 Container terminated: 68d1036425c2
+2026/09/09 21:04:48 🐳 Stopping container: ac5d7a1dec01
+2026/09/09 21:04:48 ✅ Container stopped: ac5d7a1dec01
+2026/09/09 21:04:48 🐳 Terminating container: ac5d7a1dec01
+2026/09/09 21:04:48 🚫 Container terminated: ac5d7a1dec01
+=== RUN   TestTortureSchemas/mastodon
+2026/09/09 21:04:48 🐳 Creating container for image postgres:16
+2026/09/09 21:04:48 ✅ Container created: bcee02c89431
+2026/09/09 21:04:48 🐳 Starting container: bcee02c89431
+2026/09/09 21:04:49 ✅ Container started: bcee02c89431
+2026/09/09 21:04:49 ⏳ Waiting for container id bcee02c89431 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:04:49 🔔 Container is ready: bcee02c89431
+2026/09/09 21:04:50 🐳 Creating container for image postgres:16
+2026/09/09 21:04:50 ✅ Container created: 9a8efe2847ad
+2026/09/09 21:04:50 🐳 Starting container: 9a8efe2847ad
+2026/09/09 21:04:50 ✅ Container started: 9a8efe2847ad
+2026/09/09 21:04:50 ⏳ Waiting for container id 9a8efe2847ad image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:04:50 🔔 Container is ready: 9a8efe2847ad
+2026/09/09 21:04:51 🐳 Stopping container: 9a8efe2847ad
+2026/09/09 21:04:51 ✅ Container stopped: 9a8efe2847ad
+2026/09/09 21:04:51 🐳 Terminating container: 9a8efe2847ad
+2026/09/09 21:04:51 🚫 Container terminated: 9a8efe2847ad
+2026/09/09 21:04:51 🐳 Stopping container: bcee02c89431
+2026/09/09 21:04:51 ✅ Container stopped: bcee02c89431
+2026/09/09 21:04:51 🐳 Terminating container: bcee02c89431
+2026/09/09 21:04:51 🚫 Container terminated: bcee02c89431
+=== RUN   TestTortureSchemas/gitlab
+2026/09/09 21:04:51 🐳 Creating container for image postgres:16
+2026/09/09 21:04:51 ✅ Container created: 1efa74e96b97
+2026/09/09 21:04:51 🐳 Starting container: 1efa74e96b97
+2026/09/09 21:04:51 ✅ Container started: 1efa74e96b97
+2026/09/09 21:04:51 ⏳ Waiting for container id 1efa74e96b97 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:04:52 🔔 Container is ready: 1efa74e96b97
+2026/09/09 21:04:52 🐳 Creating container for image postgres:16
+2026/09/09 21:04:53 ✅ Container created: 6400c839f629
+2026/09/09 21:04:53 🐳 Starting container: 6400c839f629
+2026/09/09 21:04:53 ✅ Container started: 6400c839f629
+2026/09/09 21:04:53 ⏳ Waiting for container id 6400c839f629 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:04:53 🔔 Container is ready: 6400c839f629
+2026/09/09 21:04:56 🐳 Stopping container: 6400c839f629
+2026/09/09 21:04:56 ✅ Container stopped: 6400c839f629
+2026/09/09 21:04:56 🐳 Terminating container: 6400c839f629
+2026/09/09 21:04:56 🚫 Container terminated: 6400c839f629
+2026/09/09 21:04:56 🐳 Stopping container: 1efa74e96b97
+2026/09/09 21:04:56 ✅ Container stopped: 1efa74e96b97
+2026/09/09 21:04:56 🐳 Terminating container: 1efa74e96b97
+2026/09/09 21:04:56 🚫 Container terminated: 1efa74e96b97
+=== RUN   TestTortureSchemas/odoo
+2026/09/09 21:04:56 🐳 Creating container for image postgres:16
+2026/09/09 21:04:56 ✅ Container created: b78ef874de11
+2026/09/09 21:04:56 🐳 Starting container: b78ef874de11
+2026/09/09 21:04:56 ✅ Container started: b78ef874de11
+2026/09/09 21:04:56 ⏳ Waiting for container id b78ef874de11 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:04:57 🔔 Container is ready: b78ef874de11
+2026/09/09 21:04:58 🐳 Creating container for image postgres:16
+2026/09/09 21:04:58 ✅ Container created: ad8456ccdaba
+2026/09/09 21:04:58 🐳 Starting container: ad8456ccdaba
+2026/09/09 21:04:58 ✅ Container started: ad8456ccdaba
+2026/09/09 21:04:58 ⏳ Waiting for container id ad8456ccdaba image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:04:58 🔔 Container is ready: ad8456ccdaba
+2026/09/09 21:05:02 🐳 Stopping container: ad8456ccdaba
+2026/09/09 21:05:02 ✅ Container stopped: ad8456ccdaba
+2026/09/09 21:05:02 🐳 Terminating container: ad8456ccdaba
+2026/09/09 21:05:02 🚫 Container terminated: ad8456ccdaba
+2026/09/09 21:05:02 🐳 Stopping container: b78ef874de11
+2026/09/09 21:05:02 ✅ Container stopped: b78ef874de11
+2026/09/09 21:05:02 🐳 Terminating container: b78ef874de11
+2026/09/09 21:05:02 🚫 Container terminated: b78ef874de11
+=== RUN   TestTortureSchemas/discourse
+2026/09/09 21:05:02 🐳 Creating container for image pgvector/pgvector:pg16
+2026/09/09 21:05:02 ✅ Container created: 3abe4b72c13b
+2026/09/09 21:05:02 🐳 Starting container: 3abe4b72c13b
+2026/09/09 21:05:02 ✅ Container started: 3abe4b72c13b
+2026/09/09 21:05:02 ⏳ Waiting for container id 3abe4b72c13b image: pgvector/pgvector:pg16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:05:03 🔔 Container is ready: 3abe4b72c13b
+2026/09/09 21:05:04 🐳 Creating container for image pgvector/pgvector:pg16
+2026/09/09 21:05:04 ✅ Container created: 9f68e3f3fd89
+2026/09/09 21:05:04 🐳 Starting container: 9f68e3f3fd89
+2026/09/09 21:05:04 ✅ Container started: 9f68e3f3fd89
+2026/09/09 21:05:04 ⏳ Waiting for container id 9f68e3f3fd89 image: pgvector/pgvector:pg16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:05:05 🔔 Container is ready: 9f68e3f3fd89
+2026/09/09 21:05:10 🐳 Stopping container: 9f68e3f3fd89
+2026/09/09 21:05:10 ✅ Container stopped: 9f68e3f3fd89
+2026/09/09 21:05:10 🐳 Terminating container: 9f68e3f3fd89
+2026/09/09 21:05:10 🚫 Container terminated: 9f68e3f3fd89
+2026/09/09 21:05:10 🐳 Stopping container: 3abe4b72c13b
+2026/09/09 21:05:10 ✅ Container stopped: 3abe4b72c13b
+2026/09/09 21:05:10 🐳 Terminating container: 3abe4b72c13b
+2026/09/09 21:05:10 🚫 Container terminated: 3abe4b72c13b
+--- PASS: TestTortureSchemas (44.40s)
+    --- PASS: TestTortureSchemas/rails-activestorage (4.85s)
+    --- PASS: TestTortureSchemas/django (2.55s)
+    --- PASS: TestTortureSchemas/supabase-auth (3.42s)
+    --- PASS: TestTortureSchemas/plausible (2.85s)
+    --- PASS: TestTortureSchemas/metabase (3.78s)
+    --- PASS: TestTortureSchemas/calcom (4.83s)
+    --- PASS: TestTortureSchemas/mastodon (2.79s)
+    --- PASS: TestTortureSchemas/gitlab (5.10s)
+    --- PASS: TestTortureSchemas/odoo (5.86s)
+    --- PASS: TestTortureSchemas/discourse (8.36s)
+=== RUN   TestTortureRegressions
+=== RUN   TestTortureRegressions/001-unique-index-masking-collision.sql
+2026/09/09 21:05:10 🐳 Creating container for image postgres:16
+2026/09/09 21:05:10 ✅ Container created: 6dea0dd08821
+2026/09/09 21:05:10 🐳 Starting container: 6dea0dd08821
+2026/09/09 21:05:11 ✅ Container started: 6dea0dd08821
+2026/09/09 21:05:11 ⏳ Waiting for container id 6dea0dd08821 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:05:11 🔔 Container is ready: 6dea0dd08821
+2026/09/09 21:05:11 🐳 Creating container for image postgres:16
+2026/09/09 21:05:11 ✅ Container created: 678badb6277d
+2026/09/09 21:05:11 🐳 Starting container: 678badb6277d
+2026/09/09 21:05:11 ✅ Container started: 678badb6277d
+2026/09/09 21:05:11 ⏳ Waiting for container id 678badb6277d image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:05:12 🔔 Container is ready: 678badb6277d
+2026/09/09 21:05:12 🐳 Stopping container: 678badb6277d
+2026/09/09 21:05:12 ✅ Container stopped: 678badb6277d
+2026/09/09 21:05:12 🐳 Terminating container: 678badb6277d
+2026/09/09 21:05:12 🚫 Container terminated: 678badb6277d
+2026/09/09 21:05:12 🐳 Stopping container: 6dea0dd08821
+2026/09/09 21:05:13 ✅ Container stopped: 6dea0dd08821
+2026/09/09 21:05:13 🐳 Terminating container: 6dea0dd08821
+2026/09/09 21:05:13 🚫 Container terminated: 6dea0dd08821
+=== RUN   TestTortureRegressions/002-function-default-refusal-uncoded.sql
+2026/09/09 21:05:13 🐳 Creating container for image postgres:16
+2026/09/09 21:05:13 ✅ Container created: 406639957bab
+2026/09/09 21:05:13 🐳 Starting container: 406639957bab
+2026/09/09 21:05:13 ✅ Container started: 406639957bab
+2026/09/09 21:05:13 ⏳ Waiting for container id 406639957bab image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:05:13 🔔 Container is ready: 406639957bab
+2026/09/09 21:05:13 🐳 Creating container for image postgres:16
+2026/09/09 21:05:14 ✅ Container created: 15f7995c4422
+2026/09/09 21:05:14 🐳 Starting container: 15f7995c4422
+2026/09/09 21:05:14 ✅ Container started: 15f7995c4422
+2026/09/09 21:05:14 ⏳ Waiting for container id 15f7995c4422 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:05:14 🔔 Container is ready: 15f7995c4422
+2026/09/09 21:05:14 🐳 Stopping container: 15f7995c4422
+2026/09/09 21:05:14 ✅ Container stopped: 15f7995c4422
+2026/09/09 21:05:14 🐳 Terminating container: 15f7995c4422
+2026/09/09 21:05:14 🚫 Container terminated: 15f7995c4422
+2026/09/09 21:05:14 🐳 Stopping container: 406639957bab
+2026/09/09 21:05:15 ✅ Container stopped: 406639957bab
+2026/09/09 21:05:15 🐳 Terminating container: 406639957bab
+2026/09/09 21:05:15 🚫 Container terminated: 406639957bab
+=== RUN   TestTortureRegressions/003-composite-unique-index-is-not-a-unique-column.sql
+2026/09/09 21:05:15 🐳 Creating container for image postgres:16
+2026/09/09 21:05:15 ✅ Container created: 176ac7ed633f
+2026/09/09 21:05:15 🐳 Starting container: 176ac7ed633f
+2026/09/09 21:05:15 ✅ Container started: 176ac7ed633f
+2026/09/09 21:05:15 ⏳ Waiting for container id 176ac7ed633f image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:05:16 🔔 Container is ready: 176ac7ed633f
+2026/09/09 21:05:16 🐳 Creating container for image postgres:16
+2026/09/09 21:05:16 ✅ Container created: 26377afac75b
+2026/09/09 21:05:16 🐳 Starting container: 26377afac75b
+2026/09/09 21:05:16 ✅ Container started: 26377afac75b
+2026/09/09 21:05:16 ⏳ Waiting for container id 26377afac75b image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:05:17 🔔 Container is ready: 26377afac75b
+2026/09/09 21:05:17 🐳 Stopping container: 26377afac75b
+2026/09/09 21:05:17 ✅ Container stopped: 26377afac75b
+2026/09/09 21:05:17 🐳 Terminating container: 26377afac75b
+2026/09/09 21:05:17 🚫 Container terminated: 26377afac75b
+2026/09/09 21:05:17 🐳 Stopping container: 176ac7ed633f
+2026/09/09 21:05:17 ✅ Container stopped: 176ac7ed633f
+2026/09/09 21:05:17 🐳 Terminating container: 176ac7ed633f
+2026/09/09 21:05:17 🚫 Container terminated: 176ac7ed633f
+=== RUN   TestTortureRegressions/004-composite-unique-index-all-masked.sql
+2026/09/09 21:05:17 🐳 Creating container for image postgres:16
+2026/09/09 21:05:17 ✅ Container created: a337b729f8a5
+2026/09/09 21:05:17 🐳 Starting container: a337b729f8a5
+2026/09/09 21:05:17 ✅ Container started: a337b729f8a5
+2026/09/09 21:05:17 ⏳ Waiting for container id a337b729f8a5 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:05:18 🔔 Container is ready: a337b729f8a5
+2026/09/09 21:05:18 🐳 Creating container for image postgres:16
+2026/09/09 21:05:18 ✅ Container created: f27c9218708b
+2026/09/09 21:05:18 🐳 Starting container: f27c9218708b
+2026/09/09 21:05:18 ✅ Container started: f27c9218708b
+2026/09/09 21:05:18 ⏳ Waiting for container id f27c9218708b image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:05:19 🔔 Container is ready: f27c9218708b
+2026/09/09 21:05:19 🐳 Stopping container: f27c9218708b
+2026/09/09 21:05:19 ✅ Container stopped: f27c9218708b
+2026/09/09 21:05:19 🐳 Terminating container: f27c9218708b
+2026/09/09 21:05:19 🚫 Container terminated: f27c9218708b
+2026/09/09 21:05:19 🐳 Stopping container: a337b729f8a5
+2026/09/09 21:05:19 ✅ Container stopped: a337b729f8a5
+2026/09/09 21:05:19 🐳 Terminating container: a337b729f8a5
+2026/09/09 21:05:19 🚫 Container terminated: a337b729f8a5
+=== RUN   TestTortureRegressions/005-array-of-extension-type-not-registered.sql
+2026/09/09 21:05:19 🐳 Creating container for image postgres:16
+2026/09/09 21:05:19 ✅ Container created: b51168da4f34
+2026/09/09 21:05:19 🐳 Starting container: b51168da4f34
+2026/09/09 21:05:20 ✅ Container started: b51168da4f34
+2026/09/09 21:05:20 ⏳ Waiting for container id b51168da4f34 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:05:20 🔔 Container is ready: b51168da4f34
+2026/09/09 21:05:20 🐳 Creating container for image postgres:16
+2026/09/09 21:05:20 ✅ Container created: deecb1a50290
+2026/09/09 21:05:20 🐳 Starting container: deecb1a50290
+2026/09/09 21:05:20 ✅ Container started: deecb1a50290
+2026/09/09 21:05:20 ⏳ Waiting for container id deecb1a50290 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:05:21 🔔 Container is ready: deecb1a50290
+2026/09/09 21:05:21 🐳 Stopping container: deecb1a50290
+2026/09/09 21:05:21 ✅ Container stopped: deecb1a50290
+2026/09/09 21:05:21 🐳 Terminating container: deecb1a50290
+2026/09/09 21:05:21 🚫 Container terminated: deecb1a50290
+2026/09/09 21:05:21 🐳 Stopping container: b51168da4f34
+2026/09/09 21:05:22 ✅ Container stopped: b51168da4f34
+2026/09/09 21:05:22 🐳 Terminating container: b51168da4f34
+2026/09/09 21:05:22 🚫 Container terminated: b51168da4f34
+=== RUN   TestTortureRegressions/006-identity-sequence-renamed-table.sql
+2026/09/09 21:05:22 🐳 Creating container for image postgres:16
+2026/09/09 21:05:22 ✅ Container created: ebb4bacb1e55
+2026/09/09 21:05:22 🐳 Starting container: ebb4bacb1e55
+2026/09/09 21:05:22 ✅ Container started: ebb4bacb1e55
+2026/09/09 21:05:22 ⏳ Waiting for container id ebb4bacb1e55 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:05:22 🔔 Container is ready: ebb4bacb1e55
+2026/09/09 21:05:23 🐳 Creating container for image postgres:16
+2026/09/09 21:05:23 ✅ Container created: 543119b88b85
+2026/09/09 21:05:23 🐳 Starting container: 543119b88b85
+2026/09/09 21:05:23 ✅ Container started: 543119b88b85
+2026/09/09 21:05:23 ⏳ Waiting for container id 543119b88b85 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:05:23 🔔 Container is ready: 543119b88b85
+2026/09/09 21:05:23 🐳 Stopping container: 543119b88b85
+2026/09/09 21:05:24 ✅ Container stopped: 543119b88b85
+2026/09/09 21:05:24 🐳 Terminating container: 543119b88b85
+2026/09/09 21:05:24 🚫 Container terminated: 543119b88b85
+2026/09/09 21:05:24 🐳 Stopping container: ebb4bacb1e55
+2026/09/09 21:05:24 ✅ Container stopped: ebb4bacb1e55
+2026/09/09 21:05:24 🐳 Terminating container: ebb4bacb1e55
+2026/09/09 21:05:24 🚫 Container terminated: ebb4bacb1e55
+=== RUN   TestTortureRegressions/007-partial-unique-index-masked-column.sql
+2026/09/09 21:05:24 🐳 Creating container for image postgres:16
+2026/09/09 21:05:24 ✅ Container created: e9befc6f28d2
+2026/09/09 21:05:24 🐳 Starting container: e9befc6f28d2
+2026/09/09 21:05:24 ✅ Container started: e9befc6f28d2
+2026/09/09 21:05:24 ⏳ Waiting for container id e9befc6f28d2 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:05:25 🔔 Container is ready: e9befc6f28d2
+2026/09/09 21:05:25 🐳 Creating container for image postgres:16
+2026/09/09 21:05:25 ✅ Container created: a7b36286fc70
+2026/09/09 21:05:25 🐳 Starting container: a7b36286fc70
+2026/09/09 21:05:25 ✅ Container started: a7b36286fc70
+2026/09/09 21:05:25 ⏳ Waiting for container id a7b36286fc70 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:05:25 🔔 Container is ready: a7b36286fc70
+2026/09/09 21:05:26 🐳 Stopping container: a7b36286fc70
+2026/09/09 21:05:26 ✅ Container stopped: a7b36286fc70
+2026/09/09 21:05:26 🐳 Terminating container: a7b36286fc70
+2026/09/09 21:05:26 🚫 Container terminated: a7b36286fc70
+2026/09/09 21:05:26 🐳 Stopping container: e9befc6f28d2
+2026/09/09 21:05:26 ✅ Container stopped: e9befc6f28d2
+2026/09/09 21:05:26 🐳 Terminating container: e9befc6f28d2
+2026/09/09 21:05:26 🚫 Container terminated: e9befc6f28d2
+=== RUN   TestTortureRegressions/008-name-hit-on-an-unaccepted-type-drops-the-type-signal.sql
+2026/09/09 21:05:26 🐳 Creating container for image postgres:16
+2026/09/09 21:05:26 ✅ Container created: acc5e89362ca
+2026/09/09 21:05:26 🐳 Starting container: acc5e89362ca
+2026/09/09 21:05:26 ✅ Container started: acc5e89362ca
+2026/09/09 21:05:26 ⏳ Waiting for container id acc5e89362ca image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:05:27 🔔 Container is ready: acc5e89362ca
+2026/09/09 21:05:27 🐳 Creating container for image postgres:16
+2026/09/09 21:05:27 ✅ Container created: 3c7229f5299d
+2026/09/09 21:05:27 🐳 Starting container: 3c7229f5299d
+2026/09/09 21:05:27 ✅ Container started: 3c7229f5299d
+2026/09/09 21:05:27 ⏳ Waiting for container id 3c7229f5299d image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:05:28 🔔 Container is ready: 3c7229f5299d
+2026/09/09 21:05:28 🐳 Stopping container: 3c7229f5299d
+2026/09/09 21:05:28 ✅ Container stopped: 3c7229f5299d
+2026/09/09 21:05:28 🐳 Terminating container: 3c7229f5299d
+2026/09/09 21:05:28 🚫 Container terminated: 3c7229f5299d
+2026/09/09 21:05:28 🐳 Stopping container: acc5e89362ca
+2026/09/09 21:05:28 ✅ Container stopped: acc5e89362ca
+2026/09/09 21:05:28 🐳 Terminating container: acc5e89362ca
+2026/09/09 21:05:28 🚫 Container terminated: acc5e89362ca
+=== RUN   TestTortureRegressions/009-citext-array-of-addresses-masked-as-one-string.sql
+2026/09/09 21:05:28 🐳 Creating container for image postgres:16
+2026/09/09 21:05:28 ✅ Container created: e1881865f3a8
+2026/09/09 21:05:28 🐳 Starting container: e1881865f3a8
+2026/09/09 21:05:28 ✅ Container started: e1881865f3a8
+2026/09/09 21:05:28 ⏳ Waiting for container id e1881865f3a8 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:05:29 🔔 Container is ready: e1881865f3a8
+2026/09/09 21:05:29 🐳 Creating container for image postgres:16
+2026/09/09 21:05:29 ✅ Container created: 8e9498dc72f7
+2026/09/09 21:05:29 🐳 Starting container: 8e9498dc72f7
+2026/09/09 21:05:29 ✅ Container started: 8e9498dc72f7
+2026/09/09 21:05:29 ⏳ Waiting for container id 8e9498dc72f7 image: postgres:16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:05:30 🔔 Container is ready: 8e9498dc72f7
+2026/09/09 21:05:30 🐳 Stopping container: 8e9498dc72f7
+2026/09/09 21:05:30 ✅ Container stopped: 8e9498dc72f7
+2026/09/09 21:05:30 🐳 Terminating container: 8e9498dc72f7
+2026/09/09 21:05:30 🚫 Container terminated: 8e9498dc72f7
+2026/09/09 21:05:30 🐳 Stopping container: e1881865f3a8
+2026/09/09 21:05:30 ✅ Container stopped: e1881865f3a8
+2026/09/09 21:05:30 🐳 Terminating container: e1881865f3a8
+2026/09/09 21:05:30 🚫 Container terminated: e1881865f3a8
+--- PASS: TestTortureRegressions (19.93s)
+    --- PASS: TestTortureRegressions/001-unique-index-masking-collision.sql (2.18s)
+    --- PASS: TestTortureRegressions/002-function-default-refusal-uncoded.sql (2.05s)
+    --- PASS: TestTortureRegressions/003-composite-unique-index-is-not-a-unique-column.sql (2.46s)
+    --- PASS: TestTortureRegressions/004-composite-unique-index-all-masked.sql (2.13s)
+    --- PASS: TestTortureRegressions/005-array-of-extension-type-not-registered.sql (2.37s)
+    --- PASS: TestTortureRegressions/006-identity-sequence-renamed-table.sql (2.14s)
+    --- PASS: TestTortureRegressions/007-partial-unique-index-masked-column.sql (2.21s)
+    --- PASS: TestTortureRegressions/008-name-hit-on-an-unaccepted-type-drops-the-type-signal.sql (2.36s)
+    --- PASS: TestTortureRegressions/009-citext-array-of-addresses-masked-as-one-string.sql (2.03s)
+=== RUN   TestTortureCatalogueMatchesTheFixtures
+--- PASS: TestTortureCatalogueMatchesTheFixtures (0.00s)
+=== RUN   TestTortureImagesAreReachable
+=== RUN   TestTortureImagesAreReachable/pgvector/pgvector:pg16
+2026/09/09 21:05:30 🐳 Creating container for image pgvector/pgvector:pg16
+2026/09/09 21:05:30 ✅ Container created: 9b21553bbe88
+2026/09/09 21:05:30 🐳 Starting container: 9b21553bbe88
+2026/09/09 21:05:30 ✅ Container started: 9b21553bbe88
+2026/09/09 21:05:30 ⏳ Waiting for container id 9b21553bbe88 image: pgvector/pgvector:pg16. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2)]
+2026/09/09 21:05:31 🔔 Container is ready: 9b21553bbe88
+2026/09/09 21:05:31 🐳 Stopping container: 9b21553bbe88
+2026/09/09 21:05:31 ✅ Container stopped: 9b21553bbe88
+2026/09/09 21:05:31 🐳 Terminating container: 9b21553bbe88
+2026/09/09 21:05:31 🚫 Container terminated: 9b21553bbe88
+--- PASS: TestTortureImagesAreReachable (0.91s)
+    --- PASS: TestTortureImagesAreReachable/pgvector/pgvector:pg16 (0.91s)
+PASS
+ok  	github.com/Liarea/lazyslice/internal/invariants	65.780s
+==> torture: the ten schemas, the catalogue and testdata/regressions/ all reported --- PASS

@@ -15,7 +15,8 @@ export const meta = {
 //   model  developer model: 'opus' | 'sonnet'
 //   paths  directories or files the developer may write, as an array of repo-relative paths
 //   stage  pipeline stage name or 'peripheral'
-//   reviewers  1 or 3 (default 3); peripheral docs tasks use 1
+//   reviewers  1 (default; one Opus reviewer with a merged correctness-and-safety lens) or 3 (the three lenses, only when the task says so)
+//   effort  developer effort; default high for opus, medium for sonnet.  reviewEffort  reviewer and re-verifier effort, default medium
 //   integration  true: run make integration in verify (only once the pipeline can pass I1-I6); a package pattern string like './internal/pg/...': run that package's integration-tagged tests instead
 //   checks  'full' (default) or 'none' for documentation-only tasks; parallel code tasks are verified by the orchestrator after the batch
 
@@ -23,7 +24,7 @@ const REPO = '/Users/gareth/personal_repos/lazyslice'
 const a = args || {}
 if (!a.brief || !a.id) throw new Error('implement.js needs args {id, title, brief, model, paths}')
 const model = a.model || 'sonnet' // default Sonnet; a task opts in to Opus only for masking, verify, or source-safety logic (Gareth, 2026-09-09)
-const effort = a.effort || 'high'
+const effort = a.effort || (model === 'opus' ? 'high' : 'medium') // Opus tasks are the safety ones and keep high; Sonnet runs at medium (Gareth, 2026-09-14)
 const paths = (a.paths || []).join(', ')
 const nReviewers = a.reviewers === 3 ? 3 : 1 // default one reviewer; three only when the task says so
 
@@ -46,13 +47,18 @@ const LENSES = [
   { key: 'scope', text: 'Scope and simplicity. Did the developer do only what the brief asked? Flag unrequested changes, extra files, speculative abstractions, dependencies added, and anything that belongs to a later phase per ROADMAP.md. Flag code that two other developers would each have to understand to work on the next stage.' },
 ]
 
-log(`Task ${a.id}: ${a.title} (developer: ${model})`)
+// One reviewer reads through a merged correctness-and-safety lens; three reviewers split the lenses (Gareth, 2026-09-14: conservative on model and effort, not on what the reviewer looks for).
+const SOLO = { key: 'correctness+safety', text: LENSES[0].text + ' Then, ' + LENSES[1].text }
+const lenses = nReviewers === 3 ? LENSES : [SOLO]
+const reviewEffort = a.reviewEffort || 'medium'
+
+log(`Task ${a.id}: ${a.title} (developer: ${model}, effort ${effort}, reviewers ${nReviewers})`)
 let dev = await agent(`${PRE}\n\n<task id="${a.id}">\n${a.brief}\n</task>`, { label: `build:${a.id}`, phase: 'Build', model, effort, schema: DEV })
 if (!dev) return { id: a.id, status: 'blocked', reason: 'developer agent died', findings: [] }
 
 const review = async (round) => {
-  const rs = await parallel(LENSES.slice(0, nReviewers).map(l => () => agent(`You are a reviewer on lazyslice. Repo: ${REPO}. Read ${REPO}/CLAUDE.md and ${REPO}/ARCHITECTURE.md. The task under review is:\n<task id="${a.id}">\n${a.brief}\n</task>\nThe developer reports: ${dev.summary}. Files: ${dev.files.join(', ')}. Checks passed: ${dev.checks_passed}.\nYour lens: ${l.text}\nRun the checks yourself (make lint && make test) and do not trust the developer's report. Do not fix anything. Return findings with file and line; severity high means it must not merge.`,
-    { label: `review:${l.key}:r${round}`, phase: 'Review', model: 'opus', schema: FINDINGS })))
+  const rs = await parallel(lenses.map(l => () => agent(`You are a reviewer on lazyslice. Repo: ${REPO}. Read ${REPO}/CLAUDE.md and ${REPO}/ARCHITECTURE.md. The task under review is:\n<task id="${a.id}">\n${a.brief}\n</task>\nThe developer reports: ${dev.summary}. Files: ${dev.files.join(', ')}. Checks passed: ${dev.checks_passed}.\nYour lens: ${l.text}\nRun the checks yourself (make lint && make test) and do not trust the developer's report. Do not fix anything. Return findings with file and line; severity high means it must not merge.`,
+    { label: `review:${l.key}:r${round}`, phase: 'Review', model: 'opus', effort: reviewEffort, schema: FINDINGS })))
   return rs.filter(Boolean).flatMap(r => r.findings)
 }
 
@@ -67,7 +73,7 @@ while (blocking.length && round < 2) {
   if (!fixed) break
   dev = fixed
   const re = await agent(`You are the re-verifier on lazyslice. Repo: ${REPO}. These findings were reported on task ${a.id} and the developer says they are fixed:\n${JSON.stringify(blocking, null, 1)}\nDeveloper's concerns: ${JSON.stringify(dev.concerns)}. Check each finding against the current code (git diff, read the files). Run make lint && make test. Return only findings that are still open, keeping their severity, plus any new high-severity problem the fix introduced.`,
-    { label: `reverify:${a.id}:r${round}`, phase: 'Fix', model: 'opus', schema: FINDINGS })
+    { label: `reverify:${a.id}:r${round}`, phase: 'Fix', model: 'opus', effort: reviewEffort, schema: FINDINGS })
   blocking = re ? re.findings.filter(f => f.severity !== 'low') : []
 }
 
