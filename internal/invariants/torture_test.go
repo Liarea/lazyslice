@@ -7,6 +7,7 @@ package invariants
 import (
 	"context"
 	"fmt"
+	"net/mail"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -239,7 +240,7 @@ func assertTortureNoLiteralSurvives(ctx context.Context, t *testing.T, source, t
 
 // regressionHeader parses the five required keys and the two optional keys
 // testdata/regressions/README.md defines.
-var regressionHeader = regexp.MustCompile(`(?m)^--\s+(root|take|expect|found|why|unique-masked|equal-masked):\s+(.*?)\s*$`)
+var regressionHeader = regexp.MustCompile(`(?m)^--\s+(root|take|expect|found|why|unique-masked|equal-masked|masked-default):\s+(.*?)\s*$`)
 
 // TestTortureRegressions runs every file in testdata/regressions/ and asserts it
 // still behaves the way its header says.
@@ -324,6 +325,9 @@ func TestTortureRegressions(t *testing.T) {
 			for _, pair := range r.equalMasked {
 				assertTortureColumnsMaskAlike(ctx, t, connect(ctx, t, db.target), pair)
 			}
+			for _, col := range r.maskedDefault {
+				assertTortureDefaultIsMasked(ctx, t, connect(ctx, t, db.target), col)
+			}
 			// Every regression that is expected to succeed is also expected not
 			// to leak. Some of these defects never changed an exit code at all:
 			// 008 exited 0 both before and after, and the only thing that told
@@ -351,7 +355,13 @@ type regression struct {
 	// foreign key whose masked values must still be equal in the target
 	// (T-0132). Empty for every file that does not carry the key.
 	equalMasked []equalPair
-	image       string
+	// maskedDefault are the `masked-default:` key's schema.table.column
+	// entries (T-0161): a masked column whose DEFAULT must hold, in the
+	// target's own pg_attrdef, a masked address rather than the source's —
+	// ARCHITECTURE.md §11.1 arm 1's central case. Empty for every file that
+	// does not carry the key.
+	maskedDefault []string
+	image         string
 }
 
 // equalPair is one `equal-masked: CHILD = PARENT` claim. Every non-NULL value
@@ -421,6 +431,21 @@ func parseRegression(t *testing.T, path string) regression {
 			}
 		}
 		r.equalMasked = append(r.equalMasked, pair)
+	}
+
+	// The third optional key: a comma-separated list of schema.table.column,
+	// each a masked column whose DEFAULT must hold a masked address in the
+	// target's own catalog (T-0161).
+	for _, spec := range strings.Split(fields["masked-default"], ",") {
+		spec = strings.TrimSpace(spec)
+		if spec == "" {
+			continue
+		}
+		if len(strings.Split(spec, ".")) != 3 {
+			t.Fatalf("torture: %s: masked-default: %q is not schema.table.column",
+				filepath.Base(path), spec)
+		}
+		r.maskedDefault = append(r.maskedDefault, spec)
 	}
 
 	// pgvector is not needed by any regression today; the field exists so that
@@ -528,6 +553,54 @@ func assertTortureColumnsMaskAlike(ctx context.Context, t *testing.T, target *pg
 		t.Errorf("torture: %d of %s's %d values in the target are not values of %s; the two are joined by a "+
 			"foreign key and must mask to the same value, which is the defect this regression exists for",
 			values-matched, pair.child, values, pair.parent)
+	}
+}
+
+// assertTortureDefaultIsMasked reads a masked column's DEFAULT back out of
+// the target's own pg_attrdef and asserts what a `masked-default:` header
+// claims (T-0161, ARCHITECTURE.md §11.1 arm 1): the literal in it is a masked
+// address, not the source's own.
+//
+// It is deliberately independent of internal/plan's and internal/verify's own
+// literal scanner: internal/invariants imports internal/testutil and nothing
+// else of ours (this package's own CLAUDE.md), so this reads pg_attrdef the
+// way any operator with psql could and checks the literal with net/mail, the
+// standard library's own address parser, rather than a second copy of
+// pipeline.Literals.
+//
+// `expect: ok` alone would pass a run that left the source's own default in
+// place — the loader would still have recreated the object and the run would
+// still exit 0 — so this is the half of the claim the exit code cannot carry,
+// the way `unique-masked:` is for 004 and 007.
+func assertTortureDefaultIsMasked(ctx context.Context, t *testing.T, target *pgx.Conn, spec string) {
+	t.Helper()
+
+	parts := strings.Split(spec, ".")
+	var def string
+	q := `SELECT pg_get_expr(ad.adbin, ad.adrelid)
+	        FROM pg_attrdef ad
+	        JOIN pg_class c ON c.oid = ad.adrelid
+	        JOIN pg_namespace n ON n.oid = c.relnamespace
+	        JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = ad.adnum
+	       WHERE n.nspname = $1 AND c.relname = $2 AND a.attname = $3`
+	if err := target.QueryRow(ctx, q, parts[0], parts[1], parts[2]).Scan(&def); err != nil {
+		t.Fatalf("torture: reading %s's default in the target: %v", spec, err)
+	}
+
+	m := regexp.MustCompile(`'((?:[^']|'')*)'`).FindStringSubmatch(def)
+	if m == nil {
+		t.Fatalf("torture: %s's default %q in the target carries no string literal to check", spec, def)
+	}
+	literal := strings.ReplaceAll(m[1], "''", "'")
+
+	if _, err := mail.ParseAddress(literal); err != nil {
+		t.Errorf("torture: %s's default in the target is %q, which does not parse as an address (%v); "+
+			"the column masks to email and its default should mask to one too", spec, literal, err)
+	}
+	if strings.Contains(def, "ddl.canary") {
+		t.Errorf("torture: %s's default in the target is still %q, the source's own literal; "+
+			"ARCHITECTURE.md §11.1 arm 1 masks a masked column's default through its own masker and "+
+			"this regression exists to prove it runs from the CLI", spec, def)
 	}
 }
 

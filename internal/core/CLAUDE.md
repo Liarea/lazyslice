@@ -162,6 +162,65 @@ each one is a deviation a reviewer should see rather than discover.
   not only here. §8's row still describes it as a re-check and is owed the same
   correction.
 
+## Decisions made during the 2026-09-14 review of T-0161
+
+- **`resolveKeyIfPresent` no longer shares `resolveKeyState` with
+  `resolveKey`.** The first landing of `keyBeforePlan` (T-0161, which fills
+  `pipeline.PlanRequest.Key` ahead of `planStage`) ran a plan-only run's key
+  lookup through the same `resolveKeyState` a writing run uses, which calls
+  `repo.Protect` — and `repo.Protect` is not read-only: it appends
+  `lazyslice.secret` and `snapshots/` into `.gitignore`
+  (`internal/repo/repo.go`'s `appendMissing`) and can hard-abort with
+  `CodeSecretTracked`. `lazyslice plan` and the TUI's Preview pass — commands
+  that write nothing — were therefore mutating the operator's `.gitignore`
+  and could refuse over a tracked secret file on the one command an operator
+  would reach for to inspect that state. `resolveKeyIfPresent` now reads
+  `$LAZYSLICE_SECRET` and `r.req.SecretFile` directly and calls neither
+  `repo.Protect` nor the tracked-file check: that check exists to stop a
+  *write* from trusting a key a clone should not (THREAT_MODEL.md T6), and a
+  plan-only run performs no write for it to protect. A writing run still gets
+  the full check, unchanged, through `resolveKey`.
+- **`keyBeforePlan` and `planRequest` read one `planOnly()` method rather than
+  two copies of `r.req.Mode == ModePlan || r.req.PlanOnly`.** The same review
+  found `internal/plan/ddlliteral.go` inferring "this is a plan-only run" from
+  `PlanRequest.Key == nil` alone, held up only by those two conditions
+  agreeing by construction — nothing pinned them together, and a nil key
+  reaching that stage from anywhere else (a bug, or a future caller that
+  skips `keyBeforePlan`) was treated the same as a deliberate plan-only
+  pending state. `PlanRequest` now carries `KeyPending`, set by `planRequest`
+  from the one `planOnly()` call `keyBeforePlan` also branches on, and
+  `internal/plan/CLAUDE.md`'s T-0161 section records the other half: that
+  package's gate now reads `KeyPending`, not a nil `Key` on its own.
+  `TestKeyBeforePlanRunsBeforePlanStage` is the AST ordering pin (in the style
+  of `refingerprint_test.go`'s own), and `TestResolveKeyIfPresent*` /
+  `TestResolveKeyWithNoSecretCreatesOne` / `TestKeyBeforePlanDispatchesOnPlanOnly`
+  (`keybeforeplan_test.go`) hold the three states the brief's "do not create a
+  secret for a plan-only run" requirement needs: a plan-only run with no key
+  anywhere touches no file, a plan-only run with one already present fills
+  `PlanRequest.Key`, and a writing run with neither creates one.
+- **`execute`'s plan-only early return calls `planOnly()` too.** The first
+  landing of the bullet above left `execute`'s own dispatch — the `if
+  r.req.Mode == ModePlan || r.req.PlanOnly { return nil, r.emitPlanOnly() }`
+  a few lines above the `move()` call — as a third hand-kept copy of the
+  condition `planOnly()` exists to collapse to one, found in the same review's
+  second pass over this change. The consequence is worse than a stray literal:
+  if that copy ever narrowed relative to `planOnly()`, a run for which
+  `planOnly()` returns true would skip the early return and reach `move()`
+  with `r.key` at its zero value — `mask.Key` is `[KeyLen]byte`, so a
+  zero-value key is a *structurally valid* one, and `move()` would mask every
+  value under it and write the load, with `SecretFingerprint` empty on the
+  marker row and nothing checking that. `execute` now calls `r.planOnly()` at
+  that site, so all three sites (`keyBeforePlan`, `planRequest`, `execute`)
+  read the one method, and `TestExecutePlanOnlyGuardCallsPlanOnly`
+  (`keybeforeplan_test.go`) parses `run.go` and asserts the guard on
+  `execute`'s `return nil, r.emitPlanOnly()` is a call to `r.planOnly()`
+  rather than any equivalent inline expression — `TestKeyBeforePlanRunsBefore
+  PlanStage` only pins that `keyBeforePlan` runs before `planStage`, which a
+  drifted literal at the `emitPlanOnly` guard would still pass. `move()` also
+  gained a belt: it now refuses with `CodeInternal` at its first line if
+  `r.keyFP == ""`, so a plan-only run that reaches it by any future drift
+  aborts instead of masking with a zero key.
+
 ## Decisions made during the T-CORE review round (2026-09-06)
 
 - **The bounded channel is wired** (`channel.go`). §7 requires `core.Run` to

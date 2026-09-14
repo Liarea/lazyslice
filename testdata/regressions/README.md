@@ -69,6 +69,20 @@ beside a `unique-masked:` on the parent: the parent's values are masked,
 distinct and unusable, and the child holds the same ones. Either key alone would
 pass a run that copied both columns verbatim.
 
+A third, added by **T-0161**:
+
+```
+-- masked-default: public.t.col   a masked column whose DEFAULT must hold a
+                                 masked address in the target's own catalog
+```
+
+Every column it names is read back out of the target's own `pg_attrdef`
+(`assertTortureDefaultIsMasked`) and must parse as an address that is not the
+source's own literal. `expect: ok` alone proves the object was recreated, not
+that ARCHITECTURE.md §11.1 arm 1 ran rather than merely not refusing; this is
+what tells the two apart, the way `unique-masked:` tells "masked" from
+"copied verbatim" for 004 and 007. It is what 011 asserts.
+
 ## Files
 
 | File | From | Defect |
@@ -107,19 +121,14 @@ email address or phone number of the source's may survive anywhere in the target
 at all — 008 exited 0 before the fix and after it — so a suite that compared only
 exit codes would have had nothing to say about the one that mattered most.
 
-011 is the second file here whose header does not say `ok` for a defect that is
-fixed, and the reason is a wiring gap rather than a decision. T-0134 landed
-ARCHITECTURE.md §11.1's literal rule: a masked column's `DEFAULT` has its
-literals masked through the column's own masker, and a literal lazyslice cannot
-rewrite that a strong validator hits is exit 13 naming the object. The masking
-half needs the run key, which arrives on `pipeline.PlanRequest.Key`;
-`internal/core` was outside T-0134's paths and does not fill it, so the run this
-file drives finds a masked default it cannot rewrite and refuses at 13. **T-0161
-fills the key and flips this header to `ok`**, asserting the target's
-`pg_attrdef` holds a masked address — the same way 009's header moved when
-T-0127 landed. `internal/plan`'s
-`TestAMaskedColumnsDefaultIsMaskedThroughItsOwnMasker` is the unit half that
-already passes.
+011's header says `ok`: T-0134 landed ARCHITECTURE.md §11.1's literal rule — a
+masked column's `DEFAULT` has its literals masked through the column's own
+masker — and T-0161 wired the run key it needs, `pipeline.PlanRequest.Key`,
+ahead of the plan stage in `internal/core`, so the run this file drives now
+reaches arm 1 rather than refusing at exit 13 under arm 2's last clause. The
+`masked-default:` key above is what proves it ran rather than merely
+stopped refusing. `internal/plan`'s
+`TestAMaskedColumnsDefaultIsMaskedThroughItsOwnMasker` is the unit half.
 
 010 is the one file here that did not come from `testdata/torture/`. Its
 schema is the reduction the review itself made — `tokens(id PRIMARY KEY, token

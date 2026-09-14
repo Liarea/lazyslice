@@ -214,10 +214,31 @@ func (p *run) columnDefault(
 	}
 
 	c, judged := p.constraintsOf(col)
-	rewritable := judged && p.defaultIsRewritable(col) && p.req.Key != nil
-	if !rewritable {
-		// Nothing here can produce a value for this column, so a literal that
-		// is plainly personal data cannot be shipped and cannot be replaced.
+	shapeRewritable := judged && p.defaultIsRewritable(col)
+
+	// No key yet is not the same finding as "cannot be rewritten": every shape
+	// this stage declines below is a property of the column and stays wrong
+	// however this run is invoked, but a nil Key *with* KeyPending set is
+	// internal/core's keyBeforePlan reporting that a plan-only run has none to
+	// resolve without creating one (T-0161). KeyPending is read explicitly
+	// here rather than inferred from Key == nil alone (2026-09-14 review,
+	// finding 1): a writing run always reaches here with a key — core
+	// resolves it in full before planStage runs, and sets KeyPending false —
+	// so a nil Key on such a run is drift, not the plan-only state, and falls
+	// through to the refusal below instead of silently skipping the column.
+	// This branch is what a `lazyslice plan` with no lazyslice.secret and no
+	// $LAZYSLICE_SECRET takes, and refusing it would make planning impossible
+	// before a secret exists at all. The column is reported instead, in the
+	// order this pass visits it, so the operator can act.
+	if shapeRewritable && p.req.Key == nil && p.req.KeyPending {
+		p.pendingKeyDefaults = append(p.pendingKeyDefaults, t.Ref.String()+"."+col.Name)
+		return nil
+	}
+	if !shapeRewritable || p.req.Key == nil {
+		// Nothing here can produce a value for this column — either the shape
+		// declines it, or (KeyPending false, drift guard) a key was expected
+		// and is missing — so a literal that is plainly personal data cannot
+		// be shipped and cannot be replaced.
 		for _, lit := range lits {
 			if hit := strongHit(lit); hit != "" {
 				return p.refuseNotRewritable(t, col.Name, "the default on", hit)

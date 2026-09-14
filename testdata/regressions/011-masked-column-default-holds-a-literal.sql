@@ -1,8 +1,9 @@
--- root:   public.reg11_item
--- take:   20
--- expect: exit 13 target.schema.literal_not_rewritable
--- found:  the 2026-09-09 review, finding 5 (probe schema s_ddl_default)
--- why:    a masked column's DEFAULT was recreated in the target verbatim, so the address in it survived the run and the next INSERT would put it back in a row
+-- root:           public.reg11_item
+-- take:           20
+-- expect:         ok
+-- found:          the 2026-09-09 review, finding 5 (probe schema s_ddl_default)
+-- why:            a masked column's DEFAULT was recreated in the target verbatim, so the address in it survived the run and the next INSERT would put it back in a row
+-- masked-default: public.reg11_item.email
 --
 -- The second regression that did not come from testdata/torture/. Finding 5 of
 -- docs/reviews/2026-09-09/REVIEW.md is already the smallest schema that fails:
@@ -33,15 +34,24 @@
 -- internal/plan/ddlliteral.go is the check, and internal/verify/catalog.go is
 -- the second look at the artefact after the load.
 --
--- **This header will move to `ok`, and the task that moves it is T-0161.**
--- The masking half is implemented and unit-tested (internal/plan's
--- TestAMaskedColumnsDefaultIsMaskedThroughItsOwnMasker), and it needs the run
--- key: pipeline.PlanRequest.Key. internal/core was outside T-0134's paths and
--- does not fill it yet, so every run reaching this file finds a masked default
--- it cannot rewrite and refuses at 13 rather than masking it. That is the
--- fail-closed direction and it is not the finished behaviour: with the key
--- wired, this run loads, the target's DEFAULT holds a masked address, and the
--- header says `ok` -- the same way 009's did when T-0127 landed.
+-- **T-0161 moved this header to `ok`.** The masking half was already
+-- implemented and unit-tested (internal/plan's
+-- TestAMaskedColumnsDefaultIsMaskedThroughItsOwnMasker); what it needed was the
+-- run key, pipeline.PlanRequest.Key, which internal/core did not fill because
+-- it was outside T-0134's paths. T-0161 moves internal/core's key resolution
+-- ahead of the plan stage for any run that will write and fills the field from
+-- it, so this run now reaches arm 1 rather than arm 2's last clause: the row is
+-- masked, the DEFAULT is masked through the column's own masker, and the run
+-- exits 0 with the target's pg_attrdef holding a masked address rather than
+-- the one ddl.canary@example.org planted -- the same way 009's header moved
+-- when T-0127 landed. The `masked-default:` key above is what
+-- internal/invariants' TestTortureRegressions checks that against
+-- (assertTortureDefaultIsMasked): pg_attrdef's own text for the column, read
+-- back out of the target, must hold an address and must not hold the source's.
+-- That the run exits 0 at all is itself part of the proof: internal/verify's
+-- catalog pass would fail exit 9 on the masked address's own literal if
+-- Column.DefaultOriginal had not told it the default was rewritten
+-- (internal/verify/catalog.go's rewroteDefault).
 --
 -- reg11_item.email is deliberately the *masked* case. The unmasked case --
 -- a literal a strong validator hits in the DDL of a column the run does not

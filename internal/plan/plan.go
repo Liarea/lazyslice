@@ -183,6 +183,13 @@ type run struct {
 	unknownTypes map[polymorphicPair]*unknownValues
 	django       map[int64][2]string // django_content_type id -> (app_label, model)
 	djangoLoaded bool
+
+	// pendingKeyDefaults is §11.1 arm 1's finding when this run holds no key
+	// (T-0161): every masked column whose default checkDDLLiterals would have
+	// masked, named "schema.table.column", in the order tableDDLLiterals visits
+	// them (ddlliteral.go's columnDefault). Reported on pipeline.Plan rather
+	// than acted on, since there is nothing to mask it with.
+	pendingKeyDefaults []string
 }
 
 // item is one entry of the FIFO worklist.
@@ -919,17 +926,18 @@ func (p *run) assemble(root ref.TableRef, rootReason string) *pipeline.Plan {
 	// not the order rows happened to arrive in.
 	polymorphic := append(append([]string(nil), p.polymorphic...), p.unknownFindings()...)
 	return &pipeline.Plan{
-		Root:        root,
-		RootReason:  rootReason,
-		Take:        p.req.Take,
-		Steps:       ordered,
-		SCCs:        components,
-		Virtual:     p.virtual,
-		Polymorphic: polymorphic,
-		Unmapped:    p.unmapped,
-		Unindexed:   unindexed,
-		Skipped:     p.skipped,
-		Unreadable:  p.unreadable,
+		Root:               root,
+		RootReason:         rootReason,
+		Take:               p.req.Take,
+		Steps:              ordered,
+		SCCs:               components,
+		Virtual:            p.virtual,
+		Polymorphic:        polymorphic,
+		Unmapped:           p.unmapped,
+		Unindexed:          unindexed,
+		Skipped:            p.skipped,
+		Unreadable:         p.unreadable,
+		PendingKeyDefaults: p.pendingKeyDefaults,
 		Estimate: pipeline.Estimate{
 			Rows:         rows,
 			Bytes:        estBytes,
