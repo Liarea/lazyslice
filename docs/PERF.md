@@ -244,12 +244,26 @@ Docker. It is not a substitute for the real-Postgres numbers above (a fake
 reader cannot measure network-bound extract/load, which is most of this
 pipeline's wall time); it is the number cheap enough to run on every push.
 
-`make bench` runs it (best of five one-second `-count=5` runs, to absorb
-ordinary noise) and compares the best run against the recorded baseline in
-`internal/extract/testdata/bench/baseline.json`, failing if throughput
-dropped more than 20% (`BENCH_REGRESSION_PCT` in the `Makefile`).
-`.github/workflows/ci.yml`'s `bench` job runs it on every push and pull
-request, no Docker service required.
+CI cannot gate this on a single recorded baseline, because the runner is
+shared: two runs of `.github/workflows/ci.yml`'s `bench` job against the
+exact same commit measured 10,865,118 rows/sec (CI run 34927703066) and
+6,741,072 rows/sec (CI run 34928141791) on GitHub-hosted `ubuntu-latest` — a
+38% swing with no code change between them, comfortably past any regression
+ceiling worth setting in either direction. So the `bench` job now runs two
+checks with two different jobs to do. `make bench-compare` is the
+regression gate: it benchmarks a base commit (`BENCH_BASE`, default
+`HEAD~1`; a pull request's base branch in CI) and the working tree
+back-to-back, interleaved run by run, in a temporary `git worktree`, on the
+*same* runner in the *same* invocation — so runner noise lands on both
+sides of the comparison instead of only on whichever commit happened to run
+while a neighbour was busy — and fails if the working tree's best-of-five
+drops more than `BENCH_REGRESSION_PCT` (20%, `Makefile`) below the base's.
+`make bench` stays too, but only as a catastrophic-regression floor:
+`internal/extract/testdata/bench/baseline.json` now records 3,000,000
+rows/sec, well under half of the slower measurement above, so it fails only
+when throughput has actually collapsed, never on ordinary runner-to-runner
+variance (see that file's own note). Both steps run in ci.yml's `bench` job
+on every push and pull request, no Docker service required.
 
 Measured on this machine: ~22,000,000 rows/sec, stable across five runs
 (21.5M–22.2M). The recorded baseline is deliberately lower — see Concerns.
@@ -259,7 +273,7 @@ $ make bench
 ==> bench: BenchmarkExtractThroughput, best of 5 one-second runs
 BenchmarkExtractThroughput-10   130   9037463 ns/op   22130103 rows/sec
 ...
-bench: best of 5 run(s) = 22,139,957 rows/sec, baseline (internal/extract/testdata/bench/baseline.json) = 15,000,000 rows/sec (+47.6%)
+bench: best of 5 run(s) = 22,139,957 rows/sec, baseline (internal/extract/testdata/bench/baseline.json) = 3,000,000 rows/sec (+638.0%)
 ==> bench: within 20% of the recorded baseline
 ```
 
@@ -287,22 +301,7 @@ ok  	github.com/Liarea/lazyslice/internal/load	(no test files run outside -tags 
   up T-0175 should also move this file (or make `internal/extract/`'s copy
   the one the CI job reads from a shared location) so both fixtures live in
   one place.
-- **The recorded baseline (15,000,000 rows/sec) is well below the ~22,000,000
-  rows/sec measured locally**, on purpose: `BenchmarkExtractThroughput` has
-  never run on the actual CI runner, whose hardware is unknown to this task,
-  and a baseline that only just clears a laptop's number would fail the
-  very first real CI run on ordinary machine-to-machine variance. But a
-  baseline this far under the laptop's own number does not by itself say
-  the CI runner will clear it: `ubuntu-latest` is a shared x86 GitHub-hosted
-  runner, plausibly 2-3x slower single-thread than the Apple M4 this
-  benchmark was recorded on, which could put the runner's real throughput
-  under even this deliberately-lowered floor. T-PERF review flagged that a
-  never-measured baseline should not gate every push, so
-  `.github/workflows/ci.yml`'s `bench` job now runs with
-  `continue-on-error: true` until **T-0177** (tracker) pushes a branch,
-  reads the job's own best-of-5 rows/sec from a real `ubuntu-latest` run,
-  replaces `baseline.json` with that number, and removes the
-  `continue-on-error` line so the job gates for real.
+- **The recorded baseline is a catastrophic floor, not a regression gate** (T-0177, T-0179, 2026-09-15). The first version of this file recorded 15,000,000 rows/sec from a laptop and said the CI runner's own number should replace it. It did, for one push: run 34927703066 measured 10,865,118 rows/sec on ubuntu-latest and the job was made blocking at 90% of that; the very next run, 34928141791, measured 6,741,072 rows/sec on identical code, a 38% swing between two shared-runner runs. No absolute number can carry a 20% ceiling on that hardware, so the gate is now relative (`make bench-compare`, head against its parent on the same runner in the same job, interleaved, best of five each) and `baseline.json` holds 3,000,000 rows/sec so `make bench` fails only when throughput collapses.
 - **The top CPU hotspot in the whole pipeline (`mask.Apply`'s HMAC
   derivation, ~26–33% of samples) is in the `mask` module**, a separate Go
   module (ADR-006) outside this task's authorized paths, so it was profiled

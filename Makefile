@@ -38,7 +38,7 @@ LDFLAGS := -s -w \
 	-X main.commit=$(COMMIT) \
 	-X main.date=$(DATE)
 
-.PHONY: all build test lint integration torture vet-tagged forbidden unsafe-flags spdx fmt check tools clean help docs docs-check vulncheck bench
+.PHONY: all build test lint integration torture vet-tagged forbidden unsafe-flags spdx fmt check tools clean help docs docs-check vulncheck bench bench-compare
 
 ## build: compile the binary into bin/
 build:
@@ -88,32 +88,52 @@ integration:
 ## deviation; T-0175 (tracker) is the sibling task for nasty.sql's own size
 ## parameter, which has the same problem for a different reason.
 ##
-## The comparison is inline Python rather than a new tools/ program, for the
-## same reason: tools/ was outside T-PERF's paths too. It takes the best of
-## five 1-second runs (`-count=5`), because a benchmark run under `go test`
-## on a shared CI runner is noisy and the baseline should not fail a pull
-## request over a slow neighbour — regressing the code is what should fail
-## it. BENCH_REGRESSION_PCT is the 20% ceiling the task set; a drop past it
-## fails the build.
+## baseline.json is a catastrophic-regression floor (3,000,000 rows/sec),
+## not a number this target is expected to come close to: two identical-code
+## CI runs on GitHub-hosted ubuntu-latest measured 10,865,118 rows/sec and
+## 6,741,072 rows/sec (see baseline.json's own note for the run ids), a 38%
+## swing that made a tight baseline here fail on ordinary runner noise. The
+## real regression gate is `bench-compare`, below, which measures against a
+## base commit on this same machine instead of against a number recorded
+## somewhere else on some other day. BENCH_REGRESSION_PCT (20%) is shared by
+## both targets: here it is measured against the deliberately-low floor, so
+## in practice only a collapse trips it.
 BENCH_BASELINE := internal/extract/testdata/bench/baseline.json
 BENCH_REGRESSION_PCT := 20
 
 # define/endef and export, rather than a tools/ program: tools/ was outside
 # T-PERF's authorized paths, the same reason BENCH_BASELINE above lives under
 # internal/extract/testdata/ and not top-level testdata/bench/.
+#
+# BENCH_PARSE_PY holds best_rate(), the "go test -bench output -> sorted
+# rows/sec numbers" parsing both BENCH_CHECK_PY (bench) and BENCH_COMPARE_PY
+# (bench-compare) need; each exec()s it from the BENCH_PARSE_PY environment
+# variable rather than repeating the regex, so there is one parser for one
+# bench.out line format.
+define BENCH_PARSE_PY
+import re
+
+def best_rate(path):
+    rates = []
+    with open(path) as f:
+        for line in f:
+            if not line.startswith("BenchmarkExtractThroughput"):
+                continue
+            m = re.search(r"([0-9.]+)\s+rows/sec", line)
+            if m:
+                rates.append(float(m.group(1)))
+    return rates
+endef
+export BENCH_PARSE_PY
+
 define BENCH_CHECK_PY
-import json, re, sys
+import json, os, sys
+
+exec(os.environ["BENCH_PARSE_PY"])
 
 bench_out, baseline_path, ceiling_pct = sys.argv[1], sys.argv[2], float(sys.argv[3])
 
-rates = []
-with open(bench_out) as f:
-    for line in f:
-        if not line.startswith("BenchmarkExtractThroughput"):
-            continue
-        m = re.search(r"([0-9.]+)\s+rows/sec", line)
-        if m:
-            rates.append(float(m.group(1)))
+rates = best_rate(bench_out)
 if not rates:
     print(f"bench: no 'rows/sec' line from BenchmarkExtractThroughput in {bench_out}")
     sys.exit(1)
@@ -126,15 +146,106 @@ pct = (best - baseline) / baseline * 100
 print(f"bench: best of {len(rates)} run(s) = {best:,.0f} rows/sec, "
       f"baseline ({baseline_path}) = {baseline:,.0f} rows/sec ({pct:+.1f}%)")
 if pct < -ceiling_pct:
-    print(f"bench: throughput dropped more than {ceiling_pct:.0f}% from the recorded baseline")
+    print(f"bench: throughput dropped more than {ceiling_pct:.0f}% from the recorded (floor) baseline")
     sys.exit(1)
 endef
 export BENCH_CHECK_PY
 
 bench:
-	@echo "==> bench: BenchmarkExtractThroughput, best of 5 one-second runs"
+	@echo "==> bench: BenchmarkExtractThroughput, best of 5 one-second runs, catastrophic-floor check"
 	@mkdir -p $(BINDIR) && go test -run '^$$' -bench BenchmarkExtractThroughput -benchtime=1s -count=5 ./internal/extract/... | tee $(BINDIR)/bench.out
 	@python3 -c "$$BENCH_CHECK_PY" $(BINDIR)/bench.out $(BENCH_BASELINE) $(BENCH_REGRESSION_PCT)
+
+## bench-compare: BenchmarkExtractThroughput, BENCH_BASE vs the working tree,
+## measured back-to-back on this machine in this invocation
+##
+## The regression gate `bench` cannot be: an absolute floor compared against
+## a number recorded on some other run, on some other day, on a shared
+## runner. ae51123 recorded one such number from the CI job's own runner and
+## made the job blocking; the very next run, with identical code, measured
+## 6,741,072 rows/sec against that run's 10,865,118 (CI runs 34928141791 and
+## 34927703066) — a 38% swing on the same commit, comfortably past
+## BENCH_REGRESSION_PCT in both directions. No single recorded baseline
+## survives that; the question has to be answered on the machine that is
+## asking it.
+##
+## So this target benchmarks BENCH_BASE (default HEAD~1: "did this commit
+## regress it") and the working tree on the *same* runner, in the *same*
+## make invocation, and compares their own best-of-five to each other rather
+## than either to a stored number. BENCH_BASE is checked out into a
+## temporary `git worktree` under a scratch directory (mktemp -d) rather than
+## a second clone or a `git stash`/checkout-and-back dance in this tree,
+## because the working tree must stay exactly as the caller left it —
+## including uncommitted changes — for its own runs. The worktree is removed
+## in a `trap ... EXIT`, so it is cleaned up whether the comparison passes,
+## fails, or the script errors out early.
+##
+## The five runs per side are interleaved (base, head, base, head, ...)
+## rather than five-then-five: a shared runner's noisy neighbour or thermal
+## throttling tends to drift over a run's lifetime rather than jump, and
+## five-then-five would let that drift land entirely on whichever side ran
+## second. Interleaving means every "run i" pairs a base sample and a head
+## sample from the same moment on the runner, so drift affects both sides
+## equally instead of biasing the comparison. Best-of-five is kept per side
+## for the same reason `bench` takes a best-of-five: a single run is noisy,
+## and the code should not fail a comparison because one sample was slow —
+## regressing should.
+##
+## BENCH_COMPARE_PY reuses BENCH_PARSE_PY's best_rate(), the same
+## bench.out-line parser `bench`'s BENCH_CHECK_PY uses, so the two targets
+## share one parser rather than each carrying its own copy of the regex.
+BENCH_BASE ?= HEAD~1
+
+define BENCH_COMPARE_PY
+import os, sys
+
+exec(os.environ["BENCH_PARSE_PY"])
+
+base_out, head_out, ceiling_pct = sys.argv[1], sys.argv[2], float(sys.argv[3])
+
+base_rates = best_rate(base_out)
+if not base_rates:
+    print(f"bench-compare: no 'rows/sec' line from BenchmarkExtractThroughput in {base_out}")
+    sys.exit(1)
+head_rates = best_rate(head_out)
+if not head_rates:
+    print(f"bench-compare: no 'rows/sec' line from BenchmarkExtractThroughput in {head_out}")
+    sys.exit(1)
+
+base_best = max(base_rates)
+head_best = max(head_rates)
+pct = (head_best - base_best) / base_best * 100
+print(f"bench-compare: base best of {len(base_rates)} run(s) = {base_best:,.0f} rows/sec, "
+      f"head best of {len(head_rates)} run(s) = {head_best:,.0f} rows/sec ({pct:+.1f}%)")
+if pct < -ceiling_pct:
+    print(f"bench-compare: head throughput dropped more than {ceiling_pct:.0f}% from base")
+    sys.exit(1)
+endef
+export BENCH_COMPARE_PY
+
+bench-compare:
+	@set -eu; \
+	scratch=$$(mktemp -d); \
+	worktree="$$scratch/base"; \
+	base_out="$$scratch/base.out"; \
+	head_out="$$scratch/head.out"; \
+	: >"$$base_out"; : >"$$head_out"; \
+	cleanup() { \
+		git worktree remove --force "$$worktree" >/dev/null 2>&1 || true; \
+		git worktree prune >/dev/null 2>&1 || true; \
+		rm -rf "$$scratch"; \
+	}; \
+	trap cleanup EXIT; \
+	base_sha=$$(git rev-parse "$(BENCH_BASE)"); \
+	echo "==> bench-compare: BENCH_BASE=$(BENCH_BASE) ($$base_sha) vs the working tree, interleaved, best of 5 one-second runs each"; \
+	git worktree add --quiet --detach "$$worktree" "$$base_sha"; \
+	for i in 1 2 3 4 5; do \
+		echo "-- run $$i/5 (base $$base_sha)"; \
+		( cd "$$worktree" && go test -run '^$$' -bench BenchmarkExtractThroughput -benchtime=1s -count=1 ./internal/extract/... ) | tee -a "$$base_out"; \
+		echo "-- run $$i/5 (head, working tree)"; \
+		go test -run '^$$' -bench BenchmarkExtractThroughput -benchtime=1s -count=1 ./internal/extract/... | tee -a "$$head_out"; \
+	done; \
+	python3 -c "$$BENCH_COMPARE_PY" "$$base_out" "$$head_out" $(BENCH_REGRESSION_PCT)
 
 ## torture: the ten real schemas of testdata/torture/, plus testdata/regressions/
 ##
