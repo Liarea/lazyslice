@@ -74,6 +74,7 @@ One row per code in the catalogue, in the file's own order. Exit is only meaning
 | `stage.done` | any | - | {stage} |
 | `stage.not_implemented` | any | - | {stage} is not in this build |
 | `source.refused.none` | discover | 3 | no source: pass --source postgres://... |
+| `source.refused.ref_invalid` | discover | 2 | ./lazyslice.yml's source_ref does not describe a usable connection: {reason} — edit the file's source: block, delete it to let lazyslice rediscover the source, or pass {flag} to override it for this run |
 | `source.decided` | discover | - | source {database} on {host} as {role} ({provenance}) — {flag} |
 | `target.decided` | discover | - | target {database} on {host} — {flag} |
 | `source.role.writable` | discover | - | the role {role} can write to {count} table(s) in {database} — recommend a read-only role: {statement} |
@@ -122,3 +123,4 @@ One row per code in the catalogue, in the file's own order. Exit is only meaning
 | `target.refused.none` | discover | 4 | no local postgres found to load into: pass {flag} |
 | `target.refused.not_implemented` | discover | 4 | starting a target container is not in this build: pass {flag} naming a database to load into |
 | `target.refused.docker_not_local` | discover | 4 | --create-target needs a local docker endpoint: {host} is {reason} — set {flag} to a local socket, or name a database with --target |
+| `target.refused.ref_invalid` | discover | 2 | ./lazyslice.yml's target_ref does not describe a usable connection: {reason} — edit the file's target: block, delete it to let lazyslice rediscover the target, or pass {flag} to override it for this run |

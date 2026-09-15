@@ -85,7 +85,7 @@ const (
 )
 
 type Candidate struct {
-    Ref        dsn.Ref    // host, port, database, user; String() never prints a password
+    Ref        dsn.Ref    // host, port, database, user, and Params (allowlisted transport keys, T-0135); String() never prints a password
     Provenance Provenance
     Label      string     // compose service, container name, env var name
     Local      bool       // loopback, or a container whose compose working_dir matches cwd
@@ -1096,6 +1096,9 @@ source:
   database: pagila
   host: 127.0.0.1
   port: 5432
+  params:                  # transport settings the first run was given, replayed on every rerun (T-0135)
+    sslmode: verify-full
+    sslrootcert: /etc/ssl/pagila-ca.pem
   password_command: null   # e.g. "pass show db/pagila"; a command string, never its output
 target:
   from: compose
@@ -1203,6 +1206,8 @@ plan:
     function: 9
     trigger: 15
 ```
+
+**Amendment 2026-09-14 (T-0135, docs/reviews/2026-09-09 finding 6).** `dsn.Ref` carries `Params`, an allowlisted map of the non-secret transport keys the connection string was given: `sslmode`, `sslrootcert`, `sslcert`, `sslkey`, `connect_timeout`, `application_name`, `options`. Emit writes it as `params:` under `source:` and `target:`, discovery's rung 0 rebuilds the endpoint from it, so a first run with `sslmode=verify-full` reruns at `verify-full` and not at pgx's default `prefer`. A key outside the allowlist is dropped with a warning naming it; `password` and the whole DSN are never in the map. A recorded endpoint that no longer parses (a typoed `sslmode`, a non-numeric `connect_timeout`) refuses at exit 2 naming the field and the parameter rather than falling through to discovery; an unreadable certificate path is stripped with a warning and retried. Settings that reached the first run only through libpq environment variables or a `PGSERVICE` entry are not yet captured (T-0168).
 
 Every `reason:` string parses against the template set (§2 "Value-free types"); every value in this file is an identifier, a count, a fingerprint or a flag value with literals withheld.
 

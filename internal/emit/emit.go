@@ -434,7 +434,12 @@ func sortColumns(cs []ref.ColumnRef) {
 // maskerID keeps the yaml decoder honest about mask.ID, which is a string type.
 func maskerID(s string) mask.ID { return mask.ID(s) }
 
-// refOf is dsn.Ref from the four fields the file carries.
-func refOf(host string, port int, database, user string) dsn.Ref {
-	return dsn.Ref{Host: host, Port: port, Database: database, User: user}
+// refOf is dsn.Ref from the fields the file carries.
+//
+// params goes through dsn.FilterAllowedParams rather than straight onto the
+// Ref: the committed file is text a person can hand-edit, and a `params:`
+// block is not exempt from "Ref never holds a credential" just because it
+// came from a read instead of a fresh Parse (THREAT_MODEL.md T4, T5).
+func refOf(host string, port int, database, user string, params map[string]string) dsn.Ref {
+	return dsn.Ref{Host: host, Port: port, Database: database, User: user, Params: dsn.FilterAllowedParams(params)}
 }

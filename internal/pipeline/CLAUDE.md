@@ -109,3 +109,18 @@ It is a text the source wrote and not a value from a row: a `DEFAULT` expression
 is catalog text that `internal/introspect` already carries on `Default` and that
 `internal/emit` does not write. Nothing here weakens `TestNoValueBearingField\
 Serialised`'s rule; a field that carried a row value would.
+
+**`Candidate` has an `IsZero()` (T-0165, 2026-09-14).** `Candidate` embeds
+`dsn.Ref` by value, and T-0135 gave `Ref` a `Params map[string]string` field,
+which makes a struct incomparable with `==` — and `Candidate` with it, since
+Go's comparability is transitive over fields. `internal/core/provenance_test.go`
+compared `r.sourceCand`/`r.targetCand` against `(pipeline.Candidate{})` with
+`==`, which stopped compiling and took the rest of that package's suite (the
+target gate and provenance safety tests included) down with it, since a test
+binary that does not compile runs nothing. `IsZero()` is field-wise, matching
+`dsn.Ref.IsZero()`'s own shape (`Params` counted as zero when empty via
+`c.Ref.IsZero()`), and `provenance_test.go` calls it instead of comparing with
+`==`. This is not the "no implementation" rule's exception clause and does not
+need to be: `IsZero()` is a value method on a type this package already owns —
+field comparisons only, no query, no masker, no renderer — the same footing
+`Provenance`'s own constants stand on.

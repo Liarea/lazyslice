@@ -87,11 +87,26 @@ const (
 	// control rather than a phase-5 detail — a container created on someone
 	// else's daemon is not local and lazyslice never removes one.
 	CodeTargetDockerNotLocal event.Code = "target.refused.docker_not_local"
+
+	// CodeSourceRefInvalid and CodeTargetRefInvalid are docs/reviews
+	// (2026-09-14, finding 2): a committed lazyslice.yml's source_ref or
+	// target_ref fails dsn.Parse for a reason refDSNValidated's sslrootcert
+	// retry cannot fix — a typoed sslmode, a non-numeric connect_timeout —
+	// and the run refuses at exit 2 rather than falling through to discovery
+	// and silently loading a database the file never named. {reason} is
+	// dsn.ParseError's own text, safe to show because refDSN built the
+	// string from a Ref and a Ref never carries a password.
+	CodeSourceRefInvalid event.Code = "source.refused.ref_invalid"
+	CodeTargetRefInvalid event.Code = "target.refused.ref_invalid"
 )
 
 // The ADR-005 exit codes this package returns. They are repeated here rather
 // than imported from cmd/lazyslice because the dependency goes the other way.
 const (
+	// exitUsage is exit 2: a flag, or here, a committed lazyslice.yml field,
+	// the operator has to fix. CodeSourceRefInvalid and CodeTargetRefInvalid
+	// use it.
+	exitUsage    = 2
 	exitNoSource = 3
 	exitTarget   = 4
 )

@@ -177,14 +177,14 @@ func fillCandidates(t *testing.T, r *run) {
 	if err := r.discover(t.Context()); err == nil {
 		t.Fatal("discover reached a database on a closed port")
 	}
-	if r.sourceCand == (pipeline.Candidate{}) {
+	if r.sourceCand.IsZero() {
 		t.Fatal("discover returned before it built the source candidate")
 	}
 	err := r.openTarget(t.Context())
 	if err == nil {
 		t.Fatal("openTarget reached a database on a closed port")
 	}
-	if r.targetCand == (pipeline.Candidate{}) {
+	if r.targetCand.IsZero() {
 		t.Fatal("openTarget returned before it built the target candidate")
 	}
 

@@ -211,9 +211,11 @@ func Resolve(ctx context.Context, o Options, sink event.Sink) (Result, error) {
 	// nothing named.
 	if o.Source != "" {
 		res.Source, res.SourceProvenance = o.Source, pipeline.FromFlag
+		warnDroppedParams(progressOf(o), o.Source)
 	}
 	if o.Target != "" {
 		res.Target, res.TargetProvenance = o.Target, pipeline.FromFlag
+		warnDroppedParams(progressOf(o), o.Target)
 	}
 	if o.Config != nil {
 		// Rung 0. The yml short-circuits the same way a flag does, for whichever
@@ -227,13 +229,27 @@ func Resolve(ctx context.Context, o Options, sink event.Sink) (Result, error) {
 		// §6 scopes --create-target to being Q1's headless answer, which fires
 		// only where the ladder found no target at all.
 		if res.Source == "" {
-			if d, ok := refDSN(o.Config.SourceRef); ok {
+			d, err := refDSNValidated(progressOf(o), o.Config.SourceRef)
+			if err != nil {
+				// docs/reviews, 2026-09-14, finding 2: this is the committed yml
+				// the operator did not override with --source, so a Ref that does
+				// not describe a usable connection is not "nothing at rung 0" — it
+				// is a file this run cannot honour, and falling through to
+				// discovery would silently load a database ./lazyslice.yml never
+				// named.
+				return res, refuseInvalidRef(sink, "source", err)
+			}
+			if d != "" {
 				res.Source = d
 				res.SourceProvenance, res.SourceLabel = o.Config.Source, o.Config.SourceLabel
 			}
 		}
 		if res.Target == "" && o.NeedTarget {
-			if d, ok := rung0Target(o); ok {
+			d, err := rung0Target(o)
+			if err != nil {
+				return res, refuseInvalidRef(sink, "target", err)
+			}
+			if d != "" {
 				res.Target = d
 				res.TargetProvenance, res.TargetLabel = o.Config.Target, o.Config.TargetLabel
 			}
@@ -362,7 +378,7 @@ func walk(ctx context.Context, o Options, sink event.Sink) ([]found, dockerEndpo
 	var cands []found
 
 	if o.Config != nil {
-		cands = append(cands, rung0(o.Config)...)
+		cands = append(cands, rung0(o)...)
 	}
 
 	env, unusable := rung1(o.Workdir)
@@ -390,8 +406,39 @@ func walk(ctx context.Context, o Options, sink event.Sink) ([]found, dockerEndpo
 	cands = collapse(cands)
 	for i := range cands {
 		emitCandidate(sink, cands[i])
+		warnDroppedParams(progressOf(o), string(cands[i].dsn))
 	}
 	return cands, dock
+}
+
+// warnDroppedParams names, on progress, every connection parameter s carries
+// that dsn.AllowedParams does not: THREAT_MODEL.md T4/T5 is why Ref.Params
+// only ever holds the allowlist (dsn.ExtractParams), and an operator who set
+// sslmode=verify-full and also, say, some pooler-specific setting deserves to
+// be told the second one did not survive rather than discovering it the next
+// time a rerun's connection looks different than the one they wrote.
+//
+// This prints rather than sending an event: internal/event/catalogue.yml is
+// outside this task's paths (T-0135) and CI fails on a Code with no row there
+// (internal/event/CLAUDE.md), so this follows the precedent the pull and
+// start messages already set — see this package's CLAUDE.md, "the pull and
+// the start print outside the event catalogue". The gap this leaves —
+// internal/core's own dsn.Parse calls for a bare --source/--target string
+// reach core.Request before this package sees them — is filed as tracker debt
+// rather than closed here, since internal/core is outside this task's paths
+// too.
+func warnDroppedParams(w io.Writer, s string) {
+	if w == nil || s == "" {
+		return
+	}
+	_, dropped := dsn.ExtractParams(s)
+	for _, k := range dropped {
+		msg := "lazyslice: dropping connection parameter " + k +
+			": not in the allowed list (" + strings.Join(dsn.AllowedParams, ", ") + ")"
+		if _, err := io.WriteString(w, msg+"\n"); err != nil {
+			return
+		}
+	}
 }
 
 // rung3 is running Postgres containers, behind the Docker endpoint ADR-008 §3
@@ -493,7 +540,8 @@ func dialDocker(o Options, e dockerctx.Endpoint) (dockerAPI, error) {
 // rung0 is ./lazyslice.yml. The file records references, not connection
 // strings, so the candidate carries no password and the ordinary password
 // sources (PGPASSWORD, ~/.pgpass, --password-command) supply one.
-func rung0(cfg *pipeline.Config) []found {
+func rung0(o Options) []found {
+	cfg := o.Config
 	var out []found
 	for _, side := range []struct {
 		ref   dsn.Ref
@@ -503,12 +551,24 @@ func rung0(cfg *pipeline.Config) []found {
 		{cfg.SourceRef, cfg.SourceLabel, pipeline.FromYml},
 		{cfg.TargetRef, cfg.TargetLabel, pipeline.FromYml},
 	} {
-		s, ok := refDSN(side.ref)
-		if !ok {
+		s, err := refDSNValidated(progressOf(o), side.ref)
+		if err != nil || s == "" {
+			// An error here always belongs to the side the operator overrode by
+			// flag this run: rung0 reads both cfg.SourceRef and cfg.TargetRef
+			// unconditionally, but Resolve's own rung-0 short-circuit above
+			// already validated whichever side was not overridden and would have
+			// refused loudly (refuseInvalidRef) on exactly this error before walk
+			// — and so this loop — was ever reached. A non-nil err reaching here
+			// therefore names a yml value this run is not using, and skipping it
+			// is correct rather than silent: the field is not in play.
 			continue
 		}
 		d, ref, err := dsn.Parse(s)
 		if err != nil {
+			// refDSNValidated already retried without any unreadable
+			// file-valued param, so a second failure here means the
+			// reference is malformed in some other way; fall through as
+			// before rather than resolving this side.
 			continue
 		}
 		out = append(out, found{
@@ -524,9 +584,73 @@ func rung0(cfg *pipeline.Config) []found {
 	return out
 }
 
+// filePathParams are the dsn.AllowedParams keys whose value pgconn reads as a
+// file at Parse time (see rung0's comment on why that matters).
+var filePathParams = map[string]bool{"sslrootcert": true, "sslcert": true, "sslkey": true}
+
+// withoutFileParams returns r with every filePathParams entry removed, and the
+// (sorted) names of the entries it removed. It returns r unchanged and no
+// names when r carries none of them, so a caller can tell "nothing to retry
+// without" apart from "retried and still nothing changed".
+func withoutFileParams(r dsn.Ref) (dsn.Ref, []string) {
+	if len(r.Params) == 0 {
+		return r, nil
+	}
+	var dropped []string
+	kept := make(map[string]string, len(r.Params))
+	for k, v := range r.Params {
+		if filePathParams[k] {
+			dropped = append(dropped, k)
+			continue
+		}
+		kept[k] = v
+	}
+	if len(dropped) == 0 {
+		return r, nil
+	}
+	sort.Strings(dropped)
+	out := r
+	out.Params = kept
+	return out, dropped
+}
+
+// warnUnreadableParams names, on progress, every file-valued param rung 0
+// could not use because dsn.Parse failed to read the path off this machine
+// (see rung0's comment). It never prints the path itself — only the key name
+// — the same restraint Ref.String already takes with every other value in
+// Params.
+func warnUnreadableParams(w io.Writer, keys []string) {
+	if w == nil || len(keys) == 0 {
+		return
+	}
+	them := "it"
+	if len(keys) > 1 {
+		them = "them"
+	}
+	msg := "lazyslice: ./lazyslice.yml names " + strings.Join(keys, ", ") +
+		", which this machine cannot read; rung 0 reconnected to the recorded endpoint without " + them
+	if _, err := io.WriteString(w, msg+"\n"); err != nil {
+		return
+	}
+}
+
 // refDSN rebuilds a connection string from a redacted reference. It is how
 // rung 0 turns lazyslice.yml's source_ref into something dialable; the password
 // is not in the file and comes from libpq's own sources.
+//
+// r.Params rides along as query parameters, which is the fix for
+// docs/reviews/2026-09-09/REVIEW.md finding 6: without it, a first run with
+// sslmode=verify-full re-dialled at rung 0 with none of that, at pgx's default
+// of sslmode=prefer. r.Params already went through dsn.FilterAllowedParams on
+// the way in (internal/emit's refOf), so this does not re-check the
+// allowlist — it only ever carries what that already let through.
+//
+// This closes the gap only for a source or target the committed yml recorded
+// with the setting spelled out in the connection string it was Parsed from
+// (rungs 0, 1, 3, 4). A first run reached through rung 2 — PGSSLMODE or a
+// PGSERVICE entry rather than a written sslmode — Parses to a Ref whose Params
+// never carried it in the first place (dsn.Ref.Params's own doc comment), so
+// there is nothing here for refDSN to ride along; tracked as T-0168.
 func refDSN(r dsn.Ref) (string, bool) {
 	if r.Host == "" || r.Database == "" {
 		return "", false
@@ -539,8 +663,14 @@ func refDSN(r dsn.Ref) (string, bool) {
 	if r.User != "" {
 		u.User = url.User(r.User)
 	}
+	q := url.Values{}
+	for k, v := range r.Params {
+		q.Set(k, v)
+	}
 	if strings.HasPrefix(r.Host, "/") {
-		u.RawQuery = url.Values{"host": {r.Host}, "port": {strconv.Itoa(port)}}.Encode()
+		q.Set("host", r.Host)
+		q.Set("port", strconv.Itoa(port))
+		u.RawQuery = q.Encode()
 		return u.String(), true
 	}
 	host := r.Host
@@ -548,7 +678,76 @@ func refDSN(r dsn.Ref) (string, bool) {
 		host = "[" + host + "]"
 	}
 	u.Host = host + ":" + strconv.Itoa(port)
+	if len(q) > 0 {
+		u.RawQuery = q.Encode()
+	}
 	return u.String(), true
+}
+
+// refDSNValidated is refDSN plus the retry docs/reviews (2026-09-14, finding
+// 2) requires: pgconn builds the TLS config — and reads sslrootcert/sslcert/
+// sslkey off disk — at Parse time, not at connect time, so a committed
+// lazyslice.yml naming a certificate path that does not exist on this
+// machine (a per-developer path, ARCHITECTURE.md §9's worked example for why
+// the file is shared) makes dsn.Parse fail outright on the string refDSN
+// built. Returning refDSN's result unchecked let that failure surface far
+// from here — a parse-time error inside internal/core's own dsn.Parse of
+// this same string, rendered as "--source is not a Postgres connection
+// string" naming a flag the operator never passed — or, from rung0's old
+// bare `continue`, silently dropped the endpoint and let the walk resolve
+// this side to a *different* database than the file recorded.
+//
+// So every caller that turns a committed Ref into something dialable goes
+// through this rather than refDSN directly: Resolve's own rung-0
+// short-circuit (both endpoints already named), rung0Target, and rung0's
+// walk of both sides. On a parse failure it retries once with every
+// filePathParams entry stripped from r, and warns the dropped keys by name
+// on w (warnUnreadableParams) rather than staying silent; a Ref whose
+// non-file params still parse without the unreadable file keeps the
+// endpoint.
+//
+// A Ref that is not usable at all — no host or no database — returns
+// ("", nil): that is not an error, it is the ordinary shape of an endpoint
+// nothing named (a --plan run with no target, the other half of a yml one
+// side of which was never recorded), and every caller treats it the same as
+// "nothing at this rung".
+//
+// A Ref that does carry a host and a database but still will not parse after
+// the retry — a typoed sslmode, a non-numeric connect_timeout, anything that
+// is not an unreadable certificate file — returns a non-nil error instead of
+// ("", false) (docs/reviews, 2026-09-14, finding 2, re-review). Returning
+// false here used to read as "nothing at rung 0" to every caller, which let
+// Resolve's own short-circuit fall through to discovery and load a database
+// ./lazyslice.yml never named, silently. The error is dsn.ParseError's text,
+// which is safe to show — never the wrapped, generic error dsn.Parse itself
+// returns — specifically because s (or, after the retry, the stripped s2) was
+// built by refDSN from r and nothing else, and a dsn.Ref can never carry a
+// password (THREAT_MODEL.md T4, T5) no matter what built the string from it.
+func refDSNValidated(w io.Writer, r dsn.Ref) (string, error) {
+	s, ok := refDSN(r)
+	if !ok {
+		return "", nil
+	}
+	if _, _, err := dsn.Parse(s); err == nil {
+		return s, nil
+	}
+	stripped, unreadable := withoutFileParams(r)
+	if len(unreadable) == 0 {
+		return "", dsn.ParseError(s)
+	}
+	s2, ok2 := refDSN(stripped)
+	if !ok2 {
+		return "", dsn.ParseError(s)
+	}
+	if _, _, err2 := dsn.Parse(s2); err2 != nil {
+		// Stripping the unreadable file(s) was not enough either: refuse on
+		// what remains rather than on the file-read problem alone, and skip
+		// warnUnreadableParams below — this path never reconnects, so its
+		// "reconnected without it" message would be wrong.
+		return "", dsn.ParseError(s2)
+	}
+	warnUnreadableParams(w, unreadable)
+	return s2, nil
 }
 
 // rung0Target is the committed yml's target, with the credential of a container
@@ -569,20 +768,23 @@ func refDSN(r dsn.Ref) (string, bool) {
 // that is not a single path element, so a lazyslice.yml naming another file
 // cannot make this read it. The label only has to *agree* with the name we
 // would have used, which is what identifies the endpoint as ours.
-func rung0Target(o Options) (string, bool) {
-	s, ok := refDSN(o.Config.TargetRef)
-	if !ok {
-		return "", false
+func rung0Target(o Options) (string, error) {
+	s, err := refDSNValidated(progressOf(o), o.Config.TargetRef)
+	if err != nil {
+		return "", err
+	}
+	if s == "" {
+		return "", nil
 	}
 	name := provision.Name(projectName(o.Workdir))
 	if o.Config.TargetLabel != name || !o.Config.TargetRef.Loopback() {
-		return s, true
+		return s, nil
 	}
 	secret, remembered := provision.Password(name)
 	if !remembered {
-		return s, true
+		return s, nil
 	}
-	return withPassword(s, secret), true
+	return withPassword(s, secret), nil
 }
 
 // withPassword puts a password into a connection string that has none. A string
@@ -789,6 +991,31 @@ func refuseNoSource(sink event.Sink) error {
 		Code:    CodeSourceNone,
 		Exit:    exitNoSource,
 		Message: "nothing on the ladder answered: pass --source postgres://...",
+	}
+	sendError(sink, r)
+	return r
+}
+
+// refuseInvalidRef is exit 2 (docs/reviews, 2026-09-14, finding 2): the
+// committed lazyslice.yml's source_ref or target_ref does not describe a
+// usable connection, and refDSNValidated's retry (which recovers only an
+// unreadable certificate file) could not fix it. side is "source" or
+// "target", the yml field the run refuses over; cause is dsn.ParseError's
+// text, which names the parameter pgconn objected to — never a password,
+// because refDSN built the string cause was found in from a Ref alone.
+func refuseInvalidRef(sink event.Sink, side string, cause error) error {
+	code, flag := CodeSourceRefInvalid, "--source"
+	if side == "target" {
+		code, flag = CodeTargetRefInvalid, "--target"
+	}
+	r := &Refusal{
+		Code: code,
+		Exit: exitUsage,
+		Args: event.Args{
+			event.ArgReason: cause.Error(),
+			event.ArgFlag:   flag,
+		},
+		Message: "./lazyslice.yml's " + side + "_ref does not describe a usable connection: " + cause.Error(),
 	}
 	sendError(sink, r)
 	return r

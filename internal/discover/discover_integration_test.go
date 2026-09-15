@@ -7,6 +7,7 @@ package discover
 import (
 	"context"
 	"os"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -318,7 +319,7 @@ func TestASecondRunOpensTheTargetItProvisioned(t *testing.T) {
 	}
 	// The reference is the file's, so the spelling is the file's — what has to
 	// match is the endpoint, and what has to be added back is the credential.
-	if _, ref, parseErr := dsn.Parse(res.Target); parseErr != nil || ref != made.Candidate.Ref {
+	if _, ref, parseErr := dsn.Parse(res.Target); parseErr != nil || !reflect.DeepEqual(ref, made.Candidate.Ref) {
 		t.Errorf("target = %q (%v), want the endpoint the first run provisioned, %s",
 			redactDSN(res.Target), parseErr, made.Candidate.Ref)
 	}
