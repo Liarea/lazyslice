@@ -63,6 +63,15 @@ sees that case and must not paper over it with a retry.
   report calls masked is exactly T12.
 
 **Decisions made during implementation.**
+- **This package now imports `internal/textsig`** (`json.go`'s `keyCategory`,
+  T-0137). ARCHITECTURE.md §2 and §12 document `textsig` as shared by
+  `classify` and `verify` only ("so classify and verify share one
+  implementation without importing each other"); this is a third importer, not
+  named there. It is not a new edge in the *cycle* `TestImportGraph` polices —
+  `textsig` imports nothing from this repository, so it stays a leaf and this
+  package already imports `pipeline` and `ref`, its documented siblings — but
+  the prose undersells it now, and ARCHITECTURE.md §2/§12 are owed the third
+  name. Reported here rather than silently widened.
 - **`New` takes the `*pipeline.Schema`.** §2's `Transform` is given the
   classification, and a `Decision` carries a category and a masker id but not
   the column's type, length, enum labels, `CHECK` constraints or nullability —
@@ -189,10 +198,53 @@ package, so this is the whole of what it may assume. A JSON path is spelled
 | a boolean leaf | — | **not recorded** (a two-valued domain) |
 | a `null` leaf | — | **not recorded** (not masked) |
 | a leaf of a collapsed document | — | **not recorded** (no per-leaf masker ran) |
+| a masked object key (email, phone or credit-card shaped, T-0137) | the key's own path in the *target* (`path+"."+maskedName`) | `mask.Canonical(the matched category, the key text)` — `mask.Apply`'s own `Result.Canonical`, not `free_text`: the category is whichever of the three strong validators the key matched |
 
 Every leaf entry goes through one function, `addLeaf`, so the table above has
 one implementation and not five call sites. Changing a row of it changes a
 contract another package is written against: change both in one commit.
+
+**A masked object key is keyed at its own path in the target, and `walk`
+recurses under the masked spelling, not the source one** (`maskKey`, `walk`,
+T-0137, **2026-09-14 review round, finding 1**). The first version of this
+keyed a masked key's entry at the document's empty path and built every
+child's path from the *source* key: `walk` still had the masked value to
+write into `out`, but the path it recursed with was the one the target would
+never spell that way again. `internal/verify`'s `leaves` and `documentKeys`
+rebuild every path from the *target* alone (they cannot import this
+package), so for `{"a@b.com":{"note":"Jane Smith"}}` this package used to
+record the leaf under `$.a@b.com.note` while verify queried a masked spelling
+at `$.<maskedkey>.note` — a bucket that was always empty. Every string leaf
+beneath a masked key was therefore untested by the residual scan; a leaf
+masker that failed open under such a key would have exited 0 with the leak in
+the target. The fix makes `walk` mask the key first and recurse with
+`path+"."+maskedName`, so every path beneath a masked key — the key's own
+entry and every leaf nested under it — is spelled exactly as the target
+spells it, and `internal/verify` can rebuild every one of them by reading the
+target and nothing else. The masked key's own entry now sits at that real
+path instead of the empty-path special case the first version needed; the
+empty path is still where a scalar cell and a collapsed document record,
+because neither of those has a path of its own to use.
+
+**Two source keys that canonicalise alike are a refusal, not a silent
+overwrite** (`walk`, T-0137, **2026-09-14 review round, finding 2**).
+`mask.Apply` is a pure function of the category and the key's own canonical
+text, so two distinct source keys that canonicalise to the same value mask to
+the same fake — verified directly against `mask`: `"+1 415 555 2671"` and
+`"+14155552671"` both mask to the same phone number, two case spellings of
+one email address both mask to the same address, and `"4111 1111 1111 1111"`
+and `"4111111111111111"` both mask to the same card number. A document keyed
+by the same phone number in two formats, or the same address in two cases, is
+ordinary in real payloads. The first version of `walk` wrote `out[maskedName]
+= child` with no check, so the second key to arrive silently dropped the
+first key's whole subtree — deterministically, since `names` is sorted before
+the loop runs — with no error, no event and no counter; the target then held
+fewer facts than the source claimed and nothing in the report said so. `walk`
+now checks `out[maskedName]` before writing and refuses the cell
+(`transform.refused.masker`, exit 7, `Masker: "json_key"`) the moment a
+second source key would land on a name already taken, the same way any other
+masker refusal stops the run — never naming either source key in the
+`Refusal` (THREAT_MODEL.md T4).
 
 **An array whose value arrives as a text literal is masked element-wise through
 its literal (`array.go`, T-0118).** `maskArray` fires on a `[]any`, which is what
@@ -314,7 +366,12 @@ is drawn from a two-element domain, so under half the run keys it comes back as
 it went in, and an inequality there would pass or fail on the fixture's key
 rather than on the code. `internal/extract`'s
 `TestMemoryStaysBoundedOnTwoMillionRows` masks 2,000,000 rows through this
-package under a `runtime.MemStats` ceiling.
+package under a `runtime.MemStats` ceiling. `TestAMaskedKeysResidualEntryIsAtTheMaskedPath`
+and `TestTwoKeysThatMaskAlikeAreRefused` (2026-09-14 review round) pin the two
+findings above: every residual entry under a masked key — the key's own and
+every leaf beneath it — is spelled with the masked key and not the source
+one, and two source keys that canonicalise alike are a refusal naming no
+source value rather than a silently dropped subtree.
 
 **Never:** mask a cell without adding it to the residual filter; accept a
 runtime-loaded masker; let `Transform` depend on anything but its arguments

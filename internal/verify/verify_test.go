@@ -1001,3 +1001,84 @@ func TestAProfileURLFailsTheSecondNetAsAnOnlineID(t *testing.T) {
 		})
 	}
 }
+
+// TestSecondNetReadsDocumentKeysAsWellAsValues is the T-0137 review round's
+// finding 3: keyHits (residual.go) tests object keys of a *masked* column
+// against the filter, but the second net's netValues (secondnet.go) used to
+// call leaves(v) alone, which never yields a key. So an email, a phone
+// number or a card used as a JSON key inside a column classified `none` or
+// carrying `--unmask` was masked by nothing (there is no masker for an
+// unmasked column) and seen by neither net, while the identical address as a
+// VALUE in the same document was already caught. netValues now folds
+// documentKeys(v) in alongside leaves(v) whenever mode.leaves is set, so the
+// net's coverage of keys no longer stops at columns internal/transform
+// actually masked.
+func TestSecondNetReadsDocumentKeysAsWellAsValues(t *testing.T) {
+	table := customers()
+	col := ref.ColumnRef{Table: table, Column: "profile"}
+
+	cases := []struct {
+		name     string
+		masked   bool
+		vals     []any
+		wantFail string
+	}{
+		{
+			name:   "an email used as a key in an unmasked jsonb column",
+			masked: false,
+			vals: []any{
+				`{"ada.lovelace@fixture.test":"ok"}`,
+				`{"note":"nothing to see"}`,
+				`{"note":"still nothing"}`,
+				`{"note":"and nothing here either"}`,
+			},
+			wantFail: "email",
+		},
+		{
+			name:   "no key of that shape is not a hit",
+			masked: false,
+			vals: []any{
+				`{"note":"nothing to see"}`,
+				`{"note":"still nothing"}`,
+			},
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dec := pipeline.Decision{Col: col, Category: pipeline.CatNone, Source: pipeline.ByClassifier}
+			if c.masked {
+				dec.Category, dec.Masked = pipeline.CatSemiStruct, true
+			}
+			s := &state{
+				schema: &pipeline.Schema{},
+				target: oneColumn{vals: c.vals},
+				steps:  []pipeline.Step{{Table: table, Mode: pipeline.ChildOK}},
+				tables: map[ref.TableRef]*pipeline.Table{
+					table: {Ref: table, Columns: []pipeline.Column{{Name: col.Column, TypeName: "jsonb"}}},
+				},
+				cls: &pipeline.Classification{Decisions: map[ref.ColumnRef]pipeline.Decision{col: dec}},
+			}
+			if err := s.secondNet(context.Background()); err != nil {
+				t.Fatalf("secondNet: %v", err)
+			}
+			if c.wantFail == "" {
+				if len(s.failures) != 0 {
+					t.Fatalf("the net failed %s on %v as %q, want no failure", col, c.vals, s.failures[0].Reason)
+				}
+				return
+			}
+			if len(s.failures) != 1 {
+				t.Fatalf("the net recorded %d failures on %v, want one naming %s; an unmasked "+
+					"key of production shape is in the target and neither net saw it",
+					len(s.failures), c.vals, c.wantFail)
+			}
+			if got := s.failures[0].Reason; got != c.wantFail {
+				t.Errorf("the refusal names the category %q, want %q", got, c.wantFail)
+			}
+			if got := s.failures[0].Exit; got != exitResidual {
+				t.Errorf("the refusal exits %d, want %d", got, exitResidual)
+			}
+		})
+	}
+}

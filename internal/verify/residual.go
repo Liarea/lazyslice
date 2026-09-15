@@ -5,9 +5,11 @@ package verify
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/Liarea/lazyslice/internal/pipeline"
 	"github.com/Liarea/lazyslice/internal/ref"
+	"github.com/Liarea/lazyslice/internal/textsig"
 	"github.com/Liarea/lazyslice/mask"
 )
 
@@ -261,7 +263,63 @@ func (s *state) documentHits(col ref.ColumnRef, v any) []hit {
 			out = append(out, hit{value: l.text, leaf: true})
 		}
 	}
+	out = append(out, s.keyHits(col, v)...)
 	return out
+}
+
+// keyHits tests every object key of a document against the filter, under
+// whichever of the three strong validators the key matches (T-0137,
+// docs/reviews/2026-09-09/REVIEW.md finding 8).
+//
+// internal/transform's maskKey (through walk) now records a masked key's
+// entry at the key's own path in the *target* document — the position the
+// masked key itself occupies, not the source one (T-0137 review round,
+// finding 1; json.go). documentKeys walks the target the same way and hands
+// back that same path per key, so the two sides agree on the spelling. Every
+// key hit is still a document-leaf hit like the whole-document one above it:
+// it lives inside the document and neither of section 6 item 3's probes can
+// ask a column "does this key appear inside you", so it is untestable and
+// exit 9 on any match (`confirm`'s `h.leaf` branch).
+func (s *state) keyHits(col ref.ColumnRef, v any) []hit {
+	var out []hit
+	for _, occ := range documentKeys(v) {
+		cat, ok := strongKeyCategory(occ.name)
+		if !ok {
+			continue
+		}
+		canon, ok, err := canonicalOf(mask.Category(cat), occ.name)
+		if err != nil || !ok {
+			continue
+		}
+		if s.res.MayContain(col, occ.path, canon) {
+			out = append(out, hit{value: occ.name, leaf: true})
+		}
+	}
+	return out
+}
+
+// strongKeyCategory names the category a JSON object key matches under one of
+// the three strong validators, or "" for anything else. It is
+// internal/transform's own `keyCategory` (`json.go`) restated here — the two
+// packages may not import each other, and it is the same "second copy" this
+// package's `catalog.go` already keeps for a `CHECK` or a `DEFAULT` literal
+// (`strongCatalogHit`): a shape guess (address, credential) is deliberately
+// excluded, because a key that only *looks* like an identifier is not the
+// precise parse this residual check requires — it tests only the columns
+// internal/transform already masked, and a confirmed hit there has no
+// `--unmask` escape (THREAT_MODEL.md T12), so a shape guess here would be a
+// refusal on a loaded target with no way past it at all.
+func strongKeyCategory(name string) (pipeline.Category, bool) {
+	s := strings.TrimSpace(name)
+	switch {
+	case textsig.ValidEmail(s):
+		return pipeline.CatEmail, true
+	case textsig.ValidPhone(s):
+		return pipeline.CatPhone, true
+	case textsig.ValidLuhn(s):
+		return pipeline.CatFinancial, true
+	}
+	return "", false
 }
 
 // handle confirms one hit and records what came of it. It reports whether the
