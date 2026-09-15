@@ -384,29 +384,17 @@ jobs:
   # testdata/bench/, which was outside T-PERF's authorized paths (docs/PERF.md's
   # concerns section, tracker T-0175).
   #
-  # `continue-on-error: true` for now: baseline.json's 15,000,000 rows/sec was
-  # recorded on an Apple M4 (docs/PERF.md), never on this job's own
-  # ubuntu-latest runner, and an M4 running this in-memory benchmark is
-  # expected to be well ahead of a GitHub-hosted x86 runner's single-thread
-  # speed — plausibly under the 12,000,000 rows/sec floor the 20% ceiling
-  # implies, which would make this job red on every push over a baseline gap
-  # rather than a real regression. T-0177 (tracker) is to push a branch, read
-  # this job's own best-of-5 rows/sec from a real run, replace baseline.json
-  # with that number, and remove this line so the job gates for real.
+  # Blocking since T-0177 (2026-09-15): baseline.json now carries a number
+  # measured on this job's own runner (CI run 34927703066), recorded at 90% of
+  # the best-of-five so the 20% ceiling tolerates shared-runner variance.
   #
-  # `ubuntu-latest` alone, not the `test` job's three-OS matrix: this is a
-  # regression gate against one recorded number, and a baseline recorded on a
-  # laptop already has to tolerate cross-machine variance (docs/PERF.md); a
-  # second and third baseline per OS is a cost this job does not need to
-  # carry to do its job.
   bench:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
-      - name: extract throughput has not dropped more than 20% from the recorded baseline (non-blocking until T-0177 records a real ubuntu-latest baseline)
+      - name: extract throughput has not dropped more than 20% from the baseline recorded on this runner (T-0177)
         run: make bench
