@@ -119,6 +119,67 @@ func QuoteLiteral(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
 
+// patternMetaChars is every character StripPatternMeta discards on its own,
+// unescaped, because a pattern operator (LIKE, ILIKE, SIMILAR TO, ~, ~*, !~,
+// !~*) reads it as a wildcard, an anchor or a grouping construct rather than
+// as a character of the value: LIKE's own % and _, and the basic regular
+// expression metacharacters SIMILAR TO and the tilde operators share with
+// POSIX/PCRE (^ $ . * + ? [ ] ( ) { } |). The backslash is in the set too, so
+// that a lone trailing backslash — a malformed escape, not one this scanner
+// can resolve — is discarded rather than kept as a stray character; an
+// ordinary backslash-escaped metacharacter never reaches this set at all,
+// because StripPatternMeta consumes the pair before checking membership.
+const patternMetaChars = `^$%_\.*+?[](){}|`
+
+// StripPatternMeta is ARCHITECTURE.md §11.1's 2026-09-15 amendment (the T-0189
+// red team, R2-10): the text left over from a pattern-operand literal once its
+// syntax is removed, so a validator can still be run over the *value* hiding
+// inside a *pattern*.
+//
+// Pattern carries a real distinction -- '%@%.%' is a shape and not a value,
+// and net/mail parses it as one anyway (testdata/nasty.sql's own trap, which
+// is why the Pattern field exists at all, T-0134) -- but "not a value" and
+// "exempt from every validator that would otherwise catch the value inside
+// it" are not the same rule, and the second is what the 2026-09-15 red team's
+// R2-10 found: `CHECK (email !~ '^ceo@bigcorp\.example$')` carries the exact
+// address `ceo@bigcorp.example` and crossed into the target under exit 0,
+// beside a `CHECK (email <> 'ceo@bigcorp.example')` on the same value that
+// refused at exit 13 — the semantically identical predicate written as a
+// pattern was the one route through.
+//
+// A caller runs this over a Pattern literal's Text before validating it, never
+// over one that RewriteLiterals would touch: what this returns is a lossy
+// projection built for detection only, and a caller that tried to write it
+// back would change what the database accepts. That is Pattern's other half,
+// unchanged: it exempts a literal from rewriting and nothing else.
+//
+// The reduction is one pass: a backslash immediately followed by another
+// character is an escape, and the escaped character is kept literally rather
+// than discarded twice over — '\\.' is an escaped dot, one literal ".",  not
+// "backslash, removed; dot, removed; nothing left". Every other occurrence of
+// a character in patternMetaChars, including a lone trailing backslash, is
+// discarded outright. So '%@%.%' (LIKE's own wildcard, unescaped) reduces to
+// "@" -- which no validator matches -- and '^ceo@bigcorp\.example$' (the
+// red team's own regex) reduces to "ceo@bigcorp.example" -- the address,
+// intact, because its one metacharacter was an *escaped* literal dot and the
+// anchors around it carried no value at all.
+func StripPatternMeta(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == '\\' && i+1 < len(s) {
+			b.WriteByte(s[i+1])
+			i++
+			continue
+		}
+		if strings.IndexByte(patternMetaChars, c) >= 0 {
+			continue
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
+}
+
 // scanLiterals walks the expression once and calls f for each string constant.
 func scanLiterals(expr string, f func(Literal)) {
 	for i := 0; i < len(expr); {

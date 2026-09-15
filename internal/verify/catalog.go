@@ -36,25 +36,35 @@ import (
 // last two are the 2026-09-15 red team's A4b, A11 and A12 — an email address and
 // a phone number in an enum label, and an address in a domain default, all three
 // in the target under a green tick. Every string literal in each text goes
-// through the strong validators — email, phone, payment card, IBAN and
-// national_id — and a hit is exit 9 naming the table and the object.
+// through strongCatalogHit's validators and a hit is exit 9 naming the table
+// and the object.
 //
 // It is the *second* look at the same boundary, not the first: internal/plan's
 // checkDDLLiterals refuses or rewrites before anything is dropped, and this
 // reads back what was actually written. The two are deliberately not the same
 // code path — plan reads the source's *pipeline.Schema and this reads the
 // target's catalog — so a literal that reached the target through a route the
-// planner does not walk is still found here. The index predicate is exactly
-// that route today and is why the third read exists: internal/plan reads no
-// pg_index at all (tracker T-0163), so `CREATE UNIQUE INDEX ... WHERE email =
-// 'x@y.test'` is seen by this pass and by nothing else. An object somebody added
-// to the target by hand is the other.
+// planner does not walk is still found here: an object somebody added to the
+// target by hand, for one. **The index predicate was that route too, until
+// T-0189 closed it (tracker T-0163):** internal/plan read no pg_index at all,
+// so `CREATE UNIQUE INDEX ... WHERE email = 'x@y.test'` was seen by this pass
+// and by nothing else, exit 9 with the target already loaded rather than exit
+// 12 or 13 before anything was dropped. internal/plan's tableDDLLiterals now
+// walks t.Indexes the same way it walks t.Constraints, so this pass's own
+// third read is a genuine second look at that route now, not the only one.
 //
-// Why only the strong ones, when the second net runs nine validators: because
-// this text is SQL and not data. A CHECK is full of English words and a default
-// is full of identifiers, and the dictionary-backed validators would refuse an
-// already-loaded target over a column named after a street. THREAT_MODEL.md T1
-// states the narrowing rather than hiding it.
+// **Every validator runs, not only the five "strong" ones (amended
+// 2026-09-15, T-0189, the round-2 red team's R2-07 and R2-09).** The narrowing
+// this comment used to state — a CHECK is full of English words and a default
+// is full of identifiers, so the dictionary-backed validators would refuse an
+// already-loaded target over a column named after a street — is an argument
+// about *identifiers*, and pipeline.Literals never returns one: only the
+// quoted string constants a deparsed expression carries, which are the
+// source's own values wherever they sit. THREAT_MODEL.md T1 records the
+// amendment and what it costs; strongCatalogHit's own comment has the full
+// validator list and the one category that stays out regardless
+// (national_id's checksum-only six, for T-0194's own reason and not this
+// one).
 //
 // And one narrowing that is about *provenance* rather than shape: a column this
 // run masked, and a column the operator opted out of, is exempt for its own
@@ -355,10 +365,47 @@ func (s *state) allowedTypeLiteral(o catalogObject) bool {
 	return false
 }
 
-// strongCatalogHit is the first of the three strong validators a literal
-// matches, or "". It is deliberately the same set internal/plan refuses on
-// (ddlliteral.go); the two packages may not import each other, and this is the
-// second of the two copies internal/verify/CLAUDE.md records.
+// addressSuffixWords and addressLiteralShape are the identical corroboration
+// internal/plan/ddlliteral.go carries under the same two names (the T-0189
+// fix round's finding 2): textsig.AddressShape is calibrated for this
+// package's own second net, which asks it of a whole column and fails only
+// once many rows agree (validators.go marks it explicitly not strong for
+// that reason), and a DDL literal gets one look, not many. Measured against
+// ordinary CHECK value-list and enum-label text, the bare shape ("a digit
+// somewhere, at least two letter-bearing words") also hits "Basic 1 user",
+// "Pro 5 users", "tier 2 plus", "level 1 support", "P1 High Priority", "Top
+// 10 sellers", "Building 4 Lobby" and "version 2 draft" — pricing tiers and
+// priority labels loaded straight into the target, refusing this pass at
+// exit 9 on an already-loaded run over a value that was never a person's.
+// The two copies exist for the reason strongCatalogHit's own comment below
+// gives for the rest of this list: the packages may not import each other.
+var addressSuffixWords = map[string]bool{
+	"street": true, "st": true, "avenue": true, "ave": true, "road": true, "rd": true,
+	"lane": true, "ln": true, "drive": true, "dr": true, "boulevard": true, "blvd": true,
+	"way": true, "court": true, "ct": true, "place": true, "pl": true, "circle": true,
+	"cir": true, "terrace": true, "ter": true, "highway": true, "hwy": true,
+	"parkway": true, "pkwy": true, "trail": true, "trl": true, "square": true, "sq": true,
+	"loop": true, "alley": true, "row": true, "walk": true, "crescent": true,
+	"close": true, "grove": true, "parade": true, "crossing": true,
+}
+
+func addressLiteralShape(s string) bool {
+	if !textsig.AddressShape(s) {
+		return false
+	}
+	for _, f := range strings.Fields(s) {
+		f = strings.Trim(f, ",.;:()\"'")
+		if addressSuffixWords[strings.ToLower(f)] {
+			return true
+		}
+	}
+	return false
+}
+
+// strongCatalogHit is the first validator a literal matches, or "". It is
+// deliberately the same set internal/plan refuses on (ddlliteral.go's
+// strongValidators/strongHit); the two packages may not import each other, and
+// this is the second of the two copies internal/verify/CLAUDE.md records.
 //
 // The national_id branch is textsig.ValidNationalIDStructured, not
 // textsig.ValidNationalID, as of the T-0187 review round (finding 2):
@@ -372,15 +419,65 @@ func (s *state) allowedTypeLiteral(o catalogObject) bool {
 // functions has the reasoning. internal/plan/ddlliteral.go's strongHit calls
 // the identical function now (tracker T-0194), so the two passes are back to
 // "the same set" for this category, as every other branch below already was.
+// The checksum-only six stay out of this function for the identical reason,
+// and the 2026-09-15 amendment below does not touch that: it answers the
+// dictionary argument, not T-0194's measured false-accept rate on an
+// unconstrained digit run.
 //
-// A pattern operand is never a hit, for the reason internal/plan's strongHit
-// gives: CHECK (email LIKE '%@%.%') carries a shape and not a value, and
-// net/mail reads that shape as a valid address.
+// **Amended 2026-09-15 (T-0189, the round-2 red team's R2-07 and R2-09).**
+// Until this amendment the set was five — email, phone, the Luhn and IBAN
+// halves of financial_account, and national_id — and every category the row
+// pipeline masks that is a parse or a shape rather than a guess over anything
+// (network_id, online_id, person_name, address, free_text) crossed the DDL
+// boundary untouched: a person's name or a postal address in a table CHECK
+// (R2-07), or in an enum label, a domain CHECK, a domain DEFAULT or a
+// generated expression (R2-09, the same four object classes A4b/A11/A12
+// already taught this pass to read), all crossed under exit 9's own green
+// tick — the *catalog* pass, not only the plan-time one, since this function
+// is the one both ARCHITECTURE.md §11.1's comment and THREAT_MODEL.md T1's
+// narrowing named directly. The argument that had kept those five out was
+// about *identifiers*: a CHECK is full of English words and a default is full
+// of them too, so a dictionary-backed signal run over the whole expression
+// text would refuse ordinary schemas over a column named after a street. That
+// argument has no purchase here, because pipeline.Literals never returns an
+// identifier — only the quoted string constants, which are the source's own
+// values wherever they appear. A pass that judges only those five extra
+// categories over the literals of an already-loaded target costs nothing new
+// to an ordinary schema and closes the gap R2-07 and R2-09 found.
+//
+// **credential does not join.** textsig.LooksSecret is the one validator on
+// internal/verify's own row-scanning list (validators.go) that is not a parse
+// or a dictionary shape — an entropy guess over any string, sixteen
+// characters or longer, carrying two of {lowercase, uppercase, digit} — and a
+// DEFAULT calling nextval embeds exactly that shape by construction: the
+// sequence's own quoted, mixed-case relation name. Running this amendment
+// with credential included refused three of testdata/torture/'s ten
+// real-world schemas and one regression fixture over exactly that shape, a
+// relation name and never a person's; internal/plan/ddlliteral.go's own
+// comment on strongValidators has the measured evidence. The dictionary
+// argument this amendment answers has no bearing on that: an entropy guess is
+// unreliable evidence from a single occurrence whether the text around it is
+// an identifier or not, which is the same reason the checksum-only
+// national_id entries stay out on T-0194's own, unrelated argument.
+//
+// A pattern operand is detected under a reduced text and never a hit outright
+// (amended 2026-09-15, T-0189, R2-10): pipeline.StripPatternMeta removes the
+// syntax a pattern operator reads as a wildcard or an anchor and unescapes a
+// backslash-escaped metacharacter to the literal character it stands for, so
+// CHECK (email LIKE '%@%.%') still reduces to "@", which nothing here
+// validates, while CHECK (email !~ '^ceo@bigcorp\.example$') reduces to
+// "ceo@bigcorp.example" intact — the value the old blanket exemption let
+// through under exit 9's own green tick. Nothing here ever rewrites a literal
+// in the first place — this pass only reads the target's catalog back — so
+// Pattern's rewrite exemption was never this function's to grant or withhold.
 func strongCatalogHit(lit pipeline.Literal) string {
+	s := strings.TrimSpace(lit.Text)
 	if lit.Pattern {
+		s = strings.TrimSpace(pipeline.StripPatternMeta(s))
+	}
+	if s == "" {
 		return ""
 	}
-	s := strings.TrimSpace(lit.Text)
 	switch {
 	case textsig.ValidEmail(s):
 		return string(pipeline.CatEmail)
@@ -392,6 +489,16 @@ func strongCatalogHit(lit pipeline.Literal) string {
 		return string(pipeline.CatFinancial)
 	case textsig.ValidNationalIDStructured(s):
 		return string(pipeline.CatNationalID)
+	case textsig.ValidIP(s), textsig.ValidMAC(s):
+		return string(pipeline.CatNetworkID)
+	case textsig.ValidURL(s):
+		return string(pipeline.CatOnlineID)
+	case textsig.Dictionary().NameShape(s):
+		return string(pipeline.CatPersonName)
+	case addressLiteralShape(s):
+		return string(pipeline.CatAddress)
+	case textsig.Dictionary().ProseName(s):
+		return string(pipeline.CatFreeText)
 	}
 	return ""
 }

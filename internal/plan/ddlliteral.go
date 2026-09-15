@@ -60,14 +60,30 @@ import (
 // class that is not a column (the T-REDFIX review's fourth finding; before it
 // the refusal named --skip-table, which cannot clear it).
 //
-// "Strong" is email, phone, payment card, IBAN and national_id — the five value
-// shapes a parser decides rather than a dictionary guesses (internal/textsig,
-// and see strongValidators below for what the last two cost and why they are
-// admissible). The narrowness is deliberate and is recorded in THREAT_MODEL.md
-// T1: a name or an address inside a CHECK is not refused, because the
-// false-positive rate of those signals over SQL fragments is what would make
-// this check unusable, and internal/verify's catalog pass is the second look at
-// the artefact this one admits.
+// A fifth class was added by the 2026-09-15 round-2 red team (R2-08,
+// tableDDLLiterals' index loop): every index §11.1 recreates, whose
+// pg_get_indexdef text can carry a partial index's WHERE predicate or an
+// expression index's key expression. It is judged by the same never-rewritten
+// rule a CHECK is — an index predicate is the application's, and internal/load/
+// ddl replays it verbatim — so it joins fixedExpression's callers rather than
+// gaining a rewrite arm of its own. Before this, internal/plan read no
+// pg_index at all (tracker T-0163): such a literal was invisible here and
+// reached internal/verify's catalog pass as the *only* look at it, exit 9 with
+// the target already loaded rather than exit 12 or 13 before anything was
+// dropped.
+//
+// **"Strong" was email, phone, payment card, IBAN and national_id until the
+// 2026-09-15 round-2 red team's R2-07 and R2-09 (amended 2026-09-15, T-0189)**
+// — the five value shapes a parser decides rather than a dictionary guesses
+// (internal/textsig). Every other category the row pipeline masks that is
+// *also* a parse or a shape now runs too — see strongValidators below for the
+// full set, for why the argument that had kept the rest out (dictionary-backed
+// signals refuse ordinary schemas when run over SQL text full of English
+// identifiers) does not reach a *literal*, which is never an identifier, and
+// for the one category (credential) that stays out on a different, measured
+// argument. THREAT_MODEL.md T1 records the amendment; internal/verify's
+// catalog pass is still the second, independent look at the same artefact,
+// reading the target's own catalog rather than the source's *Schema.
 //
 // Where it runs: after checkUniqueDomain, because the masker a default is
 // rewritten with must be the one the *rows* are masked with, and the equality
@@ -92,9 +108,9 @@ type strongValidator struct {
 // heuristic over one would refuse ordinary schemas — and that reason does not
 // reach the other two: a US Social Security number and a UK National Insurance
 // number are strict patterns and an IBAN is a mod-97 checksum, none of them a
-// guess. So national_id and the IBAN half of financial_account join the set,
-// and person_name and address stay out for exactly the reason the document
-// gives.
+// guess. So national_id and the IBAN half of financial_account joined the set,
+// and — until the 2026-09-15 round-2 red team below — person_name and address
+// stayed out for exactly the reason the document gave.
 //
 // IBAN could not have joined before this task: textsig.ValidIBAN matched any
 // fifteen-to-thirty-four-character run of letters and digits that cleared the
@@ -115,28 +131,155 @@ type strongValidator struct {
 // mod-97 check), which is what a one-hit refusal needs; internal/verify's own
 // strong entries (catalog.go's strongCatalogHit, validators.go's text-family
 // strong entry) made the identical change in the same review round, and this
-// file was the one place still calling the union.
+// file was the one place still calling the union. That reasoning stands
+// unchanged below: the checksum-only six are still not in this list, and
+// neither is Luhn's digits-family arm or national_id's digits-family arm —
+// every literal this scanner reads is a Go string built from a quoted SQL
+// constant, never a bare integer, so there is no digits-family reading to be
+// had here regardless.
+//
+// **Amended 2026-09-15 (T-0189, the round-2 red team's R2-07 and R2-09):**
+// every remaining category the row pipeline masks that is a *parse or a
+// shape*, rather than a *guess over anything*, joined the set — network_id,
+// online_id, person_name, address and free_text — because the one argument
+// that had kept person_name and address out (and, by the same reasoning,
+// never let free_text in) is an argument about *identifiers*, not about
+// *literals*: "a CHECK is full of English words" is a fact about the column
+// names, keywords and operators that surround a literal, none of which this
+// scanner ever reads — pipeline.Literals returns the quoted string constants
+// alone. A table CHECK carrying `'Aurelio Nakamura-Okonkwo'` or `'1742
+// Kestrel Hollow Lane, Ashford VT 05024'` (R2-07), or an enum label, a domain
+// CHECK, a domain DEFAULT or a generated expression carrying the same shapes
+// plus a special-category sentence (R2-09, the same four object classes
+// A4b/A11/A12 already taught this file to read) all crossed into the target
+// under exit 0, because the five validators above answer for a parsed shape
+// and none of the five newly-admitted categories is one. THREAT_MODEL.md T1's
+// sentence that named the three-then-five as the whole list is superseded by
+// this amendment; see its own 2026-09-15 entry for what running the
+// dictionary validators over a *value* rather than over *SQL text* costs and
+// does not cost.
+//
+// **credential does not join, and this is not an oversight** (the same
+// amendment's own review, run against `testdata/torture/`). textsig.
+// LooksSecret is the one validator on internal/verify's row-scanning list that
+// is not a parse or a dictionary shape at all — an entropy guess over *any*
+// string sixteen characters or longer carrying two of {lowercase, uppercase,
+// digit} — and a DEFAULT calling nextval embeds exactly that shape by
+// construction: the literal this scanner reads out of `nextval('public.
+// "AccessCode_id_seq"'::regclass)` is the sequence's own quoted, mixed-case,
+// underscore-and-digit-free relation name, and three of the ten real-world
+// schemas in testdata/torture/ (calcom, gitlab, discourse) and regression 006
+// all refused over exactly that shape — a relation name, never a person's —
+// the first time this amendment ran with credential included. The checksum-
+// only national_id entries are excluded for the identical reason, on
+// different evidence: T-0194's own measured false-accept rate on an
+// unconstrained digit run. Running a validator over a literal instead of over
+// a whole SQL expression closes the dictionary argument; it does nothing to
+// close an argument about a validator's own precision, and both of these stay
+// out on that second, unrelated argument.
 var strongValidators = []strongValidator{
 	{name: string(pipeline.CatEmail), ok: textsig.ValidEmail},
 	{name: string(pipeline.CatPhone), ok: textsig.ValidPhone},
 	{name: string(pipeline.CatFinancial), ok: textsig.ValidLuhn},
 	{name: string(pipeline.CatFinancial), ok: textsig.ValidIBAN},
 	{name: string(pipeline.CatNationalID), ok: textsig.ValidNationalIDStructured},
+	{name: string(pipeline.CatNetworkID), ok: func(s string) bool { return textsig.ValidIP(s) || textsig.ValidMAC(s) }},
+	{name: string(pipeline.CatOnlineID), ok: textsig.ValidURL},
+	{name: string(pipeline.CatPersonName), ok: func(s string) bool { return textsig.Dictionary().NameShape(s) }},
+	{name: string(pipeline.CatAddress), ok: addressLiteralShape},
+	{name: string(pipeline.CatFreeText), ok: func(s string) bool { return textsig.Dictionary().ProseName(s) }},
 }
 
-// strongHit is the first strong validator a literal matches, or "".
+// addressSuffixWords corroborates addressLiteralShape (below): the word, case
+// folded, that closes an ordinary postal address line. Deliberately small and
+// deliberately literal-only — this is not a gazetteer, it is the one signal
+// that told the false positives measured below apart from a real street
+// address in every case tried.
+var addressSuffixWords = map[string]bool{
+	"street": true, "st": true, "avenue": true, "ave": true, "road": true, "rd": true,
+	"lane": true, "ln": true, "drive": true, "dr": true, "boulevard": true, "blvd": true,
+	"way": true, "court": true, "ct": true, "place": true, "pl": true, "circle": true,
+	"cir": true, "terrace": true, "ter": true, "highway": true, "hwy": true,
+	"parkway": true, "pkwy": true, "trail": true, "trl": true, "square": true, "sq": true,
+	"loop": true, "alley": true, "row": true, "walk": true, "crescent": true,
+	"close": true, "grove": true, "parade": true, "crossing": true,
+}
+
+// addressLiteralShape corroborates textsig.AddressShape for the one-hit
+// refusal this scanner runs over a single DDL literal (the T-0189 fix round's
+// finding 2, docs/reviews/2026-09-15-redteam's own review of the round-2
+// fixes).
 //
-// A pattern operand is never a hit: it is the right-hand side of a LIKE or a
-// regex operator, so it is a shape and not a value. testdata/nasty.sql's
-// CHECK ("EmailAddress" LIKE '%@%.%') is why this is a rule and not a footnote
-// -- % is an ordinary atext character, net/mail parses '%@%.%' as a valid
-// address, and the whole fixture refused at exit 12 the first time this check
-// ran.
-func strongHit(lit pipeline.Literal) string {
-	if lit.Pattern {
-		return ""
+// textsig.AddressShape is "a digit somewhere, and at least two words that
+// carry a letter" — ARCHITECTURE.md §10's own words for it — which is
+// calibrated for internal/verify's second net (validators.go), where it is
+// deliberately marked *not* strong: the net asks it of a whole column and
+// fails only once at least validatorThreshold of many rows agree, so one
+// stray hit costs nothing. A DDL literal gets exactly one look, and this
+// scanner had been treating that same shape as a one-hit refusal since T-0189
+// widened strongValidators to close R2-07 — which the shape does not survive:
+// measured against ordinary CHECK value-list and enum-label text, it also
+// hits "Basic 1 user", "Pro 5 users", "tier 2 plus", "level 1 support", "P1
+// High Priority", "Top 10 sellers", "Building 4 Lobby" and "version 2 draft" —
+// pricing tiers and priority labels, never a person's address — and a hit on
+// a masked column is exit 13 with no escape at all, while a hit on an
+// unmasked one is exit 12 whose only escape, --unmask, says the column itself
+// holds nothing personal rather than that this one literal does not.
+//
+// The corroboration is the same shape national_id's one-hit entry already
+// uses (ValidNationalIDStructured over the twelve-format union, above): ask
+// for the feature that is actually diagnostic rather than the loosest one
+// that is merely necessary. Almost every real address line carries a
+// street-type word — street, avenue, road, lane, drive, and their kin, in
+// addressSuffixWords — and none of the false positives above do; R2-07's own
+// canary, "1742 Kestrel Hollow Lane, Ashford VT 05024", keeps its hit through
+// "Lane". textsig.AddressShape is not touched — internal/textsig is outside
+// this task's paths, and internal/verify's second net still wants the looser
+// shape it already has, calibrated the way a many-row ratio can afford.
+func addressLiteralShape(s string) bool {
+	if !textsig.AddressShape(s) {
+		return false
 	}
+	for _, f := range strings.Fields(s) {
+		f = strings.Trim(f, ",.;:()\"'")
+		if addressSuffixWords[strings.ToLower(f)] {
+			return true
+		}
+	}
+	return false
+}
+
+// strongHit is the first validator a literal matches, or "".
+//
+// A pattern operand is detected under a reduced text and never rewritten under
+// any (amended 2026-09-15, T-0189, the round-2 red team's R2-10). Pattern is a
+// real distinction — the right-hand side of a LIKE or a regex operator is a
+// shape and not a value, and testdata/nasty.sql's CHECK ("EmailAddress" LIKE
+// '%@%.%') is why this file has always known that: % is an ordinary atext
+// character, net/mail parses '%@%.%' as a valid address, and the whole fixture
+// refused at exit 12 the first time this check ran. But "is a shape" and "can
+// never also carry a value" are different claims, and R2-10 is the case that
+// tells them apart: CHECK (email !~ '^ceo@bigcorp\.example$') carries the exact
+// address ceo@bigcorp.example and, because the old rule exempted every pattern
+// operand from every validator, crossed into the target under exit 0 — while
+// the semantically identical CHECK (email <> 'ceo@bigcorp.example') refused at
+// exit 13 on the same value written without the anchors. pipeline.
+// StripPatternMeta is what tells the two cases apart: it removes the
+// metacharacters a pattern reads as syntax (LIKE's %, _; SIMILAR TO's and the
+// tilde operators' regular-expression grammar) and unescapes a
+// backslash-escaped one to the literal character it stands for, so '%@%.%'
+// reduces to "@" — which nothing here validates — and the red team's own regex
+// reduces to "ceo@bigcorp.example" intact. A pattern literal is still never
+// rewritten: this function only detects, and the caller that would write a
+// replacement back into the expression (columnDefault's RewriteLiterals
+// callback) still declines a Pattern literal outright, unconditionally, for
+// the reason its own comment gives — rewriting one changes what the database
+// accepts, where detecting one only decides whether to refuse.
+func strongHit(lit pipeline.Literal) string {
 	s := strings.TrimSpace(lit.Text)
+	if lit.Pattern {
+		s = strings.TrimSpace(pipeline.StripPatternMeta(s))
+	}
 	if s == "" {
 		return ""
 	}
@@ -358,6 +501,28 @@ func (p *run) tableDDLLiterals(t *pipeline.Table) error {
 			return err
 		}
 	}
+
+	// R2-08 (tracker T-0163): every index §11.1 recreates, in name order for
+	// the same determinism reason the constraint loop above sorts. idx.Def is
+	// pg_get_indexdef's whole text — the index's own name, its columns or
+	// expression, and, for a partial or expression index, the WHERE predicate
+	// or the key expression that has no pg_constraint row to be found through
+	// instead. namedColumns reads whichever of the table's columns idx.Def
+	// mentions by token, the same text-based match the constraint loop already
+	// trusts for a CHECK's deparsed text, so an index over an unmasked column
+	// still gets the --unmask escape and one over a masked column still
+	// refuses outright — an index predicate is never rewritten by anything, so
+	// the never-rewritten arm of fixedExpression is the whole of the rule
+	// here, exactly as it is for a CHECK.
+	idxs := append([]pipeline.Index(nil), t.Indexes...)
+	sort.Slice(idxs, func(a, b int) bool { return idxs[a].Name < idxs[b].Name })
+	for _, idx := range idxs {
+		named := namedColumns(idx.Def, t)
+		if err := p.fixedExpression(t, idx.Name, idx.Def,
+			anyMasked(named, masked), named, "the index"); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -457,6 +622,29 @@ func (p *run) columnDefault(
 		}
 		return nil
 	}
+	// R2-10 on the DEFAULT path (2026-09-15 round-2 red team's fix round): the
+	// callback above declines a Pattern literal and an empty one outright, and
+	// RewriteLiterals leaves a declined literal's text exactly as it stood —
+	// which closes the rewrite half of "exempt from rewriting only, never from
+	// detection" (ddlliteral.go's own package comment) but left the detection
+	// half open, because nothing downstream of a successful rewrite ever ran
+	// strongHit over what RewriteLiterals left alone. A pattern operand inside a
+	// rewritable masked column's DEFAULT — a boolean or CASE default whose
+	// pattern operand carries a real address, say — crossed into the target
+	// exactly as R2-10 already found for a CHECK, and internal/verify then
+	// exempted the DEFAULT outright because DefaultOriginal was set
+	// (catalog.go's rewroteDefault), so nothing looked at it a second time
+	// either. Every literal this stage declined to rewrite is re-scanned here,
+	// against the same strongHit R2-10 already reduces a pattern's text with,
+	// before the rewrite is accepted.
+	for _, lit := range lits {
+		if !lit.Pattern && strings.TrimSpace(lit.Text) != "" {
+			continue
+		}
+		if hit := strongHit(lit); hit != "" {
+			return p.refuseNotRewritable(t, col.Name, "the default on", hit)
+		}
+	}
 	p.byRef[t.Ref].Columns[index].Default = out
 	p.byRef[t.Ref].Columns[index].DefaultOriginal = def
 	t.Columns[index].Default = out
@@ -554,11 +742,34 @@ func (p *run) fixedExpression(
 // table's own column order. It is a token match over the catalog's own text,
 // which quotes a name that needs quoting and writes a bare one otherwise, so
 // both spellings are looked for.
+//
+// The scan starts after " USING " when the text has one, which an index's
+// pg_get_indexdef always does (the access method is never omitted) and a
+// table CHECK never does. Skipping to there is deliberate, not cosmetic:
+// unlike pg_get_constraintdef, pg_get_indexdef always opens with
+// `CREATE [UNIQUE] INDEX name ON schema.table`, so a token match over the
+// whole text reads the table's own name as though it were a column whenever
+// a column happens to share it — measured: table public.items with columns
+// {id, items, email}, index `CREATE INDEX items_vip_idx ON public.items
+// USING btree (email) WHERE (email = '...')`, returned named == [items
+// email], where "items" is the table, not a column. That false match had two
+// consequences downstream: anyMasked flipped true off a phantom column
+// (exit 13 with no escape named, where the real hit wanted exit 12 with
+// --unmask), and refuseUnmaskedLiteral's opt-out loop cleared a genuine hit
+// the moment that phantom column carried an --unmask of its own — a
+// different, unrelated column's opt-out silently clearing this one's
+// refusal. An exclusion constraint's Def opens `EXCLUDE USING gist (...)`
+// and has no table name to begin with, so trimming to it there only drops
+// the leading keyword, which was never a column match target either way.
 func namedColumns(def string, t *pipeline.Table) []string {
+	scan := def
+	if i := strings.Index(def, " USING "); i >= 0 {
+		scan = def[i+len(" USING "):]
+	}
 	var out []string
 	for _, col := range t.Columns {
 		quoted := `"` + strings.ReplaceAll(col.Name, `"`, `""`) + `"`
-		if strings.Contains(def, quoted) || containsWord(def, col.Name) {
+		if strings.Contains(scan, quoted) || containsWord(scan, col.Name) {
 			out = append(out, col.Name)
 		}
 	}

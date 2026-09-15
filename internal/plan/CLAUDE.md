@@ -939,3 +939,170 @@ a row (`docs/reviews/2026-09-09/evidence/ddl_default.log`).
   default really being rewritten, to the byte, to what `mask.Apply` gives for
   that literal, under the same `mask.Constraints` its rows go through. Replacing
   `checkDDLLiterals`'s body with `return nil` fails four of its tests.
+
+## The validator set widened, indexes joined, and a pattern got read (T-0189, 2026-09-15 round-2 red team)
+
+R2-07, R2-08, R2-09 and R2-10 (`docs/reviews/2026-09-15-redteam/round2-still-
+leaking.json`) all reduce to one sentence: the object classes this file read
+and the category list its validators covered were each a *subset* of what
+§11.1 recreates and of what the row pipeline masks, and the gap between the
+two was where a value crossed. Three changes, closed together because the
+tracker task naming them (T-0189) promotes **T-0163** in the same landing.
+
+- **`strongValidators` runs every category that is a parse or a shape,
+  not only the original five.** `network_id` (`ValidIP`/`ValidMAC`),
+  `online_id` (`ValidURL`), `person_name` (`Dictionary().NameShape`),
+  `address` (`AddressShape`) and `free_text` (`Dictionary().ProseName`) join
+  email, phone, the Luhn and IBAN halves of `financial_account`, and
+  national_id. The argument that had kept `person_name` and `address` out —
+  and, by the same reasoning, kept `free_text` from ever joining — is an
+  argument about *identifiers* in the surrounding SQL text ("a `CHECK` is
+  full of English words"), and this file's scanner (`pipeline.Literals`)
+  never returns an identifier, only the quoted string constants a deparsed
+  expression carries. R2-07 is a table `CHECK` carrying a person's full name
+  and one carrying a postal address, both crossing under exit 0; R2-09 is the
+  same two shapes, plus a special-category sentence, inside an enum label, a
+  domain `CHECK`, a domain `DEFAULT` and a generated expression — the four
+  object classes `checkTypeLiterals` already read, which the widened set now
+  judges too, with no change to that function at all. **The special-category
+  sentence is not closed by this list, only narrowed by accident** (T-0189
+  fix round, 2026-09-15 review, finding 4): `pipeline.CatSpecial` has no
+  entry in `strongValidators` at all, so R2-09's own canary is caught only
+  because its date supplies `AddressShape`'s digit — strip the date and a
+  health/special-category sentence with no name pair and no digit still
+  crosses at exit 0. Tracker **T-0198** carries a validator for it.
+  - **`credential` (`LooksSecret`) does not join, and this was found rather
+    than reasoned about.** The first landing of this change included it, on
+    the same "every parse or shape" argument, and three of
+    `testdata/torture/`'s ten real-world schemas (calcom, gitlab, discourse)
+    and regression 006 all refused over it: `LooksSecret` is an entropy
+    guess over *any* string sixteen characters or longer carrying two of
+    {lowercase, uppercase, digit}, not a parse or a dictionary shape, and a
+    column `DEFAULT` calling `nextval` embeds exactly that shape by
+    construction — the literal this file reads out of
+    `nextval('public."AccessCode_id_seq"'::regclass)` is the sequence's own
+    quoted, mixed-case relation name, and `refuseUnmaskedLiteral`/
+    `refuseNotRewritable` scan every literal `pipeline.Literals` finds in a
+    `DEFAULT`, including that one, with no notion that a `nextval` argument
+    is a relation name and not a value. `make torture` is what found this,
+    not a unit test: the four synthetic fixtures this task added all use
+    `person_name`/`address`/`free_text` values chosen to be unambiguous, and
+    none of them is shaped like an identifier, so the false-positive class an
+    entropy guess is prone to had nothing to trip it. The lesson generalises
+    beyond this one category: a validator's own precision, not the
+    "dictionary vs. literal" argument this task answers, is still the
+    question for anything added here in future, and `strongValidators`' own
+    comment carries the measured evidence rather than only the conclusion.
+- **A pattern operand is exempt from rewriting only, never from detection**
+  (R2-10). `strongHit` used to return `""` unconditionally for `lit.Pattern`;
+  it now runs `pipeline.StripPatternMeta` over the pattern's text first —
+  stripping the wildcard and anchor syntax a pattern operator reads as
+  metacharacters and unescaping a backslash-escaped one to the literal
+  character it stands for — and validates what is left.
+  `CHECK (email !~ '^ceo@bigcorp\.example$')` reduces to
+  `ceo@bigcorp.example`, intact; `CHECK (email LIKE '%@%.%')`
+  (`testdata/nasty.sql`'s own trap, T-0134's reason `Pattern` exists at all)
+  reduces to `@`, which nothing validates, so the fixture that motivated the
+  exemption is not what this closes. Rewriting is unaffected: `columnDefault`'s
+  `RewriteLiterals` callback still declines every `Pattern` literal
+  unconditionally, because rewriting one changes what the database accepts,
+  which detecting one does not.
+
+  **This task's own claim that "a pattern operand cannot appear in a
+  `DEFAULT` anyway" was wrong, and the fix round found the bug it hid**
+  (T-0189 fix round, 2026-09-15 review, finding 1). A `DEFAULT` is a value
+  expression of the column's own type, which is not the same as "never
+  boolean, never a `CASE`" — nothing stops `DEFAULT (email !~
+  '^ceo@bigcorp\.example$')` on a boolean column, or a pattern operand inside
+  a `CASE` arm of any type. Because that case was believed impossible,
+  `columnDefault`'s success path never re-ran `strongHit` over what the
+  callback above declined: `RewriteLiterals` leaves a declined literal's text
+  exactly as it stood and still reports `ok == true`, so a `Pattern` (or
+  empty-text) literal in an otherwise-rewritable masked column's `DEFAULT`
+  was written back to `pipeline.Schema` and returned as success, unexamined —
+  R2-10's own gap, reopened on the one arm R2-10's fix never reached.
+  `columnDefault` now re-scans every literal the callback declined against
+  `strongHit` before accepting the rewrite, refusing exactly as
+  `fixedExpression` does on a `CHECK`.
+  `TestRedTeamR210FixRoundPatternOperandInARewritableDefaultIsStillDetected`
+  is the guard.
+- **`tableDDLLiterals` walks `t.Indexes`, closing T-0163's plan-time half.**
+  Every index, in name order (the same determinism reason the constraint
+  loop sorts), through `fixedExpression` — the same never-rewritten rule a
+  `CHECK` gets, because an index predicate is the application's and
+  `internal/load/ddl` replays it verbatim. `idx.Def` is `pg_get_indexdef`'s
+  whole text (name, columns or expression, and a partial index's `WHERE`),
+  and `namedColumns(idx.Def, t)` — already the constraint loop's own
+  text-token match — decides which of the table's columns the index names,
+  so an index over an unmasked column still gets the `--unmask` escape and
+  one over a masked column still refuses outright with no rewrite arm, the
+  same shape a `CHECK` already had. `internal/verify/catalog.go`'s own
+  `pg_index` read closed the *catalog*-pass half of T-0163 in T-0134's review
+  round; this is the half that remained, and the one that matters more, since
+  a plan-time refusal is before anything is dropped and a catalog refusal is
+  after.
+
+  **`namedColumns` read the index's own table name as a column (T-0189 fix
+  round, finding 3).** `idx.Def` is `pg_get_indexdef`'s whole text, which —
+  unlike `pg_get_constraintdef` — always opens with `CREATE INDEX name ON
+  schema.table`, so a column that happened to share the table's own name was
+  matched as though the predicate named it: table `public.items` with
+  columns `{id, items, email}`, index `... ON public.items USING btree
+  (email) WHERE (email = '...')`, returned `named == [items email]`. Two
+  consequences followed from the one false match: `anyMasked` could flip true
+  off the phantom column (exit 13 with no escape named, instead of exit 12
+  naming the real one), and `refuseUnmaskedLiteral`'s opt-out loop returns
+  `nil` on the *first* named column carrying `--unmask` — so an opt-out on
+  the phantom column silently cleared a genuine hit on a column it was never
+  about. `namedColumns` now scans only the text after `" USING "`, which
+  every index carries (the access method is never omitted) and which is
+  always past the `ON schema.table` clause; an exclusion constraint's own
+  `EXCLUDE USING gist (...)` has no table name before that point either, so
+  the trim only drops a keyword there, never a match target.
+  `TestNamedColumnsDoesNotMatchTheTableNameInAnIndexDef` pins the scanner
+  directly and
+  `TestRedTeamR211FixRoundAnOptOutOnATableNamedColumnDoesNotClearAGenuineHit`
+  pins the fail-open end to end.
+- **`address`'s validator was too loose for a one-hit refusal (T-0189 fix
+  round, finding 2).** `textsig.AddressShape` — "a digit somewhere, and at
+  least two words that carry a letter" — is calibrated for
+  `internal/verify`'s second net, which asks it of a whole column and fails
+  only once `validatorThreshold` of many rows agree (`validators.go` marks
+  it explicitly not strong, for exactly this reason); this scanner asks it of
+  one literal and had been treating the bare shape as a one-hit refusal since
+  the widening above. Measured against ordinary `CHECK` value-list and
+  enum-label text it also hits "Basic 1 user", "Pro 5 users", "tier 2 plus",
+  "level 1 support", "P1 High Priority", "Top 10 sellers", "Building 4
+  Lobby" and "version 2 draft" — pricing tiers and priority labels, never a
+  person's address — and a hit on a masked column is exit 13 with no escape
+  at all, while a hit on an unmasked one is exit 12 whose only escape,
+  `--unmask`, says the whole column is not personal rather than that this one
+  literal is not. `addressLiteralShape` corroborates it the way
+  `ValidNationalIDStructured` already corroborates the national_id entry
+  above: a feature that is actually diagnostic, not merely necessary. Almost
+  every real address line carries a street-type word (`addressSuffixWords`:
+  street, avenue, road, lane, drive, and their kin), and none of the false
+  positives above do; R2-07's own canary, "1742 Kestrel Hollow Lane, Ashford
+  VT 05024", keeps its hit through "Lane". `textsig.AddressShape` itself is
+  untouched — `internal/textsig` is outside this task's paths, and
+  `internal/verify`'s second net still wants the loose shape it already has —
+  so the corroboration is a local wrapper, duplicated in
+  `internal/verify/catalog.go`'s own `strongCatalogHit` for the reason every
+  other entry in that list is already a duplicate.
+  `TestAddressStrongHitNeedsAStreetSuffixWord` is the guard.
+- **Guards.** `ddlliteral_test.go` gained
+  `TestRedTeamR207PersonNameAndAddressInCheckAreRefused`,
+  `TestRedTeamR208PartialIndexPredicateIsReadAtPlan`,
+  `TestRedTeamR210PatternOperandCarryingAValueIsStillDetected`,
+  `TestPatternMetaStripping`,
+  `TestRedTeamR210FixRoundPatternOperandInARewritableDefaultIsStillDetected`,
+  `TestNamedColumnsDoesNotMatchTheTableNameInAnIndexDef`,
+  `TestRedTeamR211FixRoundAnOptOutOnATableNamedColumnDoesNotClearAGenuineHit`
+  and `TestAddressStrongHitNeedsAStreetSuffixWord`; `typeliteral_test.go`'s
+  `TestRedTeamTypeLiteralsAreRefused` gained a person's name in an enum
+  label and a postal address in a domain default, and
+  `TestOrdinaryTypesAreNotRefused` is unchanged and still passes, which is
+  the guard against the widened set refusing an ordinary schema. None of
+  these needed a database; `make torture` against the ten real schemas and
+  `testdata/regressions/` is what caught the `credential` false positive
+  that a hand-picked fixture could not have.

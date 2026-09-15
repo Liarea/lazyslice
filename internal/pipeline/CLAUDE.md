@@ -63,21 +63,34 @@ defect the recheck exists to close. `Eligibility` grew `MarkerRunID` and
 both are identifiers rather than values.
 
 **One implementation lives here, under protest, and has a task against it
-(T-0134).** `ddlliteral.go` holds `Literal`, `Literals`, `RewriteLiterals` and
-`QuoteLiteral`: the reader that pulls the string constants out of a deparsed SQL
-expression, and the rewrite of them. It breaks the "no implementation" rule
-above and it is here because `internal/plan` and `internal/verify` both need
-exactly one answer to "what is a literal in this expression" — the plan refuses
-or masks them before anything is dropped, the verify catalog pass reads the
-target's `pg_attrdef` and `pg_constraint` back afterwards — and a stage package
-may not import another (internal/CLAUDE.md). Two copies of a scanner that
-decides what is and is not inside the data boundary is the failure
-`internal/verify/validators.go` records from its own hand copy of the
-classifier's validators. It imports `strings` and nothing else, touches no type
-in §2, and reads no row. **T-0162** moves it to a leaf package beside
-`internal/textsig`, which is where it belongs; do not add a second
-implementation here in the meantime, and do not treat this as a precedent for
-one.
+(T-0134).** `ddlliteral.go` holds `Literal`, `Literals`, `RewriteLiterals`,
+`QuoteLiteral` and, since T-0189, `StripPatternMeta`: the reader that pulls the
+string constants out of a deparsed SQL expression, the rewrite of them, and the
+reduction of a pattern operand's text to the value hiding inside it. It breaks
+the "no implementation" rule above and it is here because `internal/plan` and
+`internal/verify` both need exactly one answer to "what is a literal in this
+expression" — the plan refuses or masks them before anything is dropped, the
+verify catalog pass reads the target's `pg_attrdef` and `pg_constraint` back
+afterwards — and a stage package may not import another (internal/CLAUDE.md).
+Two copies of a scanner that decides what is and is not inside the data
+boundary is the failure `internal/verify/validators.go` records from its own
+hand copy of the classifier's validators. It imports `strings` and nothing
+else, touches no type in §2, and reads no row.
+
+`StripPatternMeta` is the same exception and not a second one: `Literal.
+Pattern` already lived here (T-0134, for the same "one answer, two callers"
+reason), and R2-10 (the 2026-09-15 round-2 red team, T-0189) is what a
+pattern operand's *text* needs the identical single answer for — both
+`internal/plan`'s `strongHit` and `internal/verify`'s `strongCatalogHit` call
+it before running their own (separately duplicated, by design) validator
+lists over what it returns, so the reduction is the one thing that has to
+agree between the two passes and the validator lists are the one thing that
+does not have to. It touches no type in §2, reads no row, and takes a
+`string` and returns a `string`.
+
+**T-0162** moves the whole file to a leaf package beside `internal/textsig`,
+which is where it belongs; do not add a second implementation here in the
+meantime, and do not treat this as a precedent for one.
 
 **`Column` has a `DefaultOriginal` (T-0134's review round, 2026-09-14).**
 ARCHITECTURE.md §2 prints it and §11.1's amendment says what it is for. It holds
