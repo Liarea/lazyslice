@@ -297,6 +297,31 @@ jobs:
           fi
           exit "$status"
 
+  # T-0140: docs/reviews/2026-09-09/REVIEW.md, "Release reality" — this
+  # workflow ran `make integration` but never `make torture`, so a green `ci`
+  # run did not mean the ten real schemas of testdata/torture/ still passed.
+  #
+  # Gated to `main` pushes only, not `pull_request` or every branch push: the
+  # Makefile's own `torture` target comment says "This target is a manual
+  # gate. No CI job runs it, and none should" because a run pulls ~2.5 GB of
+  # container images across twenty containers — the cost that comment weighs
+  # against a pull request's minutes. A push to `main` is rare enough, and
+  # important enough (it is what a release tag is gated on below and in
+  # docs/RUNBOOK.md), to carry that cost; a PR still does not.
+  torture:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: docker is available
+        run: docker version
+      - name: torture (the ten real schemas, testdata/regressions/)
+        run: make torture
+
   # ADR-002's second enforcement mechanism: docs/FLAGS.md, docs/KEYBINDINGS.md
   # and docs/ERRORS.md are tools/docgen output and must never be hand-edited
   # (docs/CLAUDE.md); this job is what makes that true rather than only

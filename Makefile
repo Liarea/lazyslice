@@ -89,13 +89,17 @@ integration:
 ## The timeout is 60m, not `integration`'s 30m: discourse alone is 370 tables and
 ## the four largest schemas each pull an image before they start.
 ##
-## **This target is a manual gate. No CI job runs it**, and none should: it wants
-## twenty containers, about 2.5 GB of images and an hour, against a pull
-## request's minutes. What CI does run over these files is `vet-tagged` (below),
-## which type-checks and vets them under the same two build tags, so a compile
-## error or a vet finding in the suite fails `make check` rather than waiting for
-## somebody to run this by hand. The behaviour of the ten schemas is asserted
-## here and recorded in docs/TORTURE.md; the reductions in `testdata/regressions/`
+## **This target is a manual gate for a pull request.** It wants twenty
+## containers, about 2.5 GB of images and up to an hour, against a pull
+## request's minutes, so no `pull_request` job runs it. What CI does run over
+## these files on every pull request is `vet-tagged` (below), which
+## type-checks and vets them under the same two build tags, so a compile
+## error or a vet finding in the suite fails `make check` rather than waiting
+## for somebody to run this by hand. Since T-0140, ci.yml's `torture` job runs
+## this target for real on every push to `main` — rare enough, and important
+## enough (docs/RUNBOOK.md gates a release tag on it), to carry the cost a
+## pull request should not. The behaviour of the ten schemas is asserted here
+## and recorded in docs/TORTURE.md; the reductions in `testdata/regressions/`
 ## are what stop a defect coming back, and `internal/classify`'s and
 ## `internal/plan`'s own unit tests are what run on every change.
 ##
