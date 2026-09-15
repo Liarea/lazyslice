@@ -54,6 +54,17 @@ func TestTortureSchemas(t *testing.T) {
 
 			assertRootIsMostConnected(ctx, t, db, s)
 
+			source := connect(ctx, t, db.source)
+
+			// Fingerprinted before runTool so that a mutation the run makes to
+			// the source during execution — not just one left behind after it
+			// — is caught by the comparison below. Fingerprinting after the
+			// run cannot see that (docs/reviews/2026-09-09/REVIEW.md finding
+			// 11); TestTortureNegativeControl proves the comparison itself
+			// would catch such a mutation.
+			beforeRows := fingerprintTables(ctx, t, source)
+			beforeCatalog := fingerprintCatalog(ctx, t, source)
+
 			res := runTool(ctx, t, db.dir, db.tortureArgs(s)...)
 			if res.exit != s.wantExit {
 				t.Fatalf("the %s run exited %d, want %d:\n  %s", s.dir, res.exit, s.wantExit, res)
@@ -62,24 +73,25 @@ func TestTortureSchemas(t *testing.T) {
 				t.Fatalf("the %s run was expected to fail with %s and its message does not carry that code:\n  %s",
 					s.dir, s.wantCode, res)
 			}
+
+			// I4 is checked for every schema, including a refusal: that is
+			// the one run that aborts partway through, and so the one most
+			// likely to leave a scratch table, an index, or an advanced
+			// sequence behind on the source.
+			compareFingerprints(t, beforeRows, fingerprintTables(ctx, t, source))
+			compareCatalogs(t, beforeCatalog, fingerprintCatalog(ctx, t, source))
+
 			if s.wantExit != 0 {
-				// The refusal is the assertion. There is no target to check.
+				// The refusal is the assertion beyond I4. There is no target to check.
 				return
 			}
 
-			source := connect(ctx, t, db.source)
 			target := connect(ctx, t, db.target)
-
-			beforeRows := fingerprintTables(ctx, t, source)
-			beforeCatalog := fingerprintCatalog(ctx, t, source)
 
 			db.assertTortureSliceReached(ctx, t, s)
 			assertTortureForeignKeys(ctx, t, s, source, target)
 			assertTortureRoot(ctx, t, db, s)
 			assertTortureNoLiteralSurvives(ctx, t, source, target)
-
-			compareFingerprints(t, beforeRows, fingerprintTables(ctx, t, source))
-			compareCatalogs(t, beforeCatalog, fingerprintCatalog(ctx, t, source))
 		})
 	}
 }
@@ -721,5 +733,49 @@ func TestTortureImagesAreReachable(t *testing.T) {
 				t.Fatalf("torture: %s did not answer: %v", image, err)
 			}
 		})
+	}
+}
+
+// TestTortureNegativeControl is the negative control docs/reviews/2026-09-09/
+// REVIEW.md finding 11 asked for: proof that compareFingerprints actually
+// fails when the source changes between the baseline and the comparison,
+// rather than trusting a suite that has never once seen its own I4 check
+// fail.
+//
+// It does not run the tool at all. A single UPDATE between the two
+// fingerprintTables calls stands in for whatever a mutation during a real run
+// would do, and a fake *testing.T (a zero-value testing.T is never registered
+// with a parent, so failing it cannot fail this test or anything above it)
+// lets the test inspect whether compareFingerprints called Errorf without
+// that failure escaping.
+func TestTortureNegativeControl(t *testing.T) {
+	ctx := context.Background()
+	testutil.SkipWithoutDocker(ctx, t)
+
+	url := testutil.Postgres(ctx, t, testutil.DefaultImage)
+	conn := connect(ctx, t, url)
+
+	if _, err := conn.Exec(ctx, `CREATE TABLE public.canary (id int PRIMARY KEY, note text)`); err != nil {
+		t.Fatalf("torture: creating the canary table: %v", err)
+	}
+	if _, err := conn.Exec(ctx, `INSERT INTO public.canary VALUES (1, 'before')`); err != nil {
+		t.Fatalf("torture: seeding the canary table: %v", err)
+	}
+
+	before := fingerprintTables(ctx, t, conn)
+
+	if _, err := conn.Exec(ctx, `UPDATE public.canary SET note = 'after' WHERE id = 1`); err != nil {
+		t.Fatalf("torture: mutating the canary table: %v", err)
+	}
+
+	after := fingerprintTables(ctx, t, conn)
+
+	fake := &testing.T{}
+	compareFingerprints(fake, before, after)
+	if !fake.Failed() {
+		t.Fatalf("torture: compareFingerprints did not fail on a source mutated between the baseline " +
+			"and the comparison; the negative control this test exists to provide is not holding, " +
+			"which is exactly how the ordering bug in docs/reviews/2026-09-09/REVIEW.md finding 11 " +
+			"went unnoticed")
 	}
 }

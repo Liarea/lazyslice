@@ -9,7 +9,7 @@
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 8 | 1 | 61 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 24 | 0 | 22 | 4 | 0 |
+| E9 Later | later | 26 | 0 | 22 | 4 | 0 |
 
 ## Open and in progress
 
@@ -48,6 +48,8 @@
 - T-0166 [open] E9 · wire dsn param-drop warnings into internal/core and internal/pg's own dsn.Parse call sites ()
 - T-0168 [open] E9 · dsn.Ref.Params misses rung-2 (env/PGSERVICE) settings, so a first run through libpq env alone reruns with no sslmode at rung 0 ()
 - T-0169 [open] E9 · ARCHITECTURE.md §14 owed the mapping_file deferral ()
+- T-0170 [open] E9 · torture regression 013 (json-object-key-email) fails on main ()
+- T-0171 [open] E9 · Add TestTortureNegativeControl to Makefile TORTURE_TESTS guard list ()
 
 ## Recently closed
 
