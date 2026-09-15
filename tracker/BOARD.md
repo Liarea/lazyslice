@@ -9,7 +9,7 @@
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 8 | 1 | 75 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 48 | 0 | 26 | 4 | 0 |
+| E9 Later | later | 49 | 0 | 26 | 4 | 0 |
 
 ## Open and in progress
 
@@ -71,6 +71,7 @@
 - T-0209 [open] E9 · ARCHITECTURE.md describes the design as PostgreSQL-specific until a second engine is real (sonnet)
 - T-0210 [open] E9 · Why a row is included, boundary crossings and cap omissions visible before copy, and a decision on which job the default slice serves (opus)
 - T-0211 [open] E9 · ROADMAP.md stops naming docs/BUILD_PLAN.md as the sequencing authority (sonnet)
+- T-0212 [open] E9 · renderSafe redacts by default, and prints a transform refusal's reason under the values flag ()
 
 ## Recently closed
 

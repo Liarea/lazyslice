@@ -26,8 +26,12 @@
 package mask
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"unicode"
+	"unicode/utf8"
 )
 
 // ID names a masker in the registry, as it is written in lazyslice.yml:
@@ -180,6 +184,33 @@ var (
 	// move the unique violation to load — where its PgError.Detail is dropped
 	// (THREAT_MODEL.md T4) — instead of refusing it at plan.
 	ErrRowCountUnknown = errors.New("a unique column needs the table's row count before a generator can be chosen")
+	// ErrPassthrough is Apply's post-condition: the generator's output follows
+	// the value it was handed instead of the digest, so the cells it masks are
+	// not masked at all. It is a hard stop and never a warning — a
+	// passed-through cell is the cleartext THREAT_MODEL.md T12 exists to keep
+	// out of a target, and Apply used to return it with Masked true, which put
+	// a digest for an unmasked cell into the residual filter and left the
+	// residual scan as the only thing between a passthrough generator and a
+	// shipped cleartext column.
+	//
+	// It is not returned for a single cell whose masked value happened to equal
+	// its source: every generator here is a function of h, so at a domain of d
+	// that is expected once in d distinct values, and refusing it would abort a
+	// run over a short-id or birthdate column for a bug that is not there.
+	// Apply calls the generator a second time under the same h to tell the two
+	// apart (see maskCell).
+	//
+	// The error names the masker id and the category. It never carries the
+	// value, and neither does anything else this module returns.
+	ErrPassthrough = errors.New("the masker's output follows the value it was given, so the cell was not masked")
+	// ErrMaskerPanic is a generator that panicked. Apply recovers it and
+	// converts it into this error, naming the masker id, the category and the
+	// *type* of the panic value — never the value, which is a free-form string
+	// written by whoever panicked and is where a masker that panics with the
+	// offending row in its message used to reach stderr (THREAT_MODEL.md T4,
+	// T7). This module is importable on its own (ADR-006), so its contract does
+	// not depend on the parent binary's redaction.
+	ErrMaskerPanic = errors.New("the masker panicked")
 )
 
 // NoRoomError is the plan-time half of ErrNoRoom: the column cannot hold any
@@ -271,9 +302,247 @@ func Apply(k Key, cat Category, id ID, in Value, c Constraints) (Result, error) 
 	if err != nil {
 		return Result{}, err
 	}
-	out, err := m.Mask(h, in, c)
+	out, err := maskCell(m, cat, id, h, in, canon, c)
 	if err != nil {
 		return Result{}, err
 	}
 	return Result{Out: out, Canonical: canon.bytes(), TypeTag: tag, Masked: true}, nil
+}
+
+// maskCell calls the generator behind the two guards the module owes a caller
+// that cannot see inside it: a recover, so a panicking masker becomes an error
+// naming the masker and nothing else, and the post-condition, so a masker that
+// tracks its input is a refusal rather than a cell the caller records as masked
+// (THREAT_MODEL.md T7, T12).
+//
+// Both guards are in one place because the post-condition calls the generator a
+// second time, with a sentinel input, and that call is the generator's code too
+// and may panic for the same reasons the first one can.
+func maskCell(m Masker, cat Category, id ID, h [32]byte, in Value, canon Value, c Constraints) (out Value, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			out, err = Value{}, fmt.Errorf("%w: category %s: masker %s panicked with %s",
+				ErrMaskerPanic, cat, id, panicKind(r))
+		}
+	}()
+	out, err = m.Mask(h, in, c)
+	if err != nil {
+		return Value{}, err
+	}
+	if !looksLikeItsInput(out, in, canon) {
+		return out, nil
+	}
+	if nothingToMask(in) {
+		// A document whose leaves are all empty containers or nulls — {"a":{}},
+		// {"tags":[]} — has no scalar for any generator here to replace, so the
+		// only output it can have is itself, and that is not evidence about the
+		// generator. Refusing it would stop a run over an ordinary jsonb column
+		// deterministically, and the cell carries nothing a mask would have
+		// removed: key names survive a mask by design (ARCHITECTURE.md section
+		// 6 item 6).
+		return out, nil
+	}
+	if !tracksItsInput(m, h, in, c) {
+		// The generator ignored its input and still landed on it: at a domain
+		// of d that happens to one distinct source value in d, and refusing it
+		// would abort a whole run over an ordinary short-id or birthdate
+		// column with a message about a masker bug that is not there. The
+		// residual scan is the check on a coincidence; this guard is the check
+		// on a generator that is not a function of h alone.
+		return out, nil
+	}
+	return Value{}, fmt.Errorf("%w: category %s: masker %s", ErrPassthrough, cat, id)
+}
+
+// panicKind names the type of a recovered panic value and never the value
+// itself. It is core.PanicSummary's rule in the module that cannot import it —
+// mask depends on the standard library and two third-party packages, and
+// nothing under internal/ (ADR-006) — and it is deliberately blunter: there is
+// no flag here to offer, because this module has no flags.
+func panicKind(v any) string {
+	if v == nil {
+		return "a nil value"
+	}
+	if _, ok := v.(error); ok {
+		return fmt.Sprintf("an error of type %T (its message is withheld because it may quote the value)", v)
+	}
+	return fmt.Sprintf("a value of type %T (it is withheld because it may quote the value)", v)
+}
+
+// looksLikeItsInput reports whether out is, or reads as, the value that went
+// in. It is the cheap trigger for the post-condition, not its verdict: every
+// masked cell is tested here, so nothing in it parses, allocates or
+// canonicalises. A NULL or an empty output is not a passthrough — Apply has
+// already returned for a NULL or an empty input, so neither can be the input —
+// and the comparison is made against the raw input and against the input's
+// canonical form, first byte for byte and then over letters and digits only, so
+// that a masker that folds the case of an address, re-spaces it or re-punctuates
+// it and hands it back still trips the trigger.
+//
+// The fold is not a canonicalisation: a generator that returns the input in a
+// form whose letters and digits differ from the source's — a bare local number
+// handed back in E.164, a date handed back in another layout — is not caught
+// here, and the residual scan is what sees it. Canonicalising the output
+// instead would put the phonenumbers parser and the date-layout loop on every
+// masked cell, which measured at roughly 85% of the cost of masking a phone.
+func looksLikeItsInput(out, in, canon Value) bool {
+	if out.Null || out.Empty() {
+		return false
+	}
+	o := out.bytes()
+	return bytes.Equal(o, in.bytes()) || bytes.Equal(o, canon.bytes()) ||
+		foldEqual(o, in.bytes()) || foldEqual(o, canon.bytes())
+}
+
+// tracksItsInput asks the question the post-condition actually wants answered:
+// is this generator a function of h and the constraints, as the contract says,
+// or does its output follow the value it was handed?
+//
+// Every generator in this module ignores in except to read its shape, so a
+// second call under the same h with a sentinel input returns the same value it
+// just returned. A generator that hands its input back returns the sentinel,
+// and that — not a single cell whose masked value coincided with its source —
+// is the contract breach ErrPassthrough names.
+//
+// It is reached only when looksLikeItsInput has already fired, so the extra
+// call is not on the per-cell path. A generator that refuses the sentinel
+// cannot answer the question, and an unanswered question is not evidence: the
+// cell passes and the residual scan keeps its role as the pipeline's check.
+func tracksItsInput(m Masker, h [32]byte, in Value, c Constraints) bool {
+	probe := probeValue(in)
+	out, err := m.Mask(h, probe, c)
+	if err != nil {
+		return false
+	}
+	return looksLikeItsInput(out, probe, probe)
+}
+
+// nothingToMask reports whether in is a JSON object or array with no scalar
+// leaf in it: every leaf is an empty object, an empty array or a JSON null.
+// Such a document has nothing a generator could replace — semi_structured
+// keeps structure and key names and masks scalar leaves, and a null leaf stays
+// null — so its masked form is the document itself, and so is the sentinel's.
+// Both halves of the post-condition therefore fire on a cell that proves
+// nothing, which is why this question is asked before the verdict rather than
+// after it.
+//
+// It is computed here and never asked of the masker: a guard that let the
+// object it contains declare itself exempt is not a guard (the same reason
+// Domain() is not consulted). It runs only once looksLikeItsInput has fired,
+// so no ordinary masked cell pays for the parse.
+func nothingToMask(in Value) bool {
+	b := in.bytes()
+	if !json.Valid(b) {
+		return false
+	}
+	doc, ok := decodeJSON(string(b))
+	if !ok {
+		return false
+	}
+	switch doc.(type) {
+	case map[string]any, []any:
+	default:
+		// A bare scalar document — 42, "a string", true — is a leaf, and a
+		// generator that hands one back is answering the question.
+		return false
+	}
+	return !hasScalarLeaf(doc)
+}
+
+// hasScalarLeaf reports whether a decoded document holds a string, number or
+// boolean anywhere in it. A JSON null is not one: maskJSON leaves it as null,
+// so a document of nulls is returned unchanged by a generator that is working.
+func hasScalarLeaf(v any) bool {
+	switch t := v.(type) {
+	case map[string]any:
+		for _, e := range t {
+			if hasScalarLeaf(e) {
+				return true
+			}
+		}
+		return false
+	case []any:
+		for _, e := range t {
+			if hasScalarLeaf(e) {
+				return true
+			}
+		}
+		return false
+	case nil:
+		return false
+	default:
+		return true
+	}
+}
+
+// probeValue returns a value shaped like in but different from it: every ASCII
+// letter and digit is stepped on by one, so an email stays an email, an IP
+// stays four dotted groups and a JSON document keeps its structure, which is
+// all any generator here reads an input for. A value with no letter or digit in
+// it gets one appended.
+func probeValue(in Value) Value {
+	src := in.bytes()
+	b := make([]byte, len(src))
+	changed := false
+	for i, ch := range src {
+		b[i] = stepByte(ch)
+		if b[i] != ch {
+			changed = true
+		}
+	}
+	if !changed {
+		// A value with no letter or digit in it: the probe has to differ from
+		// the input somehow, so it gets one.
+		b = append(append(make([]byte, 0, len(b)+1), b...), '7')
+	}
+	if len(in.Bytes) > 0 {
+		return Value{Bytes: b}
+	}
+	return Value{Text: string(b)}
+}
+
+// stepByte maps an ASCII letter or digit to the next one in its class and
+// leaves everything else — punctuation, spaces, the bytes of a multi-byte rune
+// — alone.
+func stepByte(c byte) byte {
+	switch {
+	case c >= '0' && c <= '9':
+		return '0' + (c-'0'+1)%10
+	case c >= 'a' && c <= 'z':
+		return 'a' + (c-'a'+1)%26
+	case c >= 'A' && c <= 'Z':
+		return 'A' + (c-'A'+1)%26
+	}
+	return c
+}
+
+// foldEqual reports whether a and b carry the same letters and digits in the
+// same order, ignoring case and everything that is neither. It decodes in place
+// and stops at the first difference, so the common case — a masked value that
+// is nothing like its source — costs one rune.
+func foldEqual(a, b []byte) bool {
+	for {
+		ra, na := nextFoldRune(a)
+		rb, nb := nextFoldRune(b)
+		if ra != rb {
+			return false
+		}
+		if ra < 0 {
+			return true
+		}
+		a, b = a[na:], b[nb:]
+	}
+}
+
+// nextFoldRune returns the next letter or digit in s, lowercased, and how many
+// bytes of s it consumed. It returns -1 when s holds no more.
+func nextFoldRune(s []byte) (rune, int) {
+	for i := 0; i < len(s); {
+		r, n := utf8.DecodeRune(s[i:])
+		i += n
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			return unicode.ToLower(r), i
+		}
+	}
+	return -1, len(s)
 }
