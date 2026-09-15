@@ -11,7 +11,7 @@ How this project is built by one orchestrator and a fleet of agents, with a huma
 | Developer | Opus (core pipeline) or Sonnet (peripheral) agents | Implements one task in one stage. Runs lint and tests before returning. |
 | Reviewer | Opus agents, three lenses in parallel | Correctness, security and invariants, scope. Returns findings, never fixes. |
 | Mechanic | Haiku agents | Format conversions, boilerplate, renames, doc regeneration. |
-| Human | Gareth | Sets direction, unblocks anything needing accounts, money, or public posting. |
+| Human | the maintainer | Sets direction, unblocks anything needing accounts, money, or public posting. |
 
 ## Model tiers
 
@@ -24,7 +24,7 @@ How this project is built by one orchestrator and a fleet of agents, with a huma
 | Reviews: correctness, security, scope | Opus | high | A cheap reviewer that misses a leak is worse than no reviewer. |
 | Format conversion, boilerplate, tracker board regeneration | Haiku | low | Mechanical. |
 
-Correction, 2026-09-09 (Gareth): phase 5 ran an Opus developer plus three Opus reviewers on nearly every task and burned the weekly allowance. The defaults are now a Sonnet developer and one Opus reviewer; a task opts in to Opus or to three reviewers only for masking, verify, and source-safety logic. Mechanical work goes to Haiku or Sonnet. Any single run expected to exceed about one million tokens is confirmed with Gareth first.
+Correction, 2026-09-09 (the maintainer): phase 5 ran an Opus developer plus three Opus reviewers on nearly every task and burned the weekly allowance. The defaults are now a Sonnet developer and one Opus reviewer; a task opts in to Opus or to three reviewers only for masking, verify, and source-safety logic. Mechanical work goes to Haiku or Sonnet. Any single run expected to exceed about one million tokens is confirmed with the maintainer first.
 
 ## Budget reality
 
@@ -46,7 +46,7 @@ Work runs in parallel only when it touches disjoint directories. The six pipelin
 
 ## Commit discipline
 
-Every commit that changes behaviour carries a body of release-note bullets under a `stage: title (T-id)` headline (Gareth, 2026-09-16: one-line ticket references were unusable for release notes); `.claude/skills/lazyslice-commit` is the format, `implement.js` writes it from the developer's `changelog` field, and `make relnotes` generates the notes between two refs. While a workflow that commits is running, the orchestrator never runs `git add -A`. It stages the exact paths it changed (`git add tracker/ docs/RUNBOOK.md`) so an agent's half-written files are not swept into an unrelated commit. In parallel steps only the orchestrator commits, once, after the batch, so every task's commit is attributable. Observed failure, 2026-09-05: two tracker commits absorbed the invariants suite mid-task.
+Every commit that changes behaviour carries a body of release-note bullets under a `stage: title (T-id)` headline (the maintainer, 2026-09-16: one-line ticket references were unusable for release notes); `.claude/skills/lazyslice-commit` is the format, `implement.js` writes it from the developer's `changelog` field, and `make relnotes` generates the notes between two refs. While a workflow that commits is running, the orchestrator never runs `git add -A`. It stages the exact paths it changed (`git add tracker/ docs/RUNBOOK.md`) so an agent's half-written files are not swept into an unrelated commit. In parallel steps only the orchestrator commits, once, after the batch, so every task's commit is attributable. Observed failure, 2026-09-05: two tracker commits absorbed the invariants suite mid-task.
 
 ## Context discipline
 

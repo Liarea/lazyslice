@@ -23,8 +23,8 @@ export const meta = {
 const REPO = '/Users/gareth/personal_repos/lazyslice'
 const a = args || {}
 if (!a.brief || !a.id) throw new Error('implement.js needs args {id, title, brief, model, paths}')
-const model = a.model || 'sonnet' // default Sonnet; a task opts in to Opus only for masking, verify, or source-safety logic (Gareth, 2026-09-09)
-const effort = a.effort || (model === 'opus' ? 'high' : 'medium') // Opus tasks are the safety ones and keep high; Sonnet runs at medium (Gareth, 2026-09-14)
+const model = a.model || 'sonnet' // default Sonnet; a task opts in to Opus only for masking, verify, or source-safety logic (the maintainer, 2026-09-09)
+const effort = a.effort || (model === 'opus' ? 'high' : 'medium') // Opus tasks are the safety ones and keep high; Sonnet runs at medium (the maintainer, 2026-09-14)
 const paths = (a.paths || []).join(', ')
 const nReviewers = a.reviewers === 3 ? 3 : 1 // default one reviewer; three only when the task says so
 
@@ -48,7 +48,7 @@ const LENSES = [
   { key: 'scope', text: 'Scope and simplicity. Did the developer do only what the brief asked? Flag unrequested changes, extra files, speculative abstractions, dependencies added, and anything that belongs to a later phase per ROADMAP.md. Flag code that two other developers would each have to understand to work on the next stage.' },
 ]
 
-// One reviewer reads through a merged correctness-and-safety lens; three reviewers split the lenses (Gareth, 2026-09-14: conservative on model and effort, not on what the reviewer looks for).
+// One reviewer reads through a merged correctness-and-safety lens; three reviewers split the lenses (the maintainer, 2026-09-14: conservative on model and effort, not on what the reviewer looks for).
 const SOLO = { key: 'correctness+safety', text: LENSES[0].text + ' Then, ' + LENSES[1].text }
 const lenses = nReviewers === 3 ? LENSES : [SOLO]
 const reviewEffort = a.reviewEffort || 'medium'
@@ -93,7 +93,7 @@ if (!verify || !verify.passed) {
   return { id: a.id, status: 'blocked', findings: [{ severity: 'high', file: 'Makefile', line: 0, issue: 'independent check run failed', fix: (verify && verify.output) || 'no output' }], dev, postmortem: dev.postmortem }
 }
 
-// Commit message: headline with the stage and tracker id, then the developer's changelog bullets as the body (Gareth, 2026-09-16: release notes are generated from these bodies by tools/relnotes.py, so the bullets describe behaviour, not code), then trailers.
+// Commit message: headline with the stage and tracker id, then the developer's changelog bullets as the body (the maintainer, 2026-09-16: release notes are generated from these bodies by tools/relnotes.py, so the bullets describe behaviour, not code), then trailers.
 const bullets = (dev.changelog && dev.changelog.length ? dev.changelog : [dev.summary]).map(b => '- ' + String(b).replace(/\s+/g, ' ').trim()).join('\n')
 const trailers = `Task: ${a.id}\nReview: ${nReviewers} reviewer${nReviewers === 1 ? '' : 's'}, ${round} fix round${round === 1 ? '' : 's'}`
 const message = `${(a.stage || 'peripheral')}: ${a.title} (${a.id})\n\n${bullets}\n\n${trailers}\n`

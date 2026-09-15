@@ -15,7 +15,7 @@ outcome: ""
 
 ## Goal
 
-docs/reviews/2026-09-09/REVIEW.md finding 8: preserving keys preserves identity-keyed maps; replacing the whole document breaks the application. Product decision for Gareth after dogfood; the E5 task masks strong-hit keys meanwhile. internal/transform/json.go, SECURITY.md.
+docs/reviews/2026-09-09/REVIEW.md finding 8: preserving keys preserves identity-keyed maps; replacing the whole document breaks the application. Product decision for the maintainer after dogfood; the E5 task masks strong-hit keys meanwhile. internal/transform/json.go, SECURITY.md.
 
 ## Acceptance
 

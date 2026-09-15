@@ -22,4 +22,4 @@ A modified version must be renamed. "Based on lazyslice" or "a fork of lazyslice
 
 Open an issue on github.com/Liarea/lazyslice or use the address in SECURITY.md.
 
-Copyright holder: Gareth Brown (see LICENSE). This policy is a statement of how the mark is licensed, not legal advice.
+Copyright holder: the maintainer (see LICENSE). This policy is a statement of how the mark is licensed, not legal advice.

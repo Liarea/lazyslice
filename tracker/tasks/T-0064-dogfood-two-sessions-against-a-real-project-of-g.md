@@ -1,6 +1,6 @@
 ---
 id: T-0064
-title: "Dogfood: two sessions against a real project of Gareth's choosing, logged in docs/DOGFOOD_LOG.md"
+title: "Dogfood: two sessions against a real project of the maintainer's choosing, logged in docs/DOGFOOD_LOG.md"
 epic: E5
 phase: 5
 status: open
@@ -11,7 +11,7 @@ closed: ""
 outcome: ""
 ---
 
-# T-0064 · Dogfood: two sessions against a real project of Gareth's choosing, logged in docs/DOGFOOD_LOG.md
+# T-0064 · Dogfood: two sessions against a real project of the maintainer's choosing, logged in docs/DOGFOOD_LOG.md
 
 ## Goal
 

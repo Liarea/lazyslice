@@ -15,7 +15,7 @@ outcome: ""
 
 ## Goal
 
-LICENSE_DECISION.md recommendation 6 open checks: the emitted config schema is the interface; decide whether it is Apache-2.0 by default or CC-BY; copyright holder is Gareth Brown as an individual per LICENSE.
+LICENSE_DECISION.md recommendation 6 open checks: the emitted config schema is the interface; decide whether it is Apache-2.0 by default or CC-BY; copyright holder is the maintainer as an individual per LICENSE.
 
 ## Acceptance
 
