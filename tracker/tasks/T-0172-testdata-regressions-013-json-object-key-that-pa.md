@@ -3,12 +3,12 @@ id: T-0172
 title: "testdata/regressions/013-json-object-key-that-parses-as-an-email.sql fails make torture on main"
 epic: E5
 phase: 5
-status: open
+status: done
 owner: ""
 created: 2026-09-14
-started: ""
-closed: ""
-outcome: ""
+started: 2026-09-14
+closed: 2026-09-14
+outcome: done
 ---
 
 # T-0172 · testdata/regressions/013-json-object-key-that-parses-as-an-email.sql fails make torture on main
@@ -27,6 +27,10 @@ Pre-existing failure on main (confirmed by stashing T-0119's changes and re-runn
 
 - 2026-09-14 moved to E5 phase 5
 
+- 2026-09-14 started
+
+- 2026-09-14 closed: done
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+went well: root cause found in one pass (the net was refusing the masker's own output on masked jsonb keys), fix narrowed to the three categories json.go masks so network_id, online_id, credential and address keys stay covered; thirteen regressions green under make torture; the wider skip-all-keys shape and the global output-space exclusion both rejected with reasons in internal/verify/CLAUDE.md | went badly: T-0137 returned without running make torture despite its brief, so a red regression sat on main across four landings until T-0119's developer noticed; CI's torture job on main (T-0140) now catches this, as it did on 6ba9d4a | change next time: the workflow's verify step runs make torture for any task whose paths include testdata/regressions

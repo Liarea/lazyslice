@@ -387,6 +387,91 @@ was chosen and is recorded here rather than only in a comment.
     already excludes them from `mode.leaves` — because a key is never a
     sentence and the argument that excludes a document's *value* leaves from
     them applies at least as strongly to its keys.
+  - **A masked document column's own key is excluded from the net when it is
+    the masker's own output, and only then** (**T-0172**). Finding 3 above
+    made `netValues` test *every* document key against every validator
+    `mode.text` runs, with no regard for whether this column's keys were
+    themselves masked. On a *masked* document column, `json.go`'s `maskKey`
+    already ran every key through `keyCategory` — the same three-validator
+    question (email, phone, the Luhn half of `financial_account`) — and
+    replaced every match with that category's own masker; a category masker's
+    output is, by construction, still a value of that category (an email
+    masker's output is another address, THREAT_MODEL.md T1's DDL-canary
+    paragraph says the same thing about a `DEFAULT`). So a masked key that
+    still matches the validator that made transform mask it is not a hit,
+    it is the masker working — and the net was refusing the run for it:
+    `testdata/regressions/013` is one row, one `jsonb` column, one key
+    (`canary.person@example.org`), masked to another `example.com` address
+    and refused at exit 9 as `email` on a run that masked correctly.
+    `netMode` now carries `docMasked` (`has && d.Masked`, set beside
+    `leaves` in the same `document(family)` case), and `netValues` drops a
+    key from its output exactly when `docMasked` is true and
+    `strongKeyCategory` — `residual.go`'s own restatement of `keyCategory`,
+    already used to scope `keyHits` — matches it.
+    - **Why excluding exactly that set costs no recall.** For a masked
+      document column, a key in the *target* at a given position is one of
+      two things: its source text matched `keyCategory`, in which case
+      `maskKey` replaced it and the target holds masker output that is
+      guaranteed to match the same category again; or its source text did
+      not match `keyCategory`, in which case the target holds the source
+      text unchanged, and since `strongKeyCategory` asks the identical
+      question `keyCategory` does, that unchanged text cannot match
+      `strongKeyCategory` either (if it did, it would have been masked).
+      So a target key matching `strongKeyCategory` on a masked document
+      column is provably masker output and never a surviving source value —
+      there is no case this drops that the net was ever able to use.
+      `residual.go`'s `keyHits` is the check this key actually needs: it
+      tests canonical equality against the *source*, not "does this look
+      like the category", and it already proves no source key survived at
+      that path without this change.
+    - **What stays in the net's input, and why the fix is scoped to keys and
+      not to columns.** A key that does not match `strongKeyCategory` is
+      kept regardless of `docMasked`, because `keyCategory` never masks it
+      either way: only three of the net's five *strong* categories are also
+      ones `keyCategory` recognises (email, phone, the Luhn half of
+      `financial_account`); `network_id` and `online_id` are strong here but
+      `keyCategory` has no IP, MAC or URL branch, and `credential` and
+      `address` are shape guesses `keyCategory` never runs at all. A
+      network_id-, online_id-, credential- or address-shaped key inside a
+      masked document column is exactly as unmasked as one inside an
+      unmasked column, and the net still has to catch it — which is why the
+      exclusion is per key and per the three categories `keyCategory`
+      actually rewrites, not "the net skips a masked document column's keys"
+      wholesale. The wider form was considered — it is the shape the task
+      that opened T-0172 offered first — and rejected: it would silently
+      reopen finding 3's own gap for the other two strong categories and
+      both shape guesses, on exactly the column class THREAT_MODEL.md T1
+      calls a blocking control.
+    - **Leaves have the same question and not the same answer.** A masked
+      document's string leaves are `leafCategory`'s (`json.go`) — every
+      string leaf is masked as `free_text` regardless of its key, a decision
+      `internal/transform/CLAUDE.md` records — and `free_text`'s filler
+      (`mask/gen_text.go`'s `filler`, drawing from `mask/words.go`'s
+      `fillerWords`) is neutral, space-separated words with no digit, no
+      `@` and no scheme, so it cannot itself parse as an email, a phone
+      number, a card number, an IP, a URL, or clear `LooksSecret`'s entropy
+      guard. A masked document's leaves therefore do not have the keys'
+      exposure, and `netValues`'s leaf half (`leaves(v)`) is unchanged by
+      this task. `TestSecondNetReadsDocumentKeysAsWellAsValues`'s three new
+      `masked: true` cases carry a filler-shaped leaf beside each masked key
+      for exactly this reason: the absence is pinned by a test, not left
+      argued only here.
+    - **Teaching the validators to recognise the masker's own output space
+      instead was considered and rejected**, per the task that opened
+      T-0172: a strong validator could exempt an RFC 2606 domain, the
+      `phone_unique` shape or the `credential_unique` prefix everywhere,
+      rather than only on a column this run actually masked. It reads
+      simpler, and it is wrong — a source column that genuinely holds
+      `example.com` addresses would then pass the net *unmasked*, which
+      THREAT_MODEL.md T1 does not accept (`mask`'s own CLAUDE.md and
+      ARCHITECTURE.md section 5 already call the documentation-domain
+      collision "a known false-positive surface, not a leak" for the
+      *residual* scan, precisely because that check is scoped to columns
+      this run masked; a second net that stopped scoping the same way would
+      widen the hole T1 exists to close). Scoping the exclusion to
+      `Decision.Masked` — the same gate every other row in this file reads
+      before trusting a masker ran — is what keeps a genuinely unmasked
+      `example.com` address a real hit.
   **`famOther` is the hole**: a `tsvector` renders as
   `'ace':1 'administr':9` — a number and two words, which is an address to a
   validator — and a type this package cannot name is a type it cannot
@@ -553,7 +638,11 @@ not read, the leaf spelling is `internal/transform`'s, a domain over an array is
 still an array, a number leaf is not a hit, and the second net's two thresholds
 hold (`TestAColumnBelowMinValuesFailsOnAnyHit`, `TestTheDictionaryRule`).
 `TestSecondNetReadsDocumentKeysAsWellAsValues` (2026-09-14 review round,
-finding 3) pins the second net over a JSON object key and not only a value.
+finding 3) pins the second net over a JSON object key and not only a value,
+and its three `masked: true` cases (**T-0172**) pin the fix beside it: a
+masked document column's key and leaf, each shaped like the masker's own
+output for email, phone and the Luhn half of `financial_account`, pass the
+net that used to refuse them.
 The
 `citext[]` fixture of `arrayliteral_test.go` is the T-0129 half: the grammar is
 transform's on both case lists, a masked array that arrives as a literal is
