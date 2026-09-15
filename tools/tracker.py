@@ -29,7 +29,7 @@ def today(): return datetime.date.today().isoformat()
 def slug(s): return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")[:48]
 
 def quote(v):
-    # A double-quoted YAML scalar escapes an inner double quote; T-0188's reviewer found a title that a real YAML reader rejects (2026-09-16).
+    # A double-quoted YAML scalar escapes an inner double quote; T-0188's reviewer found a title that a real YAML reader rejects (2026-09-15).
     return str(v).replace('\\', '\\\\').replace('"', '\\"')
 
 def unquote(v):
