@@ -467,3 +467,85 @@ for a refusal that was reaching people as an internal error.
   of the rollback: the drops are one transaction each, so a refusal on a later
   table leaves the earlier ones dropped, and both amendments say so in those
   terms rather than "nothing was destroyed".
+
+## Decisions made during the 2026-09-14 fix round of T-FAILUX
+
+- **`move`'s two stage goroutines (extract, transform) each recover their own
+  panic and send it as a `panicError` on their existing done channel**
+  (`extractDone`/`transformDone`, now fields on `run` and not `move`'s own
+  locals). `guardedExecute`'s recover (`cmd/lazyslice/main.go`) only wraps
+  `root.ExecuteContext` on the main goroutine; without a recover of its own,
+  a panic on either — transform is where masking runs, the most panic-prone
+  code in the tree — printed Go's raw stack trace and exited 2 whatever
+  `--debug` said. `internal/load`'s `CopyFrom` goroutine does the same with
+  its own `copyPanicError`, into `copyResult.err`. `eventChannel`'s drain
+  goroutine (`channel.go`) recovers a panic in `sink.Send` the same way, kept
+  as `sinkPanic` and surfaced by `Run`'s defer as `ch.panicked()` when the run
+  otherwise succeeded — a sink is caller-supplied render code, the one call
+  into it not already covered by a stage's own done channel.
+- **`run.extractDone`/`run.transformDone` exist as struct fields, not `move`'s
+  locals, so `close` can join them too.** `move`'s own joins
+  (`<-r.extractDone`, `<-r.transformDone`) are ordinary statements a panic
+  skips; a panic unwinding out of `move` (in `load.Load`, say) used to leave
+  `close` free to release the snapshot and close the target pools while
+  extract or transform was still running against them. `close` now joins
+  both — a no-op on the ordinary path, since `move` has already read and
+  nilled them by the time it returns.
+- **`eventChannel.Send` is now safe against a channel already closed**, guarded
+  by an `RWMutex` around a `closed` flag rather than relying on every sender
+  being joined first (belt to the joins above's suspenders): `close` takes the
+  write lock before it closes `ch`, so a `Send` already past the closed check
+  cannot land on a closed channel, and one that starts after `close` sees
+  `closed` and never touches `ch`.
+- **`--debug` was wired into `report()` (`cmd/lazyslice/main.go`), not only
+  `guardedExecute`'s panic recover**: an ordinary `*Stop` now prints its
+  wrapped cause under `--debug`, and a cause that is a recovered
+  stage-goroutine panic (this round's three `panicError`/`copyPanicError`
+  types, matched structurally by a `Stack() []byte` method so `report` need
+  not import three packages) prints its captured stack too. `docs/FLAGS.md`'s
+  other promise for the flag — "the statement trace on error", via
+  `pipeline.Source.Trace()` — is still unwired: doing that needs the tracer
+  threaded through `Run`'s return path, which this fix round's paths did not
+  cover. Filed as **T-0174**; the flag's own description text
+  (`cmd/lazyslice/main.go`) was corrected to what `--debug` actually does
+  today rather than left promising the untracked half.
+
+## Decisions made during the second 2026-09-14 review round of T-FAILUX
+
+- **`close`'s joins on `extractDone`/`transformDone` needed a cancel to join
+  against, not just the joins themselves** (`run.abortStages`, `move`'s
+  `pipelineCtx`). The round above joins both channels in `close` so a panic
+  out of `move` cannot leave it racing the stage goroutines, but a join is
+  only as good as whatever unblocks the other end: `move`'s `defer
+  cancelExtract(nil)` still runs during a panic unwind and does unblock
+  extract, but transform's masked-send select (`case masked <- out: case
+  <-ctx.Done():`) was reading Run's outer `ctx`, which nothing on the unwind
+  path ever cancels, so with `batchBuffer` at 2 that goroutine — and `close`
+  behind it — blocked forever. `move` now derives one `pipelineCtx` from `ctx`
+  ahead of `extractCtx` (which is now `pipelineCtx`'s child, not `ctx`'s) and
+  stores its cancel as `r.abortStages`; transform's select reads `pipelineCtx`
+  instead of `ctx`; `close` calls `abortStages` before its joins. Ordinary
+  Ctrl-C behaviour is unchanged — `pipelineCtx` is still cancelled whenever
+  `ctx` is, since it is a child of it — and the ordinary return path is a
+  no-op: `move`'s own `defer cancelPipeline(nil)` already ran by the time
+  `close` calls `abortStages` again. `TestCloseUnblocksTransformOnAPanicUnwind`
+  (`failux_test.go`) reproduces the shape a mid-load panic leaves behind —
+  `extractDone` already filled, `transformDone`'s goroutine parked in the same
+  select `move`'s blocks in — without driving an actual panic through a live
+  pipeline, for the reason `TestTheReviewPinIsWiredIntoTheRunItGuards` gives
+  for testing its own wiring instead of driving it end to end.
+- **`Introspect` and `Preview` promote a sink panic too, not only `Run`.** The
+  round above added `ch.panicked()` to `Run`'s defer alone; `Introspect` and
+  `Preview` share `eventChannel` and only called `ch.close()`, so a panicking
+  sink during `lazyslice introspect --json` or the TUI's preview pass was
+  recovered on the drain goroutine and never reported — nil error, exit 0,
+  whatever the panic actually interrupted. Both now carry the same
+  `if perr := ch.panicked(); perr != nil && err == nil { err = asStop(perr);
+  r.report(err) }` before `ch.close()`, which needed both functions' bare
+  `return nil, err` returns turned into named returns (`summary`/`reviewed`,
+  `err`) so the defer can see and override the result the same way `Run`'s
+  does. `TestIntrospectAndPreviewPromoteASinkPanic` (`failux_test.go`) asserts
+  the wiring structurally, the way `TestTheReviewPinIsWiredIntoTheRunItGuards`
+  asserts `Preview`'s `PlanOnly` line in the same file — driving an actual
+  sink panic through either function needs a live discover/introspect pass
+  against a real source.

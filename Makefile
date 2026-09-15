@@ -109,7 +109,7 @@ integration:
 ## silently vacuous. It runs with `-v` and greps the output for each one's own
 ## `--- PASS:` line, which is why the output is teed rather than buffered — an
 ## hour of silence is not a run anybody would trust.
-TORTURE_TESTS := TestTortureSchemas TestTortureRegressions TestTortureCatalogueMatchesTheFixtures TestTortureImagesAreReachable
+TORTURE_TESTS := TestTortureSchemas TestTortureRegressions TestTortureCatalogueMatchesTheFixtures TestTortureImagesAreReachable TestTortureNegativeControl
 
 torture:
 	@log=$$(mktemp); \

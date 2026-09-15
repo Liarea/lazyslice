@@ -7,9 +7,9 @@
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 1 | 0 | 9 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
-| E5 Hardening | 5 | 8 | 1 | 61 | 0 | 0 |
+| E5 Hardening | 5 | 4 | 1 | 66 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 27 | 0 | 22 | 4 | 0 |
+| E9 Later | later | 26 | 0 | 24 | 4 | 0 |
 
 ## Open and in progress
 
@@ -21,17 +21,12 @@
 - T-0065 [open] E6 · 20-second VHS GIF of the first run on Pagila (sonnet)
 - T-0083 [in_progress] E5 · Target type registration for CopyFrom: no owner since internal/load shipped ()
 - T-0087 [open] E9 · internal/classify's JSON leaf signal never consults the name dictionary, so verify's second net cannot score person_name or free_text over document leaves ()
-- T-0089 [open] E5 · T-FAILUX: failure UX and error catalogue drift test (opus)
 - T-0090 [open] E5 · T-PERF: performance baseline and CI throughput guard (opus)
 - T-0102 [open] E9 · A text column holding a JSON document is invisible to ARCHITECTURE.md 4's JSON rule ()
-- T-0119 [open] E5 · A table-scoped name rule, for refresh_tokens.parent and its kind ()
 - T-0124 [open] E9 · testdata/regressions covers plan.refused.unique_domain no longer ()
 - T-0125 [open] E9 · Makefile's vet-tagged comment still says .golangci.yml does not lint the torture tag ()
 - T-0126 [open] E9 · internal/textsig/CLAUDE.md still says internal/verify has no URL entry (T-0122 has landed) ()
 - T-0128 [open] E9 · A multidimensional array carried as a text literal is flattened to one dimension at CopyFrom ()
-- T-0138 [open] E5 · mapping_file is refused explicitly until it is implemented; ADR-012 records the deferral (sonnet)
-- T-0139 [open] E5 · Torture suite fingerprints the source before the run, with a negative control (sonnet)
-- T-0140 [open] E5 · CI runs the torture suite on main and the release workflow requires a green CI run for the tagged commit (sonnet)
 - T-0142 [open] E9 · Implement the mapping_file contract of ADR-006 (opus)
 - T-0143 [open] E9 · Decide the arbitrary-JSON policy: structure-preserving masking versus whole-document replacement (human)
 - T-0144 [open] E9 · The memory budget accounts for samples, pending traversal, channels and batch bytes; rename the flag help to what it measures (sonnet)
@@ -47,15 +42,17 @@
 - T-0164 [open] E9 · uniqueColumn is copied in internal/plan and internal/transform; give it a shared home ()
 - T-0166 [open] E9 · wire dsn param-drop warnings into internal/core and internal/pg's own dsn.Parse call sites ()
 - T-0168 [open] E9 · dsn.Ref.Params misses rung-2 (env/PGSERVICE) settings, so a first run through libpq env alone reruns with no sslmode at rung 0 ()
-- T-0169 [open] E9 · ARCHITECTURE.md §14 owed the mapping_file deferral ()
 - T-0170 [open] E9 · torture regression 013 (json-object-key-email) fails on main ()
-- T-0171 [open] E9 · Add TestTortureNegativeControl to Makefile TORTURE_TESTS guard list ()
-- T-0172 [open] E9 · testdata/regressions/013-json-object-key-that-parses-as-an-email.sql fails make torture on main ()
+- T-0172 [open] E5 · testdata/regressions/013-json-object-key-that-parses-as-an-email.sql fails make torture on main ()
+- T-0173 [open] E9 · Stop.Args is never populated by core.wrap, so many transcript error lines render generic while only the final exit line is specific (opus)
+- T-0174 [open] E9 · Wire --debug to print the statement trace (Source.Trace) on an ordinary failure ()
 
 ## Recently closed
 
 - T-0029 [cancelled] E9 · Before going public: git-crypt the AI-specific paths and rewrite pre-encryption history → cancelled
+- T-0089 [done] E5 · T-FAILUX: failure UX and error catalogue drift test → done
 - T-0118 [done] E5 · internal/transform: mask an array whose sample arrives as a text literal element-wise → done
+- T-0119 [done] E5 · A table-scoped name rule, for refresh_tokens.parent and its kind → done
 - T-0127 [done] E5 · internal/plan: drop the arrayArrivesAsLiteral stand-in now that transform masks a literal array element-wise → done
 - T-0129 [done] E5 · internal/verify: an array column that arrives as a text literal is not residual-scanned element-wise → done
 - T-0130 [done] E5 · Target ownership: a run lease on the target and a lock-and-recheck before every destructive DDL → done
@@ -66,6 +63,9 @@
 - T-0135 [done] E5 · dsn.Ref keeps the non-secret transport parameters so a rerun preserves sslmode and certificate paths → done
 - T-0136 [done] E5 · Second net: one strong hit in an unmasked column is a finding; classify masks a mixed column that carries a strong hit → done
 - T-0137 [done] E5 · JSON object keys that a strong validator hits are masked → done
+- T-0138 [done] E5 · mapping_file is refused explicitly until it is implemented; ADR-012 records the deferral → done
+- T-0139 [done] E5 · Torture suite fingerprints the source before the run, with a negative control → done
+- T-0140 [done] E5 · CI runs the torture suite on main and the release workflow requires a green CI run for the tagged commit → done
 - T-0141 [done] E5 · README.md and SECURITY.md no longer claim every stage is a no-op → done
 - T-0147 [done] E9 · internal/classify/CLAUDE.md array-literal section is stale after T-0118/T-0129/T-0127 → done
 - T-0148 [done] E9 · Regenerate docs/ERRORS.md for the four exit-4 target-ownership codes → done
@@ -74,8 +74,3 @@
 - T-0151 [cancelled] E9 · Key the polymorphic value digest on the run's actual mask key, not the published schema fingerprint → cancelled
 - T-0152 [cancelled] E9 · ADR for T-0131's published-fingerprint value digest, or promote T-0151 → cancelled
 - T-0153 [done] E9 · plan.refused.equality_group: a code of its own for the FK equality-group refusal → done
-- T-0156 [done] E5 · Go public: git-crypt decision, tap initial commit, flip visibility, branch protection → done
-- T-0160 [done] E9 · Regenerate docs/ERRORS.md for plan.refused.equality_group → done
-- T-0161 [done] E5 · core fills pipeline.PlanRequest.Key so a masked column's DEFAULT is masked instead of refused → done
-- T-0165 [done] E9 · internal/core/provenance_test.go compares pipeline.Candidate with == after T-0135 added dsn.Ref.Params → done
-- T-0167 [done] E9 · ARCHITECTURE.md: document dsn.Ref.Params and lazyslice.yml's new params: key (T-0135) → done

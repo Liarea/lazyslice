@@ -83,7 +83,7 @@ if (blocking.length) {
 }
 
 const integ = a.integration === true ? ' && make integration' : (typeof a.integration === 'string' ? ` && go test -tags integration -count=1 ${a.integration}` : '')
-const verify = a.checks === 'none' ? { passed: true, output: 'checks skipped: documentation task' } : await agent(`Repo: ${REPO}. Run exactly: cd ${REPO} && make check${integ}. Report whether every command exited 0 and paste the last 30 lines of output. Do not change any file.`,
+const verify = a.checks === 'none' ? { passed: true, output: 'checks skipped: documentation task' } : await agent(`Repo: ${REPO}. Run exactly: cd ${REPO} && docker info --format '{{.ServerVersion}}' | grep -q . && make check${integ}. The docker check comes first because every integration test skips silently when Docker is down and a skipped suite reports ok; if docker info prints nothing, report passed=false with the reason 'Docker is not running' and do not run the rest. Report whether every command exited 0 and paste the last 30 lines of output. Do not change any file.`,
   { label: `verify:${a.id}`, phase: 'Verify', model: 'sonnet', effort: 'low', schema: { type: 'object', required: ['passed', 'output'], properties: { passed: { type: 'boolean' }, output: { type: 'string' } } } })
 
 if (!verify || !verify.passed) {

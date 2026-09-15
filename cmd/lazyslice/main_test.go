@@ -229,6 +229,67 @@ func TestForbiddenFlagsDoNotExist_SelfTestUnmaskAll(t *testing.T) {
 	}
 }
 
+// reportPanic is the recover path's rendering: CLAUDE.md's "no stack trace
+// reaches the user without --debug" has no code behind it for a genuine
+// panic unless this gate holds. Without --debug the trace must not appear at
+// all — not truncated, not summarised, absent — and the hint must name the
+// flag that would have shown it, in the same shape every other internal
+// failure in this file uses.
+func TestReportPanicShowsTheStackOnlyUnderDebug(t *testing.T) {
+	var withoutDebug bytes.Buffer
+	code := reportPanic(&withoutDebug, "boom", false)
+	if code != ExitInternal {
+		t.Errorf("reportPanic without --debug returned %d, want %d", code, ExitInternal)
+	}
+	out := withoutDebug.String()
+	if !strings.Contains(out, "internal error: boom") {
+		t.Errorf("reportPanic without --debug = %q, want it to name the panic value", out)
+	}
+	if !strings.Contains(out, "--debug") {
+		t.Errorf("reportPanic without --debug = %q, want a hint naming --debug", out)
+	}
+	if strings.Contains(out, "goroutine") || strings.Contains(out, ".go:") {
+		t.Errorf("reportPanic without --debug = %q, this looks like a stack trace reached the user with no --debug", out)
+	}
+
+	var withDebug bytes.Buffer
+	code = reportPanic(&withDebug, "boom", true)
+	if code != ExitInternal {
+		t.Errorf("reportPanic with --debug returned %d, want %d", code, ExitInternal)
+	}
+	if !strings.Contains(withDebug.String(), "goroutine") {
+		t.Errorf("reportPanic with --debug = %q, want a goroutine stack trace", withDebug.String())
+	}
+}
+
+// run's own recover is exercised end to end by wrapping a command tree that
+// panics inside guardedExecute, the same call run makes — this is not a
+// hand-written stand-in for run's defer/recover, it is that code, called with
+// a root built to fail the way a real bug would: mid-RunE, after flags are
+// parsed, so req.Debug already carries what the operator passed.
+func TestAPanicInACommandDoesNotCrashTheProcess(t *testing.T) {
+	req := core.NewRequest()
+	root := &cobra.Command{
+		Use:          "boom",
+		SilenceUsage: true,
+		RunE: func(*cobra.Command, []string) error {
+			panic("injected for TestAPanicInACommandDoesNotCrashTheProcess")
+		},
+	}
+
+	var stderr bytes.Buffer
+	got := guardedExecute(context.Background(), root, &stderr, &req)
+	if got != ExitInternal {
+		t.Errorf("guardedExecute after a panic = %d, want %d\nstderr: %s", got, ExitInternal, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "internal error") {
+		t.Errorf("stderr after a panic = %q, want it to say \"internal error\"", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "goroutine") {
+		t.Errorf("stderr after a panic with no --debug = %q, want no stack trace", stderr.String())
+	}
+}
+
 // Exit codes are part of the interface (ADR-005): a wrapper or a CI job branches
 // on them, so "the operator mistyped a flag" (2) may never arrive as "lazyslice
 // crashed" (1). Cobra raises its own parse errors, which is why this drives the

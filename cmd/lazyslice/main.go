@@ -108,13 +108,53 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 
+	return guardedExecute(ctx, root, stderr, &req)
+}
+
+// guardedExecute runs root and maps the result to an exit code, with a
+// recover around the call: a panic anywhere below this line is a bug in
+// lazyslice, not a refusal — every deliberate stop leaves as the error
+// root.ExecuteContext returns, and this is the one path through the binary
+// that is not that. Without the recover, a panic prints Go's own unredacted
+// goroutine trace straight to stderr and the process exits 2 — reaching the
+// user with a stack trace whatever --debug says, which is CLAUDE.md's rule
+// ("no stack trace reaches the user without --debug") with no code behind
+// it. req.Debug is read from the request rather than a flag variable for the
+// same reason report reads req.ShowRowValuesInErrors: the request is where
+// every flag lands, and cobra has already parsed it by the time a stage
+// could panic. It is a function of its own, rather than inline in run, so
+// the recover can be driven with a command tree of a test's own
+// (TestAPanicInACommandDoesNotCrashTheProcess) instead of a real panic
+// reached through the whole CLI surface.
+func guardedExecute(ctx context.Context, root *cobra.Command, stderr io.Writer, req *core.Request) (code int) {
+	defer func() {
+		if r := recover(); r != nil {
+			code = reportPanic(stderr, r, req.Debug)
+		}
+	}()
+
 	if err := root.ExecuteContext(ctx); err != nil {
 		// The request is read, not the flag variable, because
-		// --show-row-values-in-errors is the one thing report needs to know and
-		// the request is where every flag lands.
-		return report(stderr, err, req.ShowRowValuesInErrors)
+		// --show-row-values-in-errors and --debug are the two things report
+		// needs to know and the request is where every flag lands.
+		return report(stderr, err, req.ShowRowValuesInErrors, req.Debug)
 	}
 	return ExitOK
+}
+
+// reportPanic is what a recovered panic becomes: one line saying this is an
+// internal failure and not something the operator did, and the stack trace
+// only under --debug (CLAUDE.md, "no stack trace reaches the user without
+// --debug"). Without --debug the hint names the flag, in the same shape as
+// every other internal failure report prints.
+func reportPanic(stderr io.Writer, r any, showStack bool) int {
+	fmt.Fprintf(stderr, "lazyslice: internal error: %v\n", r)
+	if showStack {
+		_, _ = stderr.Write(debug.Stack())
+	} else {
+		fmt.Fprintln(stderr, "  run with --debug for the stack trace")
+	}
+	return ExitInternal
 }
 
 // newCommandTree assembles the whole CLI: the root command, the five stage
@@ -177,7 +217,7 @@ func newCommandTree(ctx context.Context, req *core.Request, stdout io.Writer) *c
 // is an ADR-005 code; anything unmapped is ExitInternal, because a code that
 // means "something went wrong" must not be confused with one a CI job branches
 // on.
-func report(stderr io.Writer, err error, showValues bool) int {
+func report(stderr io.Writer, err error, showValues, showStack bool) int {
 	var stop *core.Stop
 	switch {
 	case errors.As(err, &stop):
@@ -197,6 +237,9 @@ func report(stderr io.Writer, err error, showValues bool) int {
 		// CodeInterrupted with exit 130, so this branch answers that case too
 		// and the two can no longer disagree.
 		fmt.Fprintf(stderr, "lazyslice: %s\n", renderSafe(err, showValues))
+		if showStack {
+			printDebugTrail(stderr, stop.Unwrap())
+		}
 		return stop.Exit
 	case errors.Is(err, context.Canceled):
 		// A cancellation that never reached core: cobra's own context, or a
@@ -213,6 +256,47 @@ func report(stderr io.Writer, err error, showValues bool) int {
 	default:
 		fmt.Fprintf(stderr, "lazyslice: %s\n", renderSafe(err, showValues))
 		return ExitInternal
+	}
+}
+
+// causeWithStack is what a panic recovered off a stage goroutine looks like by
+// the time it reaches report, wherever it was recovered
+// (internal/core.panicError for extract, transform and the event sink;
+// internal/load's own copyPanicError for CopyFrom). It is unexported and
+// declared here, not imported, so errors.As matches it structurally against
+// whichever package's type is actually in the chain — report has no reason to
+// import three packages just to ask "does this have a stack".
+type causeWithStack interface {
+	error
+	Stack() []byte
+}
+
+// printDebugTrail is --debug's half of an ordinary failure: CLAUDE.md's "no
+// stack trace reaches the user without --debug" says nothing reaches the user
+// WITHOUT it, and until this the flag did nothing for the non-panic errors
+// that are most of what a run reports — core.Request.Debug was read in exactly
+// one place, guardedExecute's own recover (2026-09-14 review of T-FAILUX,
+// finding 3). cause is what the Stop wraps (nil for a refusal with none of its
+// own, e.g. a usage error). When cause is a recovered stage-goroutine panic it
+// also carries a stack captured at the point it was recovered, printed here the
+// same way reportPanic prints one recovered on the main goroutine — --debug
+// means the same thing whichever goroutine the panic was on.
+//
+// docs/FLAGS.md's --debug line also promises "the statement trace on error":
+// internal/pipeline.Source.Trace() exists for that (invariant I4) but nothing
+// wires it to a failing run yet, and doing so needs the tracer threaded
+// through core.Run's return path, which is a bigger change than this fix
+// round's paths cover — filed as tracker T-0174, noted in
+// internal/core/CLAUDE.md.
+func printDebugTrail(stderr io.Writer, cause error) {
+	if cause == nil {
+		return
+	}
+	fmt.Fprintf(stderr, "  caused by: %v\n", cause)
+	var withStack causeWithStack
+	if errors.As(cause, &withStack) {
+		fmt.Fprintln(stderr, "  panic recovered off a stage goroutine:")
+		_, _ = stderr.Write(withStack.Stack())
 	}
 }
 
@@ -819,7 +903,7 @@ func bindFlags(groups []flagGroup, req *core.Request, raw *rawFlags) {
 	rend.BoolVar(&req.TUI, "tui", false,
 		"Enter the reasons and plan screens")
 	rend.BoolVar(&req.Debug, "debug", false,
-		"Stack traces and the statement trace on error")
+		"Stack traces on error, panics included; the underlying driver error")
 }
 
 // finish parses the TABLE=VALUE flags into the request, records which flags the

@@ -3,12 +3,12 @@ id: T-0119
 title: "A table-scoped name rule, for refresh_tokens.parent and its kind"
 epic: E5
 phase: 5
-status: open
+status: done
 owner: ""
 created: 2026-09-08
-started: ""
-closed: ""
-outcome: ""
+started: 2026-09-14
+closed: 2026-09-14
+outcome: done
 ---
 
 # T-0119 · A table-scoped name rule, for refresh_tokens.parent and its kind
@@ -29,6 +29,10 @@ T-0104's tenth miss has no fix in T-HARD-B and needs a rule-pack feature rather 
 
 - 2026-09-14 moved to E5 phase 5
 
+- 2026-09-14 started
+
+- 2026-09-14 closed: done
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+went well: rules.yml gains a table-scoped pattern; refresh_tokens.parent is masked; two tests kill the reviewer's mutation of the table gate; docs/TORTURE.md provenance stated (802395a, one fix round) | went badly: make torture not re-run by the task; a pre-existing torture failure on regression 013 surfaced as T-0172 | change next time: any classify change re-runs make torture before returning

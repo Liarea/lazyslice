@@ -3,12 +3,12 @@ id: T-0171
 title: "Add TestTortureNegativeControl to Makefile TORTURE_TESTS guard list"
 epic: E9
 phase: ""
-status: open
+status: done
 owner: ""
 created: 2026-09-14
-started: ""
-closed: ""
-outcome: ""
+started: 2026-09-14
+closed: 2026-09-14
+outcome: done
 ---
 
 # T-0171 · Add TestTortureNegativeControl to Makefile TORTURE_TESTS guard list
@@ -25,6 +25,10 @@ Makefile:108 TORTURE_TESTS omits TestTortureNegativeControl, so a rename/deletio
 
 - 2026-09-14 created
 
+- 2026-09-14 started
+
+- 2026-09-14 closed: done
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+went well: one word in the Makefile, by the orchestrator | change next time: nothing

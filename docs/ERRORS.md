@@ -118,10 +118,8 @@ One row per code in the catalogue, in the file's own order. Exit is only meaning
 | `discover.compose.no_project` | discover | - | docker: no compose project for this directory — showing all Postgres containers |
 | `discover.compose.stopped` | discover | - | compose declares a Postgres service that is not running — start it with: docker compose up -d {provenance} |
 | `discover.env.unusable` | discover | - | {provenance} is not a whole postgres:// URI and was not used: {reason} |
-| `discover.rung.not_implemented` | discover | - | {provenance}: {count} found, not in this build — pass {flag} |
 | `discover.source.chosen` | discover | - | source {database} on {host} — {provenance}, {flag} names another |
 | `discover.target.chosen` | discover | - | target {database} on {host} — {provenance}, {flag} names another |
 | `target.refused.none` | discover | 4 | no local postgres found to load into: pass {flag} |
-| `target.refused.not_implemented` | discover | 4 | starting a target container is not in this build: pass {flag} naming a database to load into |
 | `target.refused.docker_not_local` | discover | 4 | --create-target needs a local docker endpoint: {host} is {reason} — set {flag} to a local socket, or name a database with --target |
 | `target.refused.ref_invalid` | discover | 2 | ./lazyslice.yml's target_ref does not describe a usable connection: {reason} — edit the file's target: block, delete it to let lazyslice rediscover the target, or pass {flag} to override it for this run |
