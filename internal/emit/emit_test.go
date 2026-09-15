@@ -3,6 +3,7 @@
 package emit
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -274,6 +275,56 @@ func TestWherePredicateIsWithheld(t *testing.T) {
 	cfg.Where = "created_at > '2024-01-01'"
 	if err := e.Write(path, cfg); err == nil {
 		t.Error("Write accepted a config carrying an unwithheld literal predicate")
+	}
+}
+
+// ADR-012 (T-0138): a yml naming mapping_file for a column is refused by
+// name, not silently round-tripped or ignored — the whole point of finding
+// 10 was that nothing consumed the field while the file claimed the escape
+// was taken. Read has to surface a *MappingFileError with the right table and
+// column, and toDocument must never write the key back out even when the
+// in-memory Config carries a column that used to have one.
+func TestMappingFileIsRefusedAtRead(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "lazyslice.yml")
+	body := "version: 1\n" +
+		"tool: 0.1.0\n" +
+		"columns:\n" +
+		"  public.customer.national_id:\n" +
+		"    category: national_id\n" +
+		"    confidence: certain\n" +
+		"    mapping_file: mappings/national_id.csv\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	_, err := New(Options{}).Read(path)
+	if err == nil {
+		t.Fatal("Read accepted a yml naming mapping_file")
+	}
+	var mfErr *MappingFileError
+	if !errors.As(err, &mfErr) {
+		t.Fatalf("Read err = %v, want it to wrap *MappingFileError", err)
+	}
+	if mfErr.Table != "public.customer" || mfErr.Column != "national_id" {
+		t.Errorf("MappingFileError = %+v, want table public.customer, column national_id", mfErr)
+	}
+}
+
+// toDocument never writes the mapping_file key: pipeline.ColumnConfig carries
+// no field for it, so there is nothing to round-trip even for a column whose
+// decision started life behind a mapping-file escape.
+func TestEmitNeverWritesMappingFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "lazyslice.yml")
+	cfg := sample()
+	if err := New(Options{}).Write(path, cfg); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if strings.Contains(string(b), "mapping_file") {
+		t.Errorf("the written file names mapping_file, want the key never written (ADR-012):\n%s", b)
 	}
 }
 

@@ -392,13 +392,16 @@ func groupEscapes(g []groupMember, cause escapeCause) string {
 	if cause == causeRowCount {
 		s = "lower the row count, or "
 	}
+	// mapping_file was the group escape's alternative; ADR-012 defers it past
+	// v1 (docs/reviews/2026-09-09/REVIEW.md finding 10), so it is dropped here
+	// too rather than pointing at an escape that exits 2 if taken.
 	if len(g) > 1 {
 		s += fmt.Sprintf(
 			"--unmask every column of the group — %s, each with its own =REASON, all of them or none, "+
 				"because unmasking one end of a foreign key copies that end's real values into the target "+
-				"and still leaves the key unvalidatable — or give them a mapping_file", cols)
+				"and still leaves the key unvalidatable", cols)
 	} else {
-		s += fmt.Sprintf("--unmask %s=REASON, or give it a mapping_file", cols)
+		s += fmt.Sprintf("--unmask %s=REASON", cols)
 	}
 	return "; " + s
 }

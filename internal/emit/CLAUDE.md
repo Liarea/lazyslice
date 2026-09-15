@@ -55,13 +55,23 @@ the file; let a re-read narrow a prior decision instead of only tightening it.
   anywhere makes a `--where` predicate a literal. A predicate wrongly withheld
   costs the operator the flag on the next run and says so; one wrongly recorded
   puts a production value in a committed file (THREAT_MODEL.md T5).
-- **The merge carries three things forward** and nothing else: `extra_patterns`,
-  the `unmask:` blocks of columns the classifier still honours (a decision whose
-  `Source` is `ByYmlUnmask`; an expired one is not, so it is dropped exactly when
-  the classifier stopped honouring it), and `mapping_file:`. Everything else in
-  a prior file is a record of a run that is over. The tighten-only property
-  itself is enforced on **read**, in `internal/classify`, which is the only
-  place a prior can change a decision.
+- **The merge carries two things forward** and nothing else: `extra_patterns`
+  and the `unmask:` blocks of columns the classifier still honours (a decision
+  whose `Source` is `ByYmlUnmask`; an expired one is not, so it is dropped
+  exactly when the classifier stopped honouring it). Everything else in a prior
+  file is a record of a run that is over. The tighten-only property itself is
+  enforced on **read**, in `internal/classify`, which is the only place a prior
+  can change a decision.
+- **`mapping_file:` is no longer carried forward, or written at all (ADR-012,
+  T-0138).** ADR-006 named it a unique-index escape hatch, but nothing ever
+  consumed it — no stage read the CSV or applied a replacement
+  (docs/reviews/2026-09-09/REVIEW.md finding 10) — so a committed file that
+  round-tripped it was false confidence. `document.config()` now refuses a
+  `mapping_file:` entry by name (`*MappingFileError`, exit 2 via
+  `internal/core`), `toDocument` never writes the key, and
+  `pipeline.ColumnConfig` carries no field for it. T-0142 is the task that
+  implements the full contract and, if it lands, restores the field and the
+  merge.
 - **`plan:`, `small_domain:` and `virtual_fks:` do not come back.** They are a
   record; nothing reads them as an input. `virtual_fks:` is written as text
   rather than a structured form because the one thing it exists to say is the

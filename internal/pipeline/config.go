@@ -78,13 +78,15 @@ type ColumnConfig struct {
 	Masker     mask.ID
 	Unique     bool
 	TypeFP     string
-	// MappingFile names a CSV of original,replacement for a column refused under
-	// a unique index (ADR-006's escape hatch). It contains original values in
-	// plaintext, so it is gitignored, refused when git tracks it, and distributed
-	// like a source credential. A value absent from the mapping is exit 12, never
-	// a fallback to the refused masker.
-	MappingFile string
-	Unmask      *Unmask
+	// MappingFile is deliberately absent. ADR-006 named a 1:1 CSV mapping as a
+	// unique-index escape hatch; ADR-012 defers the full contract (uniqueness,
+	// missing values, FK consistency, secret-file protection) past v1, because
+	// nothing consumed it — the config decoder read it, emit round-tripped it,
+	// and the unique-domain refusal recommended it, but no stage ever read the
+	// CSV or applied a replacement (docs/reviews/2026-09-09/REVIEW.md finding
+	// 10). A yml naming mapping_file is refused at read (internal/emit); T-0142
+	// is the implementing task.
+	Unmask *Unmask
 }
 
 // Unmask is a per-column opt-out. There is no wholesale unmask, by design.

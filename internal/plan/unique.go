@@ -190,7 +190,11 @@ func uniqueDomainReason(t ref.TableRef, col string, de *mask.DomainError) string
 	} else {
 		s += "; no row count is small enough"
 	}
-	return s + fmt.Sprintf(", or --unmask %s.%s=REASON, or give the column a mapping_file", t, col)
+	// mapping_file was the third escape ARCHITECTURE.md §5 names; ADR-012
+	// defers it past v1 (docs/reviews/2026-09-09/REVIEW.md finding 10), so it
+	// is dropped from the printed remedy rather than pointing at an escape
+	// that exits 2 if taken.
+	return s + fmt.Sprintf(", or --unmask %s.%s=REASON", t, col)
 }
 
 // plannedRows is n for §5's rule: how many rows of this table the run will put

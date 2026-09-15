@@ -132,7 +132,6 @@ func TestUniqueDomainRefusesWhenNoMaskerFits(t *testing.T) {
 		"200 row(s)",
 		"no row count is small enough",
 		"--unmask public.contact.handle=REASON",
-		"mapping_file",
 	} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("message %q does not carry %q", msg, want)

@@ -942,6 +942,19 @@
   message: "{path} records a withheld --where predicate and this run passed none: pass {flag} again, or the slice would silently be a different one"
   args: [path, flag]
 
+# ADR-012 (2026-09-14): mapping_file is a v1 escape hatch nothing implements —
+# the config decoder read it, emit round-tripped it and the unique-domain
+# refusal recommended it, but no stage ever reads the CSV or applies a
+# replacement (docs/reviews/2026-09-09/REVIEW.md finding 10). {path} naming it
+# for {table}.{column} is refused by name rather than silently ignored.
+# T-0142 is the task that implements the full contract.
+- code: config.refused.mapping_file
+  kind: error
+  stage: emit
+  exit: 2
+  message: "{path} names mapping_file for {table}.{column}, which is not supported in this version: remove the mapping_file: line for {table}.{column} from {path}, then use --unmask {table}.{column}=REASON, or a lower --take or --cap"
+  args: [path, table, column]
+
 # The two codes that exist so that "something went wrong" is never printed as a
 # code a CI job branches on. run.refused.usage is a flag the operator has to fix
 # that could only be checked once the catalog was read — an --unmask or a

@@ -224,7 +224,7 @@ func TestEqualityGroupRefusesWhenNoMaskerFitsEveryMember(t *testing.T) {
 	// (T-0132 review, finding 2).
 	msg := refusal.Error()
 	for _, want := range []string{
-		pcol.String(), ccol.String(), "joined by foreign keys", "mapping_file",
+		pcol.String(), ccol.String(), "joined by foreign keys",
 		"--unmask every column of the group", "all of them or none",
 	} {
 		if !strings.Contains(msg, want) {
