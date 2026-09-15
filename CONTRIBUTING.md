@@ -119,7 +119,7 @@ verify: one strong hit in an unmasked column is a finding (T-0136)
 - A column that mixes ordinary text with a few such values is masked as free text instead of copied; --unmask with a reason keeps the copy.
 ```
 
-Headline: an area prefix (`classify`, `plan`, `load`, `verify`, `cli`, `ci`, ...), an imperative sentence under 72 characters, the task id in parentheses if there is one. Body: one bullet per user-visible change, naming flags, exit codes and behaviours, never files or functions. Housekeeping commits (`Tracker:`, `ROADMAP:`) need no body and are left out of the notes.
+Headline: an area prefix (`classify`, `plan`, `load`, `verify`, `cli`, `ci`, ...), an imperative sentence under 72 characters, the task id in parentheses if there is one. Body: one bullet per user-visible change, naming flags, exit codes and behaviours, never files or functions. Housekeeping commits (`Tracker:`, `ROADMAP:`) need no body; they and tooling commits (`chore:`) are left out of the notes.
 
 ## Licence and sign-off
 

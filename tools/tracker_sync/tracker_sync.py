@@ -32,6 +32,13 @@ def gh(*args, input_text=None):
     return subprocess.check_output(["gh", *args], text=True, input=input_text).strip()
 
 
+def unquote(v):
+    # Mirrors tools/tracker.py: a double-quoted scalar may carry escaped inner quotes.
+    if len(v) >= 2 and v[0] == '"' and v[-1] == '"':
+        return v[1:-1].replace('\\"', '"').replace('\\\\', '\\')
+    return v.strip('"')
+
+
 def parse(path):
     text = open(path, encoding="utf-8").read()
     fm, body = text.split("\n---\n", 1)[0], text.split("\n---\n", 1)[1]
@@ -39,7 +46,7 @@ def parse(path):
     for line in fm.splitlines():
         if ":" in line and not line.startswith("---"):
             k, v = line.split(":", 1)
-            meta[k.strip()] = v.strip().strip('"')
+            meta[k.strip()] = unquote(v.strip())
     sections, current = {}, None
     for line in body.splitlines():
         if line.startswith("## "):

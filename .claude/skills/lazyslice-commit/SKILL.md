@@ -22,7 +22,7 @@ Review: 1 reviewer, 2 fix rounds
 
 - `stage` is the pipeline stage or area: `classify`, `plan`, `extract`, `transform`, `mask`, `load`, `verify`, `emit`, `discover`, `core`, `pg`, `introspect`, `tui`, `cli`, `foundations`, `hardening`, `ci`, `bench`, `release`, `peripheral`. `tools/relnotes/relnotes.py` groups by it.
 - The headline may reference the task; the bullets may not. Three to eight bullets for a code change; one for a documentation change.
-- Housekeeping commits (`Tracker: ...`, `ROADMAP: ...`) are excluded from release notes by prefix and need no body.
+- Housekeeping commits (`Tracker: ...`, `ROADMAP: ...`) and tooling commits (`chore: ...`: workflows, skills, tools/) are excluded from release notes by prefix; a tooling commit still gets bullets for the maintainer, a housekeeping one needs no body.
 - Write the message to a file and commit with `git commit -F`; a multi-line `-m` in a shell quoting layer loses lines.
 
 Good bullet: "A plain US social security number in a column whose name matches no rule is now masked; classify reports the column as national_id." Bad bullet: "Add ValidSSN to textsig and wire it in classify.go."

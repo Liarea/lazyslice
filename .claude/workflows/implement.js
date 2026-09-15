@@ -38,6 +38,8 @@ const DEV = { type: 'object', required: ['files', 'summary', 'changelog', 'check
   concerns: { type: 'array', items: { type: 'string' }, description: 'things noticed outside scope, missing deps, doubts' },
   postmortem: { type: 'string', description: 'went well | went badly | change next time' } } }
 
+// The fix round returns the developer's shape, but its changelog is optional and is appended to the original bullets: a fix that changes nothing a user sees adds no bullet. A required changelog here failed T-0188's landing five times (2026-09-16) when the fixer's return was rejected for the missing field.
+const FIX = { ...DEV, required: DEV.required.filter(k => k !== 'changelog') }
 const FINDINGS = { type: 'object', required: ['findings'], properties: { findings: { type: 'array', items: { type: 'object',
   required: ['severity', 'file', 'line', 'issue', 'fix'], properties: { severity: { type: 'string', enum: ['high', 'medium', 'low'] },
   file: { type: 'string' }, line: { type: 'integer' }, issue: { type: 'string' }, fix: { type: 'string' } } } } } }
@@ -69,10 +71,10 @@ let round = 0
 while (blocking.length && round < 2) {
   round++
   log(`Round ${round}: ${blocking.length} findings to fix`)
-  const fixed = await agent(`${PRE}\n\nYou implemented task ${a.id}: ${a.title}. Reviewers found:\n${JSON.stringify(blocking, null, 1)}\nAddress every high and medium finding with targeted edits. If you believe a finding is wrong, say so in concerns with your reasoning rather than silently ignoring it. Re-run the checks.`,
-    { label: `fix:${a.id}:r${round}`, phase: 'Fix', model, effort, schema: DEV })
+  const fixed = await agent(`${PRE}\n\nYou implemented task ${a.id}: ${a.title}. Reviewers found:\n${JSON.stringify(blocking, null, 1)}\nAddress every high and medium finding with targeted edits. If you believe a finding is wrong, say so in concerns with your reasoning rather than silently ignoring it. Re-run the checks. Keep summary to a few sentences. Your changelog lists only user-visible changes this fix adds, if any; the original bullets are kept.`,
+    { label: `fix:${a.id}:r${round}`, phase: 'Fix', model, effort, schema: FIX })
   if (!fixed) break
-  dev = fixed
+  dev = { ...fixed, changelog: [...(dev.changelog || []), ...(fixed.changelog || [])], postmortem: fixed.postmortem || dev.postmortem }
   const re = await agent(`You are the re-verifier on lazyslice. Repo: ${REPO}. These findings were reported on task ${a.id} and the developer says they are fixed:\n${JSON.stringify(blocking, null, 1)}\nDeveloper's concerns: ${JSON.stringify(dev.concerns)}. Check each finding against the current code (git diff, read the files). Run make check. Return only findings that are still open, keeping their severity, plus any new high-severity problem the fix introduced.`,
     { label: `reverify:${a.id}:r${round}`, phase: 'Fix', model: 'opus', effort: reviewEffort, schema: FINDINGS })
   blocking = re ? re.findings.filter(f => f.severity !== 'low') : []

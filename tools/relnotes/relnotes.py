@@ -23,7 +23,7 @@ SECTIONS = [
     ("Pipeline", {"core", "extract", "load", "pg", "introspect", "emit", "discover", "tui", "cli"}),
     ("Build, CI and release", {"foundations", "hardening", "ci", "bench", "release"}),
 ]
-SKIP = re.compile(r"^(Tracker|ROADMAP|docs?/|Tracker:)", re.I)
+SKIP = re.compile(r"^(Tracker|ROADMAP|docs?/|Tracker:|chore:)", re.I)
 
 
 def commits(frm, to):
