@@ -1,8 +1,8 @@
 {
   "BenchmarkExtractThroughput": {
-    "rows_per_sec": 15000000,
-    "measured": "2026-09-14",
-    "hardware": "Apple M4 (darwin/arm64), local run — see docs/PERF.md",
-    "note": "Measured at roughly 22,000,000 rows/sec locally (best of 5 one-second runs). Recorded here at a deliberately conservative ~68% of that so `make bench` does not fail a pull request over ordinary run-to-run and CI-runner-to-laptop variance; docs/PERF.md's concerns section says this should be replaced with a number measured on the actual CI runner after this job's first few real runs."
+    "rows_per_sec": 9780000,
+    "measured": "2026-09-15",
+    "hardware": "GitHub-hosted ubuntu-latest runner (x86_64, 4 vCPU), CI run 34927703066 bench job",
+    "note": "Best of five one-second runs on the runner itself was 10,865,118 rows/sec (T-0177). Recorded at 90% of that so the 20% ceiling in the Makefile (BENCH_REGRESSION_PCT) fails at about 72% of the measured number: shared runners vary run to run and a single-sample baseline at 100% would flag ordinary noise as a regression. The Apple M4 local figure (about 22,000,000 rows/sec) is in docs/PERF.md and is not the gate."
   }
 }

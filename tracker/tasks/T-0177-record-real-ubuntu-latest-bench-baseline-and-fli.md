@@ -3,12 +3,12 @@ id: T-0177
 title: "Record real ubuntu-latest bench baseline and flip bench job to blocking"
 epic: E5
 phase: 5
-status: open
+status: done
 owner: ""
 created: 2026-09-14
-started: ""
-closed: ""
-outcome: ""
+started: 2026-09-15
+closed: 2026-09-15
+outcome: done
 ---
 
 # T-0177 · Record real ubuntu-latest bench baseline and flip bench job to blocking
@@ -27,6 +27,10 @@ internal/extract/testdata/bench/baseline.json (15,000,000 rows/sec) was recorded
 
 - 2026-09-15 moved to E5 phase 5
 
+- 2026-09-15 started
+
+- 2026-09-15 closed: done
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+went well: the runner's own best-of-five read from the bench job log of the first real run and recorded at 90% so the 20% ceiling tolerates shared-runner noise; job now blocking | change next time: record a CI baseline from the runner on the first push rather than from a laptop
