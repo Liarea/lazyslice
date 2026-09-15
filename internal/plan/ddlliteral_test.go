@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Liarea/lazyslice/internal/event"
 	"github.com/Liarea/lazyslice/internal/pipeline"
 	"github.com/Liarea/lazyslice/internal/ref"
 	"github.com/Liarea/lazyslice/mask"
@@ -363,6 +364,285 @@ func TestAPatternOperandIsNotAValue(t *testing.T) {
 	}
 }
 
+// R2-07 (2026-09-15 round-2 red team, docs/reviews/2026-09-15-redteam/
+// round2-still-leaking.json): a table CHECK carrying a person's name or a
+// postal address, neither of which any of the five original strong
+// validators reads, crossed into the target under exit 0. T-0189 widened
+// strongValidators to run every category the row pipeline masks, and this is
+// the regression fixture: a name in a CHECK on a masked column refuses at
+// exit 13 (nothing rewrites a CHECK) and an address in one on an unmasked
+// column refuses at exit 12 with the --unmask escape, exactly as an email
+// already did before this task.
+func TestRedTeamR207PersonNameAndAddressInCheckAreRefused(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name       string
+		def        string
+		maskColumn bool
+		wantCode   event.Code
+		wantExit   int
+	}{
+		{
+			name:       "a person's full name in a CHECK on a masked column",
+			def:        `CHECK (("owner" <> 'Grace Hopper'::text))`,
+			maskColumn: true,
+			wantCode:   CodeLiteralNotRewritable,
+			wantExit:   exitSchema,
+		},
+		{
+			name:     "a postal address in a CHECK on an unmasked column",
+			def:      `CHECK (("owner" <> '42 Elm Street'::text))`,
+			wantCode: CodeDDLLiteral,
+			wantExit: exitPlan,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tbl, schema := literalTable()
+			schema.Tables[0].Columns[1].Default = "" // the email column's own default is not this test's subject
+			schema.Tables[0].Columns = append(schema.Tables[0].Columns,
+				pipeline.Column{Name: "owner", TypeName: "text"})
+			schema.Tables[0].Constraints = []pipeline.Constraint{
+				{Name: "items_owner_check", Kind: 'c', Def: tc.def},
+			}
+			cls := masking(tbl, "email", pipeline.CatEmail, mask.MaskerEmail)
+			if tc.maskColumn {
+				ownerCol := ref.ColumnRef{Table: tbl, Column: "owner"}
+				cls.Decisions[ownerCol] = pipeline.Decision{
+					Col: ownerCol, Category: pipeline.CatPersonName, Masker: mask.MaskerPersonName, Masked: true,
+				}
+			}
+
+			err := planLiterals(t, schema, cls, literalKey(0x44))
+			var refusal *Refusal
+			if !errors.As(err, &refusal) {
+				t.Fatalf("Plan returned %v, want a *plan.Refusal: R2-07 crossed under exit 0", err)
+			}
+			if refusal.Code != tc.wantCode || refusal.Exit != tc.wantExit {
+				t.Fatalf("Plan refused with %s exit %d, want %s exit %d",
+					refusal.Code, refusal.Exit, tc.wantCode, tc.wantExit)
+			}
+			if refusal.Column != "items_owner_check" {
+				t.Fatalf("the refusal names %q, want the constraint it is about", refusal.Column)
+			}
+			for _, secret := range []string{"Grace Hopper", "42 Elm Street"} {
+				if strings.Contains(refusal.Message, secret) || strings.Contains(refusal.Args["reason"], secret) {
+					t.Fatalf("the refusal quotes the literal: %q / %q (THREAT_MODEL.md T4)",
+						refusal.Message, refusal.Args["reason"])
+				}
+			}
+		})
+	}
+}
+
+// R2-08 (the same round): internal/plan read no pg_index at all (tracker
+// T-0163), so a partial index's WHERE predicate carrying an address was seen
+// only by internal/verify's post-load catalog pass — exit 9 with the target
+// already dropped and loaded, rather than exit 12 or 13 before anything was
+// touched. tableDDLLiterals now walks t.Indexes through the same
+// never-rewritten rule a CHECK gets.
+func TestRedTeamR208PartialIndexPredicateIsReadAtPlan(t *testing.T) {
+	t.Parallel()
+	tbl, schema := literalTable()
+	schema.Tables[0].Columns[1].Default = ""
+	schema.Tables[0].Columns = append(schema.Tables[0].Columns,
+		pipeline.Column{Name: "owner", TypeName: "text"})
+	schema.Tables[0].Indexes = []pipeline.Index{{
+		Name:    "items_vip_idx",
+		Columns: []string{"id"},
+		Partial: true,
+		Def:     `CREATE INDEX items_vip_idx ON public.items USING btree (id) WHERE ("owner" = '42 Elm Street'::text)`,
+	}}
+	cls := masking(tbl, "email", pipeline.CatEmail, mask.MaskerEmail)
+	ownerCol := ref.ColumnRef{Table: tbl, Column: "owner"}
+	cls.Decisions[ownerCol] = pipeline.Decision{
+		Col: ownerCol, Category: pipeline.CatPersonName, Masker: mask.MaskerPersonName, Masked: true,
+	}
+
+	err := planLiterals(t, schema, cls, literalKey(0x44))
+	var refusal *Refusal
+	if !errors.As(err, &refusal) {
+		t.Fatalf("Plan returned %v, want a *plan.Refusal: an index predicate reached the target unseen (T-0163)", err)
+	}
+	if refusal.Code != CodeLiteralNotRewritable || refusal.Exit != exitSchema {
+		t.Fatalf("Plan refused with %s exit %d, want %s exit %d",
+			refusal.Code, refusal.Exit, CodeLiteralNotRewritable, exitSchema)
+	}
+	if refusal.Column != "items_vip_idx" {
+		t.Fatalf("the refusal names %q, want the index it is about", refusal.Column)
+	}
+	if strings.Contains(refusal.Message, "42 Elm Street") || strings.Contains(refusal.Args["reason"], "42 Elm Street") {
+		t.Fatalf("the refusal quotes the literal: %q / %q (THREAT_MODEL.md T4)",
+			refusal.Message, refusal.Args["reason"])
+	}
+}
+
+// R2-10 (the same round): a value on the right-hand side of a pattern
+// operator was exempt from detection entirely, not only from rewriting, so
+// CHECK (email !~ '^ceo@bigcorp\.example$') crossed under exit 0 while the
+// semantically identical CHECK (email <> 'ceo@bigcorp.example') refused. This
+// is the red team's own reduction: an anchored, dot-escaped regex carrying an
+// exact address must refuse exactly as the equality form does.
+func TestRedTeamR210PatternOperandCarryingAValueIsStillDetected(t *testing.T) {
+	t.Parallel()
+	tbl, schema := literalTable()
+	schema.Tables[0].Columns[1].Default = ""
+	schema.Tables[0].Constraints = []pipeline.Constraint{
+		{Name: "items_email_regex_check", Kind: 'c',
+			Def: `CHECK (("email" !~ '^ceo@bigcorp\.example$'::text))`},
+	}
+	cls := masking(tbl, "email", pipeline.CatEmail, mask.MaskerEmail)
+
+	err := planLiterals(t, schema, cls, literalKey(0x44))
+	var refusal *Refusal
+	if !errors.As(err, &refusal) {
+		t.Fatalf("Plan returned %v, want a *plan.Refusal: the pattern exempted the address from detection (R2-10)", err)
+	}
+	if refusal.Code != CodeLiteralNotRewritable || refusal.Exit != exitSchema {
+		t.Fatalf("Plan refused with %s exit %d, want %s exit %d",
+			refusal.Code, refusal.Exit, CodeLiteralNotRewritable, exitSchema)
+	}
+	if refusal.Column != "items_email_regex_check" {
+		t.Fatalf("the refusal names %q, want the constraint it is about", refusal.Column)
+	}
+	if strings.Contains(refusal.Message, "ceo@bigcorp.example") || strings.Contains(refusal.Args["reason"], "ceo@bigcorp.example") {
+		t.Fatalf("the refusal quotes the literal: %q / %q (THREAT_MODEL.md T4)",
+			refusal.Message, refusal.Args["reason"])
+	}
+	// The literal is still marked a pattern operand -- Pattern and Rewritable
+	// are orthogonal, and this form happens to be the plain '...' quoting, so
+	// Rewritable is true on it -- but a CHECK has no rewrite arm at all
+	// regardless of that flag: fixedExpression only ever detects and refuses.
+	// The guard that actually matters is StripPatternMeta's own, held by
+	// TestPatternMetaStripping below.
+	lits := pipeline.Literals(`CHECK (("email" !~ '^ceo@bigcorp\.example$'::text))`)
+	if len(lits) != 1 || !lits[0].Pattern {
+		t.Fatalf("the literal is not marked a pattern operand: %+v", lits)
+	}
+}
+
+// StripPatternMeta itself: the reduction R2-10's fix depends on. An escaped
+// metacharacter is unescaped to the literal it stands for rather than
+// discarded twice over, and an unescaped one is discarded outright -- which is
+// the whole difference between a regex that IS a value and one that is only a
+// shape.
+func TestPatternMetaStripping(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		in, want string
+	}{
+		{`%@%.%`, `@`},
+		{`^ceo@bigcorp\.example$`, `ceo@bigcorp.example`},
+		{`%foo_bar%`, `foobar`},
+	} {
+		if got := pipeline.StripPatternMeta(tc.in); got != tc.want {
+			t.Errorf("StripPatternMeta(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// R2-10 on the DEFAULT path (the T-0189 fix round's finding 1): a pattern
+// operand inside a *rewritable, masked column's* DEFAULT was exempt from
+// detection as well as from rewriting. columnDefault's RewriteLiterals
+// callback declines a Pattern literal outright -- correctly, rewriting one
+// changes what the database accepts -- but RewriteLiterals leaves a declined
+// literal's text exactly as it stood and still reports ok == true, and the
+// success path used to write that text back and return without ever running
+// strongHit over what it had declined. internal/verify then exempts the
+// column's DEFAULT outright because DefaultOriginal is set (rewroteDefault),
+// so nothing looked at it a second time either: exit 0 with the address in
+// the target's pg_attrdef.
+func TestRedTeamR210FixRoundPatternOperandInARewritableDefaultIsStillDetected(t *testing.T) {
+	t.Parallel()
+	tbl, schema := literalTable()
+	schema.Tables[0].Columns[1].Default = `(("email" !~ '^ceo@bigcorp\.example$'::text))`
+	cls := masking(tbl, "email", pipeline.CatEmail, mask.MaskerEmail)
+
+	err := planLiterals(t, schema, cls, literalKey(0x44))
+	var refusal *Refusal
+	if !errors.As(err, &refusal) {
+		t.Fatalf("Plan returned %v, want a *plan.Refusal: the pattern operand in a rewritable DEFAULT "+
+			"crossed unexamined (R2-10 fix round)", err)
+	}
+	if refusal.Code != CodeLiteralNotRewritable || refusal.Exit != exitSchema {
+		t.Fatalf("Plan refused with %s exit %d, want %s exit %d",
+			refusal.Code, refusal.Exit, CodeLiteralNotRewritable, exitSchema)
+	}
+	if refusal.Column != "email" {
+		t.Fatalf("the refusal names %q, want the column it is about", refusal.Column)
+	}
+	if strings.Contains(refusal.Message, "ceo@bigcorp.example") || strings.Contains(refusal.Args["reason"], "ceo@bigcorp.example") {
+		t.Fatalf("the refusal quotes the literal: %q / %q (THREAT_MODEL.md T4)",
+			refusal.Message, refusal.Args["reason"])
+	}
+	if got := schema.Tables[0].Columns[1].Default; got != `(("email" !~ '^ceo@bigcorp\.example$'::text))` {
+		t.Fatalf("the default was rewritten and written back ahead of the refusal: %q", got)
+	}
+}
+
+// R2-11 (the T-0189 fix round's finding 3): namedColumns was fed
+// pg_get_indexdef's whole text, which -- unlike pg_get_constraintdef --
+// always opens with `CREATE INDEX name ON schema.table`, so a column sharing
+// the table's own name read as though the predicate named it. Measured: table
+// public.items with columns {id, items, email}, index `CREATE INDEX
+// items_vip_idx ON public.items USING btree (email) WHERE (email =
+// '...')` returned named == [items email].
+func TestNamedColumnsDoesNotMatchTheTableNameInAnIndexDef(t *testing.T) {
+	t.Parallel()
+	table := &pipeline.Table{
+		Ref: ref.TableRef{Schema: "public", Name: "items"},
+		Columns: []pipeline.Column{
+			{Name: "id", TypeName: "bigint"},
+			{Name: "items", TypeName: "text"},
+			{Name: "email", TypeName: "text"},
+		},
+	}
+	def := `CREATE INDEX items_vip_idx ON public.items USING btree (email) ` +
+		`WHERE (email = 'ceo@bigcorp.example'::text)`
+	got := namedColumns(def, table)
+	if len(got) != 1 || got[0] != "email" {
+		t.Fatalf("namedColumns(%q) = %v, want [email]: the table's own name was read as a column (R2-11)", def, got)
+	}
+}
+
+// The end-to-end half of the test above: before the fix, the phantom "items"
+// column's own --unmask opt-out silently cleared a genuine hit in a
+// *different* column's index predicate -- refuseUnmaskedLiteral returns nil
+// on the first named column carrying an opt-out, so a false match fails open
+// as well as naming the wrong object.
+func TestRedTeamR211FixRoundAnOptOutOnATableNamedColumnDoesNotClearAGenuineHit(t *testing.T) {
+	t.Parallel()
+	tbl, schema := literalTable()
+	schema.Tables[0].Columns[1].Default = ""
+	schema.Tables[0].Columns = append(schema.Tables[0].Columns,
+		pipeline.Column{Name: "items", TypeName: "text"})
+	schema.Tables[0].Indexes = []pipeline.Index{{
+		Name:    "items_vip_idx",
+		Columns: []string{"email"},
+		Partial: true,
+		Def: `CREATE INDEX items_vip_idx ON public.items USING btree (email) ` +
+			`WHERE ("email" = 'ceo@bigcorp.example'::text)`,
+	}}
+	itemsCol := ref.ColumnRef{Table: tbl, Column: "items"}
+	cls := &pipeline.Classification{Decisions: map[ref.ColumnRef]pipeline.Decision{
+		itemsCol: {Col: itemsCol, Source: pipeline.ByFlagUnmask},
+	}}
+
+	err := planLiterals(t, schema, cls, literalKey(0x44))
+	var refusal *Refusal
+	if !errors.As(err, &refusal) {
+		t.Fatalf("Plan returned %v, want a *plan.Refusal: an opt-out on the table-named column "+
+			"cleared a genuine hit on a different column (R2-11)", err)
+	}
+	if refusal.Code != CodeDDLLiteral || refusal.Exit != exitPlan {
+		t.Fatalf("Plan refused with %s exit %d, want %s exit %d",
+			refusal.Code, refusal.Exit, CodeDDLLiteral, exitPlan)
+	}
+	if !strings.Contains(refusal.Args["reason"], "--unmask public.items.email=REASON") {
+		t.Fatalf("the refusal's reason is %q, want the escape naming the email column", refusal.Args["reason"])
+	}
+}
+
 // The Constraints a default is masked with must be the Constraints the *rows*
 // are masked with, and the one that changes a generator's output on an ordinary
 // schema is Unique: internal/transform derives it from the table
@@ -575,6 +855,76 @@ func TestNationalIDStrongHitIsStructuredOnly(t *testing.T) {
 			case !tc.refused && err != nil:
 				t.Fatalf("Plan: %v: textsig.ValidNationalIDStructured must not answer for a checksum-only "+
 					"literal (T-0194)", err)
+			}
+		})
+	}
+}
+
+// TestAddressStrongHitNeedsAStreetSuffixWord is the T-0189 fix round's finding
+// 2. textsig.AddressShape -- "a digit somewhere, and at least two words that
+// carry a letter" -- is calibrated for internal/verify's second net, which
+// asks it of a whole column and fails only once many rows agree
+// (validators.go marks it explicitly not strong for that reason); this
+// scanner gets one look at one literal, and had been treating the same loose
+// shape as a one-hit refusal since T-0189 first widened strongValidators to
+// close R2-07. Measured against ordinary CHECK value-list and enum-label
+// text, the bare shape also hit plan pricing tiers and priority labels that
+// are nobody's address, refusing a masked column at exit 13 with no escape at
+// all and an unmasked one at exit 12 whose only escape says the *column*
+// holds nothing personal, not that this one literal does not.
+// addressLiteralShape adds the corroboration ValidNationalIDStructured
+// already models for national_id: a feature that is actually diagnostic
+// (here, a street-type suffix word) rather than merely necessary.
+func TestAddressStrongHitNeedsAStreetSuffixWord(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		literal string
+		refused bool
+	}{
+		{name: "a pricing tier label is not a hit", literal: "Basic 1 user"},
+		{name: "a priority label is not a hit", literal: "P1 High Priority"},
+		{name: "a ranking label is not a hit", literal: "Top 10 sellers"},
+		{name: "a room label is not a hit", literal: "Building 4 Lobby"},
+		{
+			name:    "a real street address is still a hit",
+			literal: "42 Elm Street",
+			refused: true,
+		},
+		{
+			// R2-07's own canary must keep refusing through this change.
+			name:    "R2-07's canary address is still a hit",
+			literal: "1742 Kestrel Hollow Lane, Ashford VT 05024",
+			refused: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tbl, schema := literalTable()
+			schema.Tables[0].Columns[1].Default = "" // the email column's own default is not this test's subject
+			schema.Tables[0].Columns = append(schema.Tables[0].Columns,
+				pipeline.Column{Name: "label", TypeName: "text"})
+			schema.Tables[0].Constraints = []pipeline.Constraint{
+				{Name: "items_label_check", Kind: 'c', Def: `CHECK (("label" = '` + tc.literal + `'::text))`},
+			}
+			cls := masking(tbl, "email", pipeline.CatEmail, mask.MaskerEmail)
+			labelCol := ref.ColumnRef{Table: tbl, Column: "label"}
+			cls.Decisions[labelCol] = pipeline.Decision{
+				Col: labelCol, Category: pipeline.CatAddress, Masker: mask.MaskerFreeText, Masked: true,
+			}
+
+			err := planLiterals(t, schema, cls, literalKey(0x44))
+			var refusal *Refusal
+			switch {
+			case tc.refused && !errors.As(err, &refusal):
+				t.Fatalf("Plan returned %v, want a *plan.Refusal: a real address must still refuse", err)
+			case tc.refused && refusal.Code != CodeLiteralNotRewritable:
+				t.Fatalf("Plan refused with %s, want %s", refusal.Code, CodeLiteralNotRewritable)
+			case tc.refused && refusal.Column != "items_label_check":
+				t.Fatalf("the refusal names %q, want the constraint it is about", refusal.Column)
+			case !tc.refused && err != nil:
+				t.Fatalf("Plan: %v: an ordinary label with a digit in it must not refuse the plan "+
+					"(T-0189 fix round finding 2)", err)
 			}
 		})
 	}

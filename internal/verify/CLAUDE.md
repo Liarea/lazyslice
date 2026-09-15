@@ -1088,10 +1088,12 @@ cannot establish that the database artefact holds no sensitive literal.
     `catalogIndexesSQL` reads `pg_get_expr(indpred, indrelid)` and
     `pg_get_expr(indexprs, indrelid)` as two arms of one `UNION ALL`, so the kind
     the refusal names is `index predicate` or `index expression` rather than one
-    word covering both. **T-0163** is still open and is the *plan-side* half: an
-    index predicate is refused here at exit 9 with the target already loaded,
-    where §11.1's own rule would refuse it at exit 12 or 13 before anything is
-    dropped.
+    word covering both. **T-0163's plan-side half is closed as of T-0189
+    (2026-09-15):** `internal/plan`'s `tableDDLLiterals` now walks `t.Indexes`
+    the same way it walks `t.Constraints`, so an index predicate is refused at
+    plan — exit 12 or 13, before anything is dropped — and this pass's own
+    index read is a genuine second look at the same object now, not the only
+    look there ever was.
 - **A type the operator opted out of with `--allow-type-literal TYPE=REASON` is
   exempt for every object that belongs to it** — its enum labels, its `DEFAULT`
   and its `CHECK` (`allowedTypeLiteral`, read off `Plan.AllowedTypeLiterals`).
@@ -1146,12 +1148,47 @@ cannot establish that the database artefact holds no sensitive literal.
     the planner's judgement. `catalog_test.go` pins both directions: the masked
     column's masked default passes, and a `CHECK` on the same masked column does
     not.
-- **Only the three strong validators**, where the second net runs nine. This
-  text is SQL and not data: a `CHECK` is full of English words and a default is
-  full of identifiers, and the dictionary-backed validators would fail an
-  already-loaded target over a column named after a street, with `--unmask` no
-  help because the refusal is not about a column's contents. THREAT_MODEL.md T1
-  states the narrowing.
+- **Every validator that is a parse or a shape, not only the original five
+  (T-0189, 2026-09-15 round-2 red team, R2-07 and R2-09).** The old narrowing
+  — this text is SQL and not data, so a `CHECK` is full of English words and a
+  default is full of identifiers, and the dictionary-backed validators would
+  fail an already-loaded target over a column named after a street — is an
+  argument about *identifiers*, and `strongCatalogHit` never sees one:
+  `pipeline.Literals` returns only the quoted string constants a deparsed
+  expression carries. Run over a literal rather than over the whole
+  expression, the argument does not reach `person_name`, `address` or
+  `free_text`, and R2-07 (a table `CHECK`) and R2-09 (an enum label, a domain
+  `CHECK`, a domain `DEFAULT`, a generated expression) both crossed under
+  exit 0 before this task. `network_id` and `online_id` join for the same
+  reason, on the same footing as email or phone: a parse, not a guess.
+  `credential` (`LooksSecret`) is the one category that does not join — see
+  `strongCatalogHit`'s own comment for the measured, unrelated reason
+  (`make torture` found three real schemas and a regression refusing over an
+  ordinary sequence name once it was included). THREAT_MODEL.md T1 states the
+  amendment. **R2-09's special-category sentence is not closed by this list,
+  only narrowed by accident** (T-0189 fix round, 2026-09-15 review, finding
+  4): `pipeline.CatSpecial` has no entry here either, so the canary is caught
+  only because its date happens to supply `AddressShape`'s digit — strip the
+  date and a health/special-category sentence with no name pair and no digit
+  still crosses at exit 9's own green tick. Tracker **T-0198** carries a
+  validator for it.
+- **`address`'s validator needed corroboration for a one-hit refusal**
+  (T-0189 fix round, finding 2). `textsig.AddressShape` is calibrated for
+  this package's *own* second net (`validators.go`'s `minValues`/
+  `validatorThreshold`), which fails only once many rows agree — it is
+  explicitly marked not strong there for that reason — and this pass asks it
+  of one literal in an already-loaded target. Measured against ordinary
+  `CHECK` value-list and enum-label text, the bare shape also hits pricing
+  tiers and priority labels ("Basic 1 user", "P1 High Priority", "Top 10
+  sellers") and refuses the run at exit 9 over a value that was never a
+  person's, with no escape but `--allow-type-literal` on an object that
+  carries no address at all. `addressLiteralShape` (this file) corroborates
+  it with a street-type suffix word — `addressSuffixWords` — the same
+  shape `internal/plan/ddlliteral.go` carries under the identical two names,
+  for the reason every other entry in this list is already a duplicate: the
+  two packages may not import each other. `textsig.AddressShape` itself is
+  untouched; `internal/textsig` was outside this task's paths, and this
+  package's own second net still wants the loose shape it already has.
 - **`strongCatalogHit` is the second copy of `internal/plan`'s `strongHit`**,
   for the reason `textOf` and the identifier quoting are copies: a stage package
   may not import another. What is shared is the *scanner* —
@@ -1167,3 +1204,23 @@ cannot establish that the database artefact holds no sensitive literal.
   separately, so a test can say which object class carried the literal, and
   asserts the refusal names no literal (THREAT_MODEL.md T4) and that no passing
   catalog check sits beside it.
+- **Guards for T-0189's own three findings.** `TestTheCatalogPassFindsALiteral\
+  NoRowScanCanSee` gained a table `CHECK` carrying a person's full name, a
+  partial index predicate carrying a genuine postal address (not an email, to
+  tell it apart from the pre-existing index case, which already passed under
+  the old five-validator set), a pattern operand carrying the red team's own
+  anchored, dot-escaped regex, and its control — the same pattern with no
+  value hiding inside it, which must still pass or every ordinary
+  `LIKE`/regex `CHECK` in a real schema would refuse.
+  `TestRedTeamCatalogReadsEnumLabelsAndDomainDefaults` gained a person's full
+  name in an enum label. None of the pre-existing cases in either table moved,
+  which is the guard against the widened set refusing what it already passed.
+  As in `internal/plan`, `credential` never reached a unit test here — the
+  fixtures this task wrote all use unambiguous name/address values, and
+  `make torture` is what found the sequence-name false positive that
+  motivated leaving it out; see `internal/plan/CLAUDE.md`'s own T-0189 entry
+  for the measured detail, since the finding and the fix are identical in
+  both packages. The T-0189 fix round added two more cases to
+  `TestTheCatalogPassFindsALiteralNoRowScanCanSee`: a pricing-tier enum label
+  is not a hit, and a genuine address in the same object class still is —
+  the `addressLiteralShape` guard, above.

@@ -70,6 +70,15 @@ func TestRedTeamTypeLiteralsAreRefused(t *testing.T) {
 			object: "label 2",
 		},
 		{
+			// R2-09 (2026-09-15 round-2 red team, T-0189): the A4b/A11/A12
+			// amendment added the reads, but the five original strong
+			// validators still let a person's name through an enum label.
+			name:   "a person's full name in an enum label",
+			enums:  map[string][]string{"public.case_owner": {"Grace Hopper", "unassigned"}},
+			secret: "Grace Hopper",
+			object: "label 1",
+		},
+		{
 			// A12: a domain's DEFAULT lives in pg_type.typdefault, one catalog
 			// table to the left of pg_attrdef.
 			name: "an email address in a domain default",
@@ -110,6 +119,19 @@ func TestRedTeamTypeLiteralsAreRefused(t *testing.T) {
 				Def:  `CREATE DOMAIN "public"."iban_d" AS text CHECK (VALUE <> 'GB33BUKB20201555555555')`,
 			}},
 			secret: "GB33BUKB20201555555555",
+			object: "its definition",
+		},
+		{
+			// R2-09: a postal address in a domain's own DEFAULT, which
+			// pg_type.typdefault carries and which internal/load/ddl replays
+			// verbatim -- none of the five original strong validators reads
+			// an address.
+			name: "a postal address in a domain default",
+			domains: []pipeline.NamedDef{{
+				Name: "public.home_addr",
+				Def:  `CREATE DOMAIN "public"."home_addr" AS text DEFAULT '42 Elm Street'`,
+			}},
+			secret: "42 Elm Street",
 			object: "its definition",
 		},
 	} {

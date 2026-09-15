@@ -204,6 +204,70 @@ func TestTheCatalogPassFindsALiteralNoRowScanCanSee(t *testing.T) {
 			}},
 			wantFail: true,
 		},
+		{
+			// R2-07 (2026-09-15 round-2 red team, T-0189): a person's name
+			// in a CHECK, which no strong validator read before this task.
+			name: "a CHECK carrying a person's full name is",
+			target: catalogTarget{constraints: [][5]string{
+				{"public", "items", "items_owner_check", "constraint",
+					"CHECK ((owner <> 'Grace Hopper'::text))"},
+			}},
+			wantFail: true,
+		},
+		{
+			// R2-07's other half: a genuine postal address (not an email,
+			// unlike the case above) in a partial index predicate, the object
+			// internal/plan read no pg_index for until T-0189 (T-0163).
+			name: "a partial index predicate carrying a postal address is",
+			target: catalogTarget{indexes: [][5]string{
+				{"public", "items", "items_owner_idx", "index predicate",
+					"(owner = '42 Elm Street'::text)"},
+			}},
+			wantFail: true,
+		},
+		{
+			// R2-10: the right-hand side of a regex operator carrying the
+			// exact value, anchors and an escaped dot included. Before
+			// T-0189 a Pattern literal was exempt from every validator, not
+			// only from rewriting.
+			name: "a pattern operand carrying the exact address is",
+			target: catalogTarget{constraints: [][5]string{
+				{"public", "items", "items_email_regex_check", "constraint",
+					`CHECK ((email !~ '^ceo@bigcorp\.example$'::text))`},
+			}},
+			wantFail: true,
+		},
+		{
+			// The control for R2-10: the pattern's own shape, with no
+			// value hiding inside it, must still pass -- otherwise every
+			// ordinary LIKE/regex CHECK in a real schema would refuse.
+			name: "a pattern operand carrying only a shape is not",
+			target: catalogTarget{constraints: [][5]string{
+				{"public", "items", "items_email_like_check", "constraint",
+					`CHECK ((email ~~ '%@%.%'::text))`},
+			}},
+		},
+		{
+			// The T-0189 fix round's finding 2: textsig.AddressShape's bare
+			// "digit somewhere, two letter-bearing words" shape also matches
+			// an ordinary pricing-tier enum label, and this pass runs it as a
+			// one-hit refusal over an already-loaded target -- exit 9 on a
+			// value that was never a person's, with no escape but
+			// --allow-type-literal on an object that carries no address.
+			name: "a pricing tier enum label is not",
+			target: catalogTarget{enumLabels: [][5]string{
+				{"public", "", "plan_tier label 2", "enum label", "Basic 1 user"},
+			}},
+		},
+		{
+			// The control: a real postal address in the same object class
+			// must still refuse.
+			name: "an address in an enum label is",
+			target: catalogTarget{enumLabels: [][5]string{
+				{"public", "", "plan_tier label 2", "enum label", "42 Elm Street"},
+			}},
+			wantFail: true,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -333,6 +397,17 @@ func TestRedTeamCatalogReadsEnumLabelsAndDomainDefaults(t *testing.T) {
 			}},
 		},
 		{
+			// R2-09 (2026-09-15 round-2 red team, T-0189): the A4b/A11/A12
+			// amendment added this read; the five original strong validators
+			// still let a person's name through it.
+			name: "a person's full name in an enum label",
+			target: catalogTarget{enumLabels: [][5]string{
+				{"public", "", "case_owner label 1", "enum label", "Grace Hopper"},
+				{"public", "", "case_owner label 2", "enum label", "unassigned"},
+			}},
+			wantKind: kindEnumLabel,
+		},
+		{
 			name: "a label holding a quote is still judged and not a hit",
 			target: catalogTarget{enumLabels: [][5]string{
 				{"public", "", "kind label 1", "enum label", "it's fine"},
@@ -388,7 +463,7 @@ func TestRedTeamCatalogReadsEnumLabelsAndDomainDefaults(t *testing.T) {
 			}
 			// THREAT_MODEL.md T4: the object, never the value.
 			for _, secret := range []string{"enum.canary@bigcorp.com", "domdefault.canary@bigcorp.com",
-				"123-45-6789", "GB33BUKB20201555555555"} {
+				"123-45-6789", "GB33BUKB20201555555555", "Grace Hopper"} {
 				if strings.Contains(s.failures[0].Reason, secret) ||
 					strings.Contains(s.failures[0].Column, secret) {
 					t.Errorf("the refusal quotes the value: %q / %q",
