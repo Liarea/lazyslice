@@ -102,6 +102,7 @@ One row per code in the catalogue, in the file's own order. Exit is only meaning
 | `config.file.read` | emit | - | from {path} |
 | `config.file.written` | emit | - | wrote {path} (commit it for CI) |
 | `config.refused.where_withheld` | plan | 2 | {path} records a withheld --where predicate and this run passed none: pass {flag} again, or the slice would silently be a different one |
+| `config.refused.mapping_file` | emit | 2 | {path} names mapping_file for {table}.{column}, which is not supported in this version: remove the mapping_file: line for {table}.{column} from {path}, then use --unmask {table}.{column}=REASON, or a lower --take or --cap |
 | `run.refused.usage` | plan | 2 | a flag names something this source does not have |
 | `run.refused.internal` | plan | 1 | lazyslice failed for a reason it has no code for; run with --debug |
 | `run.interrupted` | extract | 130 | interrupted: the target transaction was rolled back, and tables already committed were left as they are |

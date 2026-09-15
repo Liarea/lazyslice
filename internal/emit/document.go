@@ -12,6 +12,23 @@ import (
 	"github.com/Liarea/lazyslice/internal/ref"
 )
 
+// MappingFileError is returned by Read (through document.config) when a yml
+// names mapping_file for a column. ADR-012 defers the mapping-file contract
+// past v1, so this is a usage error the caller maps to exit 2, not a value
+// nothing reads: errors.As reaches it through Read's %w wrapping.
+type MappingFileError struct {
+	Table  string
+	Column string
+}
+
+func (e *MappingFileError) Error() string {
+	return fmt.Sprintf(
+		"%s.%s names mapping_file, which is not supported in this version (ADR-012); "+
+			"remove the mapping_file: line for %s.%s from the yml, then use --unmask %s.%s=REASON, "+
+			"or a lower --take or --cap",
+		e.Table, e.Column, e.Table, e.Column, e.Table, e.Column)
+}
+
 // document is lazyslice.yml as YAML sees it (ARCHITECTURE.md section 10).
 //
 // It is a second shape rather than yaml tags on pipeline.Config for two
@@ -92,9 +109,14 @@ type patternDoc struct {
 
 // columnDoc is one entry of the `columns:` map.
 //
-// masker, unique, mapping_file and unmask are omitted when they do not apply,
-// because their presence is what they mean: a `masker:` on a column says the
-// run masked it, and internal/invariants reads exactly that.
+// masker, unique and unmask are omitted when they do not apply, because their
+// presence is what they mean: a `masker:` on a column says the run masked it,
+// and internal/invariants reads exactly that.
+//
+// MappingFile is still decoded, never encoded: ADR-012 defers the mapping_file
+// contract past v1, so lazyslice never writes the key any more, but a hand-
+// written or pre-ADR-012 yml naming it has to be read far enough to be refused
+// by name (config, below) rather than silently ignored.
 type columnDoc struct {
 	Category    string     `yaml:"category"`
 	Confidence  string     `yaml:"confidence"`
@@ -167,14 +189,15 @@ func toDocument(c *pipeline.Config) document {
 	}
 	for col, cc := range c.Columns {
 		d.Columns[quoteColumn(col)] = columnDoc{
-			Category:    string(cc.Category),
-			Confidence:  confidenceName(cc.Confidence),
-			Reason:      cc.Reason,
-			Masker:      string(cc.Masker),
-			Unique:      cc.Unique,
-			TypeFP:      cc.TypeFP,
-			MappingFile: cc.MappingFile,
-			Unmask:      unmaskOf(cc.Unmask),
+			Category:   string(cc.Category),
+			Confidence: confidenceName(cc.Confidence),
+			Reason:     cc.Reason,
+			Masker:     string(cc.Masker),
+			Unique:     cc.Unique,
+			TypeFP:     cc.TypeFP,
+			// mapping_file is never written (ADR-012): pipeline.ColumnConfig
+			// carries no field for it.
+			Unmask: unmaskOf(cc.Unmask),
 		}
 	}
 	d.SmallDomain = columnList(c.Plan.SmallDomain)
@@ -285,18 +308,27 @@ func (d document) config() (*pipeline.Config, error) {
 		if err != nil {
 			return nil, fmt.Errorf("columns: %w", err)
 		}
+		if cd.MappingFile != "" {
+			// ADR-012: mapping_file is a v1 escape hatch nothing implements yet
+			// (docs/reviews/2026-09-09/REVIEW.md finding 10). Naming it is
+			// refused by name rather than silently round-tripped or ignored, so
+			// an operator who wrote it never gets the false confidence of a
+			// clean run over a column it never touched.
+			return nil, fmt.Errorf("columns: %s: %w", name, &MappingFileError{
+				Table: col.Table.String(), Column: col.Column,
+			})
+		}
 		conf, err := confidenceOf(cd.Confidence)
 		if err != nil {
 			return nil, fmt.Errorf("columns: %s: %w", name, err)
 		}
 		cc := pipeline.ColumnConfig{
-			Category:    pipeline.Category(cd.Category),
-			Confidence:  conf,
-			Reason:      cd.Reason,
-			Masker:      maskerID(cd.Masker),
-			Unique:      cd.Unique,
-			TypeFP:      cd.TypeFP,
-			MappingFile: cd.MappingFile,
+			Category:   pipeline.Category(cd.Category),
+			Confidence: conf,
+			Reason:     cd.Reason,
+			Masker:     maskerID(cd.Masker),
+			Unique:     cd.Unique,
+			TypeFP:     cd.TypeFP,
 		}
 		if cd.Unmask != nil {
 			cc.Unmask = &pipeline.Unmask{

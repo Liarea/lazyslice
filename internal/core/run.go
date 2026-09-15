@@ -381,9 +381,23 @@ func (r *run) readConfig() error {
 		return nil
 	}
 	cfg, err := emit.New(emit.Options{}).Read(r.req.ConfigPath)
+	var mfErr *emit.MappingFileError
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		return nil
+	case errors.As(err, &mfErr):
+		// ADR-012: mapping_file is a v1 escape hatch nothing implements yet, so
+		// naming it in the committed file is a usage error rather than a
+		// silently ignored field.
+		return &Stop{
+			Code: CodeConfigMappingFileUnsupported, Exit: exitUsage,
+			Args: event.Args{
+				event.ArgPath:   r.req.ConfigPath,
+				event.ArgTable:  mfErr.Table,
+				event.ArgColumn: mfErr.Column,
+			},
+			Message: err.Error(),
+		}
 	case err != nil:
 		return wrap(CodeUsage, exitUsage, err, "%s could not be read", r.req.ConfigPath)
 	}

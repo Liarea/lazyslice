@@ -114,6 +114,14 @@ const (
 	// silently be a different one (ARCHITECTURE.md section 10).
 	CodeConfigWhereWithheld event.Code = "config.refused.where_withheld"
 
+	// CodeConfigMappingFileUnsupported is exit 2: the committed file names
+	// mapping_file for a column. ADR-012 defers the mapping-file contract past
+	// v1 — nothing reads the CSV or applies a replacement
+	// (docs/reviews/2026-09-09/REVIEW.md finding 10) — so naming it is refused
+	// by name rather than silently ignored or round-tripped. T-0142 implements
+	// the full contract.
+	CodeConfigMappingFileUnsupported event.Code = "config.refused.mapping_file"
+
 	// CodeUsage is exit 2: a flag the operator has to fix, discovered after the
 	// schema was read — an --unmask or a --skip-table that names no column or
 	// table of this source.

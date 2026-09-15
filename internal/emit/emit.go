@@ -160,9 +160,13 @@ func (e emitter) Emit(
 // The record half is the decision: category, confidence, reason, the masker
 // when the column was masked, and the type fingerprint the decision was made
 // against. The merge half is what the committed file has to keep carrying: the
-// opt-out that produced this decision, and the mapping file a refused unique
-// column was given. Neither is derivable from a Decision, and losing either
-// silently re-masks a column the operator opted out of on the next run.
+// opt-out that produced this decision. It is not derivable from a Decision, and
+// losing it silently re-masks a column the operator opted out of on the next
+// run.
+//
+// mapping_file is no longer part of the merge (ADR-012): pipeline.ColumnConfig
+// carries no field for it, so there is nothing here to carry forward, and a
+// prior file naming it is refused at Read before columnConfig ever runs.
 func (e emitter) columnConfig(col ref.ColumnRef, d pipeline.Decision) pipeline.ColumnConfig {
 	cc := pipeline.ColumnConfig{
 		Category:   d.Category,
@@ -173,11 +177,6 @@ func (e emitter) columnConfig(col ref.ColumnRef, d pipeline.Decision) pipeline.C
 	}
 	if d.Masked {
 		cc.Masker = d.Masker
-	}
-	if e.opts.Prior != nil {
-		if prior, ok := e.opts.Prior.Columns[col]; ok {
-			cc.MappingFile = prior.MappingFile
-		}
 	}
 
 	switch d.Source {
