@@ -5,7 +5,7 @@ description: How a lazyslice commit is written and staged: a stage-prefixed head
 
 # Committing
 
-Release notes between two versions are generated from commit bodies (`make relnotes FROM=v0.1.0 TO=v0.2.0`, `tools/relnotes/relnotes.py`), so every commit that changes behaviour carries bullets a user can read. The maintainer, 2026-09-16: one-line commits that only reference tickets are unusable for that.
+Release notes between two versions are generated from commit bodies (`make relnotes FROM=v0.1.0 TO=v0.2.0`, `tools/relnotes/relnotes.py`), so every commit that changes behaviour carries bullets a user can read. The maintainer, 2026-09-15: one-line commits that only reference tickets are unusable for that.
 
 ## Format
 

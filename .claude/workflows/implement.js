@@ -38,7 +38,7 @@ const DEV = { type: 'object', required: ['files', 'summary', 'changelog', 'check
   concerns: { type: 'array', items: { type: 'string' }, description: 'things noticed outside scope, missing deps, doubts' },
   postmortem: { type: 'string', description: 'went well | went badly | change next time' } } }
 
-// The fix round returns the developer's shape, but its changelog is optional and is appended to the original bullets: a fix that changes nothing a user sees adds no bullet. A required changelog here failed T-0188's landing five times (2026-09-16) when the fixer's return was rejected for the missing field.
+// The fix round returns the developer's shape, but its changelog is optional and is appended to the original bullets: a fix that changes nothing a user sees adds no bullet. A required changelog here failed T-0188's landing five times (2026-09-15) when the fixer's return was rejected for the missing field.
 const FIX = { ...DEV, required: DEV.required.filter(k => k !== 'changelog') }
 const FINDINGS = { type: 'object', required: ['findings'], properties: { findings: { type: 'array', items: { type: 'object',
   required: ['severity', 'file', 'line', 'issue', 'fix'], properties: { severity: { type: 'string', enum: ['high', 'medium', 'low'] },
@@ -95,7 +95,7 @@ if (!verify || !verify.passed) {
   return { id: a.id, status: 'blocked', findings: [{ severity: 'high', file: 'Makefile', line: 0, issue: 'independent check run failed', fix: (verify && verify.output) || 'no output' }], dev, postmortem: dev.postmortem }
 }
 
-// Commit message: headline with the stage and tracker id, then the developer's changelog bullets as the body (the maintainer, 2026-09-16: release notes are generated from these bodies by tools/relnotes.py, so the bullets describe behaviour, not code), then trailers.
+// Commit message: headline with the stage and tracker id, then the developer's changelog bullets as the body (the maintainer, 2026-09-15: release notes are generated from these bodies by tools/relnotes.py, so the bullets describe behaviour, not code), then trailers.
 const bullets = (dev.changelog && dev.changelog.length ? dev.changelog : [dev.summary]).map(b => '- ' + String(b).replace(/\s+/g, ' ').trim()).join('\n')
 const trailers = `Task: ${a.id}\nReview: ${nReviewers} reviewer${nReviewers === 1 ? '' : 's'}, ${round} fix round${round === 1 ? '' : 's'}`
 const message = `${(a.stage || 'peripheral')}: ${a.title} (${a.id})\n\n${bullets}\n\n${trailers}\n`

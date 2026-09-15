@@ -12,7 +12,7 @@ Everything under `tracker/` is written only by `tools/tracker.py`. Never edit a 
 ```
 python3 tools/tracker.py new --epic E5 --phase 5 --owner sonnet --title "..." --goal "..." [--accept "..."]
 python3 tools/tracker.py start T-0187
-python3 tools/tracker.py log T-0187 "2026-09-16 what changed and why"
+python3 tools/tracker.py log T-0187 "2026-09-15 what changed and why"
 python3 tools/tracker.py block T-0187 --reason "..."
 python3 tools/tracker.py move T-0187 --epic E5 --phase 5
 python3 tools/tracker.py cancel T-0187 --reason "..."
