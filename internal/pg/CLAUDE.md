@@ -798,15 +798,56 @@ recommended role.
 
 Two things closed it, and they are deliberately separate values:
 
-- **`Source.ClusterID` / `sqlClusterID`** — `pg_postmaster_start_time()` with
-  `inet_server_addr()` and `inet_server_port()`. Every one of those is
-  executable by `PUBLIC`, the start time is a microsecond timestamp (two
-  clusters starting in the same microsecond is not a case), and the address and
-  port are the *server's own view* of the connection, so two published ports
-  onto one container both report the container's own port — the aliasing the
-  endpoint comparison cannot see. `Target.SetSourceCluster` is how
-  `internal/core` hands it over, between `OpenTarget` and `Gate`, because the
-  read needs a source connection the target does not have.
+- **`Source.ClusterID` / `sqlClusterID`** — the postmaster start time rendered
+  in UTC with `to_char` (never `::text`: a `timestamptz` renders in the
+  *session's* `TimeZone`, which is set per role, per database, per DSN and by
+  `PGTZ`, so the cast made one postmaster answer two sessions with two
+  identities — R2-06 through a session-dependent input), the oid of the
+  maintenance database `postgres` (`initdb`-assigned only below PostgreSQL 15;
+  from 15 on it is **pinned at 5**, so the field distinguishes nothing there),
+  `data_directory` when the role may read it (through `pg_settings`, because
+  `current_setting()` *raises* on that superuser-only GUC), the server version,
+  and `system_identifier` appended as a last field when the role may execute
+  `pg_control_system`. **Under the SELECT-only role §9 recommends, on PG 15+,
+  that is the start time and the version and nothing else** — say so rather
+  than claim the oid separates two sibling compose containers, which it does
+  not. `Target.SetSourceCluster` is how `internal/core` hands
+  the source's over, between `OpenTarget` and `Gate`, because the read needs a
+  source connection the target does not have.
+
+  **Every value here must be the same for every session on the postmaster**
+  (ARCHITECTURE.md §9 and THREAT_MODEL.md T2, both amended 2026-09-15 for
+  R2-06/T-0190). The first version of this read `inet_server_addr()` and
+  `inet_server_port()`, which are properties of the **connection**: `NULL` over
+  a unix socket and different again behind anything that re-dials, so one
+  cluster reached over two transports had two identities and the arm fell to
+  the spelling a second time, which cost a production database. **Never** put
+  anything from `inet_server_*`, `inet_client_*`, the backend pid or
+  `pg_stat_activity` in it, and add a field only at the **end** — the fields
+  are positional.
+
+- **The identity SQL lives here and only here.**
+  `internal/load/load_integration_test.go` still re-types the pre-T-0190
+  version of it to build a source identity for the gate; it passes on the
+  first field and is asserting against a shape the product no longer produces
+  (**T-0199**). A caller that needs the identity calls `Source.ClusterID`.
+
+- **`sameClusterIdentity` is hierarchical, not string equality and not a
+  vote.** When both sides filled `system_identifier` it **decides alone** —
+  equal is one cluster, unequal is two — because it is the only value that
+  survives a restart; giving every field an equal veto meant a postmaster
+  restart between the source read and the gate's read (start time moves,
+  system identifier does not) made the gate stop recognising the source's own
+  cluster, and any rendering difference in a weaker field outvoted a matching
+  identifier. Only when one side could not read it do the weaker positional
+  fields decide, each skipped when either side left it empty, because the two
+  sides are read by two roles: `system_identifier` and `data_directory` are
+  readable by a superuser target and not by the `SELECT`-only source role §9
+  recommends, and a privilege one side lacks must never read as a difference.
+  Its second answer, `comparable`, is false when no field was filled on both
+  sides, and that is what `clusterUnknown` now means by unknown.
+  `clusterIDSystemIDField` is the position, and it moves if a field is ever
+  added before it.
 - **`clusterUnknown` fails closed.** When neither identity can be compared —
   no system identifier on one side *and* no cluster identity — a target whose
   `current_database()` is the source's own database name is **refused**. The
@@ -821,6 +862,26 @@ Two things closed it, and they are deliberately separate values:
 become one.** §11.2's marker binding is recorded against the system identifier,
 and a value that changes when the source cluster restarts would make the gate
 refuse a target lazyslice itself wrote on the next run.
+
+**What actually pins the transport rule is the statement's own text.**
+`TestTheClusterIdentityReadsNothingFromTheConnection` blacklists the
+connection-scoped functions and
+`TestTheClusterIdentityRendersTheStartTimeInAFixedZone` forbids a bare
+`timestamptz` cast and requires the UTC `to_char`; that is the only level at
+which a container suite can state the unix-socket case, because it reaches its
+server over TCP both times.
+`TestOneClusterReachedOverTwoEndpointsHasOneClusterIdentity` is the end-to-end
+half — one container reached over its own endpoint and over a second one
+(`testutil.SecondEndpoint`), one identity, and the gate refuses the source named
+the second way — and it **does not discriminate the original defect**: the proxy
+dials the same backend `host:port`, so `inet_server_addr()`/`inet_server_port()`
+answer identically over both routes and the pre-fix SQL passes it unchanged. Do
+not cite it as the evidence for the transport rule. Reaching one server over a
+genuinely different server-side socket, so that the pre-fix statement fails, is
+**T-0200**.
+`TestOneClusterReadUnderTwoSessionTimeZonesHasOneClusterIdentity` is the
+integration half that *does* discriminate: one cluster read with
+`ALTER DATABASE ... SET TimeZone` in between, one identity required.
 
 `TestGateRefusesAnAliasedSourceWithNoSystemIdentifier` and
 `TestGateAcceptsASameNamedDatabaseOnADifferentCluster` are the two directions:
