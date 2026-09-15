@@ -75,7 +75,11 @@ issue.
 3. A leaked value that was truncated, reformatted, or embedded in a longer
    string: the residual scan tests canonical equality only.
 4. Values inside `bytea`.
-5. JSON key names, which survive masking. Values do not.
+5. JSON key names, unless a key itself parses as an email address, a phone
+   number or a credit-card number, in which case it is masked through that
+   category's own masker (T-0137). An arbitrary identifier used as a key — a
+   UUID, a slug, a customer number — is not named by any of the three and
+   still survives. Values never survive: every leaf value is masked.
 6. `NULL` and the empty string, which survive and reveal that much.
 7. Masked columns with a small admissible domain, where the substitution is
    recoverable by frequency. The tool lists these under `small_domain:` rather

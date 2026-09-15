@@ -590,6 +590,111 @@ func TestEveryMaskedCellAndEveryMaskedLeafEntersTheFilter(t *testing.T) {
 	}
 }
 
+// ---------- masked JSON object keys (T-0137 review round) ----------
+
+// TestAMaskedKeysResidualEntryIsAtTheMaskedPath is finding 1: walk used to
+// build a child's path from the source key while the masked key's own
+// residual entry, and everything nested beneath it, is what the target
+// spells with the masked key. internal/verify's keyHits and documentHits
+// rebuild every path from the target alone, so a path built from the source
+// key can never be found again — every leaf under a masked key was an
+// untested blind spot in the residual scan. The child path must now be built
+// from the masked key, and every entry recorded under it — the key's own and
+// the leaf's beneath it — must use that same spelling.
+func TestAMaskedKeysResidualEntryIsAtTheMaskedPath(t *testing.T) {
+	k := key(t, 0x42)
+	b := pipeline.RowBatch{
+		Table: tbl("people"),
+		Cols:  peopleCols,
+		Rows: [][]any{{
+			int64(1), "a@example.com", "a@example.com", "",
+			map[string]any{"ada.lovelace@fixture.test": map[string]any{"note": "Jane Smith"}},
+			nil, "active", nil,
+		}},
+		Last: true,
+	}
+	res := &recorder{inner: NewResidual(100)}
+	out, err := New(fixture()).Transform(b, classification(), &k, res)
+	if err != nil {
+		t.Fatalf("Transform: %v", err)
+	}
+	doc, ok := out.Rows[0][4].(map[string]any)
+	if !ok || len(doc) != 1 {
+		t.Fatalf("people.contact masked to %#v, want one key", out.Rows[0][4])
+	}
+	var maskedKey string
+	for name := range doc {
+		maskedKey = name
+	}
+	if maskedKey == "ada.lovelace@fixture.test" {
+		t.Fatal("the key did not change; it should have masked as an email")
+	}
+
+	wantKeyPath := "$." + maskedKey
+	wantLeafPath := wantKeyPath + ".note"
+	sourcePath := "$.ada.lovelace@fixture.test"
+
+	seen := map[string]bool{}
+	for _, a := range res.adds {
+		seen[a.path] = true
+		if !res.MayContain(a.col, a.path, []byte(a.canonical)) {
+			t.Errorf("the filter does not contain what it was just given: %s", a.path)
+		}
+	}
+	if !seen[wantKeyPath] {
+		t.Errorf("no residual entry at %s (the masked key's own path); got paths %v", wantKeyPath, seen)
+	}
+	if !seen[wantLeafPath] {
+		t.Errorf("no residual entry at %s (the leaf beneath the masked key); got paths %v", wantLeafPath, seen)
+	}
+	if seen[sourcePath] || seen[sourcePath+".note"] {
+		t.Errorf("a residual entry was recorded under the source key's own path %s; "+
+			"internal/verify rebuilds every path from the target and could never find it", sourcePath)
+	}
+}
+
+// TestTwoKeysThatMaskAlikeAreRefused is finding 2: mask.Apply is a pure
+// function of the canonical text, so two distinct source keys that
+// canonicalise alike (two spellings of one email address, here) mask to the
+// same fake key. Silently overwriting the first with the second would drop a
+// whole subtree from the target with no error, no event and no counter.
+func TestTwoKeysThatMaskAlikeAreRefused(t *testing.T) {
+	k := key(t, 0x42)
+	b := pipeline.RowBatch{
+		Table: tbl("people"),
+		Cols:  peopleCols,
+		Rows: [][]any{{
+			int64(1), "a@example.com", "a@example.com", "",
+			map[string]any{
+				"Ada.Lovelace@Fixture.Test": "first",
+				"ada.lovelace@fixture.test": "second",
+			},
+			nil, "active", nil,
+		}},
+		Last: true,
+	}
+	_, err := New(fixture()).Transform(b, classification(), &k, NewResidual(100))
+	if err == nil {
+		t.Fatal("Transform returned no error; two keys that mask alike silently dropped one subtree")
+	}
+	var refusal *Refusal
+	if !errors.As(err, &refusal) {
+		t.Fatalf("Transform returned %T, want *Refusal", err)
+	}
+	if refusal.Code != CodeMasker {
+		t.Errorf("refusal code is %s, want %s", refusal.Code, CodeMasker)
+	}
+	if refusal.Exit != exitTransform {
+		t.Errorf("refusal exit is %d, want %d", refusal.Exit, exitTransform)
+	}
+	// THREAT_MODEL.md T4: no value ever reaches a refusal.
+	for _, v := range []string{"Ada.Lovelace@Fixture.Test", "ada.lovelace@fixture.test"} {
+		if strings.Contains(refusal.Error(), v) {
+			t.Errorf("the refusal carries a source value: %q", refusal.Error())
+		}
+	}
+}
+
 // ---------- refusals ----------
 
 func TestTransformRefusesWithoutTheThingsThatMakeItSafe(t *testing.T) {

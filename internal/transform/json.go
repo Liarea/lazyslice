@@ -6,12 +6,14 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/Liarea/lazyslice/internal/pipeline"
 	"github.com/Liarea/lazyslice/internal/ref"
+	"github.com/Liarea/lazyslice/internal/textsig"
 	"github.com/Liarea/lazyslice/mask"
 )
 
@@ -44,8 +46,15 @@ import (
 // every string leaf gets: the alternative was a second name-rule pack inside
 // this package, whose vocabulary no other package could see (see CLAUDE.md).
 //
-// Key names survive masking. §6 item 6 lists that as a stated false negative
-// and this is where it is true.
+// Key names survive masking, with one exception: a key that itself parses as
+// an email, a phone number or a credit-card number under a strong validator
+// (docs/reviews/2026-09-09/REVIEW.md finding 8, evidence/json_keys.log,
+// T-0137) is masked through that category's own masker, so
+// {"canary.person@example.org":"ok"} no longer keeps the address as a map
+// key. An arbitrary identifier used as a key — a UUID, a slug, a national ID
+// a strong validator cannot name — still survives; SECURITY.md states that as
+// what remains. §6 item 6's stated false negative is narrowed by exactly this
+// much and no further.
 
 // emptyDocument is what a log-shaped table's document becomes (§4), and what a
 // document this package cannot parse becomes. It is never the source document.
@@ -93,6 +102,68 @@ const leafCategory = pipeline.CatFreeText
 // leafConstraints is what a JSON leaf's masker is given. A leaf has no column
 // type of its own: it is text inside a document.
 func leafConstraints() mask.Constraints { return mask.Constraints{TypeTag: famText} }
+
+// keyCategory reports the category a JSON object key masks under, and whether
+// the key needs masking at all (finding 8, T-0137). Only the three validators
+// internal/textsig calls strong — email, phone, and the Luhn half of a
+// financial account — parse a string precisely enough to say the key itself
+// IS the thing it parses as; anything else is a shape guess this package must
+// not act on, for the same reason internal/verify's second net does not
+// (internal/verify/validators.go, "strong"). An arbitrary identifier used as a
+// key — a UUID, a slug, a customer number — is not named by any of the three
+// and stays; that is what SECURITY.md's limitation is narrowed to.
+func keyCategory(name string) (pipeline.Category, bool) {
+	switch {
+	case textsig.ValidEmail(name):
+		return pipeline.CatEmail, true
+	case textsig.ValidPhone(name):
+		return pipeline.CatPhone, true
+	case textsig.ValidLuhn(name):
+		return pipeline.CatFinancial, true
+	default:
+		return "", false
+	}
+}
+
+// maskKey masks one JSON object key when keyCategory names it, and returns
+// every other key unchanged. It also reports the matched category and the
+// masked key's own canonical bytes (when there is a residual entry to make),
+// so that walk — the only caller — can record that entry at the key's real
+// path in the *target* document, which is spelled with the masked key and not
+// the source one; maskKey itself is handed no path to record it at (T-0137
+// review, docs/reviews finding — see CLAUDE.md, "A masked object key is keyed
+// at its own path").
+//
+// It goes through mask.Apply directly rather than through addLeaf: a key has
+// no "value" of a leaf's kind, and mask.Apply is a pure function of the run
+// key, the category and the key's own canonical text — no path, no column —
+// so two equal source keys mask to equal fakes wherever they appear, which is
+// what lets an identity-keyed map still be joined on after masking. (That is
+// also why two *distinct* source keys can mask alike; walk refuses that case
+// rather than silently dropping one — see its own comment.)
+func (t transformer) maskKey(
+	col ref.ColumnRef,
+	name string,
+	k mask.Key,
+) (masked string, canonical []byte, record bool, err error) {
+	cat, ok := keyCategory(name)
+	if !ok {
+		return name, nil, false, nil
+	}
+	c := leafConstraints()
+	id, err := mask.Pick(mask.Category(cat), c)
+	if err != nil {
+		return "", nil, false, &Refusal{Code: CodeMasker, Exit: exitTransform, Col: col, Masker: string(id), Reason: err}
+	}
+	r, err := mask.Apply(k, mask.Category(cat), id, mask.Value{Text: name}, c)
+	if err != nil {
+		return "", nil, false, &Refusal{Code: CodeMasker, Exit: exitTransform, Col: col, Masker: string(id), Reason: err}
+	}
+	if r.Masked && len(r.Canonical) > 0 {
+		return r.Out.Text, r.Canonical, true, nil
+	}
+	return r.Out.Text, nil, false, nil
+}
 
 // addLeaf records one leaf's source value in the residual filter under its own
 // path. Every per-leaf Add goes through here, so the convention internal/verify
@@ -251,11 +322,40 @@ func (t transformer) walk(
 		sort.Strings(names)
 		out := make(map[string]any, len(n))
 		for _, name := range names {
-			child, err := t.walk(col, path+"."+name, n[name], k, res)
+			maskedName, canon, record, err := t.maskKey(col, name, k)
 			if err != nil {
 				return nil, err
 			}
-			out[name] = child
+			// The child's path is built from the *masked* key, not the
+			// source one: internal/verify reproduces every path in this
+			// table from the target alone (it cannot import this package),
+			// and the target spells this position with the masked key. A
+			// path built from the source key can never be found again by a
+			// scan that only ever sees the target — that was the bug this
+			// review round found (finding 1) and this is the fix.
+			childPath := path + "." + maskedName
+			// mask.Apply is a pure function of the category and the key's
+			// own canonical text, so two distinct source keys that
+			// canonicalise alike — "+1 415 555 2671" and "+14155552671",
+			// two spellings of one email address, two spellings of one card
+			// number — mask to the same fake key. Silently overwriting
+			// out[maskedName] would drop one whole subtree from the target
+			// with no error, no event and no counter (finding 2); refuse
+			// the cell instead, the same way any other masker refusal does.
+			if _, collide := out[maskedName]; collide {
+				return nil, &Refusal{
+					Code: CodeMasker, Exit: exitTransform, Col: col, Path: path, Masker: "json_key",
+					Reason: errors.New("two source keys canonicalise alike and mask to the same object key"),
+				}
+			}
+			if record {
+				res.Add(col, childPath, canon)
+			}
+			child, err := t.walk(col, childPath, n[name], k, res)
+			if err != nil {
+				return nil, err
+			}
+			out[maskedName] = child
 		}
 		return out, nil
 	case []any:

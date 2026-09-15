@@ -305,10 +305,24 @@ func (s *state) netValues(v any, mode netMode) []string {
 	}
 	if mode.leaves {
 		ls := leaves(v)
-		out := make([]string, 0, len(ls))
+		keys := documentKeys(v)
+		out := make([]string, 0, len(ls)+len(keys))
 		for _, l := range ls {
 			if l.str && l.text != "" {
 				out = append(out, l.text)
+			}
+		}
+		// Object keys too, not only values (T-0137 review round, finding 3):
+		// an email, a phone number or a card used as a JSON key is exactly as
+		// unmasked as the same value used as a value, in a column this mode
+		// already reads because it is document-shaped — a masked jsonb column
+		// whose masker (json.go's maskKey) only fires on the three strong
+		// validators, or an unmasked/--unmask one with no masker at all. The
+		// dictionary-backed validators still never see these strings, because
+		// applies excludes mode.leaves for both — a key is never a sentence.
+		for _, occ := range keys {
+			if occ.name != "" {
+				out = append(out, occ.name)
 			}
 		}
 		return out

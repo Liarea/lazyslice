@@ -349,3 +349,45 @@ func walk(path string, node any, out *[]leaf) {
 		*out = append(*out, leaf{path: path, text: strconv.FormatFloat(n, 'g', -1, 64)})
 	}
 }
+
+// keyOccurrence is one object key of a decoded document, at the JSON path of
+// the position it keys — the same path spelling internal/transform's walk
+// records a masked key's residual entry under (json.go, "A masked object key
+// is keyed at its own path", T-0137 review round finding 1).
+type keyOccurrence struct {
+	path string
+	name string
+}
+
+// documentKeys returns every object key of a decoded document, at every
+// level, in the spelling the target holds today — internal/transform's own
+// masked spelling on a run that masked a key, the source's on one that never
+// needed to (T-0137, docs/reviews/2026-09-09/REVIEW.md finding 8) — together
+// with its path.
+//
+// It walks values too, because a key can nest inside an array of objects and
+// not only inside another object.
+func documentKeys(v any) []keyOccurrence {
+	doc, ok := decodeDocument(v)
+	if !ok {
+		return nil
+	}
+	var out []keyOccurrence
+	walkKeys("$", doc, &out)
+	return out
+}
+
+func walkKeys(path string, node any, out *[]keyOccurrence) {
+	switch n := node.(type) {
+	case map[string]any:
+		for name, child := range n {
+			childPath := path + "." + name
+			*out = append(*out, keyOccurrence{path: childPath, name: name})
+			walkKeys(childPath, child, out)
+		}
+	case []any:
+		for i, item := range n {
+			walkKeys(path+"["+strconv.Itoa(i)+"]", item, out)
+		}
+	}
+}

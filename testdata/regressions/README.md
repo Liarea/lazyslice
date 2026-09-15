@@ -7,8 +7,8 @@ Every file here started as a failing run against one of the ten schemas in
 in one of them is not a test, it is an anecdote, so the rule is: **reduce it to
 the smallest schema that still fails, check that in here, and only then change
 `internal/`.** Each file names the schema it came from, the run that failed, the
-message, and what the correct behaviour is. 010, 011 and 012 are the three exceptions and say so
-in their own headers: all three came from the 2026-09-09 review's probe schemas,
+message, and what the correct behaviour is. 010, 011, 012 and 013 are the four exceptions and say so
+in their own headers: all four came from the 2026-09-09 review's probe schemas,
 which were already the smallest schemas that fail.
 
 The files are loaded and run by `make torture` (`internal/invariants`'s
@@ -99,6 +99,7 @@ what tells the two apart, the way `unique-masked:` tells "masked" from
 | `010-fk-connected-columns-mask-differently.sql` | the 2026-09-09 review, finding 3 | the masker was chosen per column, so a unique column escalated to `credential_unique` while its foreign-key child kept the fixed literal: equal inputs masked to different outputs and the load ended at exit 8 |
 | `011-masked-column-default-holds-a-literal.sql` | the 2026-09-09 review, finding 5 | **a leak no row scan could see**: a masked column's `DEFAULT` was recreated in the target verbatim, so the address in it survived under exit 0 and the application's next `INSERT` would put it back into a row |
 | `012-single-strong-hit-in-a-mostly-plain-text-column.sql` | the 2026-09-09 review, finding 7 | **a leak the 80% ratio was the wrong question for**: one email address among nineteen ordinary strings was a 5% hit ratio, so the classifier decided `none` and both nets agreed with it, under exit 0 |
+| `013-json-object-key-that-parses-as-an-email.sql` | the 2026-09-09 review, finding 8 | **a leak nothing looked at**: a jsonb document keyed by an email address masked its value and kept the address as the key, under exit 0 |
 
 009's header now says `ok`. It did not always: `arrayArrivesAsLiteral` in
 `internal/plan/writeback.go` was written as a stand-in for the element-wise

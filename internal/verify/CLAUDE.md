@@ -266,6 +266,38 @@ was chosen and is recorded here rather than only in a comment.
   for the whole document, under `semi_structured` at the empty path), and the
   classification does not say which happened. Both are tested; the wrong one
   simply never hits.
+- **The JSON walk now scans object keys, not only values** (`keyHits`,
+  T-0137, docs/reviews/2026-09-09/REVIEW.md finding 8). `internal/transform`'s
+  `maskKey` masks a key that parses as an email, a phone number or a
+  credit-card number through that category's own masker. `keyHits` walks
+  every key of the *target's* document — `documentKeys` in `columns.go`, at
+  every level and inside arrays of objects too — and tests the ones that
+  still match one of the same three strong validators (`strongKeyCategory`,
+  `internal/transform`'s own `keyCategory` restated, the way `catalog.go`'s
+  `strongCatalogHit` already restates `internal/plan`'s) against the filter.
+  Every hit is a document-leaf hit: it lives inside a key and not in a
+  column's own value, so neither probe of item 3 can ask a column whether a
+  key appeared inside it, and a hit is exit 9 the same way a leaf value's is.
+  - **It now tests at the key's own path, not the empty path**
+    (**2026-09-14 review round, finding 1**). The first version of both
+    sides recorded and queried a masked key at the document's empty path,
+    because `internal/transform`'s `walk` used to build a masked key's
+    *children's* paths from the source key — a spelling the target could
+    never hold again — which left the empty path as the only place both
+    sides could agree. `internal/transform` now builds every path beneath a
+    masked key from the masked spelling itself (its own CLAUDE.md, "A masked
+    object key is keyed at its own path"), so `documentKeys` here now returns
+    each key's path alongside its name (`keyOccurrence`, `columns.go`) and
+    `keyHits` tests the filter at that path rather than at `""`. The two
+    sides were previously silently correct only because both were wrong the
+    same way — neither actually needed the *value* recorded at the right
+    path, since the value was moved wholesale to `""` on both sides — but
+    every string leaf nested beneath a masked key was a blind spot the empty
+    path could not see at all: `keyHits` never reached those paths and
+    `leaves`/`documentHits` queried them under the source key's spelling,
+    which the target no longer held. That half of the fix is
+    `internal/transform`'s, and this side only had to follow the path it
+    now agrees on.
 - **`mask.Canonical` is called with empty `Constraints`.** It reads exactly one
   field of them, `Region`, and nothing in the tree sets it — `internal/classify`
   decided against a per-table region hint and `internal/transform` builds its
@@ -338,9 +370,24 @@ was chosen and is recorded here rather than only in a comment.
   `integer`, `bigint` and `numeric` reach the Luhn and IBAN validators, because
   a payment card in a `bigint` column is exactly what §4's surrogate-key
   exemption is most likely to have let through. A `json`/`jsonb`/`hstore`
-  column has its string leaves read whether or not it was masked: an unmasked
-  document had no masker at all, which is a stronger reason to read it and not
-  a reason to skip it. **`famOther` is the hole**: a `tsvector` renders as
+  column has its string leaves *and its object keys* read whether or not it
+  was masked: an unmasked document had no masker at all, which is a stronger
+  reason to read it and not a reason to skip it.
+  - **The keys were missed until the 2026-09-14 review round, finding 3.**
+    `keyHits` (`residual.go`) already tested a masked column's own keys
+    against the filter, but `netValues` (`secondnet.go`) called `leaves(v)`
+    alone, which never yields a key — so an email, a phone number or a card
+    used as a JSON key inside a column classified `none` or carrying
+    `--unmask` was masked by nothing (there is no masker on such a column)
+    and read by neither net, while the identical value as a *value* in the
+    same document was already caught by this one. `netValues` now folds
+    `documentKeys(v)` in alongside `leaves(v)` whenever `mode.leaves` is set,
+    so a key reaches every validator `mode.text` already runs over values
+    with. The dictionary-backed validators still never see a key — `applies`
+    already excludes them from `mode.leaves` — because a key is never a
+    sentence and the argument that excludes a document's *value* leaves from
+    them applies at least as strongly to its keys.
+  **`famOther` is the hole**: a `tsvector` renders as
   `'ace':1 'administr':9` — a number and two words, which is an address to a
   validator — and a type this package cannot name is a type it cannot
   canonicalise either, so a column of that family is left to the classifier's
@@ -504,7 +551,10 @@ exports (through a real `pg.Tracer`), the canonical bytes it reproduces are
 `mask.Apply`'s own and are computed under a `Constraints` `mask.Canonical` does
 not read, the leaf spelling is `internal/transform`'s, a domain over an array is
 still an array, a number leaf is not a hit, and the second net's two thresholds
-hold (`TestAColumnBelowMinValuesFailsOnAnyHit`, `TestTheDictionaryRule`). The
+hold (`TestAColumnBelowMinValuesFailsOnAnyHit`, `TestTheDictionaryRule`).
+`TestSecondNetReadsDocumentKeysAsWellAsValues` (2026-09-14 review round,
+finding 3) pins the second net over a JSON object key and not only a value.
+The
 `citext[]` fixture of `arrayliteral_test.go` is the T-0129 half: the grammar is
 transform's on both case lists, a masked array that arrives as a literal is
 tested one entry per element and never as one string
