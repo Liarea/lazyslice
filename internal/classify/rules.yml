@@ -141,7 +141,7 @@ patterns:
   - name: national_id
     category: national_id
     priority: 75
-    match: '(^|_)(ssn|social_?security(_?numbers?)?|national_?ids?|national_?insurance(_?numbers?)?|nino|nhs_?numbers?|tax_?ids?|passports?|passport_?numbers?|driver_?licen[sc]es?|drivers_?licen[sc]es?|licen[sc]e_?numbers?|id_?card(_?numbers?)?|personnummer|dni|nif|cpf|cnpj|aadhaar)(_|$)'
+    match: '(^|_)(ssn|social_?security(_?numbers?)?|national_?ids?|national_?insurance(_?numbers?)?|nino|nhs_?numbers?|tax_?ids?|passports?|passport_?numbers?|driver_?licen[sc]es?|drivers_?licen[sc]es?|licen[sc]e_?numbers?|id_?card(_?numbers?)?|personnummer|dni|nif|cpf|cnpj|aadhaar|pesel|codice_?fiscale|bsn|curp|rut|nir|amka|afm|henkilotunnus|hetu)(_|$)'
 
   - name: financial_account
     category: financial_account
@@ -151,12 +151,12 @@ patterns:
   - name: email
     category: email
     priority: 65
-    match: '(^|_)(e_?mails?|e_?mail_?address(es)?|mails?|correos?|correo_?electronico|courriels?|e_?posts?)(_|$)'
+    match: '(^|_)(e_?mails?|e_?mail_?address(es)?|mails?|emls?|correos?|correo_?electronico|courriels?|e_?posts?|posta_?elettronica)(_|$)'
 
   - name: phone
     category: phone
     priority: 60
-    match: '(^|_)(phones?|phone_?numbers?|telephones?|tel|mobiles?|mobile_?numbers?|cell|cellphones?|msisdn|faxe?s?|whatsapp|contact_?numbers?|telefones?|telefonos?|telefon)(_|$)'
+    match: '(^|_)(phones?|phone_?numbers?|telephones?|tel|mobiles?|mobile_?numbers?|mobs?|cell|cellphones?|msisdn|faxe?s?|whatsapp|contact_?numbers?|telefones?|telefonos?|telefon|telefoonnummers?|komorka|komórka|handy|gsm|puhelin|kotinumero|kontaktnummers?|mobilnummers?)(_|$)'
 
   - name: network_id
     category: network_id
@@ -181,7 +181,7 @@ patterns:
   - name: address
     category: address
     priority: 45
-    match: '(^|_)(address(es)?|address_?lines?|street(_?address)?|streets?|city|cities|town|postal_?codes?|postcodes?|zips?|zip_?codes?|district|county|province|locality|locations?|suburb|direccion|adresse|indirizzo|endereco)(_|$)'
+    match: '(^|_)(address(es)?|address_?lines?|street(_?address)?|streets?|city|cities|town|postal_?codes?|postcodes?|zips?|zip_?codes?|district|county|province|locality|locations?|suburb|direccion|adresse|adres|anschrift|wohnort|indirizzo|endereco|osoite|ulica|miasto|kaupunki|postnummer)(_|$)'
 
   - name: online_id
     category: online_id
@@ -223,7 +223,19 @@ patterns:
   - name: person_name
     category: person_name
     priority: 35
-    match: '(^|_)(names?|first_?names?|last_?names?|given_?names?|family_?names?|middle_?names?|sur_?names?|full_?names?|maiden_?names?|display_?names?|real_?names?|forenames?|apellidos?|nombres?|nachname|vorname|prenom)(_|$)'
+    # The non-English half was added by the 2026-09-15 red team's A1: a
+    # `klienci` table whose `nazwisko`, `imie`, `cognome` and `achternaam`
+    # columns reached the target verbatim, because the rules were only
+    # accidentally multilingual (they already carried apellido, nombre,
+    # nachname, vorname and prenom, and nothing else). `f_name`/`l_name` and
+    # `fname`/`lname` are the abbreviation half of the same attack.
+    #
+    # This is a patch and not a fix, and the difference is worth stating where
+    # the patch lives: no rule pack is ever complete, so the control that
+    # actually closes the class is the multilingual value dictionary in
+    # internal/textsig/names.txt, which both nets read. THREAT_MODEL.md T1
+    # records what a name rule alone still misses.
+    match: '(^|_)(names?|first_?names?|last_?names?|given_?names?|family_?names?|middle_?names?|sur_?names?|full_?names?|maiden_?names?|display_?names?|real_?names?|forenames?|f_?names?|l_?names?|apellidos?|nombres?|nachname|familienname|vorname|prenom|nazwisko|imie|imię|cognome|achternaam|voornaam|naam|efternamn|förnamn|sukunimi|etunimi|sobrenome|navn|fornavn|etternavn|familia)(_|$)'
 
   - name: free_text
     category: free_text

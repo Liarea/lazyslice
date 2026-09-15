@@ -795,10 +795,18 @@ a row (`docs/reviews/2026-09-09/evidence/ddl_default.log`).
   introspection, is the *source's* value and is not recomputed — it is what
   `--tui`'s review pinning and `internal/emit` read, and both sides of that
   comparison are pre-plan, so they still agree with each other.
-- **"Strong" is email, phone and payment card**, and nothing else. This text is
+- **"Strong" is email, phone, payment card, IBAN and national_id**, and nothing
+  else. This text is
   SQL: a `CHECK` is full of English words and a default is full of identifiers,
   so the dictionary-backed signals of §4 over them would refuse ordinary schemas
-  over labels that are not personal data. A `CHECK (status IN
+  over labels that are not personal data. The last two joined at the 2026-09-15
+  red team's A20, which put `SSN 123-45-6789` and an IBAN in a `CHECK` on an
+  unmasked column and watched them cross under exit 0: THREAT_MODEL.md T1 stated
+  the *name and address* half of that miss and gave the reason above, and that
+  reason does not reach a strict pattern or a mod-97 checksum. `person_name` and
+  `address` stay out for exactly the reason given. IBAN could not have joined
+  before `textsig.ValidIBAN` began requiring the two ISO 13616 check digits —
+  without them five of pagila's own film titles pass mod-97. A `CHECK (status IN
   ('active','banned'))` on a masked column is a closed value list the masker
   already honours (§5, `mask.Constraints.Checks`) and is not a refusal. The cost
   — a name or a street address in a `CHECK` on an unmasked column is not found —
@@ -886,6 +894,46 @@ a row (`docs/reviews/2026-09-09/evidence/ddl_default.log`).
   pass) must not mutate the repository or hard-abort merely by being asked
   what it would mask — see `internal/core/CLAUDE.md`'s own note on this, and
   `internal/core/run.go`'s comment on `resolveKeyIfPresent`.
+- **Types are objects too** (`checkTypeLiterals`, the 2026-09-15 red team's A4b,
+  A11 and A12). §11.1 recreates an enum with `CREATE TYPE ... AS ENUM ('a','b')`
+  and replays a domain's whole `CREATE DOMAIN` text, so an enum label and a
+  domain's `DEFAULT` and `CHECK` cross into the target exactly as a column
+  `DEFAULT` does — and this pass read `p.tables` only, so all three crossed
+  under exit 0 with an address and a phone number in the target's catalog. A
+  domain `CHECK` is the gap **T-0163** already named; the other two were named
+  nowhere. All three are read now, and **none is rewritten**: every row of every
+  column of an enum type references a label *by value*, so masking one would
+  either break the column or silently remap rows, and a domain's `DEFAULT`
+  belongs to the type rather than to a column, so there is no single masker
+  whose output is the right replacement — the same argument `columnDefault`
+  makes for a shape it declines. So `CodeTypeLiteral` at **exit 13**, naming the
+  type and the label's *ordinal*, never the label text (THREAT_MODEL.md T4).
+  `typeliteral_test.go` holds both directions, including that an ordinary status
+  enum and a money domain do not refuse a run.
+  - **The escape is `--allow-type-literal TYPE=REASON`** (the T-REDFIX review's
+    fourth finding). It was `--skip-table`, which cannot clear this refusal by
+    any route: `--skip-table` drops a table to *schema only*, so its DDL — and
+    every type that DDL names — is still recreated, nothing in `internal/core`
+    prunes `Schema.Enums` or `Schema.Domains`, and `internal/load/ddl`'s
+    `typeOrder` recreates every one of them regardless. A source schema with one
+    enum label or domain definition a strong validator hits was therefore
+    **permanently unrunnable**, under a refusal naming a flag with no effect on
+    it. The opt-out is §8's per-column `--unmask` for the object class that is
+    not a column: a reason is required, the name is resolved against the
+    source's own enums and domains in `internal/core` (`resolveType`, so a name
+    that matches nothing is exit 2 rather than a rail the operator believes they
+    lifted), and the types it names go onto `Plan.AllowedTypeLiterals` so that
+    **`internal/verify`'s catalog pass honours the same list** — an escape the
+    planner grants and the verifier refuses would load the target and then exit
+    9 over the very object the operator was told they had allowed.
+    `TestAllowTypeLiteralClearsTheRefusal` and
+    `TestAllowTypeLiteralForAnAbsentTypeIsNotRecorded` are this side's guards,
+    `TestAllowedTypeLiteralIsExemptFromTheCatalogPass` the other's.
+    **Owed:** ARCHITECTURE.md §8's flag table does not list the flag and §11.1's
+    type-literal paragraph still names `--skip-table` — tracker **T-0185**;
+    neither file was in this task's paths. The opt-out is also **not** recorded
+    in `lazyslice.yml`, where `--unmask` is, so it must be passed again on every
+    run — tracker **T-0186**.
 - **The guards.** `ddlliteral_test.go` holds all four arms without a database,
   including the one the CLI could not reach before T-0161: a masked column's
   default really being rewritten, to the byte, to what `mask.Apply` gives for

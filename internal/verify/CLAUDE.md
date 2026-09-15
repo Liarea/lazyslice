@@ -40,7 +40,14 @@ statement allowlist this stage needs registered before `Verify` runs, as
   catches what the 200-row sample missed. **It is still narrower than §6 item 4's own sentence, in three
   named ways, and this file says so in one place rather than claiming "every
   unmasked column" here and listing holes further down**: no column of a family
-  this package cannot name (`famOther`, so a `tsvector` or an enum); only the
+  this package cannot name (`famOther`, so a `tsvector` or an enum — **`bytea`
+  was on that list too until the 2026-09-15 red team and is not any more**: it is
+  read as text whenever `textsig.PrintableText` accepts the value, which is the
+  A4a fix and is, **since the T-REDFIX review's second finding**, genuinely the
+  same guard `internal/classify` applies to the same bytes on its side — that
+  package used to require 95% of the *sample set* to be readable on top of it,
+  which made a half-printable `bytea` column unmasked there and exit 9 here with
+  no green path); only the
   strong branch of §4's scoring, so a column that the neighbouring-column rule
   would raise to `possible` is not reached; and `person_name` and `free_text`
   read narrower validators than the classifier's and are scored under **the
@@ -684,6 +691,74 @@ lands in the target as the empty tsvector, and `actor.last_update`,
 `address.last_update`, `category.last_update` and `film.last_update` are
 decided unmasked and copied.
 
+## The 2026-09-15 red team
+
+Three changes here, all widening what the net and the catalog pass look at.
+
+- **`famBytea` is in the second net, under a content guard** (A4a). `netText`
+  named the character families plus uuid/inet/cidr/macaddr, and `bytea` was
+  outside it for the same reason `internal/classify`'s `bestSignal` returned
+  early for the family — a PNG rendered as a string carries a number and two
+  words and is an address to `addressShape`. That reason is about *bytes*. A
+  `bytea` holding printable UTF-8 with an address in it was read by nothing on
+  either side, in a table with no `certain` column so the classifier's
+  `byteaInPersonShapedTable` could not fire either. `netMode` now sets
+  `bytea: true` for the family and `withDocuments` drops any value
+  `textsig.PrintableText` rejects, so a column of images is still read by
+  nothing and a column of documents is read like text. The guard is the same
+  function `internal/classify` calls **and, since the T-REDFIX review's second
+  finding, the same rule**: that package had a column-level 95%-readable ratio
+  in front of the per-value question, so the two nets did disagree about a
+  half-printable column — unmasked there, exit 9 here, no green path — for as
+  long as both files claimed they could not. The ratio is gone; neither side has
+  one.
+- **A JSON document inside a `text` column is walked** (A5b). `document()`
+  covers json, jsonb and hstore, so a three-level document in a column declared
+  `text` — one of the commonest shapes in a real schema — was seen by neither
+  this net's leaf walk nor `internal/classify`'s leaf signal, and its leaves
+  were chosen so that no validator fires on the document read as one string.
+  `withDocuments` now parses any character (or readable `bytea`) value and, when
+  it is an object or an array, yields its leaves and keys **as well as** the
+  value itself. A bare JSON scalar is not a document: reading `"12345"` as one
+  would double-count every numeric-looking text column in the target.
+  - The leaf-derived strings are returned **separately** from the column's own,
+    and `count` skips the dictionary-backed validators on them. That is the
+    same rule `applies` states for a json column, applied to the text column
+    holding the same bytes, and for the same reason: `internal/classify` runs
+    no dictionary signal over a document's leaves, so a `person_name` or
+    `free_text` refusal there would fail an already-loaded target on evidence
+    the classifier is structurally unable to have seen.
+  - **They are scored separately too, and the first version of this was not**
+    (the T-REDFIX review's high finding). `netColumn` counted every leaf into
+    the column's own `nonNull`, which is both the ratio's denominator *and* the
+    `proven` gate of the T-0058 branch — so putting a JSON document into a text
+    column *raised* the denominator and flipped the column from "unproven, any
+    hit fails" to "proven, ratio ≥ 0.8 required". A two-row column holding
+    `221 Baker Street, London` and `ok` is exit 9 as `address`; the same column
+    with the second row replaced by a four-key object recorded no failure at
+    all, and a production address in the loaded target went from exit 9 to exit
+    0. The dictionary rule was diluted the same way on any text column that also
+    held a document. `netTally` is the fix: one denominator for the column's own
+    values and one for the strings a document yielded, each scored on its own by
+    `scoreHits`, either failing the column. The two cases in
+    `TestRedTeamSecondNetReadsWhatItUsedToSkip` — the same address with and
+    without a document beside it — are the guard, and the second of them passed
+    before this.
+  - **This is closed fail-closed and not closed properly.** Such a column is
+    exit 9 here; `internal/classify` still cannot mask it, because
+    `semi_structured`'s writable families are json/jsonb/hstore in the `mask`
+    module. Tracker **T-0182**.
+- **The catalog pass reads two more object classes and two more validators**
+  (A4b, A11, A12, A20). `pg_enum`'s labels, which `internal/load/ddl` writes as
+  string literals into `CREATE TYPE ... AS ENUM`, and `pg_type.typdefault`,
+  where a domain's `DEFAULT` lives — `pg_attrdef` does not carry it, so the
+  three reads could not see it, and it is the 2026-09-09 finding 5 mechanism one
+  catalog table to the left. A label is the value rather than an expression, so
+  `readLiteral` quotes it into the form `pipeline.Literals` scans; neither class
+  is ever exempt, because neither is ever rewritten. And `strongCatalogHit` gained
+  `national_id` and IBAN, which stay in step with `internal/plan`'s `strongHit`
+  by hand as they always have.
+
 **Never:** use the run's own (released) snapshot; treat an unconfirmable
 residual hit as anything but exit 9; skip the cap on confirmation probes; treat
 a source-changed mismatch as a pass; let a value reach a refusal, a check or an
@@ -762,6 +837,21 @@ cannot establish that the database artefact holds no sensitive literal.
     index predicate is refused here at exit 9 with the target already loaded,
     where §11.1's own rule would refuse it at exit 12 or 13 before anything is
     dropped.
+- **A type the operator opted out of with `--allow-type-literal TYPE=REASON` is
+  exempt for every object that belongs to it** — its enum labels, its `DEFAULT`
+  and its `CHECK` (`allowedTypeLiteral`, read off `Plan.AllowedTypeLiterals`).
+  `internal/plan`'s type-literal refusal (exit 13) honours the same opt-out, and
+  before the T-REDFIX review's fourth finding it had no escape at all: it named
+  `--skip-table`, which drops a table to *schema only* and still recreates every
+  type. A pass here that ignored the opt-out would load the target and then
+  refuse at exit 9 over the object the operator was told they had allowed, which
+  is worse than no escape — §8's rule that an escape means the same thing at
+  both ends, applied to the one object class that is not a column. A domain's
+  `CHECK` arrives in the same `pg_constraint` read a table's does, so
+  `catalogConstraintsSQL` now spells its own kind (`domain constraint`) and
+  carries the domain's name in the relation position: without that this pass
+  could not attribute a domain `CHECK` to the type the operator named, and a
+  *table's* `CHECK` is never exempt whatever type names it carries.
 - **One exemption, and it is about provenance rather than shape**
   (`catalogExempt`). A column this run **masked** is exempt for its own
   `DEFAULT` **when the planner actually rewrote that default**, and a column

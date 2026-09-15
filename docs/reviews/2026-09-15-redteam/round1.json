@@ -1,0 +1,350 @@
+[
+ {
+  "attack": "A1 — PII column names in other languages and in abbreviations. A `klienci` table (Polish) with a correctly-named `email` column as a control, plus `nazwisko` (PL surname), `imie` (PL given name), `pesel` (PL national identification number), `komorka` (PL mobile, national format), `mob`, `fname`, `lname`, `cognome` (IT surname), `achternaam` (NL surname). Values are real-shaped Polish/Italian/Dutch names, so internal/textsig/names.txt (English-only) misses them too.",
+  "reproduction": "cd /private/tmp/claude-501/lazyslice-scratch/redteam-0 && ./SETUP.sh && ./run.sh a1 a1_names.sql --root public.klienci -n 50\ndocker exec rt0-tgt psql -U ls -d tgt_a1 -x -c 'SELECT * FROM klienci ORDER BY id LIMIT 2'\n(run.sh calls /Users/gareth/personal_repos/lazyslice/bin/lazyslice --source postgresql://ls:pw@127.0.0.1:55431/src_a1 --target postgresql://ls:pw@127.0.0.1:55432/tgt_a1 --yes --no-config --root public.klienci -n 50)",
+  "leaked": true,
+  "fix": "Two changes, both needed.\n(1) internal/classify/rules.yml: the name rules are only accidentally multilingual (they carry correo/courriel/telefones/nachname/prenom but not the languages above). Add to `person_name`: nazwisko|imie|imię|cognome|achternaam|efternamn|sukunimi|familienname|f_?name|l_?name|naam|navn|sobrenome. To `phone`: komorka|komórka|handy|gsm|puhelin|telefoonnummer|kontaktnummer|kotinumero. To `national_id`: pesel|codice_?fiscale|bsn|curp|rut|nir|amka|afm. To `email`: eml|epost. To `address`: adres|anschrift|wohnort|osoite|ulica|miasto. This is a patch, not a fix: no rule pack is ever complete.\n(2) The structural fix is the one ARCHITECTURE.md §14 already schedules for phase 5 and this run demonstrates the cost of deferring: ship multilingual given/surname lists in internal/textsig/names.txt so textsig.LooksLikeName fires on `Kowalski`/`Wanjiru`/`Yıldırım`. Both nets read that file (T-0055), so it closes the classifier and the second net in one change, and with one column at `likely` the neighbouring-column rule in internal/classify/classify.go then raises the abbreviations in the same table. THREAT_MODEL.md T1 should record that between now and then a non-English name column with a non-English column name is masked by nothing at all."
+ },
+ {
+  "attack": "A2 — values that miss every validator, in columns with no name rule: `label` (person's full name), `handle2` (obfuscated email, no digits), `contact` (phone spelled out in words: 'oh seven seven oh oh, nine double-oh, nine double-oh'), `ident` (UK NI number with interleaved spaces and spelled digits), `pan` (payment card with '.' separators, which textsig.ValidLuhn rejects outright), `whereabouts` (postal address with the postcode spelled out).",
+  "reproduction": "cd /private/tmp/claude-501/lazyslice-scratch/redteam-0 && ./run.sh a2 a2_values.sql --root public.records -n 50\ndocker exec rt0-tgt psql -U ls -d tgt_a2 -x -c 'SELECT * FROM records ORDER BY id LIMIT 3'",
+  "leaked": true,
+  "fix": "Partial leak, exit 0: `contact` and `ident` reached the target verbatim ('plus four four, seven seven oh oh, nine one one, nine one one'; 'AB nine eight seven six five four D'). `label`, `whereabouts`, `handle2` and `pan` were masked — but three of those four by accident rather than by design, which is worth recording: `pan` matched textsig.ValidMAC (a dotted card number parses as a hardware address) and was replaced with an IP address, i.e. the right direction under the wrong category.\nFix: add de-obfuscating normalisation to internal/textsig — a new `Candidates(s string) []string` that yields the raw string plus canonical spellings, mapping ' at '/'(at)'/'[at]' to '@', ' dot '/'(dot)'/'[dot]'/' kropka ' to '.', collapsing single-space-separated digit runs, and mapping spelled-out digits (zero|oh|one..nine, 'double-X', 'treble-X') back to digits. Have ValidEmail, ValidPhone, ValidLuhn and ValidIBAN try every candidate. Because internal/textsig is shared, internal/classify's signals and internal/verify's second net both gain it in one change (that is the package's stated reason for existing). Also widen ValidLuhn's separator set from {' ', '-'} to include '.', '/' and NBSP."
+ },
+ {
+  "attack": "A2b — the same value-level dodge in a table where no column ever reaches `likely`, so the neighbouring-column rule cannot rescue anything: `entries(label, detail, ref2)` holding non-English full names (Nkechi Okonkwo, Bogusław Szczepański, Þórunn Jónsdóttir, Wanjiru Kamau, Ayşe Yıldırım), obfuscated emails with no digits, and passport numbers written with interleaved spaces.",
+  "reproduction": "cd /private/tmp/claude-501/lazyslice-scratch/redteam-0 && ./run.sh a2b a2b_label.sql --root public.entries -n 50\ndocker exec rt0-tgt psql -U ls -d tgt_a2b -c 'SELECT * FROM entries ORDER BY id LIMIT 3'",
+  "leaked": true,
+  "fix": "Full leak, exit 0: every name and every obfuscated address is in tgt_a2b.entries verbatim. classify prints 'no name or value signal' for both, which is the report affirmatively calling them clean.\nFixes A1(2) and A2 both apply. Beyond them, the one control that would have caught this schema without any dictionary or regexp is a change to internal/classify/classify.go's neighbouringColumns: today it raises only `low` to `possible`. Make the raise reach `none` for character-family, non-key, non-generated columns in any table that already holds a `certain` personal column — the fail-closed direction CLAUDE.md asks for ('when in doubt, mask it'). Note this attack's table has no `certain` column at all, so that rule alone would not cover it either; a second, cheaper rail is to refuse-rather-than-copy a free text column in a table reached from the root by a masked FK, which is the honest version of 'we do not know what this holds'. Whichever is chosen, THREAT_MODEL.md T1's control list must stop implying the value validators are a net over unrecognised text — they are a net over recognised shapes only."
+ },
+ {
+  "attack": "A3 control — personal data deep inside real jsonb and inside real arrays: `subjects.meta jsonb` with an email and phone at depth 3 and an SSN and a name at depth 6; `aliases text[]` of English names; `contacts text[]` of real email addresses; `doc_xml xml` carrying an email and a name.",
+  "reproduction": "cd /private/tmp/claude-501/lazyslice-scratch/redteam-0 && ./run.sh a3 a3_nested.sql --root public.subjects -n 20\ndocker exec rt0-tgt psql -U ls -d tgt_a3 -At -c 'SELECT id, meta::text, aliases::text, contacts::text FROM subjects ORDER BY id LIMIT 2'",
+  "leaked": false,
+  "fix": "No fix needed; recording it as a control that held. jsonb was masked by its type signal alone and internal/transform/json.go walked every leaf including depth 6 (its walk has no depth cap, unlike internal/classify's jsonMaxDepth=16, which only gates the classifier's evidence). `aliases` and `contacts` were classified element-wise through scalarsOf/splitArrayLiteral (T-0103) and masked. `doc_xml` was masked, though by textsig.AddressShape rather than by anything about XML — an xml column carrying only names and no digits would fall through, which is the same hole as A5b below."
+ },
+ {
+  "attack": "A3 array variant — `subjects.quiet text[]` whose elements are obfuscated email addresses ('grace.hopper AT realcorp DOT example'), in the same table as A3's control columns.",
+  "reproduction": "cd /private/tmp/claude-501/lazyslice-scratch/redteam-0 && ./run.sh a3 a3_nested.sql --root public.subjects -n 20\ndocker exec rt0-tgt psql -U ls -d tgt_a3 -At -c 'SELECT id, quiet::text FROM subjects ORDER BY id LIMIT 2'",
+  "leaked": true,
+  "fix": "Leaked verbatim, exit 0, in a table where two sibling columns were masked. The array machinery is not at fault — the elements were split and offered to the validators — so this is the A2 fix (textsig.Candidates) and nothing else. Worth a regression fixture under testdata/regressions/: an array whose elements individually dodge every validator is the case testdata/nasty.sql's array traps do not cover."
+ },
+ {
+  "attack": "A4c — PII the 200-row TABLESAMPLE cannot see: `assets.sku text` with 40,000 rows of 'AB-000123' SKUs, where only the twenty lowest ids (the rows `--take` selects first) hold real email addresses.",
+  "reproduction": "cd /private/tmp/claude-501/lazyslice-scratch/redteam-0 && ./run.sh a4 a4_safe.sql --root public.assets -n 40\n# expect: EXIT=9, 'public.assets.sku is not masked and 20 of its values validate as email'",
+  "leaked": false,
+  "fix": "No fix needed; the second net did exactly its job. classify called the column 'no name or value signal', the loader wrote the rows, verify's second net scanned the target's full contents, refused at verify.refused.second_net (exit 9), and core dropped every table this run loaded ('dropping public.assets in the target: the last run left personal data in it' — the T-0133 amendment working). Recording it because it is the boundary of every other finding here: the net catches the under-sampled column only when the value is a shape it recognises, which is why A1, A2b, A4a, A4b and A5b all walk past it."
+ },
+ {
+  "attack": "A4a — PII in a column the classifier marks safe by type: `assets.blob_doc bytea` holding printable UTF-8 ('Grace Hopper <grace.hopper1@realcorp.example> 078-05-1120'), in a table with no `certain` column so internal/classify's byteaInPersonShapedTable pass cannot fire.",
+  "reproduction": "cd /private/tmp/claude-501/lazyslice-scratch/redteam-0 && ./run.sh a4b a4b_safe.sql --root public.assets -n 40\ndocker exec rt0-tgt psql -U ls -d tgt_a4b -c \"SELECT id, convert_from(blob_doc,'UTF8') FROM assets ORDER BY id LIMIT 3\"",
+  "leaked": true,
+  "fix": "Leaked verbatim, exit 0. Two independent doors, both shut in the same change:\n(1) internal/classify/classify.go, bestSignal: `if family == famBytea || family == famTSVector { return sig }` returns before any validator runs. Its comment justifies that with 'a PNG reads as an address' — true, and it does not cover the case that leaks. Guard on content instead of on family: when a bytea sample is valid UTF-8 and (say) ≥95% printable runes, run the text validators over it; a hit makes the column binary_personal, which is already NULLed, so there is no new masker and no new writability question. A PNG fails the printability guard and is unaffected.\n(2) internal/verify/columns.go, netText: famBytea is not in the second net's family set, so nothing looks at the loaded value either. Add famBytea under the same printable-UTF-8 guard, rendering via convert_from where the encoding permits and skipping the column where it does not.\nAlso update internal/verify/CLAUDE.md, whose 'three named ways' the net is narrower currently lists famOther but not bytea, and THREAT_MODEL.md T1, whose control list implies bytea is covered by the binary_personal rule when that rule is reachable only by a name hit or by a `certain` sibling."
+ },
+ {
+  "attack": "A4b — PII in the schema rather than in a row: `CREATE TYPE contact_pref AS ENUM ('ceo@bigcorp.example', 'grace.hopper@navy.example', 'none')`. Enum labels are DDL string literals, recreated in the target verbatim.",
+  "reproduction": "cd /private/tmp/claude-501/lazyslice-scratch/redteam-0 && ./run.sh a4b a4b_safe.sql --root public.assets -n 40\ndocker exec rt0-tgt psql -U ls -d tgt_a4b -c \"SELECT enumlabel FROM pg_enum e JOIN pg_type t ON t.oid=e.enumtypid WHERE t.typname='contact_pref'\"\n# both production email addresses are present in the target's pg_enum, exit 0",
+  "leaked": true,
+  "fix": "Leaked, exit 0, through the exact route THREAT_MODEL.md T1's 2026-09-14 amendment (T-0134) was written to close — and the amendment's own object-class list omits it. `grep -n 'pg_enum' internal/verify/catalog.go internal/verify/sql.go internal/plan/ddlliteral.go` returns nothing: the plan-time literal pass and the catalog pass read pg_attrdef, pg_constraint and pg_index only.\nFix: add enum labels (pg_enum joined to pg_type, for every enum a loaded column's type depends on) to both passes, judged by the same three strong validators the amendment names — email, phone, payment card. A label cannot be rewritten the way a DEFAULT can: the values in the column reference it, so masking a label would either break the column or silently remap rows. So the correct outcome is exit 13 naming the type and the label position (never the label text — THREAT_MODEL.md T4), with --skip-table as the escape. Do the same sweep for the other unread label-bearing catalogs while the change is open: pg_type.typdefault for a domain default, and COMMENT text if internal/load/ddl recreates comments. Then amend THREAT_MODEL.md T1's amendment to list enum labels among the object classes and say which are refused rather than rewritten."
+ },
+ {
+  "attack": "A5b — a JSON document three levels deep inside a column declared `text`, with leaf values chosen so no validator fires on the document read as one string (no digits anywhere, obfuscated address, non-English name): `blobs.payload2 text` holding {\"profile\":{\"contact\":{\"email\":\"... AT klinika DOT example DOT org\",\"deeper\":{\"person\":{\"name\":\"Bogusław Szczepański\",\"home\":\"Ulica Kwiatowa, Warszawa\"}}}}}, plus `tags2 text[]` whose elements are themselves JSON documents.",
+  "reproduction": "cd /private/tmp/claude-501/lazyslice-scratch/redteam-0 && ./run.sh a5b a5b_textjson.sql --root public.blobs -n 20\ndocker exec rt0-tgt psql -U ls -d tgt_a5b -At -c 'SELECT id, payload2, tags2::text FROM blobs ORDER BY id LIMIT 2'\n# both columns arrive byte-identical to the source, exit 0",
+  "leaked": true,
+  "fix": "Leaked verbatim, exit 0. internal/classify/classify.go's bestSignal calls jsonSignal only under `isJSONFamily(family)`, and internal/verify/columns.go's document() walks leaves only for famJSON/famJSONB/famHstore — so a JSON document in a text column is seen by neither leaf walk, on either side. A `payload text` holding JSON is one of the commonest shapes in a real schema.\nFix: in bestSignal, for a character-family column, attempt json.Unmarshal on each sample; when a meaningful fraction (the same 0.8 validatorThreshold) parse as an object or an array, classify the column as semi_structured — jsonLeaves/jsonLeafIsPersonal already exist and need no change — and let internal/transform's document path mask it, writing the masked document back as text (transform's decodeDocument already carries a `fromText` flag for exactly this round trip). Mirror it in internal/verify/columns.go: run the leaf walk over any character-column value that parses as a JSON document, masked or not.\nThis also fixes the collateral damage in the next entry: today the only thing that ever masks a text-JSON column is a scalar masker that destroys the document."
+ },
+ {
+  "attack": "A5c — the same shape with ordinary, unobfuscated content: `webhooks.payload2 text` holding {\"event\":{\"customer\":{\"email\":\"customer1@realcorp.example\",\"name\":\"Grace Hopper\",\"phone\":\"+447700900001\"}}}.",
+  "reproduction": "cd /private/tmp/claude-501/lazyslice-scratch/redteam-0 && ./run.sh a5c a5c_realjson.sql --root public.webhooks -n 20\ndocker exec rt0-tgt psql -U ls -d tgt_a5c -At -c 'SELECT id, payload2 FROM webhooks ORDER BY id LIMIT 2'\n# target rows read '2891 Briar Way' and '4264 Ginkgo Lane'",
+  "leaked": false,
+  "fix": "No leak — but the tool misbehaved, and the reason it did not leak is luck rather than a control. classify reported '200/200 samples mixed digits and words', i.e. textsig.AddressShape matched the JSON document as a whole (a document has digits and more than two words), so the whole document was replaced by a street address. Nothing walked the leaves; the email and phone were destroyed as a side effect of a wrong category. The consequence is that the target no longer holds parseable JSON, so any application reading this column fails against the snapshot — CONCEPT.md's promise that structure and key names are kept is not delivered for this column, and the report line gives the operator no hint of it.\nFix: the A5b fix above (classify a character column whose samples parse as JSON as semi_structured and walk its leaves) both closes A5b's leak and makes this column mask to a real document. Until it lands, AddressShape should at minimum reject a value that parses as a JSON object or array, so that the classifier does not claim a category it has clearly not established.\nCleanup for all attempts: docker rm -f rt0-src rt0-tgt"
+ },
+ {
+  "attack": "Identity rule 1 evasion via port/host aliasing with a restricted role (the recommended read-only role). Same physical production database reached under two spellings so normalised host:port/database differs, while system_identifier is unreadable because pg_control_system EXECUTE is not granted to non-superusers by default. This defeats the same_database refusal (ARCHITECTURE.md §9 rule 1 / THREAT_MODEL T2), leaving only the emptiness check as a backstop.",
+  "reproduction": "Scratch prod cluster (container rt1-prod) with db 'newprod', role 'deploy' (no superuser). Two published ports 15432/15433 both map to the same server.\n  bin/lazyslice --source 'postgres://deploy:pw@127.0.0.1:15432/newprod' --target 'postgres://deploy:pw@127.0.0.1:15433/newprod' --yes --no-config --secret-file ./a3v.secret -n 3\nBefore: public tables = {customers}. Output shows NO 'is the source database' refusal; instead 'dropping public.customers in the target'. After: public tables = {lazyslice_meta} — the production customers table was DROPPED. (Same result with a host-spelling alias: --source 127.0.0.1 --target 192.168.2.43 --allow-remote-target 192.168.2.43 against the same server; and with a pooler alias name for the same db.) With a superuser source/target the second disjunct (system_identifier) DOES catch it and it is refused same_database, proving the gap is specific to the non-superuser role the tool itself recommends.",
+  "leaked": true,
+  "fix": "The alias-defeating control (system_identifier) is silently unavailable to the exact role the tool tells operators to create (SELECT-only, no pg_control_system EXECUTE), and THREAT_MODEL T2 does not acknowledge this. When systemIdentifier() returns \"\" (unreadable), the gate must not fall through to endpoint-string comparison alone for a same-name target. Fix in internal/pg/target.go Gate(): when the target's current_database() equals the source database name AND no system_identifier is available on either side, fail closed (CodeSameDatabase) rather than trusting that a different host/port spelling means a different cluster; require an explicit override flag to proceed. Additionally use a cluster-identity signal readable by ordinary roles (inet_server_addr()/inet_server_port(), or a per-cluster sentinel) so aliasing to one server is caught without superuser. Emptiness backstops a populated DB (verified: A5-data with rows is refused not_empty), so the destructive path is bounded to empty same-named DBs on one server, but that includes the migration scenario and the drop is real."
+ },
+ {
+  "attack": "Auto target discovery selects the SOURCE's own production cluster as the write target, and the promised 'same cluster as source' warning is never emitted. With --source pointing at production and no --target in headless (--yes) mode, the container-discovery ladder chose the production container and wrote masked slice tables into its 'postgres' maintenance database (same cluster, different db = eligible by design) with exit 0.",
+  "reproduction": "bin/lazyslice --source 'postgres://postgres:pw@127.0.0.1:15432/app' --skip-table public.pwn --yes --no-config --secret-file ./c3.secret -n 3   (NO --target)\nLadder line: 'target postgres on 127.0.0.1 — container rt1-prod ...'. Run completes exit 0: 'dropping public.customers/orders', 'public.customers: 3 rows', etc. Verify against prod: rt1-prod's postgres db now holds customers, orders, pwn, lazyslice_meta. No 'same cluster as source' line ever printed — confirmed with an explicit same-cluster target too (C3b). Code check: Eligibility.SameCluster is computed in internal/pg/target.go but grep shows it is read nowhere in internal/core or internal/render; the gate test only asserts e.SameCluster==true, never that a warning is rendered.",
+  "leaked": true,
+  "fix": "Two fixes. (1) Wire the missing warning: in internal/core/run.go openTarget(), when r.gate.SameCluster is true, r.send a Warn event (e.g. CodeTargetSameCluster) with a catalogue row and renderer line, and add a test that asserts the rendered 'same cluster as source' line, not just the boolean — as ARCHITECTURE.md §9 rule 1 and THREAT_MODEL T2 require. (2) In the discovery ladder (internal/discover), do not rank a candidate on the source's own cluster as the preferred auto-target; when the only reachable target shares the source's cluster, refuse in --yes mode and name --target, so a headless run never writes to the production server without the operator naming it."
+ },
+ {
+  "attack": "Target == source, identical endpoint (and localhost vs 127.0.0.1 spelling).",
+  "reproduction": "bin/lazyslice --source 'postgres://postgres:pw@127.0.0.1:15432/app' --target 'postgres://postgres:pw@127.0.0.1:15432/app' --yes --no-config -n 5  (also localhost/127.0.0.1 mix)",
+  "leaked": false,
+  "fix": "None needed. Refused: target.refused.same_database, exit before any write."
+ },
+ {
+  "attack": "Same database on the same server reached via a second published port, superuser role (system_identifier readable).",
+  "reproduction": "bin/lazyslice --source 'postgres://postgres:pw@127.0.0.1:15432/app' --target 'postgres://postgres:pw@127.0.0.1:15433/app' --yes --no-config -n 5",
+  "leaked": false,
+  "fix": "None needed. Refused target.refused.same_database via the system_identifier+current_database disjunct. (Contrast attempt 1: this only works because the superuser can read pg_control_system.)"
+ },
+ {
+  "attack": "Remote target (host LAN IP / bridge IP) without and with --allow-remote-target.",
+  "reproduction": "Without flag: bin/lazyslice --source ...15432/app --target 'postgres://postgres:pw@192.168.2.43:15432/newprod' --yes ... -> refused target.refused.remote. With flag: add --allow-remote-target 192.168.2.43 -> writes to the remote db.",
+  "leaked": false,
+  "fix": "None needed for the gate: a non-local target is refused (exit 4) unless the operator names the host with --allow-remote-target, which is explicit consent. (The write that then lands on a same-cluster remote is covered by attempt 1's identity fix.)"
+ },
+ {
+  "attack": "Second concurrent run against a target already held by another run (run lease / advisory-lock defeat).",
+  "reproduction": "Hold the transaction-scoped advisory lock manually with the exact LeaseKey: in psql BEGIN; SELECT pg_advisory_xact_lock(7415324289299979267); pg_sleep(15). Then run bin/lazyslice against .../slice.",
+  "leaked": false,
+  "fix": "None needed. Second run refused target.refused.lease_held ('the target slice is held by another lazyslice run'). Key derivation (sha256 of 'lazyslice:target-lease:'+current_database()) collides across spellings as intended."
+ },
+ {
+  "attack": "Concurrent writer inserts rows into the target between the gate's emptiness verdict and the loader's DROP (T-0130 lock-and-recheck), attempting a silent green run that deletes a stranger's row.",
+  "reproduction": "Loop: reset target to empty schema, launch bin/lazyslice -n 5000 against a 20k-row source (to widen the gate->drop window), and hammer INSERTs into target public.customers throughout. 8 iterations plus timed single inserts at 0.15/0.25/0.35/0.45s.",
+  "leaked": false,
+  "fix": "None needed. dropOne() takes LOCK TABLE ... ACCESS EXCLUSIVE NOWAIT then rechecks emptiness in the same txn as the DROP; rows committed before the drop trigger load.refused.target_changed, and rows inserted after the recreate are caught by verify.refused.row_count (observed: every racing run exited non-zero, never exit 0 with a lost row). Post-drop application writes are the stated residual and verify catches the count mismatch."
+ },
+ {
+  "attack": "Write to the SOURCE via a --where predicate carrying a data-modifying subquery / a function that INSERTs (defeat the READ ONLY source rail).",
+  "reproduction": "bin/lazyslice --source .../app --target .../slice --root customers --skip-table public.pwn --where \"do_write() = 1\" ...  where do_write() does INSERT INTO pwn. Also tried a wCTE-style INSERT inside a FROM subquery.",
+  "leaked": false,
+  "fix": "None needed. The source transaction is REPEATABLE READ READ ONLY: the write fails with SQLSTATE 25006 ('cannot execute INSERT in a read-only transaction') and source pwn stays empty; the wCTE form is a Postgres syntax error and cannot be placed in a WHERE clause. Minor UX nit: the 25006 case renders as 'failed for a reason it has no code for' (uncatalogued error), worth a catalogue row but not a leak."
+ },
+ {
+  "attack": "Read replica / different-host connection string with the same database name as the target (transposed-arguments and replica-as-target).",
+  "reproduction": "A replica shares system_identifier and database name with its primary; a same-cluster target with the same current_database() is refused via sameCatalog (systemID==source && currentDB==source.Database) and a replica target is in recovery so writes are rejected regardless.",
+  "leaked": false,
+  "fix": "None needed when system_identifier is readable. Note: when it is NOT readable (restricted role), the same-name replica/primary confusion collapses into attempt 1's identity gap and inherits its fix."
+ },
+ {
+  "attack": "Target host/port/credentials picked up from a compose file that points at production.",
+  "reproduction": "Placed docker-compose.yml with a db service mapping ports to prod and ran without --target.",
+  "leaked": false,
+  "fix": "None needed. internal/discover/compose.go's composeProject type has no host/port/user/password/dbname fields by construction; compose supplies only the project name and service names, never a connection string. The auto-target came from live Docker container discovery, not the compose file (that vector is attempt 2)."
+ },
+ {
+  "attack": "Baseline: get the source/target DSN passwords into lazyslice.yml, the transcript, or lazyslice_meta.",
+  "reproduction": "Setup used by every attempt below:\ndocker run -d --name rt2-src -e POSTGRES_PASSWORD=srcpw123 -e POSTGRES_USER=srcuser -e POSTGRES_DB=proddb -p 127.0.0.1:55501:5432 postgres:18\ndocker run -d --name rt2-tgt -e POSTGRES_PASSWORD=tgtpw123 -e POSTGRES_USER=tgtuser -e POSTGRES_DB=localdb -p 127.0.0.1:55502:5432 postgres:18\ncd /Users/gareth/personal_repos/lazyslice && make build\nSource schema: /private/tmp/claude-501/lazyslice-scratch/redteam-2/base.sql (customers with email/full_name/phone/note, orders).\n\nmkdir -p /private/tmp/claude-501/lazyslice-scratch/redteam-2/a01 && cd $_ && git init -q .\n/Users/gareth/personal_repos/lazyslice/bin/lazyslice --source \"postgres://srcuser:srcpw123@127.0.0.1:55501/proddb\" --target \"postgres://tgtuser:tgtpw123@127.0.0.1:55502/localdb\" --root public.customers --yes > run.out 2> run.err\ngrep -niE \"srcpw|tgtpw|bigcorp|Alice|Anderson|555-01|Elm\" lazyslice.yml run.out run.err\ndocker exec rt2-tgt psql -U tgtuser -d localdb -c \"select * from lazyslice_meta\"",
+  "leaked": false,
+  "fix": "None needed. Exit 0; the yml records only from/host/port/database/user/params, the marker holds only sha256 fingerprints, and no row value or password appears anywhere."
+ },
+ {
+  "attack": "Raise verbosity to the maximum the binary offers (--json --debug) with a key in $LAZYSLICE_SECRET and transport params in the DSN, and look for the password, the masking key, or a row value in NDJSON events.",
+  "reproduction": "cd /private/tmp/claude-501/lazyslice-scratch/redteam-2/a02\nLAZYSLICE_SECRET=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef /Users/gareth/personal_repos/lazyslice/bin/lazyslice --source \"postgres://srcuser:srcpw123@127.0.0.1:55501/proddb?sslmode=disable&application_name=rt2\" --target \"postgres://tgtuser:tgtpw123@127.0.0.1:55502/localdb\" --root public.customers --yes --json --debug > run.json 2> run.err\ngrep -niE \"srcpw123|tgtpw123|bigcorp|Alice|Anderson|555-01|0123456789abcdef\" run.json run.err lazyslice.yml",
+  "leaked": false,
+  "fix": "None needed. Every event carries Code + Args of identifiers and counts only; the key fingerprint is 8 hex chars. Note --debug printed nothing extra on success: docs/FLAGS.md promises \"the statement trace on error\" and cmd/lazyslice/main.go:286 records that nothing wires it (tracker T-0174), so that promise is currently unmet in both directions."
+ },
+ {
+  "attack": "Make Postgres put the credential into the error text: connect with a wrong password and read stderr at --debug (pgconn error chains sometimes carry the config).",
+  "reproduction": "cd /private/tmp/claude-501/lazyslice-scratch/redteam-2/a03\n/Users/gareth/personal_repos/lazyslice/bin/lazyslice --source \"postgres://srcuser:WRONGPASS_canary@127.0.0.1:55501/proddb\" --target \"postgres://tgtuser:tgtpw123@127.0.0.1:55502/localdb\" --yes --debug\n# exit 3; stderr: failed to connect to `user=srcuser database=proddb` ... SQLSTATE 28P01\ngrep -n \"WRONGPASS_canary\\|tgtpw123\" o e",
+  "leaked": false,
+  "fix": "No credential leaked. Separately, the stdout line for this failure is wrong: it prints \"✗ no source: pass --source postgres://...\" when a --source was passed and only authentication failed (internal/core/run.go:507 maps every source-open failure onto CodeSourceNone). Give an auth failure its own code and message."
+ },
+ {
+  "attack": "Put a production value into the operator's own SQL and see whether it reaches the committed yml or the logs: --where \"email = 'ceo@bigcorp.com'\" (THREAT_MODEL T5's A1-in-A7 route).",
+  "reproduction": "cd /private/tmp/claude-501/lazyslice-scratch/redteam-2/a04\n/Users/gareth/personal_repos/lazyslice/bin/lazyslice --source \"postgres://srcuser:srcpw123@127.0.0.1:55501/proddb\" --target \"postgres://tgtuser:tgtpw123@127.0.0.1:55502/localdb\" --root public.customers --where \"email = 'ceo@bigcorp.com'\" --yes --json --debug > run.json 2> run.err\ngrep -niE \"ceo@bigcorp\" run.json run.err lazyslice.yml   # no hits\ngrep -n where lazyslice.yml                              # where: null / where_fingerprint: ada70d7373917df8",
+  "leaked": false,
+  "fix": "None needed; the predicate is withheld and only sha256(where)[:16] is recorded, and it is withheld from --json and --debug too."
+ },
+ {
+  "attack": "Sweep every read-only subcommand at every verbosity for a row value, using a source whose values are canaries in text, text[], jsonb (key and value), enum, inet and uuid columns.",
+  "reproduction": "Source: /private/tmp/claude-501/lazyslice-scratch/redteam-2/canary.sql (table public.people; values like c1.canary@bigcorp.com, arr.canary@bigcorp.com, {\"json.canary@bigcorp.com\":\"jval.canary@bigcorp.com\"}).\ncd /private/tmp/claude-501/lazyslice-scratch/redteam-2/a09\nfor sub in introspect classify plan doctor; do for fl in \"\" \"--json\" \"--debug\" \"--json --debug\"; do lazyslice $sub --source ... --target ... --root public.people --yes --no-config $fl > out 2> err; done; done\ngrep -l canary *.out *.err   # no matches",
+  "leaked": false,
+  "fix": "None needed. 16 subcommand/verbosity combinations produced no source value; classification reasons carry counts (\"2/2 samples parse as addresses\"), never samples."
+ },
+ {
+  "attack": "Smuggle personal data across in a table/column COMMENT, which THREAT_MODEL T1's DDL-literal amendment does not list among the recreated objects it scans.",
+  "reproduction": "Source: comments.sql — COMMENT ON TABLE customers IS 'owner: ceo@bigcorp.com, ssn 123-45-6789'; COMMENT ON COLUMN customers.email IS 'e.g. comment.canary@bigcorp.com';\ncd /private/tmp/claude-501/lazyslice-scratch/redteam-2/a05 && lazyslice --source ... --target ... --root public.customers --yes\ndocker exec rt2-tgt psql -U tgtuser -d localdb -tAc \"select objsubid, description from pg_description d join pg_class c on c.oid=d.objoid where c.relname='customers'\"   # empty",
+  "leaked": false,
+  "fix": "None needed: comments are in internal/introspect/sql.go's sqlNotRecreated set and are reported as `not_recreated: {comment: 2}` in the yml. Minor: the count is not printed in the transcript, only written to the yml."
+ },
+ {
+  "attack": "Put an address into a partial index predicate — the route THREAT_MODEL T1 admits internal/plan reads at all (tracker T-0163) — and see whether it lands in the target.",
+  "reproduction": "docker exec rt2-src psql -U srcuser -d proddb -c \"CREATE UNIQUE INDEX accounts_vip ON accounts(id) WHERE label = 'idx.canary@bigcorp.com'\"\ncd /private/tmp/claude-501/lazyslice-scratch/redteam-2/a06 && lazyslice --source ... --target ... --root public.accounts --yes\n# exit 9: verify.refused.catalog_literal on public.accounts.accounts_vip: a literal in the index predicate parses as email\ndocker exec rt2-tgt psql -U tgtuser -d localdb -tAc \"select indexdef from pg_indexes where schemaname='public'\"  # only lazyslice_meta_pkey",
+  "leaked": false,
+  "fix": "Control works as documented: the plan-time pass misses it, internal/verify/catalog.go catches it after load, exit 9, and load.DropLoaded removes the table and its index. The cost is that the value is in the target for the length of the run rather than refused before the drop; closing T-0163 (read pg_index at plan) removes that window."
+ },
+ {
+  "attack": "Same literal, but in a DOMAIN's CHECK rather than a table's, so that the exit-9 quarantine has nothing to drop it with — internal/load/load.go:921 DropLoaded iterates ddl.DropTables only.",
+  "reproduction": "docker exec rt2-src psql -U srcuser -d proddb -c \"CREATE DOMAIN label_d AS text CHECK (VALUE <> 'domain.canary@bigcorp.com')\" -c \"CREATE TABLE accounts(id bigserial PRIMARY KEY, label label_d NOT NULL, status text)\" -c \"INSERT INTO accounts(label,status) VALUES ('alpha','ok'),('beta','ok')\"\ncd /private/tmp/claude-501/lazyslice-scratch/redteam-2/a07 && lazyslice --source ... --target ... --root public.accounts --yes\n# exit 9: verify.refused.catalog_literal ... \"dropping public.accounts in the target: the last run left personal data in it\"\ndocker exec rt2-tgt psql -U tgtuser -d localdb -tAc \"select t.typname, pg_get_constraintdef(c.oid) from pg_constraint c join pg_type t on t.oid=c.contypid where c.contypid<>0\"\n#   label_d|CHECK ((VALUE <> 'domain.canary@bigcorp.com'::text))   <-- still there\n# rerunning the identical command leaves it there again, exit 9 every time",
+  "leaked": true,
+  "fix": "THREAT_MODEL T8's amendment claims that after a content-class verify failure \"the target ends the run either empty or holding nothing this run wrote\". That is false for every non-table object the loader creates. Make the quarantine drop what the run created, not only its tables: extend load.DropLoaded to drop the domains/enum types (and any other objects in ddl.PreData) this run created, in dependency order, after the tables; and add an assertion in verify that the object the catalog pass refused is gone before the run returns. Until then the refusal message must tell the operator the object is still there and name it."
+ },
+ {
+  "attack": "Hide personal data in enum labels — recreated verbatim by internal/load/ddl/ddl.go:827 (CREATE TYPE ... AS ENUM) and read by neither internal/plan/ddlliteral.go nor internal/verify/catalog.go, whose five kinds are default, generated expression, constraint, index predicate and index expression.",
+  "reproduction": "docker exec rt2-src psql -U srcuser -d proddb -c \"CREATE TYPE assignee AS ENUM ('unassigned','enum.canary@bigcorp.com','+1-415-555-0199')\" -c \"CREATE TABLE tickets(id bigserial PRIMARY KEY, owner assignee NOT NULL, title text)\" -c \"INSERT INTO tickets(owner,title) VALUES ('unassigned','a'),('unassigned','b')\"\ncd /private/tmp/claude-501/lazyslice-scratch/redteam-2/a11 && lazyslice --source ... --target ... --root public.tickets --yes\n# EXIT=0, \"wrote ./lazyslice.yml (commit it for CI)\"\ndocker exec rt2-tgt psql -U tgtuser -d localdb -tAc \"select t.typname||' = '||e.enumlabel from pg_enum e join pg_type t on t.oid=e.enumtypid where t.typname='assignee'\"\n#   assignee = unassigned\n#   assignee = enum.canary@bigcorp.com\n#   assignee = +1-415-555-0199",
+  "leaked": true,
+  "fix": "An email address and a phone number cross into the target under a green tick, with no refusal and nothing in the yml. Add pg_enum to both passes: in internal/plan/ddlliteral.go run every enum label of every type the plan will recreate through pipeline.Literals + the strong validators (refuse at exit 13, since a label cannot be rewritten without changing the application's meaning), and in internal/verify/catalog.go add a sixth kind reading the target's pg_enum so the artefact is checked as well as the plan. THREAT_MODEL T1's DDL amendment should name enum labels explicitly rather than leaving the list at defaults/CHECK/generated/index."
+ },
+ {
+  "attack": "Same idea one level down: a DOMAIN's DEFAULT lives in pg_type.typdefault, not pg_attrdef, so the catalog pass's three reads cannot see it.",
+  "reproduction": "docker exec rt2-src psql -U srcuser -d proddb -c \"CREATE DOMAIN tenant_d AS text DEFAULT 'domdefault.canary@bigcorp.com'\" -c \"CREATE TABLE events(id bigint NOT NULL, tenant text NOT NULL, note tenant_d, PRIMARY KEY (id,tenant))\" -c \"INSERT INTO events VALUES (1,'ordinary','x')\"\ncd /private/tmp/claude-501/lazyslice-scratch/redteam-2/a12 && lazyslice --source ... --target ... --root public.events --yes\n# EXIT=0\ndocker exec rt2-tgt psql -U tgtuser -d localdb -tAc \"select typname, typdefault from pg_type where typname='tenant_d'\"\n#   tenant_d|'domdefault.canary@bigcorp.com'::text",
+  "leaked": true,
+  "fix": "Exit 0, no refusal, address in the target's catalog and materialised into a row by the application's next INSERT that omits the column — exactly the 2026-09-09 finding 5 mechanism, one catalog table to the left of where T-0134 looked. Read pg_type.typdefault in internal/verify/catalog.go (a fourth read) and in internal/plan/ddlliteral.go; a domain default is rewritable through the masker of the columns that use the domain only when they all share one, so the safe default is exit 13 naming the domain."
+ },
+ {
+  "attack": "Partition bound literals: CREATE TABLE ... PARTITION OF t FOR VALUES IN ('part.canary@bigcorp.com') — stored in pg_class.relpartbound, another catalog location outside the catalog pass's three reads.",
+  "reproduction": "Source: /private/tmp/claude-501/lazyslice-scratch/redteam-2/part.sql (events partitioned by list on tenant, partition events_vip FOR VALUES IN ('part.canary@bigcorp.com')).\ncd /private/tmp/claude-501/lazyslice-scratch/redteam-2/a12 && lazyslice --source ... --target ... --root public.events --yes\ndocker exec rt2-tgt psql -U tgtuser -d localdb -tAc \"select relname, pg_get_expr(relpartbound, oid) from pg_class where relispartition\"   # empty\ndocker exec rt2-tgt psql -U tgtuser -d localdb -c \"\\\\d+ events\"   # plain table, not partitioned",
+  "leaked": false,
+  "fix": "No leak: v1 flattens a partitioned table into a plain table, so no bound expression is recreated, and the tenant column's value was masked (the partition's own sample raised the parent column to category email). Worth pinning with a test, because the day partitioning is recreated this becomes the same hole as the enum labels."
+ },
+ {
+  "attack": "Use the miss THREAT_MODEL T1 admits — the catalog pass runs only email/phone/card — and widen it: a CHECK on an unmasked column carrying a name, a street address, a US SSN and an IBAN.",
+  "reproduction": "docker exec rt2-src psql -U srcuser -d proddb -c \"CREATE TABLE claims(id bigserial PRIMARY KEY, code text NOT NULL CONSTRAINT claims_code_ck CHECK (code <> 'Alice Anderson, 42 Elm St, SSN 123-45-6789, IBAN GB33BUKB20201555555555'), amt int)\" -c \"INSERT INTO claims(code,amt) VALUES ('a',1),('b',2)\"\ncd /private/tmp/claude-501/lazyslice-scratch/redteam-2/a20 && lazyslice --source ... --target ... --root public.claims --yes\n# EXIT=0\ndocker exec rt2-tgt psql -U tgtuser -d localdb -tAc \"select pg_get_constraintdef(oid) from pg_constraint where conname='claims_code_ck'\"\n#   CHECK ((code <> 'Alice Anderson, 42 Elm St, SSN 123-45-6789, IBAN GB33BUKB20201555555555'::text))",
+  "leaked": true,
+  "fix": "Reproduced, and THREAT_MODEL T1 already states the name/address half of it — but SSN and IBAN are shapes with precise parsers (Luhn-like check for IBAN, a strict pattern for SSN), not dictionary heuristics, so the stated reason for excluding them (\"a CHECK is full of English words\") does not apply. Add national_id and iban/bank_account to the strong set used by the catalog and plan-time literal passes; leave person_name and address out as the doc argues."
+ },
+ {
+  "attack": "Turn a column into a pass-through from the config side: hand-edit the committed lazyslice.yml so the email column's masker is the parametric fixed: masker set to the victim's own address — a pass-through mode built out of a supported masker id (THREAT_MODEL T7).",
+  "reproduction": "cd /private/tmp/claude-501/lazyslice-scratch/redteam-2/a13\n# first run writes lazyslice.yml with `masker: email` for public.users.email\nperl -0pi -e 's/(public\\.users\\.email:\\n(?:.*\\n)*?    masker: )email/${1}\"fixed:victim.canary\\@bigcorp.com\"/' lazyslice.yml\nlazyslice --source ... --target ... --root public.users --yes\ndocker exec rt2-tgt psql -U tgtuser -d localdb -tAc \"select id,email from users\"\n#   1|hana.suzuki@example.org   2|luisa.jelinek@example.com   (fakes; the yml was rewritten back to masker: email)",
+  "leaked": false,
+  "fix": "None needed: the classifier re-derives the masker from the embedded rule pack on every run and the file's masker: is decorative. Worth an explicit test named for the attack, and worth having emit refuse to read back a masker id the rule pack did not choose rather than silently discarding it."
+ },
+ {
+  "attack": "A custom masker that returns its input (THREAT_MODEL T12's central case) — register one against the public mask module and see whether mask.Apply notices.",
+  "reproduction": "Scratch module at /private/tmp/claude-501/lazyslice-scratch/redteam-2/maskprobe (go.mod replaces github.com/Liarea/lazyslice/mask with the repo's nested module; no repo file touched).\ntype passthrough struct{}; func (passthrough) Mask(h [32]byte, in mask.Value, c mask.Constraints) (mask.Value, error) { return in, nil }\nmask.Register(\"redteam_passthrough\", \"email\", passthrough{})\nr, err := mask.Apply(k, \"email\", \"redteam_passthrough\", mask.Value{Text: \"victim.canary@bigcorp.com\"}, mask.Constraints{})\ncd /private/tmp/claude-501/lazyslice-scratch/redteam-2/maskprobe && go run .\n#   passthrough: out=\"victim.canary@bigcorp.com\" masked=true err=<nil>  -> OUT==IN? true",
+  "leaked": true,
+  "fix": "mask.Apply (mask/mask.go:255) has no post-condition: it returns the source value with Masked:true and no error, so the residual filter is fed a digest for a cell that was never masked and the only thing standing between that and a shipped cleartext column is verify's residual scan in a later stage of a later process phase. The per-generator \"output never equals input\" rule lives only in unit tests. Add the check to Apply itself: after m.Mask, if the output is non-empty and byte-equal to the input (or its canonical form), return a refusal — the same hard stop transform already gives a masker error. That is one comparison and it makes T12's control local to the module that owns it."
+ },
+ {
+  "attack": "A custom masker that throws halfway — panics on the second value, with the value in the panic message — to see what the process prints.",
+  "reproduction": "Same scratch module; thrower panics on its second call with fmt.Sprintf(\"masker blew up on %q\", in.Text).\ngo run .\n#   thrower: PANIC ESCAPED mask.Apply: masker blew up on \"victim.canary@bigcorp.com\"\nThen by code: the panic is recovered on core's transform goroutine (internal/core/run.go:1567) into panicError, whose Error() is fmt.Sprintf(\"panic: %v\", p.val) (internal/core/channel.go:157), and cmd/lazyslice prints it verbatim — reportPanic: fmt.Fprintf(stderr, \"lazyslice: internal error: %v\\n\", r) (cmd/lazyslice/main.go:332) and report()/renderSafe for the error path. Nothing redacts a panic value.",
+  "leaked": true,
+  "fix": "mask.Apply does not recover, and every recover in the tree prints the panic value unredacted to stderr — so a masker, or any library under it (pgx encoding, the phonenumbers parser, a JSON walker) that panics with the offending input in its message writes a production value into the CI log at any verbosity. THREAT_MODEL T4's \"event.Event has no free-form string field\" does not cover the error egress. Two fixes: (1) recover inside mask.Apply and convert the panic into an error that names the masker id and the category and nothing else; (2) make panicError.Error() and reportPanic print a fixed string plus the recovered value's *type*, with the value itself printed only under --show-row-values-in-errors, the flag that already exists for exactly this decision."
+ },
+ {
+  "attack": "Get the masking key (A4) written somewhere the .gitignore rail does not protect: leave ./lazyslice.secret as a symlink into a cloud-synced folder before the first run.",
+  "reproduction": "cd /private/tmp/claude-501/lazyslice-scratch/redteam-2/a17 && git init -q . && printf 'x\\n' > .gitignore && git add .gitignore && git -c user.email=t@t -c user.name=t commit -qm i\nmkdir Dropbox && ln -s Dropbox/leaked.key lazyslice.secret\nlazyslice --source ... --target ... --root public.users --yes\n# EXIT=0, transcript says: \"added lazyslice.secret to .gitignore\" / \"wrote a new masking key to ./lazyslice.secret\"\nls -l Dropbox/ && cat Dropbox/leaked.key\n#   -rw------- leaked.key\n#   6010f23ac551abfad09f2ac4d0eef71054b6f6a028855edebb8f6159fab05bf0",
+  "leaked": true,
+  "fix": "os.WriteFile at internal/core/run.go:1899 follows the symlink; the .gitignore entry and the `git ls-files --error-unmatch` tracked-file check (internal/repo/repo.go:301) are both applied to the link path, not the resolved one. The key — T13's guess-confirmation oracle for every snapshot ever made with it — ends up in a synced folder while the transcript asserts it is protected. Resolve the secret path (filepath.EvalSymlinks / open with O_NOFOLLOW) before the repo check and before writing; refuse a secret path that is a symlink, or apply the .gitignore and tracked checks to the resolved target and print the real path in the \"wrote a new masking key to\" line."
+ },
+ {
+  "attack": "Same asset, lower effort: leave a pre-existing world-readable ./lazyslice.secret (mode 0644) and see whether the run notices.",
+  "reproduction": "cd /private/tmp/claude-501/lazyslice-scratch/redteam-2/a15 && git init -q . && printf 'x\\n' > .gitignore && git add .gitignore && git -c user.email=t@t -c user.name=t commit -qm i\nprintf '%064d\\n' 7 > lazyslice.secret && chmod 0644 lazyslice.secret\nlazyslice --source ... --target ... --root public.users --yes\n# EXIT=0, no warning about the mode\nls -l lazyslice.secret   #  -rw-r--r--   (unchanged)",
+  "leaked": true,
+  "fix": "THREAT_MODEL T6 promises the key file is \"created 0600\"; nothing re-checks an existing one, so on a shared machine or a CI image the key is readable by every account and the run says nothing. Stat the secret file on read: if the mode grants group or other any bit, either chmod it back to 0600 and print that, or refuse at exit 5 with the chmod command — the same shape as the tracked-by-git refusal."
+ },
+ {
+  "attack": "Commit the secret and check the tracked-file rail actually fires.",
+  "reproduction": "cd /private/tmp/claude-501/lazyslice-scratch/redteam-2/a14\ngit add -f lazyslice.secret && git -c user.email=t@t -c user.name=t commit -qm oops\nlazyslice --source ... --target ... --root public.users --yes\n# EXIT=2  ✗ ./lazyslice.secret is tracked by git: git rm --cached ./lazyslice.secret\nAlso, first run in a repo with an existing .gitignore: mode 0600, and entries appended.",
+  "leaked": false,
+  "fix": "Rail works. Two nits: the run only refuses after connecting, introspecting and classifying (move the check next to the key resolution so it costs nothing), and it appends both `lazyslice.secret` and `/lazyslice.secret` to .gitignore — two entries for one file."
+ },
+ {
+  "attack": "Use the credential-hygiene remedy the docs recommend instead of a password in the DSN: --password-command.",
+  "reproduction": "cd /private/tmp/claude-501/lazyslice-scratch/redteam-2/a08\nenv -u PGPASSWORD lazyslice --source \"postgres://srcuser@127.0.0.1:55501/proddb\" --target \"postgres://tgtuser:tgtpw123@127.0.0.1:55502/localdb\" --root public.accounts --yes --password-command 'echo srcpw123'\n# EXIT=3, stderr: password authentication failed for user \"srcuser\" (SQLSTATE 28P01)\ncd /Users/gareth/personal_repos/lazyslice && grep -rn 'exec.Command' --include='*.go' . | grep -v _test\n#   only tools/docgen/flags.go and internal/repo/repo.go (git). The flag is never executed anywhere.",
+  "leaked": false,
+  "fix": "No leak, but the flag is dead: it is registered (cmd/lazyslice/main.go:837), threaded into the Request and written into the yml, and never run. ARCHITECTURE.md §997 names it as one of the binary's two subprocesses and §1068 tells the user it is the way to stop being prompted; THREAT_MODEL T5 leans on it as the remedy printed in the transcript. A developer who takes that advice gets an auth failure and falls back to PGPASSWORD or a password in the DSN — the exact behaviour T5 exists to prevent. Either implement it (exec the command, read stdout, never log it) or remove the flag and the docs that promise it until it exists."
+ },
+ {
+  "attack": "Re-run the 2026-09-09 review's finding 7 (a single email among nineteen ordinary values in a generic text column passing the second net's 80% ratio) to see if it still ships cleartext.",
+  "reproduction": "docker exec rt2-src psql -U srcuser -d proddb -c \"CREATE TABLE records(id bigserial PRIMARY KEY, payload text)\" -c \"INSERT INTO records(payload) SELECT 'ok' FROM generate_series(1,19)\" -c \"INSERT INTO records(payload) VALUES ('sparse.canary@bigcorp.com')\"\ncd /private/tmp/claude-501/lazyslice-scratch/redteam-2/a18 && lazyslice --source ... --target ... --root public.records --yes\n# public.records.payload: 1/20 samples parse as addresses; a strong validator hit below the category threshold: masked as free_text\ndocker exec rt2-tgt psql -U tgtuser -d localdb -tAc \"select payload from records where payload like '%@%'\"   # empty",
+  "leaked": false,
+  "fix": "Closed. A single strong-validator hit now raises the column to masked regardless of ratio. No action."
+ },
+ {
+  "attack": "Look for a residue file: a temp file, a crash dump, or a snapshot written into the working directory.",
+  "reproduction": "cd /Users/gareth/personal_repos/lazyslice && grep -rn 'CreateTemp\\|MkdirTemp\\|TempDir()' --include='*.go' internal cmd mask | grep -v _test\n#   internal/emit/emit.go:290 only — os.CreateTemp(dir, \".lazyslice-*.yml\"), deferred os.Remove, chmod 0644, atomic rename; holds no value by construction.\nls -la on every attempt directory after every run above: only lazyslice.yml, lazyslice.secret, and my own redirected o/e files. No snapshots/ contents, no core dump (panics are recovered before the runtime can abort).",
+  "leaked": false,
+  "fix": "None needed. v1 writes no snapshot file, and the one temp file is beside its destination, mode 0644, removed on every path."
+ },
+ {
+  "attack": "Read back what refusals actually print to the operator, across the failures produced above.",
+  "reproduction": "a06: ✗ {table} in the target is not empty: public.customers, public.orders\na16: ✗ no masking key: {path} could not be read or written\na19: ✗ {flag} names no table in the source      (stderr: --root tenant_ceo@bigcorp.com.notes)\na23: ✗ the target refused the statement that recreates . (): SQLSTATE 42P01\nCause: internal/core's wrap() (internal/core/core.go:273) builds Stop.Message with the identifiers, but the line renderer prints the catalogue template for the Code and the Args map is never filled, so the placeholder survives and the useful message is discarded.",
+  "leaked": false,
+  "fix": "Not a leak, but the failure UX is broken for every code reached through wrap(): four distinct messages printed raw placeholders in this session. Either fill event.Args at the wrap site (pass the args, not a formatted string) or have the renderer fall back to Stop.Message when a template placeholder has no arg — and add a test that renders every catalogue template with the args each emitting site actually supplies, failing on any surviving '{'."
+ },
+ {
+  "attack": "Incidental, found while testing the CHECK vector: a source schema whose name needs quoting breaks the loader.",
+  "reproduction": "docker exec rt2-src psql -U srcuser -d proddb -c 'CREATE SCHEMA \"x.y\"' -c 'CREATE TABLE \"x.y\".notes(id bigserial PRIMARY KEY, body text)' -c \"INSERT INTO \\\"x.y\\\".notes(body) VALUES ('v')\" -c 'CREATE TABLE public.root(id bigserial PRIMARY KEY, body text)' -c \"INSERT INTO public.root(body) VALUES ('r')\"\ncd /private/tmp/claude-501/lazyslice-scratch/redteam-2/a23 && lazyslice --source ... --target ... --root public.root --yes\n# EXIT=7\n# ✗ the target refused the statement that recreates . (): SQLSTATE 42P01\n# lazyslice: relation \"x.y.notes_id_seq\" does not exist (SQLSTATE 42P01)",
+  "leaked": false,
+  "fix": "The owning sequence's name is built as schema + '.' + table + '_id_seq' and then quoted as one identifier (\"x.y.notes_id_seq\") instead of \"x.y\".\"notes_id_seq\", so the load fails at exit 7 with the target part-way rebuilt. Quote schema and relation separately everywhere a sequence name is derived in internal/load/ddl (and audit the other derived names for the same pattern); add a torture fixture with a dotted and an @-bearing schema name — the same fixture would also have caught the \". ()\" empty-identifier message in that refusal."
+ },
+ {
+  "attack": "target_race.py: guard-lock the source table, let a run pass the target gate, insert a row into the target directly after the gate completes (before load's DROP), then release the guard.",
+  "reproduction": "cd /private/tmp/claude-501/lazyslice-scratch/redteam-3 && python3 target_race.py",
+  "leaked": false,
+  "fix": "Matches T-0130. Exit 4, load.refused.target_changed, naming public.items and its row count; nothing dropped, the inserted row (id=999) survives untouched. No fix needed."
+ },
+ {
+  "attack": "target_race variant: hold an ACCESS EXCLUSIVE lock on the SOURCE table so a first lazyslice run stalls after taking the target lease but before finishing, then launch a second lazyslice run against the same target/source while the first is still in flight.",
+  "reproduction": "cd /private/tmp/claude-501/lazyslice-scratch/redteam-3 && python3 race_variant2.py",
+  "leaked": false,
+  "fix": "Matches T-0130's other control (the run lease). Second run refused at exit 4, target.refused.lease_held, naming the first run's run_id; first run then completes normally at exit 0. No fix needed."
+ },
+ {
+  "attack": "probes.py polymorphic_log: a polymorphic (thing_id, thing_type) pair with no FK, thing_type seeded with an email-shaped canary; check stdout/log for the raw value.",
+  "reproduction": "cd /private/tmp/claude-501/lazyslice-scratch/redteam-3 && python3 probes.py polymorphic_log",
+  "leaked": false,
+  "fix": "Matches T-0131. Log reports '1 distinct value mapping to no table' with no value; grep for the canary string in the log returns zero hits. No fix needed."
+ },
+ {
+  "attack": "polymorphic_log variant: two rows in thing_type, one email-canary and one real-format phone number, to see if a second distinct value or a different validator surfaces the raw text and to see how classify/verify interact when the column isn't caught at plan time.",
+  "reproduction": "cd /private/tmp/claude-501/lazyslice-scratch/redteam-3 && python3 variant.py polymorphic_log2",
+  "leaked": false,
+  "fix": "Column stayed unmasked at classify ('no name or value signal'), but T-0136's second net caught the email at verify and refused at exit 9 (verify.refused.second_net on public.items.thing_type: email) before completion; the target table was then dropped/quarantined per T-0133. No source value or canary text appeared in the log. No fix needed."
+ },
+ {
+  "attack": "probes.py fk_masker: two tables joined by a FK on a unique 'token' column seeded with an identical credential string in both tables; check whether both sides mask to the same fake value.",
+  "reproduction": "cd /private/tmp/claude-501/lazyslice-scratch/redteam-3 && python3 probes.py fk_masker",
+  "leaked": false,
+  "fix": "Matches T-0132. Both tokens.token and items.token mask to the identical fake value (lazyslice-invalid-snvurpjganvkv...), run completes, marker status is 'complete'. No fix needed."
+ },
+ {
+  "attack": "fk_masker variant: a three-table transitive FK chain (tokens -> mids -> items) all carrying the same unique credential value, to check the equality group is computed transitively rather than just one hop.",
+  "reproduction": "cd /private/tmp/claude-501/lazyslice-scratch/redteam-3 && python3 variant.py fk_masker2",
+  "leaked": false,
+  "fix": "All three tables mask to the identical fake value across the full transitive chain; exit 0, marker 'complete'. No fix needed."
+ },
+ {
+  "attack": "probes.py verify_failure: a two-row table where an unmasked column carries an email-shaped canary; expect load to fail verification without leaving 'complete' status or the leaked value queryable.",
+  "reproduction": "cd /private/tmp/claude-501/lazyslice-scratch/redteam-3 && python3 vf_check.py",
+  "leaked": false,
+  "fix": "Matches T-0133. Exit 9, marker status 'failed' (not 'complete'), and the loaded table is dropped as part of the exit-9 quarantine path -- querying it returns 'relation does not exist', so the target holds no data at all, let alone the canary. No fix needed."
+ },
+ {
+  "attack": "verify_failure variant: two unmasked columns (email-shaped and phone-shaped canaries) in the same failing row, to check both leak paths are caught and the target is still fully quarantined.",
+  "reproduction": "cd /private/tmp/claude-501/lazyslice-scratch/redteam-3 && python3 variant.py verify_failure2",
+  "leaked": false,
+  "fix": "Exit 9, table dropped (relation does not exist afterward), same as the single-column case. No fix needed."
+ },
+ {
+  "attack": "probes.py ddl_default: a masked email column with a DEFAULT literal holding a distinct canary address, checking pg_attrdef in the target for the raw default text.",
+  "reproduction": "cd /private/tmp/claude-501/lazyslice-scratch/redteam-3 && python3 probes.py ddl_default",
+  "leaked": false,
+  "fix": "Matches T-0134. pg_attrdef in the target shows a masked default ('emeka.jelinek@example.com'::text), not the source literal ('ddl.canary@example.org'). No fix needed."
+ },
+ {
+  "attack": "ddl_default variant: a masked email column plus a masked phone column (both with DEFAULT literals) and a CHECK constraint on the email column embedding a second distinct email literal the plan cannot rewrite.",
+  "reproduction": "cd /private/tmp/claude-501/lazyslice-scratch/redteam-3 && python3 variant.py ddl_default2",
+  "leaked": false,
+  "fix": "Correctly refuses before ever creating the target table: exit 13, target.schema.literal_not_rewritable naming public.items.items_email_check. The DEFAULTs were never tested independently here since the CHECK refusal is plan-stage and precedes load, but no literal reached the target in any form. No fix needed; this is the documented exit-13 refusal path working as designed."
+ },
+ {
+  "attack": "probes.py sparse_email: 20 rows in a text column, only 1 holding an email-shaped canary (5% ratio, below the old 80%/3-hit threshold), checking whether the single value survives unmasked.",
+  "reproduction": "cd /private/tmp/claude-501/lazyslice-scratch/redteam-3 && python3 probes.py sparse_email",
+  "leaked": false,
+  "fix": "Matches T-0136. Target has 0 rows matching the original canary value -- the column was classified free_text/masked despite the low ratio (single strong hit is enough). No fix needed."
+ },
+ {
+  "attack": "sparse_email variant: 25 rows, two distinct email-shaped canaries scattered at positions 1 and 13, to check multiple sparse strong hits in one column are all masked.",
+  "reproduction": "cd /private/tmp/claude-501/lazyslice-scratch/redteam-3 && python3 variant.py sparse_email2",
+  "leaked": false,
+  "fix": "Target has 0 rows matching either original canary value; both masked. No fix needed."
+ },
+ {
+  "attack": "probes.py json_keys: a JSONB document with an email-shaped object key, checking whether the key itself (not just the value) is masked in the target.",
+  "reproduction": "cd /private/tmp/claude-501/lazyslice-scratch/redteam-3 && python3 probes.py json_keys",
+  "leaked": false,
+  "fix": "Matches T-0137. jsonb_object_keys in the target returns a masked email string, not the canary key. No fix needed."
+ },
+ {
+  "attack": "json_keys variant: a document with three keys -- a genuinely valid E.164 phone number (+16502530000), an email-shaped canary, and a plain non-PII-shaped key -- to check phone-shaped keys are masked and non-PII keys are left alone (also probed a fictitious '555' NANP number first, which correctly stayed unmasked because it fails libphonenumber's IsValidNumber and is not actually phone-shaped).",
+  "reproduction": "cd /private/tmp/claude-501/lazyslice-scratch/redteam-3 && python3 variant.py json_keys2 (with the key edited to +16502530000, a real valid US number)",
+  "leaked": false,
+  "fix": "The valid phone key was masked to a different fake E.164 number, the email key was masked, and 'plain_key' passed through unchanged -- matches T-0137's stated rule exactly ('a key that parses as an email, phone or credit card is masked... other keys stay'). No fix needed. Note: an intermediate attempt using '+15551234567' (the fictional NANP 555 exchange) appeared unmasked, but this is correct behavior, not a leak -- libphonenumber's IsValidNumber (which ValidPhone wraps) rejects 555-exchange numbers as not real, so the string legitimately does not parse as a phone number and internal/textsig's 'strong validator' contract is unaffected."
+ },
+ {
+  "attack": "T-0135 sslmode round-trip: run once with sslmode=disable plus non-default application_name and connect_timeout params on the source DSN, writing lazyslice.yml; inspect the emitted config for the params, then rerun with only --config (no --source/--target flags) and confirm it reconnects successfully using the reconstructed DSN.",
+  "reproduction": "cd /private/tmp/claude-501/lazyslice-scratch/redteam-3 && python3 sslmode_check.py (inspect emitted yml) && python3 sslmode_rerun.py (rerun from config only)",
+  "leaked": false,
+  "fix": "Matches T-0135. lazyslice.yml's source.params carries application_name, connect_timeout and sslmode (never password/secret); the config-only rerun (no CLI DSN flags) connects successfully end-to-end at exit 0, proving the round trip actually works, not just that the file has the right shape. No fix needed. (Not in probes.py's case dict or target_race.py -- there is no scripted evidence case for T-0135 in the 2026-09-09 review directory; I built this check from the CLI directly since the task named it explicitly among the eight claims.)"
+ }
+]

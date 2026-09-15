@@ -740,6 +740,79 @@ superseding ADR and not an edit here. ADR-011's reversal condition is the one
 open thread: when introspect collects the largest-agreeing-group statistic,
 clause (a) becomes exact.
 
+## The 2026-09-15 red team
+
+Four changes, and every one of them widens recall — so every one is a
+THREAT_MODEL.md T1 question, and the precision floors in `pagila_test.go` and
+`names_test.go` are what keep them honest. Pagila reads precision 0.762 /
+recall 1.000 after them, against 0.70's floor.
+
+- **The rule pack's name rules are multilingual now, and that is a patch**
+  (`rules.yml`, A1). A `klienci` table whose `nazwisko`, `imie`, `pesel`,
+  `komorka`, `cognome` and `achternaam` columns held real-shaped Polish,
+  Italian and Dutch values crossed into the target verbatim: the rules were
+  only *accidentally* multilingual, carrying `correo`, `courriel`, `nachname`,
+  `prenom` and nothing else. About sixty spellings joined `person_name`,
+  `phone`, `national_id`, `email` and `address`, and the abbreviations
+  (`fname`, `lname`, `mob`, `eml`) with them. **No rule pack is ever complete**,
+  which is why the comment in `rules.yml` says so at the rule: the control that
+  closes the *class* is the multilingual dictionary in
+  `internal/textsig/names.txt`, which both nets read.
+- **A `bytea` is judged on its content, not silenced by its family**
+  (`byteaTextSignal`, A4a). The note further up this file — "a bytea column is
+  never decided by the text validators" — gave the right reason (a PNG reads as
+  an address) for a rule that did not cover the case that leaked: a `bytea`
+  holding printable UTF-8 with an address in it, in a table with no `certain`
+  column so `byteaInPersonShapedTable` could not fire. `bestSignal` now offers a
+  sample set that `textsig.PrintableText` accepts to the validators and answers
+  **`binary_personal`** on a hit — never the hit's own category, because
+  `binary_personal` is the one category `rules.yml` accepts on the family and
+  its masker (NULL) is already registered, so there is no new masker and no
+  route back to the contradiction the old rule was about. The gate is
+  `textsig.PrintableText` **per value** — valid UTF-8 and 95% printable runes —
+  and the hit is then either a *strong* validator on any readable sample or any
+  validator at `validatorThreshold` across them. A PNG fails the first, so a
+  column of images is still decided by nothing here.
+  - **The column-level ratio is gone** (the T-REDFIX review's second finding).
+    It required 95% of the *sample set* to be readable before any validator
+    ran, where `internal/verify`'s second net asks `PrintableText` per value
+    with no column ratio — so the two nets were not the same rule, which both
+    files claimed they were. A `bytea` column of half documents and half images
+    passed neither: unmasked here, exit 9 there, and `binary_personal` is
+    unreachable for it by any other route, so the run had no green path short
+    of `--unmask` on a column that really does hold documents. One question per
+    value on both sides now. The cost is the case the ratio was written for — a
+    column of images with one readable blob a validator hits is masked rather
+    than left alone — and that is the direction it has to fail in, since
+    `internal/verify` refuses that same column today.
+    `TestRedTeamA4aHalfPrintableByteaIsMasked` is the guard.
+- **The neighbouring-column rule reaches a column with no signal at all**
+  (`unknownColumnsBesideCertain`, A2b). The existing arm raises `low` to
+  `possible`; a character column with no name hit, no value hit and no type
+  signal sat at `none` beside a `certain` personal column and was copied, with
+  the report printing "no name or value signal" — which reads as a clean bill of
+  health for a column nobody looked inside. Such a column is now masked as
+  `free_text`. Two things make it safe to run:
+  - **The neighbour must be `certain` under a category that identifies a
+    person** (`identifiesAPerson`). `free_text`, `semi_structured`,
+    `binary_personal` and `derived_text` are categories a column reaches by its
+    *type* alone, so counting them made pagila's `film` table person-shaped on
+    the strength of its own `fulltext` search index and masked `film.title` and
+    `film.special_features` with it — precision 0.696, under the floor.
+  - **Five exclusions, each a run this must not break**: never-masked, a
+    type-conflicting decision, a column under a unique index (`free_text` would
+    then owe §5's `d_required` and `internal/plan` would refuse at exit 12 over
+    a column masked on no evidence), a column of two-letter codes (an ISO
+    country column has a domain of two characters), and a declared length under
+    sixteen.
+  - It does **not** reach A2b's own table, which has no `certain` column at all.
+    It is the rail under the next value shape neither net recognises, and the
+    attack's own text says so.
+- **The validators de-obfuscate** (`internal/textsig/candidates.go`, A2/A3).
+  Nothing in this package changed for it, which is the point of `textsig`
+  existing: an address written `grace.hopper AT realcorp DOT example` is now an
+  address to `bestSignal` and to `internal/verify`'s second net in one change.
+
 ## A rejected name hit never leaves a column worse off than no name (T-TORTURE)
 
 `decide`'s `hasName && !nameAccepted` branch used to record `low` and stop, and

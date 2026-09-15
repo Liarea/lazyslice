@@ -51,7 +51,14 @@ const PhoneRegionHint = "ZZ"
 // ValidEmail is net/mail.ParseAddress, tightened. ParseAddress accepts "a@b",
 // which every hostname-shaped identifier in a database would satisfy, so the
 // domain must also carry a dot.
-func ValidEmail(s string) bool {
+//
+// It reads every spelling Candidates yields, so "grace.hopper AT realcorp DOT
+// example" is the address it is written as (candidates.go, the 2026-09-15 red
+// team's A2). The parse itself is unchanged: a candidate is a new string
+// offered to the same net/mail, never a loosening of it.
+func ValidEmail(s string) bool { return anyCandidate(s, validEmail) }
+
+func validEmail(s string) bool {
 	s = strings.TrimSpace(s)
 	if s == "" || len(s) > 320 || strings.ContainsAny(s, "<>") {
 		return false
@@ -71,7 +78,13 @@ func ValidEmail(s string) bool {
 // ValidPhone is libphonenumber's IsValidNumber under PhoneRegionHint. That is
 // the conservative half of the rule: a national-format column reaches the
 // classifier through its name, at `possible`, and is masked anyway.
-func ValidPhone(s string) bool {
+//
+// It reads every spelling Candidates yields, so a number dictated in words —
+// "plus four four, seven seven oh oh, nine one one, nine one one" — is the
+// number it spells (candidates.go).
+func ValidPhone(s string) bool { return anyCandidate(s, validPhone) }
+
+func validPhone(s string) bool {
 	s = strings.TrimSpace(s)
 	if s == "" || len(s) > 40 {
 		return false
@@ -113,13 +126,34 @@ func ValidUUID(s string) bool { return uuidRE.MatchString(strings.TrimSpace(s)) 
 // twelve to nineteen digits after separators are removed, which is the range
 // ISO/IEC 7812 allows; without that bound every even-length numeric identifier
 // passes it about half the time.
-func ValidLuhn(s string) bool {
+//
+// It reads every spelling Candidates yields, so a card dictated in words is
+// still a card (candidates.go).
+func ValidLuhn(s string) bool { return anyCandidate(s, validLuhn) }
+
+// luhnSeparator is the set of characters a written card number may be grouped
+// with. It was {' ', '-'} until the 2026-09-15 red team wrote a card with "."
+// between the groups and watched this function reject it outright — the value
+// then matched ValidMAC instead (a dotted sixteen-digit run parses as a
+// hardware address) and was masked to an IP address, which is the right
+// direction under the wrong category and would have been no masking at all on
+// a column of a family network_id cannot hold. The slash and the non-breaking
+// space are the two other separators a card is printed with.
+func luhnSeparator(r rune) bool {
+	switch r {
+	case ' ', '-', '.', '/', '\u00a0':
+		return true
+	}
+	return false
+}
+
+func validLuhn(s string) bool {
 	digits := make([]int, 0, 20)
 	for _, r := range s {
 		switch {
 		case r >= '0' && r <= '9':
 			digits = append(digits, int(r-'0'))
-		case r == ' ' || r == '-':
+		case luhnSeparator(r):
 		default:
 			return false
 		}
@@ -142,8 +176,11 @@ func ValidLuhn(s string) bool {
 	return sum%10 == 0
 }
 
-// ValidIBAN is the mod-97 check.
-func ValidIBAN(s string) bool {
+// ValidIBAN is the mod-97 check. It reads every spelling Candidates yields
+// (candidates.go).
+func ValidIBAN(s string) bool { return anyCandidate(s, validIBAN) }
+
+func validIBAN(s string) bool {
 	s = strings.ToUpper(strings.NewReplacer(" ", "", "-", "").Replace(strings.TrimSpace(s)))
 	if len(s) < 15 || len(s) > 34 {
 		return false
@@ -154,6 +191,18 @@ func ValidIBAN(s string) bool {
 		}
 	}
 	if !unicode.IsLetter(rune(s[0])) || !unicode.IsLetter(rune(s[1])) {
+		return false
+	}
+	// ISO 13616: characters three and four are the check digits and are always
+	// numeric. Without this, any fifteen-to-thirty-four-character run of
+	// letters clears the mod-97 check about one time in ninety-seven — five of
+	// pagila's own film titles do ("CHARIOTS CONSPIRACY" among them), which is
+	// why internal/verify's second net has to score IBAN on a ratio rather than
+	// as a parse. Requiring the two check digits is the spec, it costs no real
+	// IBAN anything, and it is what makes this validator precise enough for
+	// internal/plan's and internal/verify's DDL-literal passes to refuse a run
+	// on one occurrence (the 2026-09-15 red team's A20).
+	if s[2] < '0' || s[2] > '9' || s[3] < '0' || s[3] > '9' {
 		return false
 	}
 	rearranged := s[4:] + s[:4]
@@ -295,4 +344,60 @@ func TwoLetterCode(s string) bool {
 		}
 	}
 	return true
+}
+
+// ssnRE and ninoRE are the two national identifier formats with a pattern
+// precise enough to decide a value rather than guess at one.
+//
+// They exist for internal/plan's and internal/verify's DDL-literal passes (the
+// 2026-09-15 red team's A20). Those passes run only the validators that are a
+// parse, because the text they read is SQL and full of English words — and
+// THREAT_MODEL.md T1 stated the exclusion of national_id in the same breath as
+// person_name and address, which is where the red team put
+// "Alice Anderson, 42 Elm St, SSN 123-45-6789, IBAN GB33BUKB20201555555555"
+// into a CHECK and watched it cross into the target under exit 0. A name and a
+// street are dictionary heuristics and stay out; a US Social Security number
+// and a UK National Insurance number are neither.
+var (
+	// ssnRE is the US Social Security number's shape. RE2 has no negative
+	// lookahead, so the excluded ranges are checked in validNationalID below.
+	ssnRE = regexp.MustCompile(`\A(\d{3})-(\d{2})-(\d{4})\z`)
+	// ninoRE is the UK National Insurance number: two prefix letters, six
+	// digits, one suffix letter from A-D. The excluded prefix letters (D, F, I,
+	// Q, U, V in first position; D, F, I, O, Q, U, V in second) and the
+	// disallowed pairs are HMRC's.
+	ninoRE = regexp.MustCompile(`\A[ABCEGHJKLMNOPRSTWXYZ][ABCEGHJKLMNPRSTWXYZ]\d{6}[A-D]\z`)
+)
+
+// ninoDisallowed are the prefix pairs HMRC never issues.
+var ninoDisallowed = map[string]bool{"BG": true, "GB": true, "NK": true, "KN": true, "TN": true, "NT": true, "ZZ": true}
+
+// ValidNationalID reports whether a value is a national identifier in one of
+// the two formats above, in any spelling Candidates yields — so a number
+// written with interleaved spaces is still the number it spells.
+//
+// It is deliberately two formats and not a family of them. A validator here
+// answers about one value with a parse; a loose "looks like an identifier"
+// rule over SQL text would refuse ordinary schemas, which is the failure mode
+// the DDL passes' narrow validator set exists to avoid.
+func ValidNationalID(s string) bool { return anyCandidate(s, validNationalID) }
+
+func validNationalID(s string) bool {
+	s = strings.TrimSpace(s)
+	if m := ssnRE.FindStringSubmatch(s); m != nil {
+		// The Social Security Administration's own exclusions: no area 000,
+		// 666 or 900-999, no group 00, no serial 0000. Without them every
+		// three-two-four digit grouping in a schema — a version triple, a date
+		// range, a part number — would be a national identifier.
+		area, group, serial := m[1], m[2], m[3]
+		switch {
+		case area == "000" || area == "666" || area[0] == '9':
+		case group == "00":
+		case serial == "0000":
+		default:
+			return true
+		}
+	}
+	up := strings.ToUpper(strings.ReplaceAll(s, " ", ""))
+	return ninoRE.MatchString(up) && !ninoDisallowed[up[:2]]
 }

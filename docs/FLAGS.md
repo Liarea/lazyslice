@@ -21,6 +21,7 @@ One row per flag registered on the command tree, grouped as `--help` groups them
 
 | Flag | Type | Default | Description |
 |---|---|---|---|
+| `--allow-type-literal` | stringArray | - | Keep an enum or domain whose recreated DDL holds a literal exit 13 refuses, as TYPE=REASON; repeatable |
 | `--cap` | stringArray | - | Children per parent key per edge, as N or TABLE=N (default 100); repeatable |
 | `--depth` | int | 3 | Child depth from the root |
 | `--key` | stringArray | - | Row identity for a table with no key, as TABLE=COL,COL; repeatable |

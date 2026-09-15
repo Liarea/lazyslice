@@ -237,13 +237,13 @@ func TestForbiddenFlagsDoNotExist_SelfTestUnmaskAll(t *testing.T) {
 // failure in this file uses.
 func TestReportPanicShowsTheStackOnlyUnderDebug(t *testing.T) {
 	var withoutDebug bytes.Buffer
-	code := reportPanic(&withoutDebug, "boom", false)
+	code := reportPanic(&withoutDebug, "boom", false, false)
 	if code != ExitInternal {
 		t.Errorf("reportPanic without --debug returned %d, want %d", code, ExitInternal)
 	}
 	out := withoutDebug.String()
-	if !strings.Contains(out, "internal error: boom") {
-		t.Errorf("reportPanic without --debug = %q, want it to name the panic value", out)
+	if !strings.Contains(out, "internal error") {
+		t.Errorf("reportPanic without --debug = %q, want it to say this is an internal failure", out)
 	}
 	if !strings.Contains(out, "--debug") {
 		t.Errorf("reportPanic without --debug = %q, want a hint naming --debug", out)
@@ -253,12 +253,46 @@ func TestReportPanicShowsTheStackOnlyUnderDebug(t *testing.T) {
 	}
 
 	var withDebug bytes.Buffer
-	code = reportPanic(&withDebug, "boom", true)
+	code = reportPanic(&withDebug, "boom", false, true)
 	if code != ExitInternal {
 		t.Errorf("reportPanic with --debug returned %d, want %d", code, ExitInternal)
 	}
 	if !strings.Contains(withDebug.String(), "goroutine") {
 		t.Errorf("reportPanic with --debug = %q, want a goroutine stack trace", withDebug.String())
+	}
+}
+
+// The 2026-09-15 red team: a panic message is a free-form string, so a masker
+// — or pgx's encoding, the phonenumbers parser, a JSON walker under one — that
+// panics with the offending input in its message wrote a production value to
+// stderr at any verbosity. THREAT_MODEL.md T4's stated control ("event.Event
+// has no free-form string field") does not cover the error egress.
+//
+// The value is still reachable, behind the flag that already exists for this
+// exact decision. --debug is a different question and must not be the one that
+// opens it: a stack frame carries no row value.
+func TestReportPanicWithholdsTheValueUnlessAsked(t *testing.T) {
+	const secret = `masker blew up on "victim.canary@bigcorp.com"`
+
+	var quiet bytes.Buffer
+	reportPanic(&quiet, secret, false, false)
+	if strings.Contains(quiet.String(), "victim.canary@bigcorp.com") {
+		t.Errorf("reportPanic printed the panic value with no flag: %q", quiet.String())
+	}
+	if !strings.Contains(quiet.String(), "--show-row-values-in-errors") {
+		t.Errorf("reportPanic = %q, want it to name the flag that would print the value", quiet.String())
+	}
+
+	var debugOnly bytes.Buffer
+	reportPanic(&debugOnly, secret, false, true)
+	if strings.Contains(debugOnly.String(), "victim.canary@bigcorp.com") {
+		t.Errorf("--debug alone printed the panic value: %q", debugOnly.String())
+	}
+
+	var asked bytes.Buffer
+	reportPanic(&asked, secret, true, false)
+	if !strings.Contains(asked.String(), "victim.canary@bigcorp.com") {
+		t.Errorf("--show-row-values-in-errors did not print the panic value: %q", asked.String())
 	}
 }
 
@@ -307,6 +341,7 @@ func TestExitCodes(t *testing.T) {
 		{"unknown flag on a subcommand", []string{"introspect", "--nope"}, ExitUsage},
 		{"unqualified unmask", []string{"--unmask", "notatable=because"}, ExitUsage},
 		{"unmask with no reason", []string{"--unmask", "public.users.email"}, ExitUsage},
+		{"allow-type-literal with no reason", []string{"--allow-type-literal", "public.assignee"}, ExitUsage},
 		{"version", []string{"version"}, ExitOK},
 		{"--version", []string{"--version"}, ExitOK},
 		{"help", []string{"--help"}, ExitOK},
@@ -323,6 +358,64 @@ func TestExitCodes(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			if got := run(t.Context(), c.args, &stdout, &stderr); got != c.want {
 				t.Errorf("run(%q) = %d, want %d\nstderr: %s", c.args, got, c.want, stderr.String())
+			}
+		})
+	}
+}
+
+// --allow-type-literal is the second place an operator says in writing that
+// something in the schema is not a person's, and it clears a refusal
+// (ARCHITECTURE.md §11.1's type-literal rule, exit 13) that had no escape at
+// all before it — the message named --skip-table, which drops a table to schema
+// only and still recreates every type (the T-REDFIX review's fourth finding).
+// So it takes a reason on the same rule --unmask does, and the name is resolved
+// against the source's own enums and domains in internal/core.
+func TestAllowTypeLiteralShapes(t *testing.T) {
+	cases := []struct {
+		name    string
+		args    []string
+		wantErr bool
+		want    map[string]string
+	}{
+		{
+			name: "qualified with a reason",
+			args: []string{"public.assignee=a product label, checked by hand"},
+			want: map[string]string{"public.assignee": "a product label, checked by hand"},
+		},
+		{
+			name: "two types",
+			args: []string{"public.assignee=a", "public.tenant_d=b"},
+			want: map[string]string{"public.assignee": "a", "public.tenant_d": "b"},
+		},
+		{name: "no reason", args: []string{"public.assignee"}, wantErr: true},
+		{name: "empty reason", args: []string{"public.assignee="}, wantErr: true},
+		{name: "no type", args: []string{"=because"}, wantErr: true},
+		{name: "the same type twice", args: []string{"public.assignee=a", "public.assignee=b"}, wantErr: true},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			req := core.NewRequest()
+			err := finish(nil, &req, &rawFlags{allowTypeLiterals: c.args})
+			if c.wantErr {
+				if err == nil {
+					t.Fatalf("finish(--allow-type-literal %q) = nil, want a usage error", c.args)
+				}
+				if !strings.Contains(err.Error(), "usage") {
+					t.Errorf("finish(--allow-type-literal %q) = %v, want it to wrap errUsage", c.args, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("finish(--allow-type-literal %q) = %v, want nil", c.args, err)
+			}
+			if len(req.AllowTypeLiterals) != len(c.want) {
+				t.Fatalf("AllowTypeLiterals = %v, want %v", req.AllowTypeLiterals, c.want)
+			}
+			for k, v := range c.want {
+				if req.AllowTypeLiterals[k] != v {
+					t.Errorf("AllowTypeLiterals[%q] = %q, want %q", k, req.AllowTypeLiterals[k], v)
+				}
 			}
 		})
 	}

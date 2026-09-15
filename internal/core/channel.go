@@ -154,5 +154,47 @@ type panicError struct {
 	stack []byte
 }
 
-func (p panicError) Error() string { return fmt.Sprintf("panic: %v", p.val) }
+// Error names the *type* of the recovered value and never the value itself,
+// and that is the 2026-09-15 red team's finding against THREAT_MODEL.md T4.
+//
+// T4's control is stated as "event.Event has no free-form string field", which
+// is true and does not cover the error egress. A panic message is a free-form
+// string by construction, and a masker — or anything under one: pgx's encoding,
+// the phonenumbers parser, a JSON walker — that panics with the offending input
+// in its message wrote that input to stderr at any verbosity, through this
+// Error() and through cmd/lazyslice's reportPanic, both of which formatted the
+// recovered value with %v. A custom masker doing it deliberately is T12's
+// central case; a library doing it by accident is the same leak with nobody to
+// blame.
+//
+// The value is still reachable, behind the flag that already exists for exactly
+// this decision: PanicValue below is read by cmd/lazyslice under
+// --show-row-values-in-errors. The stack trace stays behind --debug as before,
+// which is a separate question — a stack frame carries no row value.
+func (p panicError) Error() string { return "panic: " + PanicSummary(p.val) }
 func (p panicError) Stack() []byte { return p.stack }
+
+// PanicValue is the recovered value, for the one caller allowed to print it:
+// cmd/lazyslice's error egress under --show-row-values-in-errors. It is
+// matched structurally there, the way Stack already is.
+func (p panicError) PanicValue() any { return p.val }
+
+// PanicSummary describes a recovered panic value without quoting it: its type,
+// and for an error the fact that it is one. It is exported because
+// cmd/lazyslice's own recover (guardedExecute) needs the same redaction and may
+// not reproduce it — one rule, one function (THREAT_MODEL.md T4).
+//
+// A string panic is the dangerous one and is the case this exists for:
+// panic("masker blew up on \"victim.canary@bigcorp.com\"") is a production
+// value formatted into a message, and %v prints it whole.
+func PanicSummary(v any) string {
+	if v == nil {
+		return "a nil value"
+	}
+	if _, ok := v.(error); ok {
+		return fmt.Sprintf("an error of type %T (its message is withheld because it may quote a value: "+
+			"--show-row-values-in-errors)", v)
+	}
+	return fmt.Sprintf("a value of type %T (it is withheld because it may quote a value: "+
+		"--show-row-values-in-errors)", v)
+}

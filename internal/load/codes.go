@@ -41,6 +41,15 @@ const (
 	// last run leaked and this is the cleanup" apart.
 	CodeQuarantineDropping event.Code = "load.target.quarantine_dropping"
 
+	// CodeQuarantineDroppingObject is the same line for a non-table object the
+	// run created — a domain, an enum type, a sequence (the 2026-09-15 red
+	// team's A07). It is its own code because the quarantine's promise is that
+	// the target ends the run holding nothing this run wrote, and a transcript
+	// that named only the tables was the evidence for a promise it was not
+	// keeping: the domain whose CHECK carried the address verify had just
+	// refused the run over was still there, unmentioned.
+	CodeQuarantineDroppingObject event.Code = "load.target.quarantine_dropping_object"
+
 	// CodeTableLoaded reports one table's committed row count.
 	CodeTableLoaded event.Code = "load.table.loaded"
 

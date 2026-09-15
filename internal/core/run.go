@@ -367,6 +367,9 @@ func normalise(req Request) Request {
 	if req.Unmask == nil {
 		req.Unmask = map[string]string{}
 	}
+	if req.AllowTypeLiterals == nil {
+		req.AllowTypeLiterals = map[string]string{}
+	}
 	return req
 }
 
@@ -722,6 +725,16 @@ func (r *run) openTarget(ctx context.Context) error {
 		// other half.
 		systemID = ""
 	}
+	// The cluster identity rule 1 falls back to when system_identifier is
+	// unreadable, which it is for the SELECT-only source role §9 recommends
+	// (the 2026-09-15 red team's identity-rule-1 finding). Like the system
+	// identifier, a source that will not answer is not a refusal here — the
+	// gate decides what an unknown identity means, and it now fails closed for
+	// a target carrying the source's own database name.
+	if clusterID, clusterErr := r.source.ClusterID(ctx); clusterErr == nil {
+		tgt.SetSourceCluster(clusterID)
+	}
+
 	e, err := tgt.Gate(ctx, r.sourceRef, systemID, r.req.AllowRemoteTarget)
 	if err != nil {
 		if gateCode(e) == pg.CodeUnreachable {
@@ -755,6 +768,17 @@ func (r *run) openTarget(ctx context.Context) error {
 		event.ArgDatabase: targetRef.Database,
 		event.ArgFlag:     "--target",
 	})
+	// §9 rule 1's warning, which has been owed since the gate was written: the
+	// target is a different database on the source's own cluster, which is
+	// eligible by design and is the loudest thing about the write's location.
+	// internal/pg computed Eligibility.SameCluster and nothing read it, so a
+	// headless run whose target the discovery ladder chose on the production
+	// server wrote there in silence (the 2026-09-15 red team).
+	if e.SameCluster {
+		r.send(event.Discover, event.Warn, CodeTargetSameCluster, event.Args{
+			event.ArgDatabase: targetRef.Database,
+		})
+	}
 	if e.MarkerBound {
 		r.send(event.Discover, event.Info, CodeTargetTruncating, event.Args{
 			event.ArgDatabase: targetRef.Database,
@@ -1449,6 +1473,20 @@ func (r *run) planRequest() (pipeline.PlanRequest, error) {
 		}
 		req.Skip = append(req.Skip, t)
 	}
+	// --allow-type-literal is resolved against the source's own enums and domains, so
+	// an opt-out that could never apply is exit 2 here rather than a rail the
+	// operator believes they lifted and did not (the same rule --unmask's
+	// column names follow).
+	for name, reason := range r.req.AllowTypeLiterals {
+		typeName, err := resolveType(name, r.schema)
+		if err != nil {
+			return req, wrap(CodeUsage, exitUsage, err, "--allow-type-literal %s", name)
+		}
+		if req.AllowTypeLiterals == nil {
+			req.AllowTypeLiterals = map[string]string{}
+		}
+		req.AllowTypeLiterals[typeName] = reason
+	}
 
 	switch {
 	case r.req.Root != "":
@@ -1873,6 +1911,61 @@ func (r *run) planOnly() bool {
 // resolveKey finds the masking key, in the order ARCHITECTURE.md section 8 and
 // section 9 give: $LAZYSLICE_SECRET, then --secret-file, then a new key written
 // to that file — but only where section 9's repository rules allow it.
+// checkSecretFile is ARCHITECTURE.md §9 "The repository" applied to the file
+// itself rather than to its path, and it is the 2026-09-15 red team's two
+// findings against THREAT_MODEL.md T6.
+//
+// **A symlink is refused.** os.WriteFile follows one, and repo.Protect's
+// .gitignore entry and `git ls-files --error-unmatch` check are both applied to
+// the link path — so `ln -s Dropbox/leaked.key lazyslice.secret` put the
+// masking key in a cloud-synced folder while the transcript said the file had
+// been added to .gitignore and written. The key is T13's guess-confirmation
+// oracle for every snapshot ever made with it, so the direction that fails safe
+// is a refusal: resolving the link and protecting the target instead would mean
+// silently writing the key to a path the operator did not name, and a repository
+// rule that follows a link out of the repository is not a repository rule.
+// The check is on the path the run was given, so `--secret-file` pointing
+// straight at a file outside the repository is unaffected — that is an operator
+// naming a location, and repo.Protect already reports it as unprotected.
+//
+// **A mode granting group or other any bit is refused**, with the chmod to run.
+// T6 promises the file is created 0600 and nothing re-checked an existing one,
+// so a 0644 key in a CI image or on a shared machine was readable by every
+// account under exit 0. The refusal is the shape the tracked-by-git one already
+// has: a command to run, at exit 5, rather than a warning nobody acts on. It is
+// not a silent chmod, because a key that has been world-readable may already
+// have been read, and the operator is the one who knows whether that matters.
+//
+// A file that does not exist yet passes both: there is nothing to judge, and
+// resolveKey creates it 0600.
+func (r *run) checkSecretFile() error {
+	info, err := os.Lstat(r.req.SecretFile)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return nil
+	case err != nil:
+		return wrap(CodeSecretRefusedKey, exitCredential, err, "%s could not be read", r.req.SecretFile)
+	}
+	if info.Mode()&fs.ModeSymlink != 0 {
+		return &Stop{
+			Code: CodeSecretSymlink, Exit: exitCredential,
+			Args:    event.Args{event.ArgPath: r.req.SecretFile},
+			Message: fmt.Sprintf("%s is a symbolic link", r.req.SecretFile),
+		}
+	}
+	if perm := info.Mode().Perm(); perm&0o077 != 0 {
+		return &Stop{
+			Code: CodeSecretPermissive, Exit: exitCredential,
+			Args: event.Args{
+				event.ArgPath:      r.req.SecretFile,
+				event.ArgStatement: "chmod 600 " + r.req.SecretFile,
+			},
+			Message: fmt.Sprintf("%s is mode %04o", r.req.SecretFile, perm),
+		}
+	}
+	return nil
+}
+
 func (r *run) resolveKey() error {
 	found, state, err := r.resolveKeyState()
 	if err != nil || found {
@@ -1931,6 +2024,11 @@ func (r *run) resolveKeyIfPresent() error {
 		r.key, r.keyFP = k, k.Fingerprint()
 		return nil
 	}
+	// The environment variable is the one branch with no file, so the file
+	// checks come after it on this path as they do on resolveKeyState's.
+	if err := r.checkSecretFile(); err != nil {
+		return err
+	}
 	body, err := os.ReadFile(r.req.SecretFile)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
@@ -1965,6 +2063,14 @@ func (r *run) resolveKeyState() (found bool, state repo.State, err error) {
 		}
 		r.key, r.keyFP = k, k.Fingerprint()
 		return true, state, nil
+	}
+
+	// Before repo.Protect, which opens .gitignore for append and asks git about
+	// the *link* path: a secret file that is a symlink is refused before either
+	// happens, so the transcript never claims to have protected a file it did
+	// not (the 2026-09-15 red team).
+	if err := r.checkSecretFile(); err != nil {
+		return false, state, err
 	}
 
 	state, protectErr := repo.Protect(r.req.SecretFile, nil)

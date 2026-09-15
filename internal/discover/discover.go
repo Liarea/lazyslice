@@ -878,6 +878,30 @@ func collapseKey(r dsn.Ref) string {
 	return n.Host + ":" + strconv.Itoa(n.Port) + "/" + n.Database
 }
 
+// maintenanceDatabase reports the three databases a Postgres cluster is created
+// with. None of them is ever a target: `postgres` exists so that a client has
+// something to connect to in order to create a database, and the two templates
+// are copied to make one.
+func maintenanceDatabase(name string) bool {
+	switch name {
+	case "postgres", "template0", "template1":
+		return true
+	}
+	return false
+}
+
+// clusterKey is collapseKey without the database: the server a candidate is on.
+// Two databases on one cluster share it, which is the question ARCHITECTURE.md
+// §9 rule 1's SameCluster asks and the one chooseTarget has to ask before it
+// picks a target nobody named.
+func clusterKey(r dsn.Ref) string {
+	n, err := r.Normalised()
+	if err != nil {
+		n = r
+	}
+	return n.Host + ":" + strconv.Itoa(n.Port)
+}
+
 // chooseSource is ARCHITECTURE.md §9's source rule: the most-local reachable
 // candidate with the most tables. Local beats remote regardless of table count
 // (Scenario B2). Source is never a question.
@@ -949,6 +973,18 @@ func chooseTarget(cands []found, source *found) (winner, runnerUp *found) {
 		if source != nil && collapseKey(c.Ref) == collapseKey(source.cand.Ref) {
 			continue
 		}
+		if maintenanceDatabase(c.Ref.Database) {
+			// The 2026-09-15 red team: with --source pointing at production and
+			// no --target, the ladder chose the production container and wrote
+			// the masked slice into its `postgres` maintenance database. A
+			// maintenance database is never what anybody means by a target —
+			// it is the database a client connects to in order to create
+			// another one — and ranking it at all is what let the ladder pick
+			// the production server over nothing. An operator who really wants
+			// to write there says --target, which is where a run records that
+			// on purpose.
+			continue
+		}
 		shaped = append(shaped, i)
 	}
 	if len(shaped) == 0 {
@@ -956,6 +992,21 @@ func chooseTarget(cands []found, source *found) (winner, runnerUp *found) {
 	}
 	sort.SliceStable(shaped, func(x, y int) bool {
 		a, b := cands[shaped[x]].cand, cands[shaped[y]].cand
+		// A candidate that is *not* on the source's own cluster outranks one
+		// that is, ahead of every other key (the 2026-09-15 red team). A second
+		// database on one cluster stays eligible — ARCHITECTURE.md §9 rule 1
+		// says so, and it is the ordinary compose setup — but where a genuinely
+		// separate server is reachable, writing to the one holding the source
+		// is the worse of the two and must not win on a name pattern. The
+		// warning that says the write landed on the source's own server is
+		// internal/core's (CodeTargetSameCluster) and prints either way.
+		if source != nil {
+			as := clusterKey(a.Ref) == clusterKey(source.cand.Ref)
+			bs := clusterKey(b.Ref) == clusterKey(source.cand.Ref)
+			if as != bs {
+				return bs
+			}
+		}
 		if an, bn := targetNamePattern.MatchString(a.Ref.Database), targetNamePattern.MatchString(b.Ref.Database); an != bn {
 			return an
 		}

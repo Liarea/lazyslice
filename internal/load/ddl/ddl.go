@@ -117,21 +117,50 @@ func DropTables(schema *pipeline.Schema, extra []ref.TableRef) []TableDrop {
 // something the run has not been told about, and a loud 2BP01 naming it is
 // better than dropping a stranger's column.
 func DropObjects(schema *pipeline.Schema) []string {
+	drops := ObjectDrops(schema)
+	out := make([]string, 0, len(drops))
+	for _, d := range drops {
+		out = append(out, d.SQL)
+	}
+	return out
+}
+
+// ObjectDrop is one non-table object PreData creates, with the name to print
+// before it is dropped. It is DropTables' TableDrop for the object classes that
+// are not tables, and it exists for the same reason: ARCHITECTURE.md section
+// 11.1 requires each drop to be printed before it happens, and a caller cannot
+// name an object it can only see as SQL text.
+type ObjectDrop struct {
+	Name string
+	SQL  string
+}
+
+// ObjectDrops returns the sequences and types PreData creates, in the reverse
+// of the order it creates them, each with its name.
+//
+// load.DropLoaded reads this (the 2026-09-15 red team's A07). THREAT_MODEL.md
+// T8 claimed that after a content-class verify failure the target ends "either
+// empty or holding nothing this run wrote", and that was false for every
+// non-table object the loader creates: the quarantine dropped ddl.DropTables'
+// list and nothing else, so a domain whose CHECK carried an address stayed in
+// the target after the exit-9 refusal that found it, and stayed again on every
+// rerun.
+func ObjectDrops(schema *pipeline.Schema) []ObjectDrop {
 	if schema == nil {
 		return nil
 	}
-	var out []string
+	var out []ObjectDrop
 	for _, s := range sequences(schema) {
-		out = append(out, "DROP SEQUENCE IF EXISTS "+qualified(s.Name))
+		out = append(out, ObjectDrop{Name: s.Name, SQL: "DROP SEQUENCE IF EXISTS " + qualified(s.Name)})
 	}
 	types := typeOrder(schema)
 	for i := len(types) - 1; i >= 0; i-- {
 		t := types[i]
 		if t.kind == typeDomain {
-			out = append(out, "DROP DOMAIN IF EXISTS "+qualified(t.name))
+			out = append(out, ObjectDrop{Name: t.name, SQL: "DROP DOMAIN IF EXISTS " + qualified(t.name)})
 			continue
 		}
-		out = append(out, "DROP TYPE IF EXISTS "+qualified(t.name))
+		out = append(out, ObjectDrop{Name: t.name, SQL: "DROP TYPE IF EXISTS " + qualified(t.name)})
 	}
 	return out
 }

@@ -35,11 +35,14 @@ One row per code in the catalogue, in the file's own order. Exit is only meaning
 | `plan.refused.equality_group` | plan | 12 | {table}.{column} is in a group of columns joined by foreign keys that must mask alike, and no masker fits all of them: {reason} |
 | `plan.refused.ddl_literal` | plan | 12 | {table}.{column} is not masked and its recreated DDL carries a literal that parses as personal data: {reason} |
 | `target.schema.literal_not_rewritable` | plan | 13 | {table}.{column} is masked and its recreated DDL carries a literal lazyslice cannot rewrite: {reason} |
+| `target.schema.type_literal` | plan | 13 | type {table} carries a literal in {column} that parses as personal data and cannot be rewritten: {reason} |
 | `target.schema.not_recreatable` | plan | 13 | the foreign key on {table} ({column}) into {reason} cannot be recreated in the target |
 | `extract.refused.standby_cancelled` | extract | 7 | the source cancelled the read of {table}: the snapshot conflicts with recovery on a standby (SQLSTATE {reason}); retry, or run against the primary |
 | `transform.refused.masker` | transform | 7 | masker {reason} refused a value in {table}.{column}: it is not copied through |
 | `load.target.dropping` | load | - | dropping {table} in the target |
+| `target.warn.same_cluster` | discover | - | target {database} is on the same cluster as the source: this run writes to the source's own server |
 | `load.target.quarantine_dropping` | load | - | dropping {table} in the target: the last run left personal data in it |
+| `load.target.quarantine_dropping_object` | load | - | dropping object {table} in the target: it was created by a run that left personal data behind |
 | `load.table.loaded` | load | - | {table}: {count} rows |
 | `load.refused.ddl` | load | 7 | the target refused the statement that recreates {table} ({column}): SQLSTATE {reason} |
 | `load.refused.copy` | load | 7 | the rows of {table} did not go in: SQLSTATE {reason}; the table is empty, not half loaded |
@@ -99,6 +102,8 @@ One row per code in the catalogue, in the file's own order. Exit is only meaning
 | `secret.git.absent` | transform | - | git not found — could not verify {path} is untracked |
 | `secret.file.tracked` | transform | 2 | {path} is tracked by git: {statement} |
 | `secret.refused.no_key` | transform | 5 | no masking key: {path} could not be read or written |
+| `secret.refused.symlink` | transform | 5 | {path} is a symbolic link: the masking key would be written outside the repository, where .gitignore does not reach it |
+| `secret.refused.permissive` | transform | 5 | {path} is readable by other accounts on this machine: {statement} |
 | `config.file.read` | emit | - | from {path} |
 | `config.file.written` | emit | - | wrote {path} (commit it for CI) |
 | `config.refused.where_withheld` | plan | 2 | {path} records a withheld --where predicate and this run passed none: pass {flag} again, or the slice would silently be a different one |

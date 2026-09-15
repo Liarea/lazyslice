@@ -603,3 +603,101 @@ func mustUUID(t *testing.T) string {
 	}
 	return id
 }
+
+// The 2026-09-15 red team's identity-rule-1 attack. ARCHITECTURE.md §9 rule 1
+// is a disjunction, and only the system_identifier half survives aliasing: the
+// same physical server reached under two published ports, two host spellings or
+// a pooler name normalises to a different endpoint every time. EXECUTE on
+// pg_control_system is not granted to PUBLIC, so under the SELECT-only source
+// role §9 itself recommends that half answers "" and the endpoint comparison
+// stands alone — and the red team dropped a production table through the gap.
+//
+// The source here is the container's own database under an endpoint spelling
+// that does not match (a second published port onto one server is exactly this
+// shape), with no system identifier on either side — which is what the
+// recommended role produces. The only thing left that can tell the truth is the
+// cluster identity an ordinary role can read.
+func TestGateRefusesAnAliasedSourceWithNoSystemIdentifier(t *testing.T) {
+	ctx := context.Background()
+	f := newGateFixture(ctx, t)
+
+	// The source, reached under a port the endpoint comparison will not match.
+	aliased := f.sourceRef
+	aliased.Port = f.sourceRef.Port + 1
+
+	target, err := OpenTarget(ctx, dsn.DSN(f.sourceURL))
+	if err != nil {
+		t.Fatalf("opening the target: %v", err)
+	}
+	defer target.Close()
+	target.SetSourceCluster(f.clusterID(ctx, t, f.sourceURL))
+
+	e, err := target.Gate(ctx, aliased, "", "")
+	if err != nil {
+		t.Fatalf("Gate: %v", err)
+	}
+	if e.Verdict != pipeline.Refused || e.Reason != CodeSameDatabase {
+		t.Fatalf("Verdict = %v (%s), want Refused/%s: the target is the source under a second "+
+			"endpoint spelling, and a run that passes here drops the production tables",
+			e.Verdict, e.Reason, CodeSameDatabase)
+	}
+}
+
+// The other side of the same rule: two genuinely different clusters whose
+// databases happen to share a name. That is the ordinary case — a production
+// database called `app` and a local one called `app` — and it must stay
+// eligible, or the fail-closed arm above would refuse nearly every real run
+// made with the recommended role.
+func TestGateAcceptsASameNamedDatabaseOnADifferentCluster(t *testing.T) {
+	ctx := context.Background()
+	f := newGateFixture(ctx, t)
+
+	other := testutil.Postgres(ctx, t, "")
+	_, otherRef, err := dsn.Parse(other)
+	if err != nil {
+		t.Fatalf("parsing the second container url: %v", err)
+	}
+	if otherRef.Database != f.sourceRef.Database {
+		t.Skipf("the two containers do not share a database name (%q and %q), "+
+			"so this case is not the one being tested", otherRef.Database, f.sourceRef.Database)
+	}
+
+	target, err := OpenTarget(ctx, dsn.DSN(other))
+	if err != nil {
+		t.Fatalf("opening the target: %v", err)
+	}
+	defer target.Close()
+	target.SetSourceCluster(f.clusterID(ctx, t, f.sourceURL))
+
+	// No system identifier on either side: the SELECT-only role §9 recommends.
+	e, err := target.Gate(ctx, f.sourceRef, "", "")
+	if err != nil {
+		t.Fatalf("Gate: %v", err)
+	}
+	if e.Verdict != pipeline.Eligible {
+		t.Fatalf("Verdict = %v (%s), want Eligible: a database of the same name on a different "+
+			"cluster is an ordinary target", e.Verdict, e.Reason)
+	}
+	if e.SameCluster {
+		t.Error("SameCluster = true for a database in a different container")
+	}
+}
+
+// clusterID is what internal/core reads from Source.ClusterID and hands the
+// target before every gate call.
+func (f gateFixture) clusterID(ctx context.Context, t *testing.T, connURL string) string {
+	t.Helper()
+	src, err := OpenSource(ctx, dsn.DSN(connURL))
+	if err != nil {
+		t.Fatalf("opening the source: %v", err)
+	}
+	defer src.Close()
+	id, err := src.ClusterID(ctx)
+	if err != nil {
+		t.Fatalf("reading the source cluster identity: %v", err)
+	}
+	if id == "" {
+		t.Fatal("the cluster identity is empty, so the case this test is about cannot be exercised")
+	}
+	return id
+}

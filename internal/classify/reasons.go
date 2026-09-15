@@ -40,6 +40,7 @@ const (
 	phraseURL       = "parse as URLs"
 	phraseProse     = "hold prose with dictionary names"
 	phraseJSONLeaf  = "hold personal data at a JSON leaf"
+	phraseByteaText = "hold printable text that parses as personal data"
 )
 
 // validatorPhrases is every phrase the fragment set will accept.
@@ -56,6 +57,7 @@ var validatorPhrases = []string{
 	phraseURL,
 	phraseProse,
 	phraseJSONLeaf,
+	phraseByteaText,
 }
 
 // The placeholder classes. Each is a character set, not a wildcard: a category
@@ -163,6 +165,16 @@ var fragments = []*fragment{
 		name:    "neighbour",
 		format:  "raised by the neighbouring-column rule: %s has %d columns at likely or above",
 		pattern: `raised by the neighbouring-column rule: ` + reQualified + ` has ` + reCount + ` columns at likely or above`,
+	},
+	{
+		// The 2026-09-15 red team's A2b. The ordinary neighbour fragment above
+		// is for a column that had a signal of its own; this one is for a
+		// column that had none at all, which is a different claim and has to
+		// read as one on the report.
+		name:   "neighbour_unknown",
+		format: "raised by the neighbouring-column rule: %s has %d columns at certain and nothing is known about this column's contents",
+		pattern: `raised by the neighbouring-column rule: ` + reQualified + ` has ` + reCount +
+			` columns at certain and nothing is known about this column's contents`,
 	},
 	{
 		name:    "fk_propagation",

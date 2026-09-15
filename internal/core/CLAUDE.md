@@ -114,6 +114,19 @@ each one is a deviation a reviewer should see rather than discover.
   this wrapper was not a registrar, and putting it one line earlier in `run.go`
   would have turned every run's type registration off with no compile error. A `Query` method on `internal/pg`'s writer is the proper home
   and is owed there (`internal/verify/CLAUDE.md` records the same deviation).
+- **A type name an operator typed is resolved here too** (`resolveType`,
+  `names.go`). `--allow-type-literal TYPE=REASON` is the escape from §11.1's
+  type-literal refusal (the T-REDFIX review's fourth finding), and it is
+  resolved against the source's own `Schema.Enums` and `Schema.Domains` on
+  exactly the rules `resolveTable` follows: a qualified name must exist, a bare
+  one must be unambiguous, and a name matching nothing is **exit 2** rather than
+  a stored opt-out. That is `--unmask`'s own argument applied to a type — an
+  opt-out that silently never applied looks exactly like one that did, and this
+  one suppresses a refusal whose job is keeping a person's value out of the
+  target's catalog. The resolved names travel on
+  `pipeline.PlanRequest.AllowTypeLiterals`, and `internal/plan` puts the ones
+  the schema actually carries onto `Plan.AllowedTypeLiterals`, which is what
+  `internal/verify`'s catalog pass honours.
 - **The first-run ladder runs here** (`resolveEndpoints`, T-0061). `cmd/`
   reaches no stage package, so §9's ladder is walked by the discover stage:
   `discover.Resolve` for `lazyslice` with no arguments, and for the five stage
@@ -549,3 +562,47 @@ for a refusal that was reaching people as an internal error.
   asserts `Preview`'s `PlanOnly` line in the same file — driving an actual
   sink panic through either function needs a live discover/introspect pass
   against a real source.
+
+## Decisions made for the 2026-09-15 red team
+
+- **`checkSecretFile` judges the file, not the path** (THREAT_MODEL.md T6, A15
+  and A17). `os.WriteFile` follows a symlink and `repo.Protect` applies both the
+  `.gitignore` entry and the `git ls-files --error-unmatch` check to the *link*
+  path, so `ln -s Dropbox/leaked.key lazyslice.secret` put the masking key —
+  T13's guess-confirmation oracle for every snapshot ever made with it — into a
+  cloud-synced folder while the transcript said the file had been added to
+  `.gitignore` and written. A secret path that is a symbolic link is exit 5
+  before `repo.Protect` opens anything; it is a **refusal** rather than a
+  resolve-and-protect, because following a link out of the repository would mean
+  writing the key to a path the operator did not name. And a file whose mode
+  grants group or other any bit is exit 5 naming the `chmod 600` to run: T6
+  promises "created 0600" and nothing re-checked an existing one, so a 0644 key
+  in a CI image was readable by every account under exit 0. Not a silent
+  `chmod`, because a key that has been world-readable may already have been
+  read. The check runs on both key paths and **after** the `$LAZYSLICE_SECRET`
+  branch on each, because that branch has no file.
+- **`CodeTargetSameCluster` is wired** (ARCHITECTURE.md §9 rule 1,
+  THREAT_MODEL.md T2). `internal/pg` has computed `Eligibility.SameCluster`
+  since the gate was written and **nothing here or in `internal/render` read
+  it**, so a run that wrote into a database on the source's own server said
+  nothing about where the write had landed. The gate's own test asserted the
+  boolean and never the rendered line, which is how the omission survived —
+  `TestASameClusterTargetIsWarnedAbout` asserts the line.
+- **`openTarget` hands the target the source's cluster identity** before
+  `Gate`, from `Source.ClusterID`. It is rule 1's second disjunct for a role
+  that cannot execute `pg_control_system`, which is the role §9 recommends; see
+  `internal/pg/CLAUDE.md`. A source that will not answer is not a refusal here —
+  the gate decides what an unknown identity means, and it fails closed for a
+  target carrying the source's own database name.
+- **A recovered panic names the value's type and not the value**
+  (`PanicSummary`, THREAT_MODEL.md T4). `panicError.Error` formatted the
+  recovered value with `%v`, and so did `cmd/lazyslice`'s `reportPanic`, so a
+  masker — or pgx's encoding, the phonenumbers parser, a JSON walker under one —
+  that panicked with the offending input in its message wrote a production value
+  to stderr **at any verbosity**. T4's stated control ("`event.Event` has no
+  free-form string field") is about events and does not reach the error egress,
+  which is a free-form string by construction. The value is printed only under
+  `--show-row-values-in-errors`, through `panicError.PanicValue`, and **not**
+  under `--debug`: a stack frame carries no row value, so the two flags keep
+  answering their own questions. `mask.Apply` should recover on its own side
+  too — **T-0181**, `mask/` being its own module.

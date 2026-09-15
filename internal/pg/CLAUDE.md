@@ -781,3 +781,49 @@ takes before each drop, because by then the gate's verdict is a remembered fact
 (ARCHITECTURE.md §11.2, THREAT_MODEL.md T2, both amended 2026-09-14). **Never**
 treat the gate's verdict as continuing ownership of the target, and never make
 the lease optional behind a flag: it is a T2 rail.
+
+## Rule 1 under the role §9 recommends (the 2026-09-15 red team)
+
+ARCHITECTURE.md §9 rule 1 is a disjunction over sameness, and only the
+`system_identifier` half survives **aliasing**: the same physical server reached
+under two published ports, two host spellings or a pooler name normalises to a
+different endpoint every time. `EXECUTE` on `pg_control_system` is **not granted
+to `PUBLIC`**, so under the SELECT-only source role §9 itself tells operators to
+create, `systemIdentifier` answers `""` and the endpoint comparison stands
+alone. The red team published two ports onto one production container, pointed
+`--source` at one and `--target` at the other, and the run printed "dropping
+public.customers in the target" and did it. With a superuser source the same run
+is refused `same_database`, which is what makes the gap specific to the
+recommended role.
+
+Two things closed it, and they are deliberately separate values:
+
+- **`Source.ClusterID` / `sqlClusterID`** — `pg_postmaster_start_time()` with
+  `inet_server_addr()` and `inet_server_port()`. Every one of those is
+  executable by `PUBLIC`, the start time is a microsecond timestamp (two
+  clusters starting in the same microsecond is not a case), and the address and
+  port are the *server's own view* of the connection, so two published ports
+  onto one container both report the container's own port — the aliasing the
+  endpoint comparison cannot see. `Target.SetSourceCluster` is how
+  `internal/core` hands it over, between `OpenTarget` and `Gate`, because the
+  read needs a source connection the target does not have.
+- **`clusterUnknown` fails closed.** When neither identity can be compared —
+  no system identifier on one side *and* no cluster identity — a target whose
+  `current_database()` is the source's own database name is **refused**. The
+  endpoint spelling is exactly what an alias changes, so "the endpoints differ"
+  is not evidence of anything there. In practice this arm is nearly
+  unreachable, because the cluster read succeeds for any role; the caller it
+  does catch is one that supplies neither, which is why
+  `internal/load/load_integration_test.go` now supplies what `internal/core`
+  supplies.
+
+**The cluster identity is not a fallback inside `SystemID`, and must not
+become one.** §11.2's marker binding is recorded against the system identifier,
+and a value that changes when the source cluster restarts would make the gate
+refuse a target lazyslice itself wrote on the next run.
+
+`TestGateRefusesAnAliasedSourceWithNoSystemIdentifier` and
+`TestGateAcceptsASameNamedDatabaseOnADifferentCluster` are the two directions:
+the alias is refused, and a database of the same name on a genuinely different
+cluster stays eligible — which is the ordinary case (`app` on production, `app`
+locally) and what the fail-closed arm must not take down.

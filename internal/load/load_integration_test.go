@@ -492,6 +492,20 @@ func TestLoadPagilaIntoAMarkedTarget(t *testing.T) {
 		t.Fatalf("opening the target: %v", err)
 	}
 	defer target.Close()
+	// The source's cluster identity, which internal/core reads from
+	// Source.ClusterID and hands the target before every gate call (run.go's
+	// openTarget). It is rule 1's second disjunct for a role that cannot
+	// execute pg_control_system, and without it the gate cannot tell two
+	// containers that both call their database `postgres` from one server
+	// reached under two published ports — which is the 2026-09-15 red team's
+	// identity-rule-1 attack, and which the gate now fails closed on. Supplying
+	// it here is supplying what a real run supplies; leaving it out made this
+	// test assert the marker binding through a refusal that fires before the
+	// marker is ever read.
+	target.SetSourceCluster(scalar[string](ctx, t, connect(ctx, t, sourceURL),
+		`SELECT pg_postmaster_start_time()::text || '|'
+		     || coalesce(host(inet_server_addr()), '')
+		     || '|' || coalesce(inet_server_port()::text, '')`))
 	e, err := target.Gate(ctx, sourceRef, "", "")
 	if err != nil {
 		t.Fatalf("the gate: %v", err)

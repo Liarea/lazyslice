@@ -434,3 +434,29 @@ candidate.
     `walk` (and so `rung0`) is ever reached, for the side that *is* in play;
     letting `rung0` refuse a second time over an unused field would make an
     override fail on a file it was explicitly told to ignore.
+
+## What the ladder will not pick as a target (the 2026-09-15 red team)
+
+With `--source` pointing at production and no `--target`, the ladder chose the
+production container and wrote the masked slice into its `postgres` maintenance
+database — a different database on the same cluster, which ARCHITECTURE.md §9
+rule 1 makes eligible by design — under `--yes`, exit 0, and without the
+`same cluster as source` warning §9 promises (that half was `internal/core`'s
+and is wired now, `CodeTargetSameCluster`).
+
+Two changes in `chooseTarget`, and one deliberate non-change.
+
+- **A maintenance database is never target-shaped.** `postgres`, `template0`
+  and `template1` are the databases a cluster is created with; `postgres` exists
+  so that a client has something to connect to in order to create another one.
+  Ranking it is what let the ladder land a slice there.
+- **A candidate off the source's cluster outranks one on it**, ahead of every
+  other sort key, so a genuinely separate server always wins where one is
+  reachable. `clusterKey` is `collapseKey` without the database.
+- **A same-cluster candidate is still chosen when it is the only one.** That is
+  the ordinary compose setup, rule 1 admits it, and
+  `internal/core/gate_integration_test.go`'s
+  `TestAGateRefusalEndsTheRunInsteadOfTryingTheRunnerUp` pins a run whose only
+  two target candidates are on the source's cluster. Refusing it in headless
+  mode would supersede ADR-008 §5 and rule 1 both, which is an ADR and not a
+  patch — **T-0184** carries the question.
