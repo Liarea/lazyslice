@@ -86,6 +86,27 @@ type Decision struct {
 	// Refused is non-empty when a unique column's domain is too small for the
 	// planned row count (exit 12).
 	Refused string
+	// NameMatchedNationalID reports that rules.yml's national_id name pattern
+	// (priority 75) matched this column's name -- internal/classify's own
+	// pack.matchColumn answer, carried here independent of whether the type
+	// was accepted or which category the decision went on to record (T-0187
+	// third review round, finding 1). internal/verify may not import
+	// internal/classify (internal/CLAUDE.md's import graph) and so cannot
+	// re-run the rule pack itself; this is the one bit its second net's
+	// national_id digits-family entry needs, as one of its two corroboration
+	// signals, to ask the same question about a numeric column classify
+	// decided `none` or `low`.
+	NameMatchedNationalID bool
+	// TableHasLikelyPersonalColumn reports that another column of this
+	// column's table was decided at ConfLikely or ConfCertain --
+	// internal/classify's neighbouring-column rule already counts this
+	// (neighbouringColumns's own `likely`), carried onto every decision in
+	// the table so a caller that does not re-run that rule can still ask the
+	// same question about a column decided `none` or `low` (T-0187 third
+	// review round, finding 1). It is internal/verify's second corroboration signal
+	// for the national_id digits-family entry, alongside
+	// NameMatchedNationalID above.
+	TableHasLikelyPersonalColumn bool
 }
 
 // Classification is every decision for one run.

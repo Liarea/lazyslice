@@ -10,7 +10,27 @@ the smallest schema that still fails, check that in here, and only then change
 message, and what the correct behaviour is. 010, 011, 012 and 013 are the four exceptions and say so
 in their own headers: all four came from the 2026-09-09 review's probe schemas,
 which were already the smallest schemas that fail. 014 to 017 are four more of
-the same kind, from the 2026-09-15 red team's own probe schemas.
+the same kind, from the 2026-09-15 red team's own probe schemas, and 018 to 020
+are three more again, from that red team's round two: none of the ten needed a
+new flag once national_id joined the row-scanning nets (docs/TORTURE.md's own
+T-0187 note), so what these three reduce is the round's own probe schemas
+rather than one of the ten. **021 is a sixth exception of the same kind**, from
+the review round that followed T-0187 rather than from one of the ten: the
+digits-family national_id entry T-0187 added had no check digit at all, so it
+refused an ordinary surrogate id column and an ordinary date column on the
+strength of a ratio a mod-free exclusion-range check clears almost regardless
+of what the column means; the reviewer's own probe schema is what 021 reduces.
+**022 is a seventh**, from the review round that followed that one: the first
+fix's key exemption was gated on internal/classify's own surrogate-key
+decision, which inherited classify's own miss and exempted a primary key of
+real SSNs along with it; a second reviewer's own probe is what 022 reduces.
+**023 is an eighth**, from the review round that followed 022's: a sparse
+numeric column with a fixed leading prefix is neither dense nor a date, so
+neither of 021's two fixes reaches it, and it clears the SSA's exclusion
+ranges at essentially 1.0 the same way a genuine leaked identifier column
+does; the reviewer's own probe (an account-number column and an
+invoice-number column, both ordinary) is what 023 reduces, and the fix is
+corroboration rather than a third exclusion rule.
 
 The files are loaded and run by `make torture` (`internal/invariants`'s
 `TestTortureRegressions`, behind the `integration` and `torture` build tags), so
@@ -84,6 +104,32 @@ that ARCHITECTURE.md §11.1 arm 1 ran rather than merely not refusing; this is
 what tells the two apart, the way `unique-masked:` tells "masked" from
 "copied verbatim" for 004 and 007. It is what 011 asserts.
 
+A fourth, added by **T-0187**:
+
+```
+-- not-copied: public.t.col, public.t2.col2   every source value must not
+                                             survive anywhere in the target
+```
+
+Each column it names has its distinct non-NULL source values read out and
+grepped for, byte for byte, over every cell of the whole target
+(`assertTortureColumnNotCopied`). It exists because the leak check every
+`expect: ok` regression gets automatically — "What each file asserts, beyond
+its exit code", below — only ever proves the absence of the two shapes
+`scan_test.go`'s detectors recognise, an email and a phone number; a defect
+over a third shape needs its own values checked directly rather than trusting
+a pattern that was never written to look for it. It is what 018 and 019
+assert, for the national identifier the 2026-09-15 red team's round two found
+no validator anywhere on the row path; 020, the same round's numeric-family
+half, is a refusal rather than a mask and asserts its exit code instead (see
+below). **For an array column it reads one element at a time, not the whole
+array's text rendering** (the review round that followed T-0187): 019's own
+column is `text[]`, and internal/transform masks such a column element-wise,
+so the check that would actually catch a partial failure — one element of
+several crossing unmasked — has to compare elements and not the array's
+rendered literal, which the whole-array form the check used to read could
+never reflect.
+
 ## Files
 
 | File | From | Defect |
@@ -105,6 +151,12 @@ what tells the two apart, the way `unique-masked:` tells "masked" from
 | `015-printable-bytea-in-a-table-with-no-certain-column.sql` | the 2026-09-15 red team, A4a | **a leak nothing looked at**: a `bytea` holding printable UTF-8 is skipped by the classifier before any validator runs and is outside the second net's family set, under exit 0 |
 | `016-enum-label-holds-an-email-address.sql` | the 2026-09-15 red team, A4b and A11 | personal data in the *schema*: an enum label is a DDL string literal and neither the plan-time pass nor the catalog pass read `pg_enum`, so an address and a phone number crossed under exit 0 |
 | `017-domain-default-holds-an-email-address.sql` | the 2026-09-15 red team, A12 | the 2026-09-09 finding 5 mechanism one catalog table to the left: a `DOMAIN`'s `DEFAULT` lives in `pg_type.typdefault` and was read by nothing |
+| `018-plain-ssn-in-an-unrecognised-column-name.sql` | the 2026-09-15 red team round 2, R2-02/A6 | **a leak with no obfuscation at all**: a plain hyphenated US SSN in a column called `code` — a name no rule pack pattern matches — was reported "no name or value signal" and crossed under exit 0, because national_id had no value validator on the row path |
+| `019-national-id-text-array-carrier.sql` | the 2026-09-15 red team round 2, R2-03/A7 | the same missing validator reached through the array carrier: a `text[]` of UK NI numbers reached the target verbatim, split correctly and recognised by nothing |
+| `020-ssn-stored-as-bigint.sql` | the 2026-09-15 red team round 2, R2-04/A9b | **the numeric-family half, closed as a refusal and not a mask**: a bigint column can hold no hyphen and drops a leading zero, so a dashed SSN with a leading-zero area renders as an eight-digit number and even a registered national_id validator never saw the same number twice; internal/verify's digits-family entry catches it and refuses at exit 9, `verify.refused.second_net`, since internal/classify's own narrower validator cannot mask what it cannot see. Carries a corroborating `email` column since 023 (below); its own header explains why its five values changed at the same time |
+| `021-ordinary-numeric-columns-clear-the-ssn-ratio.sql` | the T-0187 review round | **the other side of 020**: the digits-family entry 020 needed has no check digit, only the SSA's own exclusion ranges, so an ordinary surrogate bigint id column, an ordinary non-key dense business-number column and an ordinary YYYYMMDD date column all cleared its ratio and refused a run holding no personal data at all; fixed by excluding a value that is also a real calendar date directly and by exempting a column whose own values pack into a dense numeric range, read from the values rather than from internal/classify's decision |
+| `022-national-id-in-a-surrogate-key-column.sql` | the review round that followed the T-0187 round | **the cost of 021's first-draft fix**: gating the key exemption on internal/classify's own surrogate-key decision meant a primary key of real, non-dense SSNs — a shape classify's own signals find nothing in — was exempted along with the ordinary keys 021 pins, and crossed into the target verbatim; the values-based fix in 021 refuses it because the column is not dense, whatever classify decided about it being a key. Carries a corroborating `email` column since 023 (below) |
+| `023-sparse-fixed-prefix-reference-block-is-not-national-id.sql` | the review round that followed 022's | **the cost of 021's fix, the other side of the ratio**: a sparse column with a fixed leading prefix is neither dense (021's own exemption) nor a date (021's own exclusion), so an ordinary account-number or invoice-number column still cleared the ratio at essentially 1.0 and refused a run holding no personal data at all; fixed by requiring corroboration — a rules.yml national_id name-pattern hit on the column, or a certain-or-likely personal column in the same table — before the ratio is asked at all, which is also why 020 and 022 each gained a corroborating column of their own |
 
 009's header now says `ok`. It did not always: `arrayArrivesAsLiteral` in
 `internal/plan/writeback.go` was written as a stand-in for the element-wise

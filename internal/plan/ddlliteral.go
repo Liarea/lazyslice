@@ -101,12 +101,27 @@ type strongValidator struct {
 // mod-97 check, which five of pagila's own film titles do. It now requires the
 // two ISO 13616 check digits in positions three and four, which every real IBAN
 // has and an all-caps title does not.
+//
+// national_id reads textsig.ValidNationalIDStructured, not the twelve-format
+// union ValidNationalID (tracker T-0194, the T-0187 review round's finding 2):
+// six of the twelve are a mod-N sum over an otherwise unconstrained digit run
+// and clear a random string of the right length far too often for a
+// one-occurrence refusal — 25.7% of random 9-digit strings, 11.0% of 11-digit,
+// measured — so a single DEFAULT, CHECK or enum-label literal that happened to
+// be an ordinary nine-digit reference number had roughly a one-in-four chance
+// of refusing an otherwise clean plan at exit 12/13 with no ratio to weigh it
+// against. ValidNationalIDStructured is the six formats that also constrain the
+// value's shape (a dash, a letter, or (NIR) a fixed length under its own
+// mod-97 check), which is what a one-hit refusal needs; internal/verify's own
+// strong entries (catalog.go's strongCatalogHit, validators.go's text-family
+// strong entry) made the identical change in the same review round, and this
+// file was the one place still calling the union.
 var strongValidators = []strongValidator{
 	{name: string(pipeline.CatEmail), ok: textsig.ValidEmail},
 	{name: string(pipeline.CatPhone), ok: textsig.ValidPhone},
 	{name: string(pipeline.CatFinancial), ok: textsig.ValidLuhn},
 	{name: string(pipeline.CatFinancial), ok: textsig.ValidIBAN},
-	{name: string(pipeline.CatNationalID), ok: textsig.ValidNationalID},
+	{name: string(pipeline.CatNationalID), ok: textsig.ValidNationalIDStructured},
 }
 
 // strongHit is the first strong validator a literal matches, or "".

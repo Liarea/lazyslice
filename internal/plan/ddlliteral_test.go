@@ -507,3 +507,75 @@ func TestPlanningTwiceOverOneSchemaProducesOneDefault(t *testing.T) {
 		t.Fatalf("the rekeyed default is %q, want %q", got, expect)
 	}
 }
+
+// TestNationalIDStrongHitIsStructuredOnly is tracker T-0194 (the T-0187
+// review round's finding 2). strongValidators' national_id entry used to call
+// textsig.ValidNationalID, the twelve-format union: six of those formats are a
+// mod-N sum over an otherwise unconstrained digit run, and a mod-N sum clears
+// a meaningful fraction of a random string of the right length regardless of
+// what it means (measured: 25.7% of random 9-digit strings, 11.0% of
+// 11-digit) -- so an ordinary CHECK or DEFAULT literal that happened to be a
+// nine- or eleven-digit reference number had a real chance of refusing an
+// otherwise clean plan at exit 13 with no ratio to weigh it against. The
+// entry now calls textsig.ValidNationalIDStructured, the six formats that also
+// constrain the value's *shape* (a dash, a letter, or a fixed length under its
+// own mod-97 check), so neither a PESEL-valid eleven-digit literal nor a bare
+// nine-digit literal that merely clears a checksum is a hit -- and a dashed US
+// SSN, one of the structured six, still is.
+func TestNationalIDStrongHitIsStructuredOnly(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		literal string
+		refused bool
+	}{
+		{
+			// nationalid_test.go's own Polish PESEL vector: a real weighted
+			// mod-10 checksum with no shape constraint at all.
+			name:    "a PESEL-valid eleven-digit literal in a CHECK is not a hit",
+			literal: "44050612341",
+		},
+		{
+			// nationalid_test.go's own Canadian SIN vector: nine digits under
+			// the same Luhn check ValidLuhn uses, applied directly, again with
+			// no shape constraint.
+			name:    "a checksum-clearing nine-digit literal in a CHECK is not a hit",
+			literal: "123456782",
+		},
+		{
+			name:    "a dashed US SSN literal in a CHECK is still a hit",
+			literal: "078-05-1001",
+			refused: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tbl, schema := literalTable()
+			schema.Tables[0].Columns[1].Default = "" // the email column's own default is not this test's subject
+			schema.Tables[0].Columns = append(schema.Tables[0].Columns,
+				pipeline.Column{Name: "ref", TypeName: "text"})
+			schema.Tables[0].Constraints = []pipeline.Constraint{
+				{Name: "items_ref_check", Kind: 'c', Def: `CHECK (("ref" = '` + tc.literal + `'::text))`},
+			}
+			cls := masking(tbl, "email", pipeline.CatEmail, mask.MaskerEmail)
+			refCol := ref.ColumnRef{Table: tbl, Column: "ref"}
+			cls.Decisions[refCol] = pipeline.Decision{
+				Col: refCol, Category: pipeline.CatFreeText, Masker: mask.MaskerFreeText, Masked: true,
+			}
+
+			err := planLiterals(t, schema, cls, literalKey(0x44))
+			var refusal *Refusal
+			switch {
+			case tc.refused && !errors.As(err, &refusal):
+				t.Fatalf("Plan returned %v, want a *plan.Refusal", err)
+			case tc.refused && refusal.Code != CodeLiteralNotRewritable:
+				t.Fatalf("Plan refused with %s, want %s", refusal.Code, CodeLiteralNotRewritable)
+			case tc.refused && refusal.Column != "items_ref_check":
+				t.Fatalf("the refusal names %q, want the constraint it is about", refusal.Column)
+			case !tc.refused && err != nil:
+				t.Fatalf("Plan: %v: textsig.ValidNationalIDStructured must not answer for a checksum-only "+
+					"literal (T-0194)", err)
+			}
+		})
+	}
+}

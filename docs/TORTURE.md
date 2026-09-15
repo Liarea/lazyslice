@@ -34,16 +34,95 @@ removed. Both are re-cut to `expect: ok` plus a `unique-masked:` assertion that
 reads the columns out of the target, so what they pin is the masking and not
 merely the exit code.
 
-**It does not, right now.** A `make torture` run taken for T-0119 (2026-09-14,
-unrelated to this task's own change — confirmed by re-running the same
-regression with T-0119's diff stashed out) fails
-`testdata/regressions/013-json-object-key-that-parses-as-an-email.sql`: the run
-exits 9, `verify.refused.second_net`, instead of the exit 0 the fixture expects
-with the key masked. `TestTortureSchemas`, `TestTortureCatalogueMatchesTheFixtures`,
-`TestTortureImagesAreReachable` and `TestTortureNegativeControl` all still pass
-on their own, and every regression but 013 does too — the ten schemas below and
-their flag counts are unaffected and re-measured against this same run. T-0172
-tracks the fix; this line stays until it lands.
+**It did not, for a while, and does again.** A `make torture` run taken for
+T-0119 (2026-09-14) failed `testdata/regressions/013-json-object-key-that-
+parses-as-an-email.sql` at exit 9, `verify.refused.second_net`, instead of the
+exit 0 the fixture expects with the key masked; T-0172 tracked the fix and
+closed the same day. `TestTortureSchemas`, `TestTortureCatalogueMatchesTheFixtures`,
+`TestTortureImagesAreReachable` and `TestTortureNegativeControl` all passed on
+their own throughout, and every regression but 013 did too — the ten schemas
+below and their flag counts were unaffected by the window either way.
+
+**T-0187 (2026-09-15, round-2 red team) re-measured the ten against the twelve
+national-identifier validators (`internal/textsig/nationalid.go`) newly wired
+into both `internal/classify`'s ordered validators list and `internal/verify`'s
+second net.** `make torture` exits 0 with the same twenty-seven flags, the same
+nine-clean-one-refused split, and no schema needed a new one: none of the ten
+real schemas' generated data happens to carry a plain, unseparated national
+identifier in a column the rule pack's name patterns miss, which is the shape
+that would have surfaced as a new `--unmask` here. What the round found is in
+`testdata/regressions/018-plain-ssn-in-an-unrecognised-column-name.sql`,
+`019-national-id-text-array-carrier.sql` and `020-ssn-stored-as-bigint.sql`
+instead — reduced fixtures, not one of the ten, which is what "reduced to the
+smallest schema that still fails" (`testdata/regressions/README.md`) means in
+practice when the real schemas do not happen to exercise a gap.
+
+**The review round that followed T-0187 found the digits-family entry 020
+needed was itself a false-positive hazard, and a second review round found
+the first fix was two bugs at once — `make torture` still exits 0 with the
+same twenty-seven flags after both.** `ValidNationalIDDigits` has no check
+digit — the SSA's own exclusion ranges are the whole of the check — so it
+cleared ~91% of random 9-digit numbers, and (the second round's own
+measurement) effectively 100% of YYYYMMDD-shaped integer dates over any
+realistic booking range and of a dense run of assigned numbers, well over the
+ordinary 0.8 ratio: an unmasked surrogate bigint id column, an ordinary
+non-key dense business-number column, or an ordinary booking-date integer
+column, had no green path short of `--unmask`. None of the ten real schemas
+happened to surface either round's shape — the same "no schema needed a new
+flag" reading as above, for the same reason: a schema needs an *unmasked,
+ratio-scored* 8- or 9-digit numeric column with no personal data in it, and
+none of the ten's generated data produces one by chance.
+`testdata/regressions/021-ordinary-numeric-columns-clear-the-ssn-ratio.sql`
+is the first reviewer's own probe schema, reduced.
+
+**The first fix — a surrogate-key exemption read off `internal/classify`'s
+own decision, plus a ratio threshold raised above the measured rates — was
+itself wrong twice over, and the second review round's own probe
+(`testdata/regressions/022-national-id-in-a-surrogate-key-column.sql`) is
+what a third one reduces.** The 97%-of-dates figure the threshold was set
+above was itself an artefact of the range it was measured over (over any
+realistic range the true rate is 1.0), and gating the exemption on classify's
+decision meant a primary key of real SSNs — a column classify's own signals
+found nothing personal in — was exempted along with the ordinary keys the
+exemption was written for, crossing into the target verbatim at exit 0. The
+fix is now read from the column's own values during the scan rather than from
+either a ratio alone or a second read of classify's decision:
+`textsig.ValidNationalIDDigits` excludes a value that is also a real calendar
+date directly, and `internal/verify`'s second net exempts a column whose own
+values pack into a dense numeric range — a generated sequence, key or not —
+which a primary key of independently assigned SSNs is not, whatever
+`internal/classify` decided about the column being a key. 021 now pins a
+dense surrogate id column, a dense non-key business-number column and an
+all-2024-dated booking column together, none tuned to a threshold; 022 pins
+the primary key of real SSNs still refusing; and 020's own SSN-as-bigint
+column — ratio 1.0, neither a date nor dense — still refuses at exit 9 with
+every change in place.
+
+**A third review round found a shape neither of those two fixes reaches, and
+`make torture` still exits 0 with the same twenty-seven flags after this one
+too.** A *sparse* numeric column with a fixed leading prefix and no check
+digit is neither dense (`digitRange`'s own test) nor a date
+(`looksLikePlausibleDate` only ever excludes an eight-digit value), and it
+clears the SSA's exclusion ranges at essentially 1.0 regardless — the
+reviewer measured 494/500 for 500 account numbers of the form
+`100000000+rand(1e8)` and 500/500 for 500 invoice numbers of the form
+`202600000+7*rand(50000)`, and no ratio under 1.0 tells that shape apart from
+a real leaked identifier column, because assigned identifiers clear the same
+ranges at the same rate. The fix is a gate in front of the ratio rather than a
+fourth exclusion rule: the digits entry now refuses only when the column's own
+name matches `rules.yml`'s national_id pattern or a certain-or-likely personal
+column sits in the same table (`Decision.NameMatchedNationalID` and
+`Decision.TableHasLikelyPersonalColumn`, both computed by `internal/classify`
+and read by `internal/verify`'s `corroborated`, since the second package may
+not re-run the first's rule pack). Without either, the ratio is never asked at
+all. None of the ten real schemas needed a new flag for this round either, for
+the same reason as the first two: none of them carries an unmasked, sparse,
+fixed-prefix numeric column with no personal data and no name or neighbour
+signal, which is the shape that would have surfaced here as one.
+`testdata/regressions/023-sparse-fixed-prefix-reference-block-is-not-
+national-id.sql` is the reviewer's own probe, reduced; `020` and `022` both
+needed a corroborating column added to keep refusing under the new rule, and
+their own headers say why.
 
 One thing the nine clean runs do not say on their own, measured below:
 supabase-auth's classifier now catches **all fifty** of the columns the

@@ -22,16 +22,22 @@ statement allowlist this stage needs registered before `Verify` runs, as
   case-folded probe only if that's false, capped at
   `--residual-probe-cap` (THREAT_MODEL.md T4's value-egress note: a probe
   parameter can land in the source's own log).
-- The second net re-runs *all eleven of internal/classify's value validators*
+- The second net re-runs *all twelve of internal/classify's value validators*
   over the whole contents of every unmasked, non-opted-out column of a family
   this package can name, and over the string leaves of every JSON column,
-  masked or not (ARCHITECTURE.md §6 item 4). Eleven, not ten: the eleventh is
-  `textsig.ValidURL`, which `internal/classify` gained at T-0100 when
-  `textsig.LooksSecret` stopped reading a URL as a credential, and which this
-  package only gained at **T-0122** — between those two tasks a URL was a shape
-  *neither* net could see, and a profile URI that reached the target unmasked
-  passed every validator here. None of the eleven is missing now; two are
-  answered by narrower validators on purpose (the dictionary rule, below).
+  masked or not (ARCHITECTURE.md §6 item 4). Twelve, not eleven: the twelfth
+  is `national_id`, which this package gained at **T-0187** (the 2026-09-15
+  round-2 red team, below) in the same shape the eleventh — `textsig.ValidURL`
+  — already teaches: `internal/classify` gained the validator first,
+  `internal/verify` was a separate task's paths, and between the two a
+  national identifier was a shape *neither* net could see. Before that, the
+  eleventh was `textsig.ValidURL`, which `internal/classify` gained at T-0100
+  when `textsig.LooksSecret` stopped reading a URL as a credential, and which
+  this package only gained at **T-0122** — between those two tasks a URL was a
+  shape *neither* net could see, and a profile URI that reached the target
+  unmasked passed every validator here. None of the twelve is missing now;
+  two are answered by narrower validators on purpose (the dictionary rule,
+  below).
   `internal/textsig/CLAUDE.md` still describes that hole as open, because
   `internal/textsig` was outside T-0122's paths; correcting it is tracker
   **T-0126**, and the rule it teaches stands either way: a validator narrowed in
@@ -88,10 +94,11 @@ statement allowlist this stage needs registered before `Verify` runs, as
 - `reasons.go` — the fixed phrases a `Refusal.Reason` may hold.
 - `residual.go` — §6 items 1 to 3: the scan, the hit, the two probes, the cap.
 - `secondnet.go`, `validators.go` — §6 item 4: the scan and the scoring, and
-  the eleven validators attached to their categories, in eleven entries here
+  the twelve validators attached to their categories, in thirteen entries here
   (T-0136 split Luhn and IBAN back apart, then split Luhn again by family —
   strong on the character side, ratio on the digits side, its review round's
-  finding 2; only IP and MAC still share one entry). The validators and the
+  finding 2; T-0187 split national_id the same way, below; only IP and MAC
+  still share one entry). The validators and the
   name dictionary themselves are `internal/textsig`, which `internal/classify`
   imports too (T-0055).
 - `fk.go`, `counts.go`, `sample.go` — §6 item 5.
@@ -765,6 +772,254 @@ a source-changed mismatch as a pass; let a value reach a refusal, a check or an
 event; scan a masked array column that arrived as a text literal as one string,
 or let a literal this stage cannot split be anything but exit 9 naming the
 column.
+
+## The 2026-09-15 red team, round 2 (T-0187)
+
+**`national_id` joined the second net's `validators` table.** R2-01
+through R2-04 (`docs/reviews/2026-09-15-redteam/round2-still-leaking.json`,
+attacks A2, A6, A7, A9b) found that `strongCatalogHit` above already carried
+`national_id` — the note two paragraphs up — but nothing in *this file's*
+table did, so a plain SSN or NI number in a column the rule pack's name
+patterns miss reached the loaded target unmasked, was scanned by this net's
+eleven entries, and matched none of them. Three entries close it, in
+`validators.go` (the character-family half split in two by the review round
+that followed, below, so this is three entries and not the two the round
+originally landed):
+
+- `{text: true, strong: true, ok: textsig.ValidNationalIDStructured}` — the
+  six shape-constrained formats (a US SSN, a UK NINO, an Italian codice
+  fiscale, a Spanish DNI or NIE, a French NIR), at the same footing as email:
+  each also constrains the value's *shape* — a dash, a letter, or a fixed
+  length under its own mod-97 check — so none matches a bare digit run at
+  all, and any hit is one production identifier in the target, whatever the
+  ratio.
+- `{text: true, ok: textsig.ValidNationalIDChecksumOnly}` — the other six
+  (PESEL, BSN, SIN, TFN, Aadhaar's Verhoeff check, CPF), at the ordinary
+  ratio rather than `strong`: each is a mod-N sum over an otherwise
+  unconstrained digit run and clears a meaningful fraction of a random string
+  of the right length regardless of what it means (measured: 25.7% for a
+  random 9-digit string), which is not a precise enough claim for "any hit
+  fails". This is the text-family half of the split the T-0187 review round's
+  finding 2 asked for; `internal/classify/CLAUDE.md`'s own note records the
+  same split on that package's side, and why it is only a partial answer
+  there.
+- `{digits: true, minRatio: nationalIDDigitsThreshold, sequenceExempt: true,
+  ok: textsig.ValidNationalIDDigits}` — A9b's own half, mirroring T-0136's
+  Luhn text/digits split for the same reason: a numeric column drops an SSN's
+  hyphens and, when the area starts with 0, its leading digit, so the
+  structured entry's dashed regexp never matches a bigint's rendering of the
+  same number. `ValidNationalIDDigits` is the function that recovers it, and
+  it is deliberately **not** strong: an SSN carries no check digit at all, so
+  a bare nine-digit number is "SSN-shaped" about as often as a random
+  nine-digit number clears the SSA's exclusion ranges — a claim precise
+  enough for the ordinary ratio rule and far too wide for "any hit fails".
+  `ADR-010`'s numeric-family silencing never had to be touched for any of the
+  three: `rules.yml`'s `national_id` category already accepted
+  `bigint`/`integer`/`numeric` (`mask/gen_number.go`'s masker already emits
+  digits into them), so the premise that would have needed exempting was
+  already false. `minRatio` and `sequenceExempt` are the review round that
+  followed T-0187's own fix, below, and `validators.go`'s own comment on the
+  entry has the full account.
+
+**This closes a gap `internal/classify` still has, and that is the accepted
+asymmetry, not a second bug.** `internal/classify`'s own new `national_id`
+entry (its own CLAUDE.md, T-0187) calls plain `ValidNationalID` uniformly
+across every family, because that package's ordered validators list has no
+`text`/`digits` split the way this file's does — so a `bigint` column with no
+name hit is still decided `none` there and copied by `internal/transform`.
+This net's digits entry is what catches it: `testdata/regressions/020-ssn-
+stored-as-bigint.sql` runs such a column through end to end and asserts the
+refusal, `expect: exit 9 verify.refused.second_net`, the same "refusal instead
+of a mask" shape the dictionary rule and the Luhn split above already argue
+for. Fixtures 018 and 019 pin the character-family half (a plain SSN in a
+column called `code`, a `text[]` of NI numbers), each `expect: ok` with a
+`not-copied:` key naming the column — the generic leak check every `expect:
+ok` regression gets, `assertTortureNoLiteralSurvives`, only ever proves the
+absence of the two shapes `internal/invariants/scan_test.go`'s own detectors
+recognise, an email and a phone number, and a national identifier is neither
+(`internal/invariants/CLAUDE.md`'s own note on the point).
+
+## The review round that followed T-0187: the digits entry's ratio was not the answer, and neither was the first fix
+
+`ValidNationalIDDigits` has no check digit at all — the SSA's own exclusion
+ranges are the whole of the check — so a first review round (finding 1) found
+it clearing an ordinary surrogate `id bigint PRIMARY KEY` and an ordinary
+`booked_on integer` booking-date column at rates well over `validatorThreshold`
+(0.8): a threshold raised to `nationalIDDigitsThreshold` (0.97) plus a skip
+for a column `internal/classify` had already decided is a surrogate key
+(`surrogateExempt`/`netMode.surrogateKey`, now removed) was the first fix, and
+`testdata/regressions/021-ordinary-numeric-columns-clear-the-ssn-ratio.sql`
+was its guard.
+
+**A second review round found both halves of that fix were themselves wrong,
+and the two findings are the two paragraphs below.**
+
+**Finding 1: 0.97 was set above a figure that was itself an artefact.** The
+entry's own comment justified the threshold with "~97% of YYYYMMDD integer
+dates", averaged over 1950-2050 — a range where the only dates the padded SSA
+check rejects are the two whose two-digit year suffix is itself the excluded
+group `00` (1900, 2000). Over any realistic booking range the true clear rate
+is 1.0, and the reviewer measured `ValidNationalIDDigits` at 1000/1000 on
+YYYYMMDD dates across 2022-2024 and 10000/10000 on a sequential 9-digit
+non-key business number (`400100000+i`) — the second of which the
+decision-based exemption could never reach at all, because nothing about that
+column's name or values ever told `internal/classify` it was a key.
+
+**Finding 3: the decision-based exemption was also a regression, and a
+serious one.** `surrogateKeyExempt` read `internal/classify`'s own "preserved
+verbatim" reason, which classify grants a key column precisely when *its own*
+name and value signals found nothing personal in it — the same miss this net
+exists to catch a second time. Gating the digits entry's skip on that
+decision meant a `citizen_no bigint PRIMARY KEY` (or an FK to one) holding
+real SSNs, with a column name `rules.yml` misses, was exempted by classify,
+skipped by this net, and crossed into the target verbatim at exit 0 — a
+column that refused correctly before the first fix's exemption existed.
+
+**The fix is now in three parts, and none of them is this entry's ratio
+alone, or a second read of classify's decision.**
+
+- `textsig.ValidNationalIDDigits` excludes a value that is also a real
+  YYYYMMDD calendar date directly (`looksLikePlausibleDate`,
+  `internal/textsig/nationalid.go`), rather than leaving it to this ratio: a
+  column of real dates now scores zero hits from this entry regardless of the
+  threshold, which is what actually answers finding 1's date case.
+  `internal/textsig/CLAUDE.md` records the function on that package's side.
+- `digitRange` (`secondnet.go`) reads the column's own values during the
+  scan — never `internal/classify`'s decision — and marks a column *dense*
+  when its values pack into a numeric range within a factor of two of their
+  own count: a surrogate key's own values (`id`, `id+1`, `id+2`, ...) and an
+  ordinary dense business-number block with no key at all are both dense:
+  finding 1's own sequential-business-number case is answered the same way
+  its own key case now is, by one signal read from the values rather than
+  two, one of them a decision. A primary key of independently assigned SSNs
+  is not dense — real identifiers are drawn from a space many orders of
+  magnitude wider than the sample — so finding 3's attack still refuses,
+  whatever `internal/classify` decided about the column being a key.
+  `validator.sequenceExempt` (`validators.go`) is the field the digits entry
+  alone sets; `netMode.surrogateKey` and `surrogateKeyExempt` are gone, not
+  narrowed, because reading classify's decision at all was the mechanism
+  finding 3 exploited.
+  - **Order-independent on purpose.** `scanSQL` (`sql.go`) is `SELECT column
+    FROM table` with no `ORDER BY`, so the order this net sees a column's
+    values in is Postgres's own heap scan order and not a signal this net
+    may read a *sequence* out of. `digitRange` asks only the *span* the
+    observed values cover against how many there are, which answers the same
+    question whatever order the scan delivers them in.
+- `nationalIDDigitsThreshold` stays, at the same 0.97, for what is left once
+  the two structural exclusions above run: a column that is neither a date
+  nor a dense sequence and still clears the SSA exclusion ranges on more than
+  97% of its values. It is no longer asked to carry the date case or the
+  sequence case on its own, which is what made it insufficient the first
+  time.
+
+**The regressions.** `021` is rewritten rather than re-tuned: its own header
+used to carry one hand-placed non-2024 row to hold the date column's ratio
+just under the old threshold, which pinned the threshold's *number* rather
+than the property that a column of real dates and a column of a real
+generated sequence must both pass regardless of how many rows they hold or
+what values they take. The rewritten file holds a `booked_on` column whose
+every value is a 2024 date and a second, non-key `business_ref bigint` column
+whose values are a dense run with no key or uniqueness constraint on it at
+all, both `expect: ok`, so the fix cannot be satisfied by fixture
+construction. `022-national-id-in-a-surrogate-key-column.sql` is finding 3's
+own regression: a `bigint PRIMARY KEY` holding real-shaped, non-dense SSNs
+chosen to also fail every checksum-only format, so `internal/classify` grants
+its ordinary key exemption and this net is the only control left,
+`expect: exit 9 verify.refused.second_net` — no `not-copied:` key, the same as
+020, because the harness never checks an optional key on a non-zero exit
+(`testdata/regressions/README.md`). `020-ssn-stored-as-bigint.sql` (a genuine
+SSN, neither a date nor dense, ratio 1.0) is unaffected and still refuses.
+
+## The review round that followed that one: no ratio is precise enough, so the entry now needs corroboration
+
+**A third review round found a shape neither `nationalIDDigitsThreshold` nor
+`digitRange` answers: a *sparse* numeric column with a fixed leading prefix.**
+It is neither dense (`digitRange.dense()` needs the observed span within twice
+the row count, and a sparse column's span is many orders of magnitude wider)
+nor a date (`looksLikePlausibleDate` only ever excludes an eight-digit value),
+so nothing the second review round's fix added reaches it, and it clears the
+SSA's exclusion ranges at essentially 1.0 the same way a genuine leaked
+identifier column does — the reviewer measured 494/500 for 500 account
+numbers of the form `100000000+rand(1e8)` and 500/500 for 500 invoice numbers
+of the form `202600000+7*rand(50000)`. An ordinary `account_no` or
+`invoice_no` column of either shape refused an already-loaded run at exit 9
+with no green path short of `--unmask`, and no threshold under 1.0 fixes it:
+an assigned identifier and a fixed-prefix reference number clear the same
+ranges at the same rate, so there is no ratio that admits one and still
+refuses the other.
+
+**The fix is not a fourth exclusion rule; it is a gate in front of the ratio.**
+`validator.requiresCorroboration` (`validators.go`) is true for the digits
+entry alone, and `netColumn` (`secondnet.go`) skips the entry entirely —
+never scores it, whatever the ratio — for a column `corroborated` answers
+false for:
+
+```go
+func (s *state) corroborated(col ref.ColumnRef) bool {
+	d, has := s.decision(col)
+	return has && (d.NameMatchedNationalID || d.TableHasLikelyPersonalColumn)
+}
+```
+
+Both signals are read off `pipeline.Decision`, never re-derived: this package
+may not import `internal/classify` (`internal/CLAUDE.md`'s import graph), and
+a second copy of the rule pack's name-matching or of the neighbouring-column
+rule's own count here would be exactly the drift this file's own opening
+paragraphs already warn a hand copy of the classifier's validators risks.
+
+- **`Decision.NameMatchedNationalID`** is `rules.yml`'s `national_id` name
+  pattern (priority 75) matching the column's own name, set in
+  `internal/classify/classify.go`'s `decide` independent of whether the type
+  was accepted or which category the decision went on to record. In practice
+  this can answer true for the digits entry only on a column `internal/classify`
+  leaves unmasked for some other reason — a surrogate key or FK column, whose
+  `neverMask` exemption is granted *before* a name hit would otherwise raise
+  it to `possible` — because an ordinary bigint column with an accepted-type
+  name hit is masked outright by `decide` and never reaches this net at all.
+- **`Decision.TableHasLikelyPersonalColumn`** is `internal/classify`'s own
+  neighbouring-column rule's `likely` count (`neighbouringColumns`), carried
+  onto every decision in the table rather than only the ones that pass gets
+  raised — "another column of this table was decided at `likely` or
+  `certain`" — computed with the column's own confidence excluded, since a
+  digits-family column that reaches this net is never itself at `likely` or
+  above (it would be masked and excluded before `netMode` runs).
+
+**Without either, the ratio is never asked at all** — not scored against
+`nationalIDDigitsThreshold`, not checked for denseness or a date, skipped
+outright — which is the direction that has to fail safe here: a column that
+*is* corroborated still goes through every check the second review round
+added, at the same thresholds, so a genuine leak beside a proven personal
+column or under a matched name is caught exactly as before.
+
+**Picking a corroborating column for a fixture is not free, and 020 is the
+proof.** `TableHasLikelyPersonalColumn` is computed by the *same* pass
+(`neighbouringColumns`) that already raises an ordinary `low`-confidence
+column to `possible` beside a `likely` one — an existing rule, unrelated to
+this finding — so adding a personal column to a table that already has a
+digits-family column sitting at `low` (not `none`) masks that column outright
+via the pre-existing rule instead of corroborating it. `020-ssn-stored-as-
+bigint.sql`'s original five values were exactly that trap: three of the five
+coincidentally cleared one of `internal/classify`'s own checksum-only formats
+(BSN's 11-proef, or Australia's TFN) on the bare digit string, which put
+`taxref` at `low` even though the file's own prose always said `none`. Adding
+`email` for corroboration would have raised `taxref` to `possible` and masked
+it, defeating the regression a different way than the one it exists to catch.
+The file's own header now explains this and its five values are replaced with
+ones confirmed, by direct computation, to clear none of
+`internal/classify`'s national_id formats.
+
+**The regressions.** `023-sparse-fixed-prefix-reference-block-is-not-
+national-id.sql` is the finding's own probe, reduced: a ten-row `account_no
+bigint` column with a fixed leading digit and eight further digits spread
+across a range many orders of magnitude wider than the row count (span
+about 92.5 million against ten rows, nowhere near `digitRange`'s
+within-twice-the-count test), all ten clearing the SSA's exclusion ranges,
+`expect: ok`, in a table with no other column and a name matching no
+`rules.yml` pattern. `020` and `022` both needed a corroborating `email`
+column added for the same reason `023` exists — each `taxref` and
+`citizen_no` had neither signal on its own — and both still refuse on the
+same ratio, dense-range and date logic as before, now that the table gives
+them a `likely` neighbour to read.
 
 ## Which sequence to read (T-TORTURE)
 

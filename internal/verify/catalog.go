@@ -360,6 +360,19 @@ func (s *state) allowedTypeLiteral(o catalogObject) bool {
 // (ddlliteral.go); the two packages may not import each other, and this is the
 // second of the two copies internal/verify/CLAUDE.md records.
 //
+// The national_id branch is textsig.ValidNationalIDStructured, not
+// textsig.ValidNationalID, as of the T-0187 review round (finding 2):
+// ValidNationalID is the twelve-format union, six of which are a mod-N sum
+// over an otherwise unconstrained digit run and clear a random string of the
+// right length far too often for a one-occurrence refusal (9.1% of random
+// 8-digit strings, 25.7% of 9-digit, 11.0% of 11-digit, measured) —
+// ValidNationalIDStructured is the six that also constrain the value's shape
+// (a dash, a letter, or a fixed length under its own mod-97 check) and is
+// precise enough for exactly this use; textsig.go's own comment on both
+// functions has the reasoning. internal/plan/ddlliteral.go's strongHit calls
+// the identical function now (tracker T-0194), so the two passes are back to
+// "the same set" for this category, as every other branch below already was.
+//
 // A pattern operand is never a hit, for the reason internal/plan's strongHit
 // gives: CHECK (email LIKE '%@%.%') carries a shape and not a value, and
 // net/mail reads that shape as a valid address.
@@ -377,7 +390,7 @@ func strongCatalogHit(lit pipeline.Literal) string {
 		return string(pipeline.CatFinancial)
 	case textsig.ValidIBAN(s):
 		return string(pipeline.CatFinancial)
-	case textsig.ValidNationalID(s):
+	case textsig.ValidNationalIDStructured(s):
 		return string(pipeline.CatNationalID)
 	}
 	return ""

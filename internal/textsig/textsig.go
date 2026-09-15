@@ -346,8 +346,9 @@ func TwoLetterCode(s string) bool {
 	return true
 }
 
-// ssnRE and ninoRE are the two national identifier formats with a pattern
-// precise enough to decide a value rather than guess at one.
+// ssnRE and ninoRE are two of the twelve national identifier formats with a
+// pattern precise enough to decide a value rather than guess at one; the other
+// ten are nationalid.go's (T-0187).
 //
 // They exist for internal/plan's and internal/verify's DDL-literal passes (the
 // 2026-09-15 red team's A20). Those passes run only the validators that are a
@@ -360,7 +361,7 @@ func TwoLetterCode(s string) bool {
 // and a UK National Insurance number are neither.
 var (
 	// ssnRE is the US Social Security number's shape. RE2 has no negative
-	// lookahead, so the excluded ranges are checked in validNationalID below.
+	// lookahead, so the excluded ranges are checked by validSSN (nationalid.go).
 	ssnRE = regexp.MustCompile(`\A(\d{3})-(\d{2})-(\d{4})\z`)
 	// ninoRE is the UK National Insurance number: two prefix letters, six
 	// digits, one suffix letter from A-D. The excluded prefix letters (D, F, I,
@@ -373,31 +374,169 @@ var (
 var ninoDisallowed = map[string]bool{"BG": true, "GB": true, "NK": true, "KN": true, "TN": true, "NT": true, "ZZ": true}
 
 // ValidNationalID reports whether a value is a national identifier in one of
-// the two formats above, in any spelling Candidates yields — so a number
-// written with interleaved spaces is still the number it spells.
+// twelve formats, in any spelling Candidates yields — so a number written with
+// interleaved spaces is still the number it spells.
 //
-// It is deliberately two formats and not a family of them. A validator here
-// answers about one value with a parse; a loose "looks like an identifier"
-// rule over SQL text would refuse ordinary schemas, which is the failure mode
-// the DDL passes' narrow validator set exists to avoid.
+// Twelve, not the two this function held until T-0187 (the 2026-09-15 round-2
+// red team, R2-01 through R2-04): a US Social Security number, a UK National
+// Insurance number, a Polish PESEL, an Italian codice fiscale, a Dutch BSN, a
+// Spanish DNI or NIE, a French NIR, a Brazilian CPF, a Canadian SIN, an Indian
+// Aadhaar number and an Australian TFN — every one of them nationalid.go's.
+//
+// It is the union of ValidNationalIDStructured and ValidNationalIDChecksumOnly
+// and nothing else, and it is deliberately **not** precise enough to decide a
+// single occurrence (the T-0187 review round, finding 2, docs/reviews/): six of
+// the twelve also constrain the value's shape and are what
+// ValidNationalIDStructured alone answers for; the other six (PESEL, BSN, SIN,
+// TFN, Aadhaar and CPF) are a mod-N sum, or two of them for CPF, over an
+// otherwise unconstrained digit run, and a mod-N sum answers "yes" to a
+// meaningful fraction of a random string of the right length regardless of
+// what it means (measured: 9.1% of random 8-digit strings, 25.7% of 9-digit,
+// 11.0% of 11-digit). A caller that refuses a whole run, or fails a whole
+// column, on any single hit from this union — internal/plan's and
+// internal/verify's DDL-literal passes did until this review, and
+// internal/verify's own text-family net entry did too — refuses an ordinary
+// schema roughly one time in four whenever it holds a nine-digit column of
+// reference codes, order numbers or dates. Call ValidNationalIDStructured for
+// that use instead; this union stays what it always was, for
+// ValidNationalIDDigits's own fallback (below) and for the twelve-format
+// positive coverage in nationalid_test.go, where every value is a *real*
+// check-rule vector for its own format and a false accept is a checksum bug,
+// not a shape false positive.
 func ValidNationalID(s string) bool { return anyCandidate(s, validNationalID) }
 
 func validNationalID(s string) bool {
+	return validNationalIDStructured(s) || validNationalIDChecksumOnly(s)
+}
+
+// ValidNationalIDStructured is the six of the twelve formats whose check rule
+// also constrains the value's *shape*, not only its checksum: a US SSN (the
+// dashes are required), a UK NINO (a letter prefix and suffix from a fixed
+// set), an Italian codice fiscale (six letters, a month letter, sixteen fixed
+// positions), a Spanish DNI or NIE (a trailing check letter against a fixed
+// table) and a French NIR (a fixed fifteen-character layout with a sex digit
+// and a month code, itself checked against a mod-97 sum). The other six —
+// PESEL, BSN, SIN, TFN, Aadhaar's Verhoeff check and CPF's own two check
+// digits — are excluded here for the reason ValidNationalID's own comment
+// gives: a mod-N sum over an unconstrained digit run is not a shape, so it
+// clears at a rate a length guess would, not at the rate a checksum implies.
+//
+// This is the narrow function precise enough for a single-occurrence refusal
+// (the T-0187 review round, finding 2): none of its six formats matches a bare
+// run of digits at all — every one needs a dash, a letter, or (NIR) fifteen
+// characters under its own mod-97 check, which a random string of that length
+// clears about once in ninety-seven — so internal/verify/catalog.go's
+// strongCatalogHit calls this instead of the twelve-format union,
+// internal/verify/validators.go's own strong text-family entry does too, and
+// internal/plan/ddlliteral.go's strongHit does as well (tracker T-0194): the
+// review's own measurement (25.7% of random 9-digit strings, 11.0% of
+// 11-digit clearing a checksum-only format) is why the union was not
+// precise enough for a one-occurrence refusal on any of the three passes.
+func ValidNationalIDStructured(s string) bool { return anyCandidate(s, validNationalIDStructured) }
+
+func validNationalIDStructured(s string) bool {
 	s = strings.TrimSpace(s)
-	if m := ssnRE.FindStringSubmatch(s); m != nil {
-		// The Social Security Administration's own exclusions: no area 000,
-		// 666 or 900-999, no group 00, no serial 0000. Without them every
-		// three-two-four digit grouping in a schema — a version triple, a date
-		// range, a part number — would be a national identifier.
-		area, group, serial := m[1], m[2], m[3]
-		switch {
-		case area == "000" || area == "666" || area[0] == '9':
-		case group == "00":
-		case serial == "0000":
-		default:
+	if m := ssnRE.FindStringSubmatch(s); m != nil && validSSN(m[1], m[2], m[3]) {
+		return true
+	}
+	up := strings.ToUpper(strings.ReplaceAll(s, " ", ""))
+	if ninoRE.MatchString(up) && !ninoDisallowed[up[:2]] {
+		return true
+	}
+	switch {
+	case validCodiceFiscale(s):
+		return true
+	case validDNI(s):
+		return true
+	case validNIE(s):
+		return true
+	case validNIR(up):
+		return true
+	}
+	return false
+}
+
+// ValidNationalIDChecksumOnly is the other six of the twelve: PESEL, BSN, SIN,
+// TFN, Aadhaar's Verhoeff check and CPF's own two check digits, none of which
+// constrains anything about the value beyond its length and a weighted sum
+// (CPF's is two weighted sums, which is why its own random-string acceptance
+// is far below the other five's — see nationalid.go's validCPF — but it is
+// grouped here rather than with ValidNationalIDStructured because it still has
+// no shape constraint at all, only a digit run and a checksum, the same
+// category of evidence as the other five and not the category a dash or a
+// letter table is). It is what a *ratio* over a whole column may still decide
+// — internal/verify/validators.go's own non-strong text-family entry — and
+// what nothing may decide on one occurrence: the T-0187 review round's own
+// measurement is 9.1% of random 8-digit strings, 25.7% of 9-digit and 11.0% of
+// 11-digit, none of which a one-hit refusal can tell apart from a real leak.
+func ValidNationalIDChecksumOnly(s string) bool { return anyCandidate(s, validNationalIDChecksumOnly) }
+
+func validNationalIDChecksumOnly(s string) bool {
+	s = strings.TrimSpace(s)
+	switch {
+	case validPESEL(s):
+		return true
+	case validBSN(s):
+		return true
+	case validCPF(s):
+		return true
+	case validSIN(s):
+		return true
+	case validAadhaar(s):
+		return true
+	case validTFN(s):
+		return true
+	}
+	return false
+}
+
+// ValidNationalIDDigits reports whether a value is a national identifier
+// rendered without its format's usual separators — the shape a numeric
+// (bigint/integer/numeric) column produces, which cannot hold a hyphen and
+// silently drops a leading zero (T-0187, red team round 2's A9b).
+// "078-05-1001" stored as a bigint renders as the eight-digit "78051001", and
+// ValidNationalID's SSN branch requires the dashes, so it never sees the same
+// number twice.
+//
+// It is a separate function from ValidNationalID and is never read by
+// Candidates, by design: internal/verify/catalog.go's and
+// internal/plan/ddlliteral.go's DDL-literal passes both call
+// ValidNationalIDStructured directly on SQL text (the T-0187 review round,
+// finding 2, and tracker T-0194) and must never gain this recall either. An
+// SSN has no check digit at all, so a bare nine-digit number is "SSN-shaped"
+// about as often as a random nine-digit number clears the SSA's exclusion
+// ranges — precise enough for a
+// *ratio* over a whole numeric column (internal/classify's and
+// internal/verify's digits: true entries, mirroring Luhn's own text/digits
+// split, T-0136) and far too wide for a one-occurrence refusal, which is why
+// the DDL-literal passes keep calling a Candidates-free function and not this
+// one.
+//
+// A digit string of another length still reaches ValidNationalID unchanged —
+// PESEL, BSN, CPF, SIN, Aadhaar and TFN carry their own checksum and need no
+// separator in the first place, so the zero-pad recovery below is SSN's alone.
+//
+// The eight-digit branch skips its own zero-padded SSA check for a value that
+// is also a real YYYYMMDD calendar date (looksLikePlausibleDate,
+// nationalid.go, T-0187 second review round finding 1): the forced leading
+// zero the padding writes means that check clears an ordinary date at a rate
+// close to 1.0 over any realistic range, which is not a meaningful signal.
+// The other checksum-only formats reachable through the fallback are
+// unaffected — none of them shares SSN's padding failure.
+func ValidNationalIDDigits(s string) bool {
+	s = strings.TrimSpace(s)
+	if !allDigits(s) {
+		return validNationalID(s)
+	}
+	switch len(s) {
+	case 8:
+		if !looksLikePlausibleDate(s) && validSSN("0"+s[:2], s[2:4], s[4:8]) {
+			return true
+		}
+	case 9:
+		if validSSN(s[:3], s[3:5], s[5:9]) {
 			return true
 		}
 	}
-	up := strings.ToUpper(strings.ReplaceAll(s, " ", ""))
-	return ninoRE.MatchString(up) && !ninoDisallowed[up[:2]]
+	return validNationalID(s)
 }

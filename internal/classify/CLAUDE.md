@@ -813,6 +813,95 @@ recall 1.000 after them, against 0.70's floor.
   existing: an address written `grace.hopper AT realcorp DOT example` is now an
   address to `bestSignal` and to `internal/verify`'s second net in one change.
 
+## The 2026-09-15 red team, round 2 (T-0187)
+
+**`national_id` joined the ordered `validators` list.** R2-01 through R2-03
+(attacks A2, A6, A7 in
+`docs/reviews/2026-09-15-redteam/round2-still-leaking.json`) were the same
+finding three ways: `textsig.ValidNationalID` was correct and recognised every
+attack value, but no entry in this file's `validators` list ever called it, so
+a plain SSN in a column called `code` — a name no `rules.yml` pattern matches,
+in a table with no other personal column for the neighbouring-column rule to
+key on — reached `decide` with the reason `no name or value signal` and was
+copied verbatim under exit 0. The fix is one entry, `{pipeline.CatNationalID,
+phraseNationalID, true, ...textsig.ValidNationalID}`, at the same `strong`
+footing as email: every one of the twelve formats `internal/textsig` now
+recognises (nationalid.go, T-0187) is a checksum or an issuing authority's own
+exclusion range, the same class of precise parse. Nothing about `decide`'s
+scoring changed — the entry runs through the same generic loop every other
+validator does, gated by the same `silencedByType` accepted-types check, and
+`rules.yml`'s `national_id` category already accepted every family
+(`text`/`varchar`/`bpchar`/`citext`/`bigint`/`integer`/`numeric`) the fix
+needed, so ADR-010's numeric-family silencing never had to be touched.
+
+**What this package still cannot reach, and why that is the accepted
+asymmetry and not a second bug.** R2-04 (A9b) planted the same SSN stored as
+`bigint`: a numeric column can hold no hyphen and drops a leading zero, so
+`078-05-1001` renders as the eight-digit `78051001`, and
+`textsig.ValidNationalID`'s dashed regexp — the only validator this package's
+`national_id` entry calls — never matches it, whatever spelling
+`anyCandidate` offers. `internal/textsig.ValidNationalIDDigits` recovers that
+padding, and it is deliberately *not* wired into this package's
+`validators` list: this file's own generic loop applies one `ok` function
+across every family uniformly, with no `text`/`digits` split the way
+`internal/verify/validators.go`'s does, so there is no way to scope the wider,
+ratio-only-safe function to numeric columns alone without either widening
+recall on *every* family (an eight-digit code in a `text` column would also
+validate) or adding that split here, which is a wider change than this task's
+brief asked for. So `taxref bigint` with no name hit still decides `none` here
+and is copied — the same "refusal instead of a mask" shape
+`internal/verify/CLAUDE.md`'s T-0136 notes already accept for a `bigint`
+column with a Luhn minority hit: `internal/verify`'s second net (its own
+`digits: true`, non-strong, ratio-scored `national_id` entry, mirroring
+Luhn's text/digits split) is what catches the value on the family this
+package's entry cannot reach, refusing the already-loaded target at exit 9
+rather than leaving a silent leak. `testdata/regressions/020-ssn-stored-as-
+bigint.sql` is the regression that pins the refusal.
+
+## The T-0187 review round: national_id split by evidence quality, partially (2026-09-15)
+
+The review that followed T-0187 (finding 2) found the entry above still
+calling `textsig.ValidNationalID` — the twelve-format union — uniformly at
+`strong`, the same shape `internal/verify/validators.go`'s own national_id
+entry had before that file's three-way split. `validators` (above) now
+carries two entries instead of one: `textsig.ValidNationalIDStructured` (the
+six shape-constrained formats — a US SSN, a UK NINO, an Italian codice
+fiscale, a Spanish DNI or NIE, a French NIR) at `strong`, and
+`textsig.ValidNationalIDChecksumOnly` (PESEL, BSN, SIN, TFN, Aadhaar's
+Verhoeff check, CPF — a mod-N sum over an otherwise unconstrained digit run,
+clearing 9%-26% of a random string of the right length by chance) at the
+ordinary ratio.
+
+**What the split closes.** `bestSignal`'s `sig.strongHit` (T-0136, finding 7)
+masks a *proven* column outright as `free_text` at `ConfPossible` on a single
+hit from a `strong` validator, anywhere in the sample, with no neighbouring
+column needed. With the union at `strong`, an ordinary business-key or
+reference-code column could be masked that way on one coincidental
+checksum-only hit — the exposure the split closes: only the six
+shape-constrained formats can set `sig.strongHit` now, so a bare checksum
+coincidence no longer masks a column by itself.
+
+**What it does not close, and why that is T-0195 and not a second bug.**
+`sig.weak` (`bestSignal`) is set by ratio alone —
+`proven && ratio >= weakThreshold` — and never reads `v.strong`, so a business
+key whose values clear a checksum-only format at or above `weakThreshold`
+(0.5) still records `national_id` at `low`, and the neighbouring-column rule
+can still raise that to `possible`/masked beside a `likely` personal column in
+the same table. That is finding 2's own "consequence (1)", and it needs
+either a per-validator type-family gate this package does not have (the way
+`rules.yml`'s `accepts:` gates a *name* hit, not a value hit) or a materially
+higher within-column threshold scoped to this one entry — both recall-
+affecting scoring changes that this file's own rule says need a T1 review and
+a `TestPagilaPrecisionAndRecall` measurement, not a quiet edit riding on an
+unrelated task. **T-0195** carries it; this paragraph is the deferral pinned
+here as well as in the tracker, per the review round's own request.
+
+This package also still has no `text`/`digits` split the way
+`internal/verify/validators.go`'s does (`internal/textsig/CLAUDE.md`'s own
+note on the point), so an SSN stored as `bigint` with no name hit is still
+`none` here — `internal/verify`'s digits-family entry is what catches it
+instead, at exit 9 rather than a mask. T-0195 owes that split too.
+
 ## A rejected name hit never leaves a column worse off than no name (T-TORTURE)
 
 `decide`'s `hasName && !nameAccepted` branch used to record `low` and stop, and
@@ -830,3 +919,63 @@ signal has to be at least as safe as the branch with no signal at all.** The
 `sig.refused` branch below is the same shape with a value signal instead of a
 name, and it has not been measured against a real schema; if one turns up, it
 gets the same treatment.
+
+## Two decision fields carried for internal/verify (T-0187 third review round, finding 1)
+
+`internal/verify`'s digits-family national_id entry (a numeric column, ratio
+scored, no check digit — `internal/verify/CLAUDE.md` has the full account) can
+no longer refuse on ratio alone: a sparse column with a fixed leading prefix
+clears the SSA's exclusion ranges at essentially 1.0 the same way a genuine
+leaked identifier column does, so the entry now refuses only with
+corroboration. `internal/verify` may not import this package or re-run
+`rules.yml`'s patterns or the neighbouring-column rule itself
+(`internal/CLAUDE.md`'s import graph, and this package's own "no rule pack
+elsewhere" argument run in reverse), so this package carries the two signals
+on `pipeline.Decision` instead of leaving `internal/verify` to guess at them a
+second, drifting way:
+
+- **`Decision.NameMatchedNationalID`** is `hit.Category ==
+  pipeline.CatNationalID` from `decide`'s own `st.pack.matchColumn`, recorded
+  right after the match and independent of `nameAccepted` or of which branch
+  the switch below it takes — a plain fact about the column's name, not about
+  what the decision did with it. It is deliberately **not** gated on
+  acceptance: `internal/verify`'s digits family is exactly `rules.yml`'s
+  `national_id` accepts list (`bigint`/`integer`/`numeric`), so a name hit on
+  an accepted numeric column is already masked by one of the branches above
+  and never reaches this net's digits entry at all — the field can answer
+  true in practice only for a column `markNeverMasked` exempts regardless of
+  confidence (a surrogate key or an FK column), because that exemption is
+  granted *after* `decide` has already run. This is stated rather than
+  papered over: the signal exists for the case it can reach, not for a wider
+  promise about ordinary columns.
+- **`Decision.TableHasLikelyPersonalColumn`** is `neighbouringColumns`'s own
+  `likely` count (pass 3, above), carried onto *every* column of the table —
+  not only the ones the pass goes on to raise — with the column's own
+  confidence excluded from the count: "another column of this table was
+  decided at `likely` or `certain`". It costs nothing extra to compute: the
+  count already exists per table before the raise loop runs, and this is one
+  more assignment inside the same loop.
+
+**Neither field changes what this package masks.** Both are read-only
+metadata about a decision this package already made, computed after `decide`
+and `markNeverMasked` have run for the column in question (`base`, then
+`neighbouringColumns`), so setting them cannot move `Masked`, `Confidence` or
+`Category` for any column — a change here that could would need the T1 review
+this file's own top rule requires, and neither of these does one.
+
+**A trap for the next fixture that adds a corroborating column: check the
+digits-family column's own baseline confidence first.**
+`neighbouringColumns`'s pre-existing raise (pass 3's first arm, unrelated to
+this finding) promotes any column sitting at exactly `low` to `possible`
+— masked — the moment the table gains a `likely` column, whatever put it at
+`low`. A digits-family column whose bare digit string happens to clear one of
+this package's own checksum-only national_id formats (a coincidence, not a
+leak) is at `low` already, and adding a personal neighbour for
+`TableHasLikelyPersonalColumn` corroboration then masks it outright instead
+of corroborating it — `testdata/regressions/020-ssn-stored-as-bigint.sql`'s
+original five values were exactly that trap (three of five coincidentally
+cleared BSN's or Australia's TFN's checksum on the bare digit string), and its
+own header and `internal/verify/CLAUDE.md`'s matching note explain how the
+replacement values were chosen: confirmed, by direct computation against
+`ValidNationalIDStructured` and `ValidNationalIDChecksumOnly`, to clear none
+of this package's twelve formats.
