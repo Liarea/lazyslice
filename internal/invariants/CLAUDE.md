@@ -94,6 +94,12 @@ is output under test and not one of our types.
   A yml holding nothing but a `columns:` map would otherwise pass, and the
   first person to commit it and run on a clean checkout gets a different
   snapshot.
+- **`make torture`'s guard list is incomplete.** `TORTURE_TESTS` in the
+  repo-root Makefile lists the `--- PASS:` lines it greps for, and it does not
+  name `TestTortureNegativeControl` — the one test whose whole job is proving
+  the I4 comparison can fail, and so the one most worth guarding against a
+  silent rename or deletion. Filed as **T-0171**; the Makefile is outside this
+  package's paths.
 - **I4's fingerprint has two halves, and the second is not about rows.** An
   index created to make an extract tractable and left behind takes locks,
   consumes disk and outlives the run, and it changes no row of any ordinary
