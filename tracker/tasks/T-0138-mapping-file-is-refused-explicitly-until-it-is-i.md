@@ -3,12 +3,12 @@ id: T-0138
 title: "mapping_file is refused explicitly until it is implemented; ADR-012 records the deferral"
 epic: E5
 phase: 5
-status: open
+status: done
 owner: sonnet
 created: 2026-09-14
-started: ""
-closed: ""
-outcome: ""
+started: 2026-09-14
+closed: 2026-09-14
+outcome: done
 ---
 
 # T-0138 · mapping_file is refused explicitly until it is implemented; ADR-012 records the deferral
@@ -25,6 +25,10 @@ internal/pipeline/config.go:81 reads mapping_file, emit round-trips it (internal
 
 - 2026-09-14 created
 
+- 2026-09-14 started
+
+- 2026-09-14 closed: done
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+went well: mapping_file is exit 2 at read with a two-step remedy, emit never writes it, ADR-012 proposed, unique refusal names two escapes (99e3fe2, one fix round) | went badly: first landing's remedy named only flags, which cannot clear a refusal driven by file content; ADR cited a stale line number and a merge test that does not exist (low, to fix before the ADR freezes) | change next time: write the exact remedy text first, verify every line reference in an ADR against the checkout

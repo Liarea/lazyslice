@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -57,18 +58,31 @@ const residualBitsPerCell = 29
 // A run holds the source snapshot from the start of introspect to the end of
 // extract, releases it, loads, verifies, then emits. Stage transitions are
 // events, so the transcript in CONCEPT.md is the event stream rendered as lines.
-func Run(ctx context.Context, req Request, sink event.Sink) (*pipeline.Report, error) {
+func Run(ctx context.Context, req Request, sink event.Sink) (report *pipeline.Report, err error) {
 	if sink == nil {
 		sink = event.Discard
 	}
 	ch := newEventChannel(sink)
 	r := &run{req: normalise(req), sink: ch}
 	defer func() {
+		// Checked, and reported, before ch.close(): a sink panic is recovered
+		// on the drain goroutine (eventChannel's own recover) rather than left
+		// to crash the process, and if execute otherwise succeeded that panic
+		// is the only thing wrong with the run and must still turn it into a
+		// failure, not a silent green one (2026-09-14 review of T-FAILUX,
+		// finding 1). r.report sends the Error event through r.sink, which is
+		// ch — doing that ahead of ch.close() is what lets the event still
+		// reach the sink at all, rather than the closed channel silently
+		// dropping it (see eventChannel.Send's doc).
+		if perr := ch.panicked(); perr != nil && err == nil {
+			err = asStop(perr)
+			r.report(err)
+		}
 		r.close(ctx)
 		ch.close()
 	}()
 
-	report, err := r.execute(ctx)
+	report, err = r.execute(ctx)
 	if err != nil {
 		r.report(err)
 	}
@@ -87,7 +101,7 @@ func Run(ctx context.Context, req Request, sink event.Sink) (*pipeline.Report, e
 // other use of it in the tree. There is no second definition: a summary that
 // printed a hash computed some other way would be a hash nothing else agrees
 // with, and section 11.2's binding is exactly a comparison of two of them.
-func Introspect(ctx context.Context, req Request, sink event.Sink) (*pipeline.SchemaSummary, error) {
+func Introspect(ctx context.Context, req Request, sink event.Sink) (summary *pipeline.SchemaSummary, err error) {
 	if sink == nil {
 		sink = event.Discard
 	}
@@ -95,19 +109,28 @@ func Introspect(ctx context.Context, req Request, sink event.Sink) (*pipeline.Sc
 	r := &run{req: normalise(req), sink: ch}
 	r.req.Mode = ModeIntrospect
 	defer func() {
+		// Same promotion as Run's defer, and for the same reason: a panic in a
+		// caller-supplied sink is recovered on the drain goroutine, and without
+		// this it is simply never reported — introspect returns its summary and
+		// nil error, exit 0, whatever the sink's panic actually was (2026-09-14
+		// review of T-FAILUX, finding 2).
+		if perr := ch.panicked(); perr != nil && err == nil {
+			err = asStop(perr)
+			r.report(err)
+		}
 		r.close(ctx)
 		ch.close()
 	}()
 
-	if err := r.readConfig(); err != nil {
+	if err = r.readConfig(); err != nil {
 		r.report(err)
 		return nil, err
 	}
-	if err := r.discover(ctx); err != nil {
+	if err = r.discover(ctx); err != nil {
 		r.report(err)
 		return nil, err
 	}
-	if err := r.introspectStage(ctx); err != nil {
+	if err = r.introspectStage(ctx); err != nil {
 		r.report(err)
 		return nil, err
 	}
@@ -130,7 +153,7 @@ func Introspect(ctx context.Context, req Request, sink event.Sink) (*pipeline.Sc
 // --plan on the request it was given and runs the same stages through the same
 // run struct, stopping where PlanOnly stops, which is before the target is
 // written.
-func Preview(ctx context.Context, req Request, sink event.Sink) (*Reviewed, error) {
+func Preview(ctx context.Context, req Request, sink event.Sink) (reviewed *Reviewed, err error) {
 	if sink == nil {
 		sink = event.Discard
 	}
@@ -140,11 +163,20 @@ func Preview(ctx context.Context, req Request, sink event.Sink) (*Reviewed, erro
 	// the pass that writes a target whatever request it is handed.
 	r.req.PlanOnly = true
 	defer func() {
+		// Same promotion as Run's defer, and for the same reason: a panic in a
+		// caller-supplied sink is recovered on the drain goroutine, and without
+		// this it is simply never reported — preview returns its Reviewed and
+		// nil error, exit 0, whatever the sink's panic actually was (2026-09-14
+		// review of T-FAILUX, finding 2).
+		if perr := ch.panicked(); perr != nil && err == nil {
+			err = asStop(perr)
+			r.report(err)
+		}
 		r.close(ctx)
 		ch.close()
 	}()
 
-	if _, err := r.execute(ctx); err != nil {
+	if _, err = r.execute(ctx); err != nil {
 		r.report(err)
 		return nil, err
 	}
@@ -252,6 +284,36 @@ type run struct {
 	key    mask.Key
 	keyFP  string
 	unmask map[ref.ColumnRef]string
+
+	// extractDone and transformDone are move's own join channels, kept here
+	// rather than as move's local variables so that close can join them too.
+	// move's ordinary joins (<-r.extractDone, <-r.transformDone near the end of
+	// move) are ordinary statements a panic skips; without this, a panic
+	// unwinding out of move left close free to release the snapshot and close
+	// the target pools while extract or transform was still running against
+	// them (2026-09-14 review of T-FAILUX, finding 2). Both are nil except
+	// between the point move starts the goroutines and the point it joins them
+	// — normally, that is entirely within move, and close's own join is a
+	// no-op; only a panic in between leaves one or both non-nil for close to
+	// wait on.
+	extractDone   chan error
+	transformDone chan error
+
+	// abortStages cancels the pipeline context that both extract's extractCtx
+	// and transform's masked-send select are derived from, so that close can
+	// unblock the stage goroutines on the panic-unwind path (2026-09-14 review
+	// of T-FAILUX, finding 1). A panic in load.Load, on the main goroutine,
+	// unwinds through move and runs its `defer cancelExtract(nil)`, which
+	// unblocks extract — but transform's `select { case masked <- out: case
+	// <-ctx.Done(): }` was selecting on Run's outer ctx, never cancelled by
+	// that defer, so with batchBuffer at 2 transform fills masked within two
+	// batches and blocks forever, and close's own joins on extractDone and
+	// transformDone then block forever too. close calls abortStages before
+	// those joins so transform's select always has somewhere to unblock to;
+	// nil until move sets it, and safe to call more than once (a no-op on the
+	// ordinary path, where move's own defer already cancelled the same
+	// context).
+	abortStages context.CancelFunc
 }
 
 // normalise fills the fields a caller may have left at zero with section 3's
@@ -1446,29 +1508,72 @@ func (r *run) move(ctx context.Context) (*pipeline.Report, error) {
 		exempt:   smallDomainColumns(r.cls),
 	}
 
+	// pipelineCtx is what both stage goroutines below select on to stop: extract
+	// through extractCtx (a child of it, for the cause-carrying reason below) and
+	// transform directly, in its masked-send select. r.abortStages lets close
+	// cancel it on the panic-unwind path, where move's own defers below still
+	// run (cancelExtract) but move's ordinary joins do not — see abortStages's
+	// doc (2026-09-14 review of T-FAILUX, finding 1).
+	pipelineCtx, cancelPipeline := context.WithCancelCause(ctx)
+	defer cancelPipeline(nil)
+	r.abortStages = func() { cancelPipeline(nil) }
+
 	// WithCancelCause and not WithCancel: transform cancels extract when a masker
 	// refuses a value, and extract then returns a bare context.Canceled. Without
 	// the cause there is no way to tell that cancellation from a Ctrl-C, so the
 	// masking refusal — the one error that says a value could not be masked —
 	// was discarded and the run reported "interrupted", exit 130.
-	extractCtx, cancelExtract := context.WithCancelCause(ctx)
+	extractCtx, cancelExtract := context.WithCancelCause(pipelineCtx)
 	defer cancelExtract(nil)
 
 	raw := make(chan pipeline.RowBatch, batchBuffer)
 	masked := make(chan pipeline.RowBatch, batchBuffer)
 
 	r.start(event.Extract)
-	extractDone := make(chan error, 1)
+	r.extractDone = make(chan error, 1)
 	go func() {
+		// Recovered here, not left to guardedExecute: that recover only wraps
+		// root.ExecuteContext on the main goroutine, and extract is the
+		// pipeline's own reader of production rows — a panic in it must become
+		// an error on this goroutine's own done channel, the same as any other
+		// extract failure, rather than an unredacted stack trace straight to
+		// stderr whatever --debug says (2026-09-14 review of T-FAILUX, finding
+		// 1). extract.Extract's own `defer close(out)` still runs during the
+		// unwind, before this recover, so raw closes either way and transform
+		// is never left ranging over a channel nobody will close.
+		defer func() {
+			if v := recover(); v != nil {
+				r.releaseSnapshot(ctx)
+				r.extractDone <- panicError{val: v, stack: debug.Stack()}
+			}
+		}()
 		extractErr := extract.New(r.schema).Extract(extractCtx, r.reader, r.plan, raw)
 		r.releaseSnapshot(ctx)
-		extractDone <- extractErr
+		r.extractDone <- extractErr
 	}()
 
 	r.start(event.Transform)
-	transformDone := make(chan error, 1)
+	r.transformDone = make(chan error, 1)
 	go func() {
 		defer close(masked)
+		// Recovered for the same reason as extract's goroutine above: transform
+		// is where masking runs, the most panic-prone code in the tree (every
+		// masker in internal/transform, operating on whatever the source
+		// actually holds). The recover is its own defer, run before
+		// `defer close(masked)` above (LIFO), so a recovered panic still closes
+		// masked like an ordinary return would.
+		defer func() {
+			if v := recover(); v != nil {
+				perr := panicError{val: v, stack: debug.Stack()}
+				// A recovered panic leaves the `for b := range raw` loop below
+				// without draining it, so extract must be told to stop or its
+				// next send blocks forever and move() never receives extractDone
+				// (2026-09-14 review of T-FAILUX, finding 4). cancelExtract
+				// unblocks extract's send select; extract then closes raw.
+				cancelExtract(perr)
+				r.transformDone <- perr
+			}
+		}()
 		var failure error
 		for b := range raw {
 			if failure != nil {
@@ -1482,17 +1587,19 @@ func (r *run) move(ctx context.Context) (*pipeline.Report, error) {
 			}
 			select {
 			case masked <- out:
-			case <-ctx.Done():
-				failure = ctx.Err()
+			case <-pipelineCtx.Done():
+				failure = pipelineCtx.Err()
 			}
 		}
-		transformDone <- failure
+		r.transformDone <- failure
 	}()
 
 	r.start(event.Load)
 	lr, loadErr := load.New(r.loadRun(), r.sink).Load(ctx, writer, r.plan, r.schema, masked)
-	extractErr := <-extractDone
-	transformErr := <-transformDone
+	extractErr := <-r.extractDone
+	r.extractDone = nil
+	transformErr := <-r.transformDone
+	r.transformDone = nil
 	r.done(event.Extract)
 	r.done(event.Transform)
 	r.done(event.Load)
@@ -1948,6 +2055,27 @@ func (r *run) releaseSnapshot(ctx context.Context) {
 
 // close gives every connection back, whichever way the run ended.
 func (r *run) close(ctx context.Context) {
+	// Cancel the pipeline context before joining move's stage goroutines: on the
+	// panic-unwind path move's own defers still ran (cancelExtract), but that
+	// only ever unblocked extract, never transform's masked-send select — see
+	// abortStages's doc. Nil until move sets it, and a no-op to call when move
+	// already returned normally (its own deferred cancelPipeline got there
+	// first).
+	if r.abortStages != nil {
+		r.abortStages()
+	}
+	// Join move's stage goroutines before anything below runs, in case a panic
+	// unwound out of move before its own joins did (see extractDone's doc).
+	// Normally move has already read both and set them back to nil, so this is
+	// two nil checks and nothing else.
+	if r.extractDone != nil {
+		<-r.extractDone
+		r.extractDone = nil
+	}
+	if r.transformDone != nil {
+		<-r.transformDone
+		r.transformDone = nil
+	}
 	r.releaseSnapshot(ctx)
 	// The lease is given up before the pool it lives on is closed, and last of
 	// the target's business: it is held "until the marker is finished"

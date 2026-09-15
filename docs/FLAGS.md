@@ -71,7 +71,7 @@ One row per flag registered on the command tree, grouped as `--help` groups them
 
 | Flag | Type | Default | Description |
 |---|---|---|---|
-| `--debug` | bool | - | Stack traces and the statement trace on error |
+| `--debug` | bool | - | Stack traces on error, panics included; the underlying driver error |
 | `--json` | bool | - | NDJSON events on stdout |
 | `--tui` | bool | - | Enter the reasons and plan screens |
 

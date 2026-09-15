@@ -1,8 +1,8 @@
 ---
 id: T-0172
 title: "testdata/regressions/013-json-object-key-that-parses-as-an-email.sql fails make torture on main"
-epic: E9
-phase: ""
+epic: E5
+phase: 5
 status: open
 owner: ""
 created: 2026-09-14
@@ -24,6 +24,8 @@ Pre-existing failure on main (confirmed by stashing T-0119's changes and re-runn
 ## Log
 
 - 2026-09-14 created
+
+- 2026-09-14 moved to E5 phase 5
 
 ## Post-mortem
 

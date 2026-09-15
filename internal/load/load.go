@@ -25,6 +25,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"time"
 
 	"github.com/Liarea/lazyslice/internal/event"
@@ -768,11 +769,38 @@ func (l loader) begin(ctx context.Context, w pipeline.Writer, b pipeline.RowBatc
 	}
 	cols := append([]string(nil), b.Cols...)
 	go func() {
+		// Recovered here, not left to guardedExecute: that recover only wraps
+		// root.ExecuteContext on the main goroutine, and CopyFrom is fed
+		// arbitrary masked production data over a driver library this package
+		// does not control. A panic in it must become an error on this
+		// goroutine's own result channel, the same as any other copy failure,
+		// rather than an unredacted stack trace straight to stderr whatever
+		// --debug says (2026-09-14 review of T-FAILUX, finding 1). tc.send and
+		// tc.wait already select on tc.done, so a result that arrives this way
+		// is read exactly like a normal one.
+		defer func() {
+			if v := recover(); v != nil {
+				tc.done <- copyResult{err: copyPanicError{val: v, stack: debug.Stack()}}
+			}
+		}()
 		n, err := tx.CopyFrom(ctx, tc.table, cols, tc.rows)
 		tc.done <- copyResult{n: n, err: err}
 	}()
 	return tc, nil
 }
+
+// copyPanicError is a panic recovered off CopyFrom's own goroutine, converted
+// into an ordinary error so it can travel the same Refusal path every other
+// copy failure does. Its Stack method is picked up structurally by
+// cmd/lazyslice's --debug reporting (errors.As against an unexported
+// interface), the same as internal/core's own panicError.
+type copyPanicError struct {
+	val   any
+	stack []byte
+}
+
+func (p copyPanicError) Error() string { return fmt.Sprintf("panic: %v", p.val) }
+func (p copyPanicError) Stack() []byte { return p.stack }
 
 func (tc *tableCopy) send(ctx context.Context, row []any) error {
 	select {

@@ -1092,15 +1092,6 @@
   message: "{provenance} is not a whole postgres:// URI and was not used: {reason}"
   args: [provenance, reason]
 
-# Rung 4 (stopped containers) and provisioning are phase 5 (ARCHITECTURE.md
-# §14). The count is printed so that a developer whose database is stopped is
-# told why it is not on the ladder.
-- code: discover.rung.not_implemented
-  kind: info
-  stage: discover
-  message: "{provenance}: {count} found, not in this build — pass {flag}"
-  args: [provenance, count, flag]
-
 - code: discover.source.chosen
   kind: decision
   stage: discover
@@ -1120,18 +1111,6 @@
   stage: discover
   exit: 4
   message: "no local postgres found to load into: pass {flag}"
-  args: [flag]
-
-# The not-implemented path ARCHITECTURE.md §14 leaves for provisioning:
-# --create-target lands here rather than on a silent no-op or a connection
-# string that does not connect. {flag} is --target, the flag that names a
-# database today, and never --create-target: telling an operator to pass the
-# flag they just passed is not a next step.
-- code: target.refused.not_implemented
-  kind: error
-  stage: discover
-  exit: 4
-  message: "starting a target container is not in this build: pass {flag} naming a database to load into"
   args: [flag]
 
 # ADR-008 §3: --create-target against a docker endpoint that is not local, or
