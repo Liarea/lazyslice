@@ -46,7 +46,7 @@ Work runs in parallel only when it touches disjoint directories. The six pipelin
 
 ## Commit discipline
 
-While a workflow that commits is running, the orchestrator never runs `git add -A`. It stages the exact paths it changed (`git add tracker/ docs/RUNBOOK.md`) so an agent's half-written files are not swept into an unrelated commit. In parallel steps only the orchestrator commits, once, after the batch, so every task's commit is attributable. Observed failure, 2026-09-05: two tracker commits absorbed the invariants suite mid-task.
+Every commit that changes behaviour carries a body of release-note bullets under a `stage: title (T-id)` headline (Gareth, 2026-09-16: one-line ticket references were unusable for release notes); `.claude/skills/lazyslice-commit` is the format, `implement.js` writes it from the developer's `changelog` field, and `make relnotes` generates the notes between two refs. While a workflow that commits is running, the orchestrator never runs `git add -A`. It stages the exact paths it changed (`git add tracker/ docs/RUNBOOK.md`) so an agent's half-written files are not swept into an unrelated commit. In parallel steps only the orchestrator commits, once, after the batch, so every task's commit is attributable. Observed failure, 2026-09-05: two tracker commits absorbed the invariants suite mid-task.
 
 ## Context discipline
 

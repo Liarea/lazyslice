@@ -38,7 +38,7 @@ LDFLAGS := -s -w \
 	-X main.commit=$(COMMIT) \
 	-X main.date=$(DATE)
 
-.PHONY: all build test lint integration torture vet-tagged forbidden unsafe-flags spdx fmt check tools clean help docs docs-check vulncheck bench bench-compare
+.PHONY: all build test lint integration torture vet-tagged forbidden unsafe-flags spdx fmt check tools clean help docs docs-check vulncheck bench relnotes bench-compare
 
 ## build: compile the binary into bin/
 build:
@@ -544,3 +544,12 @@ clean:
 ## help: list the targets
 help:
 	@grep -E '^## ' $(MAKEFILE_LIST) | sed 's/^## //'
+
+## relnotes: release notes from the commit bodies between two refs (FROM exclusive, TO
+## inclusive), grouped by the headline's stage prefix. Every task commit carries
+## bullets written for this (docs/OPERATING_MODEL.md "Commit discipline"), so the
+## release workflow hands goreleaser this file instead of a list of subjects.
+FROM ?= $(shell git describe --tags --abbrev=0 HEAD^ 2>/dev/null || git rev-list --max-parents=0 HEAD)
+TO ?= HEAD
+relnotes:
+	@python3 tools/relnotes/relnotes.py $(FROM) $(TO)
