@@ -7,7 +7,7 @@
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
-| E5 Hardening | 5 | 12 | 1 | 71 | 0 | 0 |
+| E5 Hardening | 5 | 11 | 1 | 72 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
 | E9 Later | later | 34 | 0 | 26 | 4 | 0 |
 
@@ -53,7 +53,6 @@
 - T-0184 [open] E5 · Should a headless run auto-select a target on the source's own cluster? ()
 - T-0185 [open] E9 · ARCHITECTURE.md does not know about --allow-type-literal ()
 - T-0186 [open] E5 · --allow-type-literal is not recorded in lazyslice.yml ()
-- T-0188 [open] E5 · Multilingual given-name and surname lists in textsig, sourced under CC0, so a non-English name in a column with no name rule is recognised (sonnet)
 - T-0189 [open] E5 · Catalog literals: every validator over string literals in CHECK, domain, enum and generated expressions; pattern operands detected but not rewritten; plan reads partial-index predicates (sonnet)
 - T-0190 [open] E5 · Cluster identity does not depend on the transport: sqlClusterID uses values that are the same for every session on the cluster (opus)
 - T-0191 [open] E5 · mask.Apply has a post-condition and a recover; a masker error message never reaches the operator with the value in it (opus)
@@ -69,6 +68,7 @@
 - T-0177 [done] E5 · Record real ubuntu-latest bench baseline and flip bench job to blocking → done
 - T-0179 [done] E5 · Bench CI gate compares head against its parent on the same runner; absolute baseline becomes a catastrophic floor → done
 - T-0187 [done] E5 · National-identifier validators with checksums in textsig; classify and the second net treat them as strong; a digits-family SSN shape under the ratio rule → done
+- T-0188 [done] E5 · Multilingual given-name and surname lists in textsig, sourced under CC0, so a non-English name in a column with no name rule is recognised → done
 - T-0193 [done] E9 · THREAT_MODEL.md T1: national_id is now a row-path control, not only DDL-literal → done
 - T-0194 [done] E9 · internal/plan/ddlliteral.go: strongHit's national_id entry should call the narrower textsig.ValidNationalIDStructured → done
 - T-0029 [cancelled] E9 · Before going public: git-crypt the AI-specific paths and rewrite pre-encryption history → cancelled
@@ -88,4 +88,3 @@
 - T-0138 [done] E5 · mapping_file is refused explicitly until it is implemented; ADR-012 records the deferral → done
 - T-0139 [done] E5 · Torture suite fingerprints the source before the run, with a negative control → done
 - T-0140 [done] E5 · CI runs the torture suite on main and the release workflow requires a green CI run for the tagged commit → done
-- T-0141 [done] E5 · README.md and SECURITY.md no longer claim every stage is a no-op → done
