@@ -3,12 +3,12 @@ id: T-0187
 title: "National-identifier validators with checksums in textsig; classify and the second net treat them as strong; a digits-family SSN shape under the ratio rule"
 epic: E5
 phase: 5
-status: open
+status: done
 owner: sonnet
 created: 2026-09-15
-started: ""
-closed: ""
-outcome: ""
+started: 2026-09-15
+closed: 2026-09-15
+outcome: done
 ---
 
 # T-0187 · National-identifier validators with checksums in textsig; classify and the second net treat them as strong; a digits-family SSN shape under the ratio rule
@@ -25,6 +25,10 @@ Red team 2026-09-15 round 2 items R2-01, R2-02, R2-03, R2-04 in docs/reviews/202
 
 - 2026-09-15 created
 
+- 2026-09-15 started
+
+- 2026-09-15 closed: done
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+went well: twelve national-identifier formats with real check rules, split by evidence quality after review; the reviewer measured false-positive rates over 100k samples instead of trusting comments, which is the review that mattered; six regressions 018 to 023 | went badly: three review rounds (two in the workflow, one by hand): the first cut accepted 26 percent of random nine-digit strings and would have refused ordinary id columns; a usage-window cut killed the first fix round; the by-hand agent twice yielded to its own background test run instead of reading it | change next time: any validator brief states the false-positive budget as a number and a test that measures it over generated data, before the first line of code

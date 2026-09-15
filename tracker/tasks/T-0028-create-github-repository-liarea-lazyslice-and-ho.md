@@ -3,12 +3,12 @@ id: T-0028
 title: "Create GitHub repository Liarea/lazyslice and homebrew-tap, push main, add HOMEBREW_TAP_TOKEN secret"
 epic: E3
 phase: 3
-status: open
+status: done
 owner: human
 created: 2026-09-05
-started: ""
-closed: ""
-outcome: ""
+started: 2026-09-15
+closed: 2026-09-15
+outcome: done
 ---
 
 # T-0028 · Create GitHub repository Liarea/lazyslice and homebrew-tap, push main, add HOMEBREW_TAP_TOKEN secret
@@ -25,10 +25,14 @@ git remote origin set; CI runs on push; HOMEBREW_TAP_TOKEN set on Liarea/lazysli
 
 - 2026-09-05 created
 
-- 2026-09-05 2026-09-05: repo created by Gareth, origin added (ssh), main pushed. Remaining: Liarea/homebrew-tap repo and HOMEBREW_TAP_TOKEN secret; repo is private, so a public brew install needs it public or the cask will point at inaccessible assets.
+- 2026-09-05 2026-09-05: repo created by the maintainer, origin added (ssh), main pushed. Remaining: Liarea/homebrew-tap repo and HOMEBREW_TAP_TOKEN secret; repo is private, so a public brew install needs it public or the cask will point at inaccessible assets.
 
-- 2026-09-05 2026-09-05: homebrew-tap created (public), HOMEBREW_TAP_TOKEN set by Gareth. Remaining: make the repo public before the first installable tag; decide git-crypt then.
+- 2026-09-05 2026-09-05: homebrew-tap created (public), HOMEBREW_TAP_TOKEN set by the maintainer. Remaining: make the repo public before the first installable tag; decide git-crypt then.
+
+- 2026-09-15 started
+
+- 2026-09-15 closed: done
 
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+went well: repository, tap and HOMEBREW_TAP_TOKEN all done by the maintainer on 2026-09-05 and 2026-09-06; closed late by the orchestrator | change next time: close human tasks the day they happen

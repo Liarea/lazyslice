@@ -93,8 +93,29 @@ in the same change.**
 
 **Test.** `go test ./internal/textsig/...`. `textsig_test.go` holds T-0100's
 rule in both directions — a URL is a URL and is not a secret, and the two secret
-shapes stay secrets — and that is the whole of this package's own suite. The
-rest of its behaviour is pinned where the decisions are made: the classifier's
+shapes stay secrets. `nationalid_test.go` (T-0187) is the twelve formats' own
+suite: one positive and one negative check-rule vector per format
+(`TestValidNationalIDTwelveFormats`); a set of fixed ordinary-shape vectors
+against the whole union, `ValidNationalID`, including a sequential surrogate
+id, a YYYYMMDD date and an order code, each confirmed by direct computation to
+fail every checksum-only format a bare digit run of its length can reach
+(`TestValidNationalIDRejectsOrdinaryShapes`); a generated-population *rate*
+assertion against `ValidNationalIDStructured` — the function
+`internal/verify/catalog.go` and `internal/verify/validators.go`'s strong
+entry actually call for a single-occurrence refusal — over random digit runs
+at NIR's own fifteen-digit length (bounded near its ~1-in-97 mod-97 rate) and
+at 8/9/11/12 digits (must never match, no dash or letter present)
+(`TestValidNationalIDStructuredPrecisionOverRandomDigitRuns`, T-0187 review
+round finding 4: the version of `TestValidNationalIDRejectsOrdinaryShapes`
+that shipped with T-0187 asserted a precision claim from one hand-picked
+literal, "123456789", annotated "happens to fail every checksum" — true of
+that string and untrue of 25.7% of random 9-digit strings, so a stub that
+rejected only that literal would have passed); and the digits-only recovery
+both ways (`TestValidNationalIDDigitsRecoversTheDroppedLeadingZero` —
+`ValidNationalIDDigits` recovers a bigint's dropped leading zero,
+`ValidNationalID` itself must not). That and `textsig_test.go` are the whole of
+this package's own suite. The rest of its behaviour is pinned where the
+decisions are made: the classifier's
 precision and recall suite (`TestPagilaPrecisionAndRecall`,
 `TestFiftyNamesFromThreeSchemas` in `internal/classify`, which is now 64 names
 from four schemas and keeps its name) and the second net's thresholds in
@@ -155,12 +176,92 @@ one digit actually *spelled*, at least `minMixedDigits` digits, and at least
 carries the prose cases that must stay negative, "Room 4 at the end of the hall"
 among them — every field of it is short, and it has no spelled digit.
 
-**`ValidNationalID`, and it is exactly two formats.** A US Social Security
+**`ValidNationalID`, and it was exactly two formats.** A US Social Security
 number and a UK National Insurance number, both strict patterns with the issuing
 authority's own exclusions. They exist for the DDL-literal passes, which run
 only the validators that are a parse. A wider "looks like an identifier" rule
 would refuse ordinary schemas, which is the failure mode that set of validators
 is narrow to avoid.
+
+## T-0187 (2026-09-15, round-2 red team): ten more formats, and the row path finally calls it
+
+`ValidNationalID` was correct and answered `true` for every value the round-2
+red team's R2-01 through R2-04 planted (docs/reviews/2026-09-15-redteam/round2-
+still-leaking.json, attempts A2, A6, A7, A9b) — the bug was that nothing on the
+row-scanning path ever called it at all. `internal/classify`'s ordered
+validators list had no `CatNationalID` entry, and `internal/verify`'s second
+net had none either, so a plain SSN in a column called `code`, a UK NI number
+in a `text[]`, and an SSN stored as `bigint` all crossed into the target
+verbatim under exit 0, reported "no name or value signal" — the row-path half
+of THREAT_MODEL.md T1's national_id note never having existed, where the note
+itself only ever described the two DDL-literal passes. Both entries are wired
+now: `internal/classify/classify.go`'s `validators` list gains `CatNationalID`
+at the same `strong` footing as email, and `internal/verify/validators.go`
+gains two — a `text: true, strong: true` entry mirroring email's, and a
+`digits: true` entry (below) mirroring Luhn's own text/digits split (T-0136).
+**Owed:** THREAT_MODEL.md T1 still reads as if national_id were a DDL-only
+control; correcting it is tracker **T-0193**, filed rather than edited here
+because THREAT_MODEL.md is outside this task's paths.
+
+`nationalid.go` is where the other ten formats live, and `ValidNationalID`
+dispatches to all twelve: US SSN, UK NINO (both already here), Polish PESEL
+(a weighted mod-10 checksum), Italian codice fiscale (the CIN check character,
+mod 26 over the first fifteen), Dutch BSN (the "11-proef" weighted sum),
+Spanish DNI and NIE (an eight-digit number, or a letter-prefixed one, mod 23
+against a fixed letter table), French NIR (the thirteen-digit number mod 97),
+Brazilian CPF (two weighted check digits), Canadian SIN (the same Luhn check
+digit `ValidLuhn` uses, applied directly because Luhn's own twelve-digit floor
+excludes a nine-digit SIN), Indian Aadhaar (the Verhoeff checksum, which
+catches every single-digit substitution a mod-11 check would not) and
+Australian TFN (a weighted mod-11 sum). Every one is a real check rule and
+never a length guess — the same requirement `rules.yml`'s comment on the
+national_id name pattern makes of the *name* half, applied to the value half
+that was missing for every abbreviation the pattern already carried (`pesel`,
+`codice_fiscale`, `bsn`, `dni`, `cpf`, `aadhaar`, `nir` were already there).
+`allSameDigit` excludes a run of one repeated digit from every weighted-sum
+format (PESEL, BSN, SIN, TFN, and CPF's own pre-existing guard): each of those
+checksums is linear in the digits, so an all-zero run clears every one of them
+by construction, which is precise about nothing.
+
+**`ValidNationalIDDigits` is the A9b half, and it is deliberately not read by
+`Candidates`.** A9b's own SSN, stored as `bigint`, never reached
+`ValidNationalID` at all: a numeric column can hold no hyphen and silently
+drops a leading zero, so `078-05-1001` renders as the eight-digit `78051001`,
+which the dashed regexp does not match regardless of how many candidate
+spellings `anyCandidate` offers it. `ValidNationalIDDigits` is a second,
+separate function — zero-pad an eight-digit run to nine and apply the SSA's
+own exclusions directly, then fall back to `validNationalID` for every other
+digit length, which is what lets PESEL, BSN, SIN, TFN, CPF and Aadhaar (none
+of which ever had a separator to lose) validate through the same function with
+no special case. It is read only by `internal/classify`'s and
+`internal/verify`'s digits-family entries, never by `Candidates` and never by
+`ValidNationalID` itself: an SSN carries no check digit at all, so a bare
+nine-digit number is "SSN-shaped" about as often as a random nine-digit number
+clears the exclusion ranges (nearly always), which is precise enough for a
+*ratio* over a whole numeric column and would refuse an ordinary schema on one
+occurrence if the DDL-literal passes' `ValidNationalID` ever gained it —
+exactly the failure mode this package's narrow validators exist to avoid.
+`TestValidNationalIDDigitsRecoversTheDroppedLeadingZero` pins both halves: the
+digits function recovers the padding, and `ValidNationalID` itself does not.
+
+**The review round that followed T-0187 found the eight-digit branch's own
+check degenerates on a calendar date, and `looksLikePlausibleDate`
+(nationalid.go) is the fix.** The zero-pad recovery above prepends a forced
+`'0'` to the first two digits before running `validSSN`'s exclusion ranges,
+which means the padded "area" field can never fall in the excluded 666/9xx
+bands — the check degenerates to "the year's own two-digit suffix is not
+`00`", a rate close to 1.0 over any realistic date range rather than the
+~97% the digits-family entry's own comment (`internal/verify/validators.go`)
+had assumed from averaging over 1950-2050. `looksLikePlausibleDate` is a
+plain calendar check — year in a plausible range, month 01-12, day valid for
+that month including leap years — and `ValidNationalIDDigits`'s eight-digit
+branch skips its own padded SSA check for a value it accepts, falling back to
+`validNationalID` for the six checksum-only formats that do not share SSN's
+padding failure. It is a value-shape exclusion like the ones `Candidates`
+already has (`spelledDigits`'s field-length guards, `collapseGroups`'s
+four-character cap): a fact about the *string*, never a column, a category or
+a threshold, so it stays inside this package's own contract.
+`TestValidNationalIDDigitsExcludesPlausibleDates` pins it.
 
 **`names.txt` is no longer English only.** ARCHITECTURE.md §14 deferred the
 multilingual dictionaries to phase 5; the red team is phase 5, and it showed the
@@ -200,3 +301,9 @@ set; add a category, a confidence or a threshold to this package.
   here later, they arrive with the same rule as above: a value shape, never a
   rule pack — and `mask.Canonical` reproduction may not live here at all if it
   needs `pipeline`, because this package's import list is a feature.
+- THREAT_MODEL.md T1's national_id note (its 2026-09-15 amendment, around line
+  47) still says the validator "joins the strong set used by both the
+  plan-time and the catalog pass" — both DDL passes — which is now stale about
+  the row path T-0187 wired it into (`internal/classify`'s validators list,
+  `internal/verify`'s second net). THREAT_MODEL.md is not in T-0187's paths —
+  **tracker T-0193** carries the edit.

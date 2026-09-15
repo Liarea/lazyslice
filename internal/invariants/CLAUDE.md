@@ -324,6 +324,24 @@ differs subtly from the invariant of the same name is worse than no assertion.
   a run that copied the tokens verbatim. `testdata/regressions/README.md`
   defines the key; `plan.refused.unique_domain` losing its only reduction is
   **T-0124**.
+- **`not-copied:` is the fourth optional header key** (T-0187), for a leak the
+  other three cannot see. Every `expect: ok` regression already gets
+  `assertTortureNoLiteralSurvives` for free, and that check is scoped to the
+  two shapes `scan_test.go`'s own detectors recognise — an email pattern and a
+  phone one, that file's own doc comment says so ("deliberately not the
+  classifier's") — so a defect over a third shape, a national identifier,
+  would pass a run that copied the column verbatim with nothing to say so.
+  `not-copied: schema.table.column` names a column whose *source* values are
+  read directly and greped for, byte for byte, over the whole target
+  (`assertTortureColumnNotCopied`), independent of any pattern: the same
+  "read the target and check the exact claim" shape `unique-masked:` and
+  `masked-default:` already take, extended to a shape neither of those checks
+  answers either. `testdata/regressions/018-plain-ssn-in-an-unrecognised-
+  column-name.sql` and `019-national-id-text-array-carrier.sql` are what it
+  proves; `020-ssn-stored-as-bigint.sql`, the same round's numeric-family
+  half, is a refusal (`expect: exit 9 verify.refused.second_net`) rather than
+  a mask and needs no `not-copied:` at all, because the harness returns
+  before checking any optional key on a non-zero exit.
 - **Every run in this package masks under a fixed key** (`fixedSecret`, written
   into the working directory by `start` before the first invocation). It is not a
   convenience: the residual scan fails a run when a masked value equals a value

@@ -5,6 +5,7 @@ package verify
 import (
 	"context"
 	"crypto/sha256"
+	"math/big"
 
 	"github.com/Liarea/lazyslice/internal/pipeline"
 	"github.com/Liarea/lazyslice/internal/ref"
@@ -13,10 +14,11 @@ import (
 
 // The second net (ARCHITECTURE.md section 6 item 4).
 //
-// All eleven of the classifier's value validators, folded into the ten entries
-// in validators.go (its two network validators, IP and MAC, share one entry
-// here; the two financial ones, Luhn and IBAN, do not -- see validators.go's
-// own comment, T-0136), run over the full contents of
+// All twelve of the classifier's value validators, folded into the fourteen
+// entries in validators.go (its two network validators, IP and MAC, share one
+// entry here; the financial and national_id ones do not, and national_id
+// answers for three -- see validators.go's own comment, T-0136 and the
+// T-0187 review round), run over the full contents of
 // every column of the loaded target that is not fully masked by a category
 // masker: every unmasked, non-opted-out column of a family this package can
 // name and render, and the string leaves of every JSON column, masked or not. A
@@ -209,10 +211,100 @@ type netTally struct {
 	hits    []int64
 }
 
+// digitRange tracks one digits-family column's numeric span, order-
+// independent on purpose (T-0187 second review round, findings 1 and 3):
+// scanSQL's "SELECT column FROM table" (sql.go) carries no ORDER BY, so the
+// order this net sees a column's values in is whatever Postgres's own heap
+// scan gives, not a signal it may read anything into. A generated
+// sequence — a surrogate key's own values (id, id+1, id+2, ...) or an
+// ordinary dense business-number block with no key at all (400100000+i) —
+// packs n values into a numeric range about n wide, however they arrive;
+// n independently assigned identifiers, real SSNs among them, are drawn from
+// a space many orders of magnitude wider than the sample and do not. Reading
+// the values this way, rather than asking internal/classify whether it
+// called the column a surrogate key, is what closes finding 3: a primary key
+// of real SSNs is exactly as dense-or-not as the same values in a plain
+// column, so classify's own miss (nothing in the column's name or values said
+// "personal" to it) cannot suppress this net's answer any more.
+type digitRange struct {
+	min, max *big.Int
+	n        int64
+	broken   bool
+}
+
+// observe folds one digits-family value into the range. A value that will not
+// parse as a plain non-negative integer — a numeric column can carry a sign
+// or a decimal point, which a digits-family national identifier never does —
+// breaks the range rather than being skipped: an unparseable value is
+// evidence this net has no basis for calling the column a generated sequence,
+// and the safe default is to keep the ordinary ratio in charge.
+func (r *digitRange) observe(s string) {
+	if r.broken {
+		return
+	}
+	v, ok := new(big.Int).SetString(s, 10)
+	if !ok || v.Sign() < 0 {
+		r.broken = true
+		return
+	}
+	r.n++
+	if r.min == nil || v.Cmp(r.min) < 0 {
+		r.min = v
+	}
+	if r.max == nil || v.Cmp(r.max) > 0 {
+		r.max = v
+	}
+}
+
+// dense reports a range packed to within a factor of two of its own count —
+// wide enough that a handful of gaps (deleted rows, or a --take slice that
+// thinned a contiguous block) still reads as a sequence, and many orders of
+// magnitude short of what an issuing authority's own independently assigned
+// numbers would need to clear by chance. minValues floors it the same way
+// every other ratio in this net is floored (T-0058): two values a range apart
+// says nothing about whether the column is a sequence.
+func (r *digitRange) dense() bool {
+	if r.broken || r.n < minValues || r.min == nil {
+		return false
+	}
+	span := new(big.Int).Sub(r.max, r.min)
+	span.Add(span, big.NewInt(1))
+	n := big.NewInt(r.n)
+	if span.Cmp(n) < 0 {
+		return false // impossible unless values repeat; not proven dense
+	}
+	limit := new(big.Int).Mul(n, big.NewInt(2))
+	return span.Cmp(limit) <= 0
+}
+
+// corroborated is the national_id digits entry's own gate (T-0187 third
+// review round, finding 1): true when this column's pipeline.Decision carries
+// either of the two signals internal/classify already computed and this
+// package may not re-derive -- a rules.yml national_id name-pattern hit on
+// the column itself, or a certain-or-likely personal column elsewhere in the
+// same table (the neighbouring-column rule's own count). A column with
+// neither is read by nothing but its own ratio, which a sparse, fixed-prefix
+// reference-number column clears about as often as a real leaked identifier
+// column does -- see requiresCorroboration's own comment in validators.go.
+//
+// It reads the decision internal/classify already recorded rather than
+// asking rules.yml or the schema a second question: internal/verify may not
+// import internal/classify (internal/CLAUDE.md's import graph), and a second
+// copy of the rule pack's name-matching logic here would be exactly the drift
+// internal/verify/CLAUDE.md already records this file's validators as a risk
+// of. A column with no decision at all -- s.decision's own "has" -- is
+// uncorroborated, the same as one classify decided `none` with neither
+// signal set.
+func (s *state) corroborated(col ref.ColumnRef) bool {
+	d, has := s.decision(col)
+	return has && (d.NameMatchedNationalID || d.TableHasLikelyPersonalColumn)
+}
+
 // netColumn runs every applicable validator over one column's whole contents.
 func (s *state) netColumn(ctx context.Context, col ref.ColumnRef, mode netMode) error {
 	own := netTally{hits: make([]int64, len(validators))}
 	leaf := netTally{hits: make([]int64, len(validators))}
+	var seq digitRange
 	// distinct holds, for the dictionary-backed validators only, the digests of
 	// up to minValues distinct values that hit. A digest rather than the value
 	// because a free_text value can be a whole document and this set outlives
@@ -232,6 +324,9 @@ func (s *state) netColumn(ctx context.Context, col ref.ColumnRef, mode netMode) 
 		for _, text := range direct {
 			own.nonNull++
 			count(text, false, mode, own.hits, distinct)
+			if mode.digits {
+				seq.observe(text)
+			}
 		}
 		for _, text := range fromLeaves {
 			leaf.nonNull++
@@ -245,8 +340,27 @@ func (s *state) netColumn(ctx context.Context, col ref.ColumnRef, mode netMode) 
 	if own.nonNull == 0 && leaf.nonNull == 0 {
 		return nil
 	}
+	dense := mode.digits && seq.dense()
+	corroborated := s.corroborated(col)
 	for i, val := range validators {
 		if !applies(val, mode) {
+			continue
+		}
+		if val.sequenceExempt && dense {
+			// T-0187 second review round, findings 1 and 3: a column whose
+			// own values pack into a dense numeric range is a generated
+			// sequence, key or not, and this validator has no check digit to
+			// tell that apart from a real identifier by ratio alone. See
+			// digitRange's own comment above.
+			continue
+		}
+		if val.requiresCorroboration && !corroborated {
+			// T-0187 third review round, finding 1: this validator's ratio,
+			// however tuned, cannot tell a sparse column of assigned
+			// identifiers from a sparse column of ordinary fixed-prefix
+			// reference numbers -- both clear the SSA's exclusion ranges at
+			// essentially 1.0. See corroborated, above, and
+			// requiresCorroboration's own comment in validators.go.
 			continue
 		}
 		distinctHits := 0
@@ -306,6 +420,15 @@ func scoreHits(val validator, hits, nonNull int64, distinctHits int) bool {
 		return false
 	}
 	ratio := float64(hits) / float64(nonNull)
+	// threshold is validatorThreshold unless the entry overrides it
+	// (validator.minRatio, T-0187 review round, finding 1): the national_id
+	// digits entry alone, whose ordinary 0.8 is not a meaningful bar for a
+	// validator with no check digit — see nationalIDDigitsThreshold's own
+	// comment in validators.go.
+	threshold := validatorThreshold
+	if val.minRatio > 0 {
+		threshold = val.minRatio
+	}
 	switch {
 	case val.dict:
 		// The dictionary rule (see the package comment above and
@@ -318,7 +441,7 @@ func scoreHits(val validator, hits, nonNull int64, distinctHits int) bool {
 		// dictionary literal repeated down a column cannot reach exit 9.
 		// The validators themselves are already the narrow ones —
 		// NameShape, not LooksLikeName; ProseName, not Prose.
-		return ratio >= validatorThreshold && distinctHits >= minValues
+		return ratio >= threshold && distinctHits >= minValues
 	case val.strong:
 		// Second net, second bug (docs/reviews/2026-09-09/REVIEW.md
 		// finding 7): a strong validator is a precise parse, so any hit
@@ -335,15 +458,15 @@ func scoreHits(val validator, hits, nonNull int64, distinctHits int) bool {
 		// filtered above, so reaching this case is the refusal.
 		return true
 	default:
-		// The ratio rule, for the two validators that are a shape guess
-		// rather than a parse (credential, address), and for the digits
-		// half of Luhn: below minValues the column is unproven and any hit
-		// still fails (T-0058, above); at or above it, only a ratio at or
-		// over validatorThreshold does. Weakening this to "any hit" for
-		// these would be exit 9 on an ordinary slug or a room number, which
-		// is not what a heuristic's occasional false positive should cost
-		// on a target that is already loaded.
-		return nonNull < minValues || ratio >= validatorThreshold
+		// The ratio rule, for the validators that are a shape guess rather
+		// than a parse (credential, address), the checksum-only half of
+		// national_id, and the digits half of Luhn: below minValues the
+		// column is unproven and any hit still fails (T-0058, above); at or
+		// above it, only a ratio at or over threshold does. Weakening this
+		// to "any hit" for these would be exit 9 on an ordinary slug or a
+		// room number, which is not what a heuristic's occasional false
+		// positive should cost on a target that is already loaded.
+		return nonNull < minValues || ratio >= threshold
 	}
 }
 
@@ -371,6 +494,14 @@ func applies(v validator, mode netMode) bool {
 	if v.dict && mode.leaves {
 		return false
 	}
+	// v.sequenceExempt is not read here: whether the exemption fires depends
+	// on the column's own values (digitRange, above netColumn), which are not
+	// known until the scan finishes, so netColumn checks it itself once
+	// scoring starts rather than gating the tally here. v.requiresCorroboration
+	// is not read here either, for a simpler reason: corroborated (above) is a
+	// property of the column's decision, not of its values, and is cheap
+	// enough to read once in netColumn rather than being threaded through
+	// this function's signature.
 	return (mode.text && v.text) || (mode.digits && v.digits)
 }
 

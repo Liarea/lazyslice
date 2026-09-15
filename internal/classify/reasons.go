@@ -28,24 +28,26 @@ import (
 // example lines in ARCHITECTURE.md §10 are written that way; it is closed
 // because an open one would be a free-form string field by another name.
 const (
-	phraseAddresses = "parse as addresses"
-	phraseNameDict  = "in name dictionary"
-	phraseAddrShape = "mixed digits and words"
-	phraseE164      = "valid E.164"
-	phraseIP        = "parse as IP addresses"
-	phraseMAC       = "parse as MAC addresses"
-	phraseLuhn      = "pass the Luhn check"
-	phraseIBAN      = "pass the IBAN check"
-	phraseSecrets   = "look like secrets"
-	phraseURL       = "parse as URLs"
-	phraseProse     = "hold prose with dictionary names"
-	phraseJSONLeaf  = "hold personal data at a JSON leaf"
-	phraseByteaText = "hold printable text that parses as personal data"
+	phraseAddresses  = "parse as addresses"
+	phraseNationalID = "parse as national identifiers"
+	phraseNameDict   = "in name dictionary"
+	phraseAddrShape  = "mixed digits and words"
+	phraseE164       = "valid E.164"
+	phraseIP         = "parse as IP addresses"
+	phraseMAC        = "parse as MAC addresses"
+	phraseLuhn       = "pass the Luhn check"
+	phraseIBAN       = "pass the IBAN check"
+	phraseSecrets    = "look like secrets"
+	phraseURL        = "parse as URLs"
+	phraseProse      = "hold prose with dictionary names"
+	phraseJSONLeaf   = "hold personal data at a JSON leaf"
+	phraseByteaText  = "hold printable text that parses as personal data"
 )
 
 // validatorPhrases is every phrase the fragment set will accept.
 var validatorPhrases = []string{
 	phraseAddresses,
+	phraseNationalID,
 	phraseNameDict,
 	phraseAddrShape,
 	phraseE164,

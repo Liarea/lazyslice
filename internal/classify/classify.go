@@ -313,6 +313,63 @@ var validators = []struct {
 	ok     func(*textsig.Dict, string) bool
 }{
 	{pipeline.CatEmail, phraseAddresses, true, func(_ *textsig.Dict, s string) bool { return textsig.ValidEmail(s) }},
+	// national_id joined the list at T-0187 (the 2026-09-15 round-2 red team,
+	// R2-01/A2, R2-02/A6, R2-03/A7): textsig.ValidNationalID was correct and
+	// recognised every attack value, but nothing on this list ever called it,
+	// so a plain SSN or NI number in a column whose name missed rules.yml's
+	// pattern crossed into the target verbatim, reported as "no name or value
+	// signal".
+	//
+	// **It was one entry at `strong`, calling the twelve-format union, and
+	// the T-0187 review round's finding 2 is why it is two now — but this
+	// split closes only part of that finding, and the CLAUDE.md note beside
+	// this list says which part.** Six of the twelve (PESEL, BSN, SIN, TFN,
+	// Aadhaar's Verhoeff check and CPF) are a mod-N sum over an otherwise
+	// unconstrained digit run and clear a meaningful fraction of a random
+	// string of the right length regardless of what it means (measured:
+	// 25.7% for a random 9-digit string, 11.0% for 11-digit) —
+	// internal/verify/validators.go's own comment has the full table.
+	// Marking the whole union `strong` meant `bestSignal`'s minority-hit
+	// tracking (`strongHit`, the T-0136 note above) masked an unrelated
+	// proven column outright — a business key, a reference-code column — as
+	// `free_text` on a *single* coincidental checksum hit anywhere in the
+	// sample, `ConfPossible`, with no neighbouring column needed at all
+	// (`decide`'s `case sig.strongHit != nil`, below). That is the exposure
+	// this split closes: the checksum-only six can no longer set
+	// `sig.strongHit`, only `sig.weak` at the ordinary ratio, so a lone hit
+	// no longer masks anything by itself. The other six (a US SSN, a UK
+	// NINO, an Italian codice fiscale, a Spanish DNI or NIE, a French NIR)
+	// also constrain the value's *shape* — a dash, a letter, or a fixed
+	// length under its own mod-97 check — so none of them matches a bare
+	// digit run at all, and `textsig.ValidNationalIDStructured` is precise
+	// enough to stay on email's own `strong` footing.
+	//
+	// **What this split does not close, and why that is tracker T-0195 and
+	// not a second bug here.** `sig.weak` (`bestSignal`, below) is set by
+	// ratio alone — `proven && ratio >= weakThreshold` — with no read of
+	// `v.strong` at all, so a business key whose values clear one of the six
+	// checksum-only formats at or above `weakThreshold` (0.5) still records
+	// `national_id` at `low`, and the neighbouring-column rule can still
+	// raise that to `possible`/masked beside a `likely` personal column in
+	// the same table — finding 2's own "consequence (1)". Closing that needs
+	// either a per-validator type-family gate this package does not have
+	// (the way `rules.yml`'s `accepts:` gates a *name* hit, not a value hit)
+	// or a materially higher within-column threshold scoped to this one
+	// entry, and either is a recall-affecting scoring change that
+	// internal/classify/CLAUDE.md's own rule says needs a T1 review and a
+	// `TestPagilaPrecisionAndRecall` measurement, not a quiet edit bundled
+	// into this task — T-0195 already carries it, filed at the same
+	// specificity as this paragraph. This also mirrors
+	// internal/verify/validators.go's own three-way national_id split
+	// (T-0187 review round, finding 2) on the row-scanning side only in
+	// part: this package still has no `text`/`digits` split the way that
+	// file does (internal/textsig/CLAUDE.md's own note on the point), which
+	// is why an SSN stored as `bigint` with no name hit is still `none` here
+	// and is what internal/verify's digits-family entry exists to catch
+	// instead. **Owed:** the `text`/`digits` split and the type-family gate
+	// T-0195 describes.
+	{pipeline.CatNationalID, phraseNationalID, true, func(_ *textsig.Dict, s string) bool { return textsig.ValidNationalIDStructured(s) }},
+	{pipeline.CatNationalID, phraseNationalID, false, func(_ *textsig.Dict, s string) bool { return textsig.ValidNationalIDChecksumOnly(s) }},
 	{pipeline.CatFinancial, phraseIBAN, false, func(_ *textsig.Dict, s string) bool { return textsig.ValidIBAN(s) }},
 	{pipeline.CatFinancial, phraseLuhn, true, func(_ *textsig.Dict, s string) bool { return textsig.ValidLuhn(s) }},
 	{pipeline.CatPhone, phraseE164, true, func(_ *textsig.Dict, s string) bool { return textsig.ValidPhone(s) }},
@@ -758,6 +815,13 @@ func (st *state) decide(w *work, col pipeline.Column, ct columnType, values []st
 	best := sig.strong
 	hit, hasName := st.pack.matchColumn(normaliseName(w.table.Name), normaliseName(col.Name))
 	nameAccepted := hasName && st.pack.accepted(hit.Category, ct.Family)
+	// Carried for internal/verify's national_id digits-family entry (T-0187
+	// third review round, finding 1), independent of nameAccepted and of which
+	// category the decision below actually records: see
+	// pipeline.Decision.NameMatchedNationalID's own comment.
+	if hasName && hit.Category == pipeline.CatNationalID {
+		w.d.NameMatchedNationalID = true
+	}
 
 	switch {
 	case hasName && nameAccepted:
@@ -1114,6 +1178,25 @@ func (st *state) neighbouringColumns() {
 			if w := st.dec[ref.ColumnRef{Table: t.Ref, Column: col.Name}]; w != nil && w.d.Confidence >= pipeline.ConfLikely {
 				likely++
 			}
+		}
+		// Decision.TableHasLikelyPersonalColumn is carried on every column of
+		// the table, not only the ones this pass goes on to raise (T-0187
+		// third review round, finding 1): internal/verify's second net reads it off
+		// a column this rule never touches -- a numeric column at `none` or
+		// `low` whose own confidence never reaches ConfLow's exact match
+		// below. "Another" excludes the column's own confidence, which is
+		// what a neighbour has to mean; a column already at ConfLikely or
+		// above is masked and never reaches that net regardless.
+		for _, col := range t.Columns {
+			w := st.dec[ref.ColumnRef{Table: t.Ref, Column: col.Name}]
+			if w == nil {
+				continue
+			}
+			others := likely
+			if w.d.Confidence >= pipeline.ConfLikely {
+				others--
+			}
+			w.d.TableHasLikelyPersonalColumn = others > 0
 		}
 		if likely == 0 {
 			continue

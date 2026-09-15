@@ -3,12 +3,12 @@ id: T-0194
 title: "internal/plan/ddlliteral.go: strongHit's national_id entry should call the narrower textsig.ValidNationalIDStructured"
 epic: E9
 phase: ""
-status: open
+status: done
 owner: ""
 created: 2026-09-15
-started: ""
-closed: ""
-outcome: ""
+started: 2026-09-15
+closed: 2026-09-15
+outcome: done
 ---
 
 # T-0194 · internal/plan/ddlliteral.go: strongHit's national_id entry should call the narrower textsig.ValidNationalIDStructured
@@ -25,6 +25,10 @@ T-0187 review round (2026-09-15, finding 2): strongHit's national_id entry (inte
 
 - 2026-09-15 created
 
+- 2026-09-15 started
+
+- 2026-09-15 closed: done
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+went well: one-line narrowing to the structured set plus three test vectors, landed with T-0187 | change next time: nothing

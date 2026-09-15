@@ -5,19 +5,18 @@
 | E0 Frame | 0 | 0 | 0 | 3 | 0 | 0 |
 | E1 Research | 1 | 0 | 0 | 10 | 0 | 0 |
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
-| E3 Foundations | 3 | 1 | 0 | 9 | 0 | 0 |
+| E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
-| E5 Hardening | 5 | 13 | 1 | 70 | 0 | 0 |
+| E5 Hardening | 5 | 12 | 1 | 71 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 35 | 0 | 24 | 4 | 0 |
+| E9 Later | later | 33 | 0 | 26 | 4 | 0 |
 
 ## Open and in progress
 
 - T-0019 [open] E9 · Go vs Python COPY throughput benchmark to validate ADR-001 (opus)
-- T-0028 [open] E3 · Create GitHub repository Liarea/lazyslice and homebrew-tap, push main, add HOMEBREW_TAP_TOKEN secret (human)
 - T-0031 [open] E9 · Licence for the lazyslice.yml schema and docs; confirm copyright holder statement (fable)
 - T-0048 [open] E9 · Explicit --key on an uncomparable column type surfaces a raw pgx error instead of a refusal (opus)
-- T-0064 [open] E5 · Dogfood: two sessions against a real project of Gareth's choosing, logged in docs/DOGFOOD_LOG.md (human)
+- T-0064 [open] E5 · Dogfood: two sessions against a real project of the maintainer's choosing, logged in docs/DOGFOOD_LOG.md (human)
 - T-0065 [open] E6 · 20-second VHS GIF of the first run on Pagila (sonnet)
 - T-0083 [in_progress] E5 · Target type registration for CopyFrom: no owner since internal/load shipped ()
 - T-0087 [open] E9 · internal/classify's JSON leaf signal never consults the name dictionary, so verify's second net cannot score person_name or free_text over document leaves ()
@@ -54,22 +53,23 @@
 - T-0184 [open] E5 · Should a headless run auto-select a target on the source's own cluster? ()
 - T-0185 [open] E9 · ARCHITECTURE.md does not know about --allow-type-literal ()
 - T-0186 [open] E5 · --allow-type-literal is not recorded in lazyslice.yml ()
-- T-0187 [open] E5 · National-identifier validators with checksums in textsig; classify and the second net treat them as strong; a digits-family SSN shape under the ratio rule (sonnet)
 - T-0188 [open] E5 · Multilingual given-name and surname lists in textsig, sourced under CC0, so a non-English name in a column with no name rule is recognised (sonnet)
 - T-0189 [open] E5 · Catalog literals: every validator over string literals in CHECK, domain, enum and generated expressions; pattern operands detected but not rewritten; plan reads partial-index predicates (sonnet)
 - T-0190 [open] E5 · Cluster identity does not depend on the transport: sqlClusterID uses values that are the same for every session on the cluster (opus)
 - T-0191 [open] E5 · mask.Apply has a post-condition and a recover; a masker error message never reaches the operator with the value in it (opus)
 - T-0192 [open] E5 · The secret file is protected on its resolved path: symlinked parent directories and hard links refuse; password_command is screened before it is written to the yml (sonnet)
-- T-0193 [open] E9 · THREAT_MODEL.md T1: national_id is now a row-path control, not only DDL-literal ()
-- T-0194 [open] E9 · internal/plan/ddlliteral.go: strongHit's national_id entry should call the narrower textsig.ValidNationalIDStructured ()
 - T-0195 [open] E9 · classify: national_id's checksum-only formats can weak-ratio-mask an ordinary numeric business key ()
 - T-0196 [open] E9 · Migrate the tracker to GitHub Issues and Projects behind the existing tools/tracker.py command surface (sonnet)
 
 ## Recently closed
 
+- T-0028 [done] E3 · Create GitHub repository Liarea/lazyslice and homebrew-tap, push main, add HOMEBREW_TAP_TOKEN secret → done
 - T-0090 [done] E5 · T-PERF: performance baseline and CI throughput guard → done
 - T-0177 [done] E5 · Record real ubuntu-latest bench baseline and flip bench job to blocking → done
 - T-0179 [done] E5 · Bench CI gate compares head against its parent on the same runner; absolute baseline becomes a catastrophic floor → done
+- T-0187 [done] E5 · National-identifier validators with checksums in textsig; classify and the second net treat them as strong; a digits-family SSN shape under the ratio rule → done
+- T-0193 [done] E9 · THREAT_MODEL.md T1: national_id is now a row-path control, not only DDL-literal → done
+- T-0194 [done] E9 · internal/plan/ddlliteral.go: strongHit's national_id entry should call the narrower textsig.ValidNationalIDStructured → done
 - T-0029 [cancelled] E9 · Before going public: git-crypt the AI-specific paths and rewrite pre-encryption history → cancelled
 - T-0089 [done] E5 · T-FAILUX: failure UX and error catalogue drift test → done
 - T-0118 [done] E5 · internal/transform: mask an array whose sample arrives as a text literal element-wise → done
@@ -88,7 +88,3 @@
 - T-0139 [done] E5 · Torture suite fingerprints the source before the run, with a negative control → done
 - T-0140 [done] E5 · CI runs the torture suite on main and the release workflow requires a green CI run for the tagged commit → done
 - T-0141 [done] E5 · README.md and SECURITY.md no longer claim every stage is a no-op → done
-- T-0147 [done] E9 · internal/classify/CLAUDE.md array-literal section is stale after T-0118/T-0129/T-0127 → done
-- T-0148 [done] E9 · Regenerate docs/ERRORS.md for the four exit-4 target-ownership codes → done
-- T-0149 [done] E9 · Regenerate docs/ERRORS.md for T-0133's two new codes → done
-- T-0150 [done] E9 · ARCHITECTURE.md §3.2 amendment (2026-09-08) still says a _type value is truncated and printed at 64 bytes → done

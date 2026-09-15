@@ -250,9 +250,9 @@ func assertTortureNoLiteralSurvives(ctx context.Context, t *testing.T, source, t
 
 // ---------- the regressions ----------
 
-// regressionHeader parses the five required keys and the two optional keys
+// regressionHeader parses the five required keys and the four optional keys
 // testdata/regressions/README.md defines.
-var regressionHeader = regexp.MustCompile(`(?m)^--\s+(root|take|expect|found|why|unique-masked|equal-masked|masked-default):\s+(.*?)\s*$`)
+var regressionHeader = regexp.MustCompile(`(?m)^--\s+(root|take|expect|found|why|unique-masked|equal-masked|masked-default|not-copied):\s+(.*?)\s*$`)
 
 // TestTortureRegressions runs every file in testdata/regressions/ and asserts it
 // still behaves the way its header says.
@@ -340,6 +340,9 @@ func TestTortureRegressions(t *testing.T) {
 			for _, col := range r.maskedDefault {
 				assertTortureDefaultIsMasked(ctx, t, connect(ctx, t, db.target), col)
 			}
+			for _, col := range r.notCopied {
+				assertTortureColumnNotCopied(ctx, t, connect(ctx, t, db.source), connect(ctx, t, db.target), col)
+			}
 			// Every regression that is expected to succeed is also expected not
 			// to leak. Some of these defects never changed an exit code at all:
 			// 008 exited 0 both before and after, and the only thing that told
@@ -373,7 +376,18 @@ type regression struct {
 	// ARCHITECTURE.md §11.1 arm 1's central case. Empty for every file that
 	// does not carry the key.
 	maskedDefault []string
-	image         string
+	// notCopied are the `not-copied:` key's schema.table.column entries
+	// (T-0187): every distinct non-NULL value the SOURCE holds for the column
+	// must not appear anywhere in the target, checked byte for byte rather
+	// than by a pattern. It exists because scan_test.go's two literal
+	// detectors are deliberately narrow — an email shape and a phone one, its
+	// own doc comment says so — so a leak of a value neither recognises (a
+	// national identifier, and any shape after it) needs its exact source
+	// values read and checked, the way unique-masked and equal-masked read
+	// the target directly rather than trusting expect: ok alone. Empty for
+	// every file that does not carry the key.
+	notCopied []string
+	image     string
 }
 
 // equalPair is one `equal-masked: CHILD = PARENT` claim. Every non-NULL value
@@ -458,6 +472,21 @@ func parseRegression(t *testing.T, path string) regression {
 				filepath.Base(path), spec)
 		}
 		r.maskedDefault = append(r.maskedDefault, spec)
+	}
+
+	// The fourth optional key: a comma-separated list of schema.table.column,
+	// each a column whose source values must not survive anywhere in the
+	// target (T-0187).
+	for _, spec := range strings.Split(fields["not-copied"], ",") {
+		spec = strings.TrimSpace(spec)
+		if spec == "" {
+			continue
+		}
+		if len(strings.Split(spec, ".")) != 3 {
+			t.Fatalf("torture: %s: not-copied: %q is not schema.table.column",
+				filepath.Base(path), spec)
+		}
+		r.notCopied = append(r.notCopied, spec)
 	}
 
 	// pgvector is not needed by any regression today; the field exists so that
@@ -613,6 +642,93 @@ func assertTortureDefaultIsMasked(ctx context.Context, t *testing.T, target *pgx
 		t.Errorf("torture: %s's default in the target is still %q, the source's own literal; "+
 			"ARCHITECTURE.md §11.1 arm 1 masks a masked column's default through its own masker and "+
 			"this regression exists to prove it runs from the CLI", spec, def)
+	}
+}
+
+// assertTortureColumnNotCopied reads every distinct non-NULL value a
+// `not-copied:` key names out of the SOURCE and greps every cell of the whole
+// TARGET for each one, byte for byte (T-0187).
+//
+// It exists because assertTortureNoLiteralSurvives — run unconditionally on
+// every `expect: ok` regression — only ever proves the absence of the two
+// shapes scan_test.go's own detectors recognise, an email and a phone number
+// (that file's own doc comment: "deliberately not the classifier's... take
+// every address and every number that is a phone"). A national identifier is
+// neither, so a regression whose defect was one crossing verbatim needs its
+// own values checked directly, the same way unique-masked and equal-masked
+// read the target directly rather than trusting expect: ok alone to mean more
+// than "the run did not refuse".
+//
+// **An array column is read one element at a time** (a review round's own
+// finding on this function): a `text[]` renders as the whole literal
+// (`{AB123456D,CE234567A}`) under a bare `::text` cast, and internal/transform
+// masks such a column element-wise (its own CLAUDE.md, T-0118), so a
+// regression where only *one* element crossed unmasked — exactly the partial
+// failure the array carrier (019) exists to catch — would leave the whole
+// array's rendering absent from the target while one of its elements is
+// present in it, and a whole-string `strings.Contains` would not find that. So
+// the type is read out of the source's own catalogue (`pg_type.typcategory`,
+// which is 'A' for every array type Postgres has, not only the ones this
+// package's other type tables happen to name) and an array column is unnested
+// in the source query instead: what is checked is then each *element* the
+// source held, the same unit internal/transform masks, so `not-copied:`
+// proves no individual source value survives rather than merely that the
+// array's own text rendering does not.
+func assertTortureColumnNotCopied(ctx context.Context, t *testing.T, source, target *pgx.Conn, spec string) {
+	t.Helper()
+
+	col, ok := parseColumnRef(spec)
+	if !ok {
+		t.Fatalf("torture: not-copied: %q is not schema.table.column", spec)
+	}
+	ident := pgx.Identifier{col.Column}.Sanitize()
+
+	var isArray bool
+	typeQ := `SELECT t.typcategory = 'A'
+	            FROM pg_attribute a
+	            JOIN pg_type t ON t.oid = a.atttypid
+	           WHERE a.attrelid = $1::regclass AND a.attname = $2 AND NOT a.attisdropped`
+	if err := source.QueryRow(ctx, typeQ, col.Table.quoted(), col.Column).Scan(&isArray); err != nil {
+		t.Fatalf("torture: reading %s's type in the source: %v", spec, err)
+	}
+
+	var q string
+	if isArray {
+		q = fmt.Sprintf(`SELECT DISTINCT e::text FROM %s, unnest(%s) AS e WHERE e IS NOT NULL`,
+			col.Table.quoted(), ident)
+	} else {
+		q = fmt.Sprintf(`SELECT DISTINCT %s::text FROM %s WHERE %s IS NOT NULL`, ident, col.Table.quoted(), ident)
+	}
+	rows, err := source.Query(ctx, q)
+	if err != nil {
+		t.Fatalf("torture: reading %s in the source: %v", spec, err)
+	}
+	var values []string
+	for rows.Next() {
+		var v string
+		if scanErr := rows.Scan(&v); scanErr != nil {
+			t.Fatalf("torture: reading %s in the source: %v", spec, scanErr)
+		}
+		values = append(values, v)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		t.Fatalf("torture: reading %s in the source: %v", spec, err)
+	}
+	if len(values) == 0 {
+		t.Fatalf("torture: %s holds no non-NULL value in the source, so proving none of them crossed into "+
+			"the target proves nothing; the regression is supposed to load rows", spec)
+	}
+
+	targetCells := scanCells(ctx, t, target)
+	for _, v := range values {
+		for _, c := range targetCells {
+			if strings.Contains(c.Value, v) {
+				t.Errorf("torture: %s's source value %q survives in the target, at %s: national identifiers "+
+					"are not one of scan_test.go's two literal patterns, so only this direct check catches "+
+					"it", spec, v, c.Column)
+			}
+		}
 	}
 }
 

@@ -3,12 +3,12 @@ id: T-0193
 title: "THREAT_MODEL.md T1: national_id is now a row-path control, not only DDL-literal"
 epic: E9
 phase: ""
-status: open
+status: done
 owner: ""
 created: 2026-09-15
-started: ""
-closed: ""
-outcome: ""
+started: 2026-09-15
+closed: 2026-09-15
+outcome: done
 ---
 
 # T-0193 · THREAT_MODEL.md T1: national_id is now a row-path control, not only DDL-literal
@@ -25,6 +25,10 @@ T-0187 wired textsig.ValidNationalID/ValidNationalIDDigits into internal/classif
 
 - 2026-09-15 created
 
+- 2026-09-15 started
+
+- 2026-09-15 closed: done
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+went well: THREAT_MODEL T1 amended by the orchestrator with the landing | change next time: nothing
