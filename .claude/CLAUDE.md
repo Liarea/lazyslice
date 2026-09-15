@@ -1,9 +1,9 @@
 # .claude/
 
-`workflows/` only: one resumable workflow script per phase (`research.js`,
+`workflows/` and `skills/`: one resumable workflow script per phase (`research.js`,
 `architecture.js`, `foundations.js`, `slice.js`, `hardening.js`), plus
 `implement.js`, the shared one-task runner every phase workflow calls into.
-No product code, no docs content — this is orchestration only.
+`skills/` holds the two chore skills, `lazyslice-tracker` and `lazyslice-commit`, that root CLAUDE.md points at; a skill is instructions for a recurring operation, not a workflow. No product code, no docs content — this is orchestration only.
 
 **Contract.** Each workflow exports `meta` (`name`, `description`, `phases`)
 matching `docs/BUILD_PLAN.md`'s gates. Resuming at a named step is **not**

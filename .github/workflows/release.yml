@@ -99,11 +99,20 @@ jobs:
       # use. The action takes a literal, so this is the one place the pin is
       # repeated: bump both in the same pull request, or the tag builds with a
       # goreleaser no pull request ever validated the config against.
+      # Release notes come from the commit bodies since the previous tag
+      # (tools/relnotes/relnotes.py; every task commit carries release-note
+      # bullets, .claude/skills/lazyslice-commit), not from goreleaser's list of
+      # subjects. --release-notes makes goreleaser use the file verbatim.
+      - name: release notes from the commits since the previous tag
+        run: |
+          prev=$(git describe --tags --abbrev=0 "${{ github.ref_name }}^" 2>/dev/null || git rev-list --max-parents=0 HEAD)
+          python3 tools/relnotes/relnotes.py "$prev" "${{ github.ref_name }}" > /tmp/relnotes.md
+          echo "release notes: from $prev to ${{ github.ref_name }}, $(wc -l < /tmp/relnotes.md) lines"
       - uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
           version: v2.18.0 # keep equal to Makefile's GORELEASER_VERSION
-          args: release --clean
+          args: release --clean --release-notes /tmp/relnotes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # The tap is another repository, so publishing the cask needs a

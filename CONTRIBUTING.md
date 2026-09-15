@@ -108,6 +108,19 @@ Do not open a public issue for a masking miss or any other vulnerability. See
 [SECURITY.md](SECURITY.md) for the private route, and read the rule about not
 sending us personal data before you write the report.
 
+## Commit messages
+
+Release notes are generated from commit bodies (`make relnotes FROM=<tag> TO=<ref>`), so a commit that changes behaviour says what a user now sees:
+
+```
+verify: one strong hit in an unmasked column is a finding (T-0136)
+
+- A single parsed email, phone number or card number in a column nothing masked now fails verification at exit 9, naming the column and the count.
+- A column that mixes ordinary text with a few such values is masked as free text instead of copied; --unmask with a reason keeps the copy.
+```
+
+Headline: an area prefix (`classify`, `plan`, `load`, `verify`, `cli`, `ci`, ...), an imperative sentence under 72 characters, the task id in parentheses if there is one. Body: one bullet per user-visible change, naming flags, exit codes and behaviours, never files or functions. Housekeeping commits (`Tracker:`, `ROADMAP:`) need no body and are left out of the notes.
+
 ## Licence and sign-off
 
 Contributions are accepted under the Apache License 2.0, the same licence as the project. There is no contributor licence agreement. Instead, every commit carries a Developer Certificate of Origin sign-off (`git commit -s`), which adds a `Signed-off-by:` line stating you have the right to submit the change under that licence. See https://developercertificate.org/. lazyslice will not be relicensed away from Apache-2.0; contributions are accepted on that basis. Every source file carries an `SPDX-License-Identifier: Apache-2.0` header. The name lazyslice is governed by [docs/TRADEMARK.md](docs/TRADEMARK.md).

@@ -34,10 +34,13 @@ Do not create git commits unless your task says to. The orchestrator commits.
 - tracker/: epics, tasks, BOARD.md. Written only via tools/tracker.py by the orchestrator.
 - .claude/workflows/: one resumable workflow per phase.
 
-## Tracker
+## Tracker and commits
+
+Two skills carry the recurring chores: `lazyslice-tracker` (`.claude/skills/lazyslice-tracker/SKILL.md`: filing, starting, logging, moving, closing with a post-mortem; how to word a goal) and `lazyslice-commit` (`.claude/skills/lazyslice-commit/SKILL.md`: the headline-plus-bullets commit format release notes are generated from, and path-scoped staging while a workflow runs). Read the skill before doing either.
 
 ```
 python3 tools/tracker.py list
-python3 tools/tracker.py new --epic E1 --title "..." --owner opus
-python3 tools/tracker.py close T-0001 --outcome done --postmortem "went well | went badly | change next time"
+python3 tools/tracker.py new --epic E5 --phase 5 --title "..." --owner sonnet --goal "..."
+python3 tools/tracker.py close T-0001 --outcome done --postmortem "went well: ... | went badly: ... | change next time: ..."
+make relnotes FROM=v0.1.0 TO=HEAD
 ```
