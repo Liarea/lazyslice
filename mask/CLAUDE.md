@@ -200,13 +200,73 @@ next change to this module argues with a decision rather than rediscovering it.
   which every generator passes — including `fixed:$lazyslice$invalid`, whose
   domain is 1. Failing open there is the load-time unique violation whose
   `PgError.Detail` we drop (THREAT_MODEL.md T4).
-- **`Apply` has no runtime "output must differ from input" guard.** Two
-  generators are *meant* to be able to return the input — a masked enum emits a
-  member label, and a collapsed special category emits the first one — so a
-  global guard would refuse the correct answer. THREAT_MODEL.md T12 names this
-  as a **test** (`TestNoGeneratorReturnsItsInput`,
-  `TestUnexpectedTypesDoNotPassThrough`) and a runtime **residual scan**, and
-  those are where it stays.
+- **`Apply` has a post-condition, and it is not `out != in`** (`mask.go`,
+  T-0191). Until the 2026-09-15 red team registered a masker that returns its
+  input, "output never equals input" lived only in this module's per-generator
+  unit tests, and `Apply` handed the source value back with `Masked: true`, so
+  the caller fed the residual filter a digest for a cell nothing had masked
+  (THREAT_MODEL.md T12). What the post-condition tests is the property the red
+  team actually broke — **that the generator is a function of `h` and not of its
+  input** — and a hit is `ErrPassthrough`, naming the category and the masker id
+  and never the value.
+  - **A single cell whose masked value equals its source is not a passthrough.**
+    Every generator here ignores `in` except to read its shape, so at a domain
+    of *d* the output coincides with the source once in *d* distinct values:
+    `national_id` in a `varchar(4)` (d = 9,000) hits it about once in 9,000
+    distinct ids, `person_date` on a `date` about once in 25,567. A bare
+    comparison made that a hard stop at exit 7, deterministic under the key, so
+    an ordinary birthdate or short-id column could not be snapshotted at all.
+    `looksLikeItsInput` is therefore only the **trigger**: when it fires,
+    `tracksItsInput` calls the generator a second time under the same `h` with a
+    sentinel input (`probeValue` steps every ASCII letter and digit on by one,
+    so an email stays an email and a JSON document keeps its structure), and
+    only an output that follows *that* input too is refused. A generator that
+    refuses the sentinel has not answered the question, and an unanswered
+    question is not evidence: the cell passes and the residual scan keeps its
+    role.
+  - **A document with nothing in it to mask is exempt, and the module decides
+    that itself.** `semi_structured` keeps structure and key names and replaces
+    scalar leaves, so a document whose leaves are all empty objects, empty
+    arrays or JSON nulls — `{"tags":[]}`, `{"prefs":{}}`, `{"a":{"b":{}}}` — is
+    returned identical to its input, and so is the sentinel, whose keys
+    `probeValue` merely steps by one letter. Both halves of the post-condition
+    therefore fired on a cell that proves nothing about the generator, and
+    `{"tags":[]}`-shaped rows are ordinary production data: the refusal was
+    deterministic under the key, so an ordinary `jsonb` column — and with it the
+    database — could not be snapshotted at all. `nothingToMask` parses the input
+    and passes such a document before the verdict is reached. It is computed
+    here and never asked of the masker, for the same reason `Domain()` is not
+    asked; the exemption is for a document with no leaf, not for `jsonb`, and a
+    masker that hands back `{"email":"…","tags":[]}` is refused like any other.
+  - **`Domain()` is not asked, and neither is the closed-column exemption.**
+    Both were self-declared by the object the guard exists to contain: a
+    masker that returns its input and reports `Domain(c) == 1` was exempted by
+    its own answer. The second call settles the same cases without trusting
+    anyone — a constant generator (`fixed:`, `null`, `derived_text`, a collapsed
+    `special_category`) and a closed column's `labelValue` both return the same
+    value for the sentinel as for the row, which is exactly not following the
+    input.
+  - **Nothing on the per-cell path canonicalises.** `looksLikeItsInput` compares
+    the output to the input and to the input's canonical form byte for byte and
+    then over letters and digits only (`foldEqual`), which catches a masker that
+    folds the case of an address, re-spaces or re-punctuates it and hands it
+    back. Canonicalising the *output* instead would put the phonenumbers parser
+    on every masked cell — measured at roughly 85% of the cost of masking a
+    phone — for the sake of the narrower case where a generator returns the
+    input in a form whose letters and digits differ from the source's (a local
+    number handed back in E.164, a date in another layout). That case is a
+    stated limit of this guard and the residual scan is what sees it.
+  - The residual scan and `TestNoGeneratorReturnsItsInput` are unchanged: the
+    post-condition is the module's own control, not a replacement for the
+    pipeline's.
+- **`Apply` recovers a panicking generator** (`mask.go`, T-0191). A masker that
+  panics with the offending row in its message used to cross the module
+  boundary with the value in it, and the redaction that caught it lived in the
+  parent binary (`core.PanicSummary`) — which a program that imports only this
+  module never runs (ADR-006). `maskCell` recovers and returns `ErrMaskerPanic`
+  naming the category, the masker id and the panic value's *type*. `panicKind`
+  is `core.PanicSummary`'s rule restated here because this module may not import
+  `internal/`; it is blunter on purpose, since there is no flag here to offer.
 - **Arrays are the caller's loop.** §5 masks an array element-wise with `h`
   computed per element; `Value` has no array form, and dimensions and lower
   bounds are a pgx concern, so `internal/transform` maps `Apply` over the

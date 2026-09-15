@@ -182,6 +182,39 @@ sees that case and must not paper over it with a retry.
 - **A refusal is `transform.refused.masker`, exit 7.** ADR-005's table names
   "7 extract or load" and does not name transform; a masker refusal stops the
   same movement of rows between the two, so it takes the same exit.
+- **`Refusal.Error()` renders the mask module's own reason and withholds any
+  other** (`codes.go`, T-0191). The doc comment on that file has always promised
+  "it never carries the value that could not be masked", and until this change
+  only the *event* kept it: `Error()` interpolated the wrapped error with `%v`
+  and `cmd/lazyslice` printed the result at any verbosity. A free-form reason is
+  written by whoever refused — a masker's own message (a third party's code,
+  ADR-006), or this package's array-literal parser, which quotes the literal —
+  so it is a string with a row value in it, and it is the same string that the
+  2026-09-15 panic amendment (THREAT_MODEL.md T4) already withholds when it
+  arrives as a panic. For those, `Error()` names the column, the masker and the
+  reason's *type*; `reasonSummary` is `core.PanicSummary`'s rule restated
+  because `internal/core` imports this package and Go has no import cycles.
+  - **A `mask` error is not a free-form reason and is printed in full.**
+    `ErrNoRoom`, `*NoRoomError`, `*DomainError`, `ErrPassthrough`,
+    `ErrMaskerPanic` and the rest name a category, a masker id, a type or a row
+    count and are documented value-free, so `maskReason` renders them: an exit-7
+    refusal that said only "an error of type `*fmt.wrapError`" left the operator
+    with no diagnosis at all. For a *wrapped* sentinel it prints the sentinel's
+    own text and not the wrapper's, because a masker is free to wrap
+    `mask.ErrNoRoom` with the row in its message and `errors.Is` would say yes
+    to that too.
+  - **`ReasonMessage()` is the flag-side half, and nothing calls it yet.** It
+    returns the reason's own words for the one caller allowed to print them,
+    `cmd/lazyslice`'s error egress under `--show-row-values-in-errors`, matched
+    structurally there the way `internal/core`'s `PanicValue` already is.
+    `cmd/` was outside T-0191's paths, so until that wiring lands a free-form
+    reason is unreachable even under the flag — which is why `Error()` does not
+    name the flag either: a message telling the operator to re-run under a flag
+    that changes nothing is worse than one that stays quiet. Tracker **T-0212**
+    carries the wiring and puts the hint back with it, together with the wider
+    change the same red team round asked for: make `renderSafe` redact by
+    *default* rather than scrub an allowlist of two error types, so a new error
+    type in the tree is not value-bearing until someone notices.
 
 **The residual-filter contract.** `internal/verify` reproduces these bytes from
 the *target* and tests the filter (§6 item 3), and it cannot import this

@@ -5,6 +5,7 @@ package transform
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -471,6 +472,47 @@ func TestAMaskerRefusalIsACodedExitSeven(t *testing.T) {
 				t.Errorf("the refusal quotes the value it could not mask: %s", r.Error())
 			}
 		})
+	}
+}
+
+// A masker's own message never reaches the operator with the value in it
+// (T-0191, THREAT_MODEL.md T4 and T7). The same string was withheld when it
+// arrived as a panic and printed when it arrived as an error, and a masker is
+// free to write whatever it likes into either.
+func TestARefusalNeverRendersTheMaskersOwnMessage(t *testing.T) {
+	const secret = "ada.lovelace@example.com"
+	reason := fmt.Errorf("cannot mask %q: unsupported shape", secret)
+	r := &Refusal{
+		Code: CodeMasker, Exit: exitTransform,
+		Col: col("people", "email"), Masker: "email", Reason: reason,
+	}
+	if strings.Contains(r.Error(), secret) {
+		t.Errorf("the refusal quotes the masker's message: %s", r.Error())
+	}
+	if !strings.Contains(r.Error(), "email") {
+		t.Errorf("the refusal does not name the column and the masker: %s", r.Error())
+	}
+	if !strings.Contains(r.Error(), "an error of type") {
+		t.Errorf("the refusal does not say what kind of reason it withheld: %s", r.Error())
+	}
+	// A refusal the mask module wrote itself is value-free by construction, so
+	// it is rendered in full: withholding it would leave the operator with a
+	// column, a masker and no diagnosis.
+	fits := &Refusal{
+		Code: CodeMasker, Exit: exitTransform,
+		Col: col("people", "email"), Masker: "email",
+		Reason: &mask.NoRoomError{Category: mask.CatEmail, ID: "email", TypeTag: "varchar", MaxLen: 8},
+	}
+	if !strings.Contains(fits.Error(), "no value that fits varchar(8)") {
+		t.Errorf("the refusal withholds the mask module's own reason: %s", fits.Error())
+	}
+	// The words themselves are still reachable, by the one caller that has been
+	// told to show row values.
+	if r.ReasonMessage() != reason.Error() {
+		t.Errorf("ReasonMessage() = %q, want %q", r.ReasonMessage(), reason.Error())
+	}
+	if (&Refusal{Col: col("people", "email")}).ReasonMessage() != "" {
+		t.Error("a refusal with no reason has a message")
 	}
 }
 
