@@ -119,6 +119,20 @@ type netMode struct {
 	// text and digits say which validators apply, from the column's family.
 	text   bool
 	digits bool
+	// docMasked is true for a masked document column (T-0172). json.go's
+	// maskKey already replaces every key strongKeyCategory names — email,
+	// phone, the Luhn half of financial_account — through that category's own
+	// masker, and a category masker's output is, by construction, still a
+	// value of that category (mask/gen_email.go's address, mask/gen_number.go's
+	// Luhn-valid digit run): the masked key still matches the validator that
+	// made transform mask it in the first place. netValues reads this to drop
+	// exactly those keys from the net's input, so the net never counts the
+	// masker's own correct output as a hit. A key none of the three names is
+	// untouched by transform whether or not the column is masked — that is
+	// keyCategory's own stated limitation (json.go) — so it stays in the net's
+	// coverage either way; only the three the masker actually rewrites are
+	// excluded, and only when this column was masked at all.
+	docMasked bool
 }
 
 func (s *state) netMode(col ref.ColumnRef, c pipeline.Column) (netMode, bool) {
@@ -133,7 +147,7 @@ func (s *state) netMode(col ref.ColumnRef, c pipeline.Column) (netMode, bool) {
 		// A masked document's masker was chosen per key by name, so the net
 		// checks the leaves; an unmasked one had no masker at all, which is a
 		// stronger reason to read its leaves and not a reason to skip it.
-		return netMode{leaves: true, text: true}, true
+		return netMode{leaves: true, text: true, docMasked: has && d.Masked}, true
 	case has && d.Masked:
 		return netMode{}, false
 	case netText(family):
@@ -321,9 +335,36 @@ func (s *state) netValues(v any, mode netMode) []string {
 		// dictionary-backed validators still never see these strings, because
 		// applies excludes mode.leaves for both — a key is never a sentence.
 		for _, occ := range keys {
-			if occ.name != "" {
-				out = append(out, occ.name)
+			if occ.name == "" {
+				continue
 			}
+			if mode.docMasked {
+				// T-0172: on a *masked* document column, a key that still
+				// matches one of the three strongKeyCategory validators is
+				// never a surviving source value — json.go's maskKey ran
+				// every key through keyCategory, the same three-validator
+				// question, and replaced every match with that category's own
+				// masker output; a category masker's output is by
+				// construction a value of that category (mask.CLAUDE.md,
+				// financialAccountMasker's own comment), so the masked key
+				// still matches the validator that made transform mask it.
+				// Counting that match here would be the net refusing the
+				// masker's own correct output (the bug this task fixes,
+				// testdata/regressions/013). residual.go's keyHits already
+				// proves no *source* key survived at this path, by testing
+				// canonical equality against the source rather than asking
+				// "does this look like the category" — that is the check
+				// this key needs, not this one. A key none of the three
+				// names was never touched by transform, so it is kept: it
+				// still needs the net's other validators (network_id,
+				// online_id, credential, address, the IBAN half of
+				// financial_account), none of which json.go's keyCategory
+				// ever masks, whether or not the column is masked.
+				if _, ok := strongKeyCategory(occ.name); ok {
+					continue
+				}
+			}
+			out = append(out, occ.name)
 		}
 		return out
 	}

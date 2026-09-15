@@ -7,7 +7,7 @@
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 1 | 0 | 9 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
-| E5 Hardening | 5 | 4 | 1 | 66 | 0 | 0 |
+| E5 Hardening | 5 | 3 | 1 | 67 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
 | E9 Later | later | 26 | 0 | 24 | 4 | 0 |
 
@@ -43,7 +43,6 @@
 - T-0166 [open] E9 · wire dsn param-drop warnings into internal/core and internal/pg's own dsn.Parse call sites ()
 - T-0168 [open] E9 · dsn.Ref.Params misses rung-2 (env/PGSERVICE) settings, so a first run through libpq env alone reruns with no sslmode at rung 0 ()
 - T-0170 [open] E9 · torture regression 013 (json-object-key-email) fails on main ()
-- T-0172 [open] E5 · testdata/regressions/013-json-object-key-that-parses-as-an-email.sql fails make torture on main ()
 - T-0173 [open] E9 · Stop.Args is never populated by core.wrap, so many transcript error lines render generic while only the final exit line is specific (opus)
 - T-0174 [open] E9 · Wire --debug to print the statement trace (Source.Trace) on an ordinary failure ()
 

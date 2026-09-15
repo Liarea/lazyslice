@@ -1042,6 +1042,35 @@ func TestSecondNetReadsDocumentKeysAsWellAsValues(t *testing.T) {
 				`{"note":"still nothing"}`,
 			},
 		},
+		// T-0172: a masked document column's key that still matches one of
+		// the three strongKeyCategory validators is the masker's own output,
+		// not a surviving source value — json.go's maskKey already ran every
+		// key through the same three-validator question and replaced every
+		// match with that category's own masker, whose output is by
+		// construction a value of that category (mask/gen_email.go's
+		// address, textsig's own "+44 20 7946 0958" fixture value above,
+		// mask/gen_number.go's Luhn-valid digit run). Before this task, the
+		// net counted that as a hit and refused a run that masked correctly
+		// (testdata/regressions/013). The leaf beside each key is
+		// free_text's own filler-word shape (mask/words.go's fillerWords),
+		// which is what every leaf of a masked document actually holds
+		// (json.go's leafCategory) and matches no validator either — the
+		// exposure this task's diagnosis asked about is confirmed absent.
+		{
+			name:   "a masked document column's key is the email masker's own output",
+			masked: true,
+			vals:   []any{`{"alice.k7v2x@example.com":"buffer cadence delta"}`},
+		},
+		{
+			name:   "a masked document column's key is the phone masker's own output",
+			masked: true,
+			vals:   []any{`{"+44 20 7946 0958":"buffer cadence delta"}`},
+		},
+		{
+			name:   "a masked document column's key is the financial masker's own output",
+			masked: true,
+			vals:   []any{`{"4111111111111111":"buffer cadence delta"}`},
+		},
 	}
 
 	for _, c := range cases {
