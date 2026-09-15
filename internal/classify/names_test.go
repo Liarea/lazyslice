@@ -114,9 +114,9 @@ var heldOutNames = []namedColumn{
 	// identity provider issues for this person.
 	{"gitlab", "identities", "extern_uid", "character varying(255)", true},
 
-	// Supabase auth (T-0104). These are the ten columns docs/TORTURE.md's
-	// hand-labelled truth set recorded as missed at recall 0.800, which is 0.980
-	// there now with one of the ten left;
+	// Supabase auth (T-0104, and refresh_tokens.parent at T-0119). These are the
+	// ten columns docs/TORTURE.md's hand-labelled truth set recorded as missed at
+	// recall 0.800, which is 1.000 there now with none of the ten left;
 	// supabase_misses_test.go pins each one's decision individually, and this is
 	// where they are scored beside everything else.
 	{"supabase", "flow_state", "auth_code", "text", true},
@@ -129,9 +129,10 @@ var heldOutNames = []namedColumn{
 	{"supabase", "webauthn_credentials", "credential_id", "bytea", true},
 	// Labelled to agree with mastodon's above, for the reason written there.
 	{"supabase", "webauthn_credentials", "public_key", "bytea", true},
-	// Still a false negative, and deliberately left as one: a rule matching
-	// `parents?` would mask every parent_id join key in every schema there is.
-	// See supabase_misses_test.go.
+	// Masked now by the table-scoped rule T-0119 added (rules.yml's
+	// table_patterns:, refresh_token_parent): a rule matching `parents?` alone
+	// would mask every parent_id join key in every schema there is, so this one
+	// is scoped to tables named like refresh_tokens. See supabase_misses_test.go.
 	{"supabase", "refresh_tokens", "parent", "character varying(255)", true},
 	// The negatives of the same schema, so that the block is not all-positive
 	// and a pattern that widened too far is visible here as a false positive.
@@ -189,6 +190,11 @@ func namesSchema() (*pipeline.Schema, map[string]bool) {
 // positives, 17 → 15 true negatives, two false positives and one false negative
 // unchanged, precision 0.957 → 0.958 and recall 0.978 → 0.979. No label here is
 // open now.
+//
+// T-0119's table-scoped rule moved no label either — refresh_tokens.parent was
+// already true here, a false negative the classifier now gets right — and it is
+// the only change since: 46 → 47 true positives, the false negative gone,
+// precision 0.958 → 0.959, recall 0.979 → 1.000.
 func TestFiftyNamesFromThreeSchemas(t *testing.T) {
 	t.Parallel()
 	if len(heldOutNames) != 64 {
