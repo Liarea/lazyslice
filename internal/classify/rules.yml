@@ -24,6 +24,16 @@
 #     rendered string. `priority` breaks a tie when two rules match one name:
 #     ip_address is network_id and not address, email_address is email and not
 #     address, and password_hash is credential and not person_name.
+#   table_patterns: one row per table-scoped name rule (T-0119): `table` is a
+#     regexp over the normalised *table* name, `match` is a regexp over the
+#     normalised *column* name exactly as in patterns: above, and `priority`
+#     shares patterns:'s number line, so a table-scoped rule and a name rule
+#     matching the same column resolve the same tie-breaking way (priority,
+#     then rule name) as two name rules do. A table-scoped rule is tried only
+#     within a table its own `table` regexp matches; against every other table
+#     it does not exist, which is what lets it name a column a bare word rule
+#     could never say without mismasking every other schema's join keys — see
+#     the refresh_token_parent rule below.
 #   tables: name rules over the *table*, not the column.
 #
 # The type families are the ones internal/classify/types.go maps
@@ -219,6 +229,22 @@ patterns:
     category: free_text
     priority: 20
     match: '(^|_)(notes?|comments?|descriptions?|bio|biography|messages?|body|reasons?|remarks?|memo|content|contents|text|raw|cooked|excerpts?|summary)(_|$)'
+
+table_patterns:
+  # T-0119: refresh_tokens.parent holds another refresh token, in a column
+  # named after a tree edge. A name rule matching `parents?` would match
+  # parent_id in every schema there is, at priority 80, and mask half a
+  # database's join keys to the fixed literal — patterns: above sees the
+  # column name alone, so "parent, in a table called refresh_tokens" is not a
+  # rule it can express. This is the first row this section has ever needed:
+  # docs/TORTURE.md's supabase-auth truth set carried it as the one remaining
+  # false negative, and it is what the priority and the name here are measured
+  # against there.
+  - name: refresh_token_parent
+    category: credential
+    priority: 80
+    table: '(^|_)refresh_?tokens?(_|$)'
+    match: '^parents?$'
 
 tables:
   # ARCHITECTURE.md §4: "any jsonb in a table named like audit|log|history|event"

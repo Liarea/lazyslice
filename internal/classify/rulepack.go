@@ -24,10 +24,11 @@ var rulesYAML []byte
 
 // rulePack is rules.yml as written.
 type rulePack struct {
-	Version    string         `yaml:"version"`
-	Categories []categoryRule `yaml:"categories"`
-	Patterns   []patternRule  `yaml:"patterns"`
-	Tables     tableRules     `yaml:"tables"`
+	Version       string             `yaml:"version"`
+	Categories    []categoryRule     `yaml:"categories"`
+	Patterns      []patternRule      `yaml:"patterns"`
+	TablePatterns []tablePatternRule `yaml:"table_patterns"`
+	Tables        tableRules         `yaml:"tables"`
 }
 
 type categoryRule struct {
@@ -43,22 +44,43 @@ type patternRule struct {
 	Match    string `yaml:"match"`
 }
 
+// tablePatternRule is one row of table_patterns: a name rule that only
+// applies within a table its own `table` regexp matches (T-0119). `match`,
+// `category` and `priority` are read exactly as patternRule's are; `table` is
+// the regexp a name rule has no field for.
+type tablePatternRule struct {
+	Name     string `yaml:"name"`
+	Category string `yaml:"category"`
+	Priority int    `yaml:"priority"`
+	Table    string `yaml:"table"`
+	Match    string `yaml:"match"`
+}
+
 type tableRules struct {
 	LogShaped string `yaml:"log_shaped"`
 }
 
-// compiledPattern is one name rule with its regexp built.
+// compiledPattern is one name rule with its regexp built. tableRe is nil for
+// an ordinary patterns: rule, which applies inside every table; a
+// table_patterns: rule sets it, and matchColumn skips the rule in a table its
+// tableRe does not match.
 type compiledPattern struct {
 	Name     string
 	Category pipeline.Category
 	Priority int
 	re       *regexp.Regexp
+	tableRe  *regexp.Regexp
 }
 
 // compiledPack is the rule pack in the form the scorer uses.
 type compiledPack struct {
 	Version  string
 	Patterns []compiledPattern
+	// ColumnPatterns is Patterns plus every table_patterns: rule, resorted
+	// together by the one priority line the two share. matchColumn reads this;
+	// match reads Patterns alone, because the JSON-leaf path that calls it
+	// (jsonLeafIsPersonal) has no table to test a table-scoped rule against.
+	ColumnPatterns []compiledPattern
 	// Masker is the mask.ID a decision in that category carries.
 	Masker map[pipeline.Category]mask.ID
 	// Accepts is the type-family set each category's maskers accept. A nil set
@@ -92,6 +114,14 @@ func (p *compiledPack) logShapedTable(name string) bool {
 var pack = sync.OnceValues(loadPack)
 
 func loadPack() (*compiledPack, error) {
+	return decodePack(rulesYAML)
+}
+
+// decodePack is loadPack's body, over an arbitrary rule pack rather than only
+// the embedded one, so that a malformed-pack error path can be exercised
+// directly (rulepack_test.go) instead of only through the one rule pack that
+// ships.
+func decodePack(rulesYAML []byte) (*compiledPack, error) {
 	var raw rulePack
 	if err := yaml.Unmarshal(rulesYAML, &raw); err != nil {
 		return nil, fmt.Errorf("classify: reading the embedded rule pack: %w", err)
@@ -147,12 +177,47 @@ func loadPack() (*compiledPack, error) {
 	}
 	// Highest priority first, then by name, so that two rules matching one
 	// column resolve the same way on every run and in every build.
-	sort.SliceStable(c.Patterns, func(i, j int) bool {
-		if c.Patterns[i].Priority != c.Patterns[j].Priority {
-			return c.Patterns[i].Priority > c.Patterns[j].Priority
+	byPriorityThenName := func(pats []compiledPattern) func(i, j int) bool {
+		return func(i, j int) bool {
+			if pats[i].Priority != pats[j].Priority {
+				return pats[i].Priority > pats[j].Priority
+			}
+			return pats[i].Name < pats[j].Name
 		}
-		return c.Patterns[i].Name < c.Patterns[j].Name
-	})
+	}
+	sort.SliceStable(c.Patterns, byPriorityThenName(c.Patterns))
+	c.ColumnPatterns = append(c.ColumnPatterns, c.Patterns...)
+	for _, tr := range raw.TablePatterns {
+		cat := pipeline.Category(tr.Category)
+		if _, ok := c.Masker[cat]; !ok {
+			return nil, fmt.Errorf("classify: table pattern %q names category %q, which the rule pack does not declare", tr.Name, cat)
+		}
+		if tr.Table == "" {
+			return nil, fmt.Errorf("classify: table pattern %q has no table: regexp; an empty one would compile and match every table, turning it into a global rule", tr.Name)
+		}
+		if tr.Match == "" {
+			return nil, fmt.Errorf("classify: table pattern %q has no match: regexp; an empty one would compile and match every column in a matching table", tr.Name)
+		}
+		tableRe, err := regexp.Compile(tr.Table)
+		if err != nil {
+			return nil, fmt.Errorf("classify: table pattern %q: table: %w", tr.Name, err)
+		}
+		re, err := regexp.Compile(tr.Match)
+		if err != nil {
+			return nil, fmt.Errorf("classify: table pattern %q: match: %w", tr.Name, err)
+		}
+		if bad, ok := ParseReason(render("name_match", tr.Name)); !ok {
+			return nil, fmt.Errorf("classify: table pattern name %q does not render inside the reason grammar: %q", tr.Name, bad)
+		}
+		c.ColumnPatterns = append(c.ColumnPatterns, compiledPattern{
+			Name:     tr.Name,
+			Category: cat,
+			Priority: tr.Priority,
+			re:       re,
+			tableRe:  tableRe,
+		})
+	}
+	sort.SliceStable(c.ColumnPatterns, byPriorityThenName(c.ColumnPatterns))
 	if raw.Tables.LogShaped != "" {
 		re, err := regexp.Compile(raw.Tables.LogShaped)
 		if err != nil {
@@ -166,6 +231,24 @@ func loadPack() (*compiledPack, error) {
 // match returns the highest-priority name rule that matches a normalised name.
 func (p *compiledPack) match(normalised string) (compiledPattern, bool) {
 	for _, pat := range p.Patterns {
+		if pat.re.MatchString(normalised) {
+			return pat, true
+		}
+	}
+	return compiledPattern{}, false
+}
+
+// matchColumn returns the highest-priority rule that matches a column, over
+// both patterns: and table_patterns: (T-0119): a table-scoped rule is tried
+// only where its own tableRe matches normalisedTable, so the same priority
+// line orders a table-scoped rule against a name rule exactly as it orders two
+// name rules against each other. normalisedTable and normalised are both
+// normaliseName's output.
+func (p *compiledPack) matchColumn(normalisedTable, normalised string) (compiledPattern, bool) {
+	for _, pat := range p.ColumnPatterns {
+		if pat.tableRe != nil && !pat.tableRe.MatchString(normalisedTable) {
+			continue
+		}
 		if pat.re.MatchString(normalised) {
 			return pat, true
 		}

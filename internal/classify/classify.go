@@ -658,7 +658,7 @@ func (st *state) decide(w *work, col pipeline.Column, ct columnType, values []st
 		return
 	}
 	best := sig.strong
-	hit, hasName := st.pack.match(normaliseName(col.Name))
+	hit, hasName := st.pack.matchColumn(normaliseName(w.table.Name), normaliseName(col.Name))
 	nameAccepted := hasName && st.pack.accepted(hit.Category, ct.Family)
 
 	switch {
@@ -850,7 +850,7 @@ func (st *state) decide(w *work, col pipeline.Column, ct columnType, values []st
 // Nothing downstream reads it above the threshold -- the refusal is on
 // Decision.Masked -- and the operator's escape is a flag either way.
 func (st *state) decideComposite(w *work, col pipeline.Column, sig signals) {
-	hit, hasName := st.pack.match(normaliseName(col.Name))
+	hit, hasName := st.pack.matchColumn(normaliseName(w.table.Name), normaliseName(col.Name))
 	best := sig.strong
 	switch {
 	case best != nil:

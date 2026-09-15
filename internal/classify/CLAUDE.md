@@ -39,8 +39,11 @@ exemption; add a way for a category's confidence to be lowered by config.
 ## Files
 
 - `rules.yml` — the embedded rule pack: the categories with their maskers and
-  accepted type families, the name patterns with their priorities, and the
-  log-shaped table rule. Changing it changes `Classification.Fingerprint`.
+  accepted type families, the name patterns with their priorities, the
+  table-scoped patterns (T-0119: a name rule gated by a second regexp over the
+  table, for a column name that means something different depending which
+  table it is in), and the log-shaped table rule. Changing it changes
+  `Classification.Fingerprint`.
 - `literal.go` — reading a Postgres array or composite output literal back into
   the values inside it (T-0103, T-0094). A reader, not a parser: liberal in what
   it accepts, and what it cannot read stays one opaque value.
@@ -469,6 +472,31 @@ was chosen and is recorded here rather than only in a comment.
   validators ask which section a word came from; nothing here reads them. The
   two sections of `names.txt` are still parsed, so a line outside a section is
   still ignored.
+- **A table-scoped pattern is a second, merged pattern list, not a second match
+  call site** (`rulepack.go`, T-0119). `matchColumn(table, column)` is what
+  `decide` and `decideComposite` call now, and it walks `ColumnPatterns` — a
+  copy of the ordinary `patterns:` list with every `table_patterns:` rule
+  merged in and the whole thing resorted by the one priority line the two
+  share, so a table-scoped rule and a name rule matching the same column at the
+  same priority tie-break identically (priority, then rule name) whichever list
+  either came from. `match(column)`, the plain lookup, is untouched and still
+  reads `Patterns` alone: `jsonLeafIsPersonal` (`validators.go`) is its only
+  other caller, over a JSON document's leaf keys, and a leaf has no table to
+  test a `table:` regexp against — merging table-scoped rules into `Patterns`
+  itself would have let `refresh_token_parent` fire on any JSON key named
+  `parent` anywhere, table or not, which is a different and wider claim than
+  the one this rule makes. A `table_patterns:` row without a matching entry in
+  `categories:`, or with either regexp malformed, fails `loadPack` the same way
+  a `patterns:` row does; its `name` is checked against the reason grammar the
+  same way too, since it renders through the same `name_match` fragment. An
+  *empty* `table:` or `match:` fails `loadPack` too, and by a check of its own
+  (review round, T-0119): `regexp.Compile("")` succeeds and matches every
+  string, so without it an omitted `table:` would silently compile into a rule
+  that applies to every table — a table-scoped rule that is not actually
+  scoped — and an omitted `match:` would mask every column of a matching table
+  to the rule's fixed literal. Neither is "malformed" in the syntax-error sense
+  the sentence above is about; both are rejected by name before
+  `regexp.Compile` ever sees them.
 
 ## A composite is refused, not copied and not masked (T-0094, T-HARD-B)
 
@@ -587,8 +615,9 @@ by deleting a name pattern fails the test that matters first. Run
 schemas: T-0104 added Supabase's auth columns and GitLab's `identities.extern_uid`
 beside the original fifty, because every spelling the credential and online_id
 rules gained has to be scored in the same matrix as everything else. It reads
-precision 0.958 / recall 0.979 (T-0121; it was 0.957 / 0.978 with both
-`public_key` columns copied and labelled not-personal).
+precision 0.959 / recall 1.000 (T-0119; it was 0.958 / 0.979 after T-0121 with
+`refresh_tokens.parent` still a false negative, and 0.957 / 0.978 before that
+with both `public_key` columns copied and labelled not-personal).
 
 **No hand label moves in the change that widens the rules scored against it.**
 Relabelling a column turns a false positive into a true positive without the
@@ -600,25 +629,39 @@ from not-personal to personal, under **T-0121**'s own decision that a
 task that wrote none of the T-0104 patterns it is scored against. The movement
 it caused is the two lines above: 44 → 46 true positives, 17 → 15 true
 negatives, and the false positives and the one false negative unchanged.
-`supabase.refresh_tokens.parent` is left as that false negative on purpose (see
-below).
+**T-0119 moved no label either** — `supabase.refresh_tokens.parent` was already
+labelled personal, and only the classifier's decision moved, false negative to
+true positive: 46 → 47 true positives, the one false negative gone, recall
+0.979 → 1.000.
 
-Two rules were **not** widened, and both refusals are load-bearing:
+One rule was **not** widened, and the refusal is load-bearing:
 
 - **A bare `codes?` is not in the credential pattern.** At priority 80 it would
   take `postal_code`, `country_code`, `currency_code` and `status_code` away
   from the address rule and mask them to the fixed literal. What is in the
   pattern is the compound spellings: `auth_code`, `otp_code`,
   `authorization_code`, `code_verifier`, `code_challenge`, `code_hash`.
-- **`parent` is not a name rule.** `refresh_tokens.parent` holds another refresh
-  token, and a rule matching `parents?` would mask every `parent_id` join key in
-  every schema there is. This package's name rules see the column name alone, so
-  "parent, in a table called refresh_tokens" is not expressible; T-0119 carries
-  the table-scoped-pattern question. `supabase_misses_test.go` pins the column as
-  still copied and says why.
 
-**`public_?keys?` used to be the third of these, and it is now in the credential
-pattern** (T-0121, settled 2026-09-09). It is the other of the two columns
+**`parent` used to be the second of these, and it is now a table-scoped rule
+and not a name rule** (`refresh_token_parent`, T-0119). `refresh_tokens.parent`
+holds another refresh token, and a rule matching `parents?` would mask every
+`parent_id` join key in every schema there is — this package's name rules see
+the column name alone, so "parent, in a table called refresh_tokens" was not
+expressible as one of `patterns:`. `rules.yml` gained `table_patterns:` for
+exactly this shape: a name rule with a second regexp, over the *table*, that
+gates whether the rule is tried at all — `refresh_token_parent` is `credential`
+at priority 80 (the same line `patterns:`'s own `credential` rule sorts on),
+scoped to `table: '(^|_)refresh_?tokens?(_|$)'`, `match: '^parents?$'`. It is
+compiled into `compiledPack.ColumnPatterns`, a copy of `Patterns` with the
+table-scoped rules merged in and resorted by the one priority line the two
+share; `compiledPack.Patterns` itself, and `match`, are unchanged, because the
+JSON-leaf path that calls `match` (`jsonLeafIsPersonal`) has no table to test a
+table-scoped rule against. `decide` and `decideComposite` call the new
+`matchColumn(table, column)` instead. `supabase_misses_test.go` and
+`names_test.go` pin the column as masked now.
+
+**`public_?keys?` was the third of the three T-0104 left open, and it is now in
+the credential pattern** (T-0121, settled 2026-09-09). It is the other of the two columns
 T-0104 said "deserve a decision rather than a pattern". A public key is
 published by design, which is the argument for leaving it alone or for calling
 it an `online_id`; what decided it is that a key identifying exactly one person

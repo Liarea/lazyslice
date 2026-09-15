@@ -34,15 +34,28 @@ removed. Both are re-cut to `expect: ok` plus a `unique-masked:` assertion that
 reads the columns out of the target, so what they pin is the masking and not
 merely the exit code.
 
-One thing the nine clean runs do **not** say, measured below: supabase-auth's
-classifier misses **one** of the fifty columns the hand-labelling calls personal
-— `refresh_tokens.parent`, a quarter populated in this fixture — and it is
-copied into the target in cleartext under exit 0 (recall 0.980). It missed **ten** at recall
-0.800 when this file was written; T-0104's name rules took eight of them and
-T-0121's `public_key` decision the ninth, and the re-measurement is in the truth
-sets below. A second finding used to stand beside it — `credential`'s only
-masker had a domain of one — and that is the T-0098 defect the count above no
-longer carries.
+**It does not, right now.** A `make torture` run taken for T-0119 (2026-09-14,
+unrelated to this task's own change — confirmed by re-running the same
+regression with T-0119's diff stashed out) fails
+`testdata/regressions/013-json-object-key-that-parses-as-an-email.sql`: the run
+exits 9, `verify.refused.second_net`, instead of the exit 0 the fixture expects
+with the key masked. `TestTortureSchemas`, `TestTortureCatalogueMatchesTheFixtures`,
+`TestTortureImagesAreReachable` and `TestTortureNegativeControl` all still pass
+on their own, and every regression but 013 does too — the ten schemas below and
+their flag counts are unaffected and re-measured against this same run. T-0172
+tracks the fix; this line stays until it lands.
+
+One thing the nine clean runs do not say on their own, measured below:
+supabase-auth's classifier now catches **all fifty** of the columns the
+hand-labelling calls personal — recall 1.000 — where it missed **ten** at
+recall 0.800 when this file was written. T-0104's name rules took eight of
+them, T-0121's `public_key` decision the ninth, and T-0119's table-scoped rule
+the tenth and last: `refresh_tokens.parent`, a quarter populated in this
+fixture, held another refresh token in a column named after a tree edge and
+reached the target in cleartext under exit 0 until now. The re-measurement is
+in the truth sets below. A second finding used to stand beside it —
+`credential`'s only masker had a domain of one — and that is the T-0098 defect
+the count above no longer carries.
 
 The fixtures are `testdata/torture/`; the catalogue that runs them is
 `internal/invariants/torture_catalogue_test.go`; the reduced defects are
@@ -338,14 +351,25 @@ landed, because each changes a number quoted here:
   them but ran no linter over them. T-HARD-C added `torture` to that list. The
   suite was clean under the full linter set on the first run.
 
-One decision was taken rather than a rule widened, and it moves a hand label
-below: **T-0121 — a `public_key` column is `credential`** (2026-09-09), masked
-to the unusable literal, or `credential_unique` under a unique index. A public
+Two decisions were taken rather than a rule widened, and both are settled now.
+
+**T-0121 — a `public_key` column is `credential`** (2026-09-09), masked to
+the unusable literal, or `credential_unique` under a unique index. A public
 key is published by design, which is the argument the other way, but it is a
 stable identifier for exactly one person and nothing a development database does
 needs the real one. T-0104 had named it one of two columns that deserve a
-decision rather than a pattern; the other, `refresh_tokens.parent`, is still
-open and is the one remaining false negative below.
+decision rather than a pattern.
+
+**T-0119 — `refresh_tokens.parent` is `credential`, by a table-scoped rule**
+(the other of the two). It holds another refresh token, in a column named
+after a tree edge; a name rule matching `parents?` would have masked every
+`parent_id` join key in every schema there is, at priority 80, which this
+package's plain name rules cannot avoid because they see a column name with no
+table beside it. `rules.yml` gained `table_patterns:` for exactly this shape —
+a name rule with a second regexp, over the table, that gates whether the rule
+is tried at all — and `refresh_token_parent` there is `credential` at
+priority 80, scoped to tables named like `refresh_tokens`. It was the one
+remaining false negative below; it is not any more.
 
 ## PII truth sets
 
@@ -369,18 +393,23 @@ threshold. An operator's `--unmask` does not change the prediction — it is a
 decision about a column the classifier flagged, and folding it in would score the
 flags rather than the classifier.
 
-Re-measured 2026-09-09 (T-HARD-C), after T-0104's name rules and T-0121's
-`public_key` decision, by the method under "Reproducing it" below: each schema
-loaded from its pin, sliced with the catalogue's own root, `--take` and flags,
-and every entry of the emitted `lazyslice.yml`'s `columns:` block scored against
-the labels at the end of this file.
+Re-measured 2026-09-14 (T-0119), after T-0104's name rules, T-0121's
+`public_key` decision and T-0119's table-scoped `refresh_token_parent` rule, by
+the method under "Reproducing it" below: each schema loaded from its pin,
+sliced with the catalogue's own root, `--take` and flags, and every entry of
+the emitted `lazyslice.yml`'s `columns:` block scored against the labels at the
+end of this file. Taken from the three per-schema reproductions
+(`go test -tags 'integration torture' -run TestTortureSchemas/<django|rails-activestorage|supabase-auth> ./internal/invariants/`),
+each green on its own, and not from a full `make torture` — the "It does not,
+right now" note above records that the full suite fails elsewhere, on
+regression `013`, a fixture none of these three schemas touches.
 
 | Schema | Columns | Labelled personal | Predicted | TP | FP | FN | Precision | Recall |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | django | 44 | 9 | 12 | 9 | 3 | 0 | **0.750** | **1.000** |
 | rails-activestorage | 36 | 7 | 15 | 7 | 8 | 0 | **0.467** | **1.000** |
-| supabase-auth | 271 | 50 | 73 | 49 | 24 | 1 | **0.671** | **0.980** |
-| all three | 351 | 66 | 100 | 65 | 35 | 1 | **0.650** | **0.985** |
+| supabase-auth | 271 | 50 | 74 | 50 | 24 | 0 | **0.676** | **1.000** |
+| all three | 351 | 66 | 101 | 66 | 35 | 0 | **0.653** | **1.000** |
 
 The first measurement of this table, before T-0104, was supabase-auth 62
 predicted, 40 TP, 22 FP, 10 FN — precision 0.645, recall 0.800 — and all three
@@ -394,7 +423,12 @@ T-0104's `code_?challenges?`, against nine columns that stopped being missed.
 T-0121 added exactly one prediction, `webauthn_credentials.public_key`, and it
 is a true positive: measured with the same fixture and the `public_key` rule
 removed, supabase-auth is 72 predicted, 48 TP, 24 FP, 2 FN, precision 0.667,
-recall 0.960.
+recall 0.960. **T-0119 added the last one**: `refresh_tokens.parent`, also a
+true positive and the false negative that had been left standing — 73 → 74
+predicted, 49 → 50 TP, 24 FP unchanged, 1 → 0 FN, precision 0.671 → 0.676,
+recall 0.980 → 1.000. supabase-auth's recall is 1.000 for the first time this
+file has measured it, and no false negative is open on any of the three
+schemas.
 
 ### django — precision 0.750, recall 1.000
 
@@ -424,10 +458,11 @@ Nothing personal was missed, including the one that matters:
 `active_storage_blobs.filename` — `ana-aluko-passport-3.pdf` — is caught at
 `likely` with no name signal at all.
 
-### supabase-auth — precision 0.671, recall 0.980
+### supabase-auth — precision 0.676, recall 1.000
 
-The one with a false negative, and it is the reason this schema is in the set.
-It had ten, and nine of them were names no rule covered:
+The schema with the false negative, and it is the reason this schema is in the
+set — though recall is 1.000 now, and there is none left. It had ten, and nine
+of them were names no rule covered:
 
 | Was missed | Rows in the fixture | What it holds | Now |
 |---|---|---|---|
@@ -440,7 +475,7 @@ It had ten, and nine of them were names no rule covered:
 | `scim_users.external_id` | 0 | the IdP's id for the person | masked (T-0104) |
 | `webauthn_credentials.credential_id` | 0 | the authenticator's credential id | masked (T-0104) |
 | `webauthn_credentials.public_key` | 0 | a stable per-person identifier | masked (T-0121) |
-| `refresh_tokens.parent` | 400, a quarter populated | another refresh token | **still copied** |
+| `refresh_tokens.parent` | 400, a quarter populated | another refresh token | **masked (T-0119)** |
 
 **Seven of the ten were columns with nothing in them**, where only the name could
 have decided — which is precisely the case a name rule exists for, and precisely
@@ -448,13 +483,19 @@ where the rule pack was thin: it matched `tokens?`, `secrets?`, `passwords?` and
 `api_keys?`, and none of `code`, `verifier`, `credential_id` or `public_key`.
 That was T-0104, and the `Now` column is the fix scored against the same table.
 
-The one that remains is the sharpest of the ten and the only one with data in
-it: `refresh_tokens.parent` is a refresh token in a column named after a tree
-edge, populated, and missed by name and by value alike. There is no pattern to
+**The tenth was the sharpest of the ten and the only one with data in it**:
+`refresh_tokens.parent` is a refresh token in a column named after a tree edge,
+populated, and missed by name and by value alike. There was no *name* pattern to
 write — `parents?` would mask the join keys of half a database at priority 80,
-and this rule pack sees a column name without its table — so the fix is a
-table-scoped pattern, which is a rule-pack feature and not a rule. It is pinned
-by `TestSupabaseAuthMissesArePinned`.
+and this rule pack's plain name rules see a column name without its table — so
+the fix is `rules.yml`'s `table_patterns:` (T-0119): a name rule gated by a
+second regexp over the table, tried only within a table that regexp matches.
+`refresh_token_parent` there is `credential` at priority 80, scoped to
+`(^|_)refresh_?tokens?(_|$)`, and catches the column by name alone in a run with
+nothing in it to read — `textsig.LooksSecret` would catch the value in
+production, where the column holds real tokens, but it was empty in this
+fixture, which is exactly the gap a name rule closes and a value signal cannot.
+It is pinned by `TestSupabaseAuthMissesArePinned`.
 
 The twenty-four false positives are mostly one table — `custom_oauth_providers`,
 nine of them, where a deployment's OAuth endpoints (`token_url`, `discovery_url`,
@@ -462,7 +503,9 @@ nine of them, where a deployment's OAuth endpoints (`token_url`, `discovery_url`
 `authentication_method`, which are short enum-ish strings that clear the entropy
 threshold, `sso_domains.domain`, which is an organisation's, four `jsonb`
 columns masked on their type alone, and the two `code_challenge` columns T-0104
-added.
+added. None of the twenty-four moved with T-0119: the table-scoped rule is
+anchored to `refresh_tokens.parent` alone and touches nothing else in the
+schema.
 
 **What the recall number does not measure.** These are the classifier's
 decisions, not the run's outcome. A column the classifier misses is copied
@@ -470,24 +513,23 @@ verbatim, so a miss here *is* a leak — which is why the grep half of I2 runs o
 every torture target as well, and why defect 8 was found by that and not by
 this table.
 
-**So phase 5 closes with a measured, reproducible leak of one of the fifty
-labelled columns on one of the ten schemas**, and that belongs in the gate's
-evidence rather than in this paragraph alone. It was ten when this file was
-written, and two of those ten were populated in the fixture that I2's grep half
-cannot see — `identities.provider_id` (300 rows, the provider's subject id for
-the person) and `flow_state.auth_code`: that half knows email addresses and
-phone numbers, and a subject id is neither. Both are masked now. The one that
-remains, `refresh_tokens.parent`, is a quarter populated and needs a
-table-scoped pattern rather than a name.
+**So phase 5's gate evidence, re-measured, is zero leaks of the fifty labelled
+columns on the ten schemas** — a claim this paragraph used to be unable to make.
+It was ten when this file was written, and two of those ten were populated in
+the fixture that I2's grep half cannot see on its own — `identities.provider_id`
+(300 rows, the provider's subject id for the person) and `flow_state.auth_code`:
+that half knows email addresses and phone numbers, and a subject id is neither.
+`refresh_tokens.parent` (400 rows, a quarter populated) was the third, and the
+last: I2's grep half does not know a refresh token by shape either, so the name
+rule T-0119 added is what closed it, the same way the identity provider's
+columns needed T-0104's rather than the grep.
 
 All ten are still pinned, one by one, by `TestSupabaseAuthMissesArePinned`
 (`internal/classify/supabase_misses_test.go`), which runs in `make test` on
-every change: nine assert the masking and one asserts the leak. It fails in
-**both** directions — an eleventh miss, or one of these ten changing side
-without this table being re-measured — so the number cannot get quietly worse,
-and cannot get better without the doc being updated with it. A test that asserts
-a leak is an uncomfortable thing to write and a worse thing to lose track of;
-that is why it names its own tracker task in its failure message.
+every change: all ten now assert the masking. It still fails in **both**
+directions — an eleventh miss, or any of these ten reverting to a leak —
+without this table being re-measured, so the number cannot get quietly worse,
+and cannot get better without the doc being updated with it.
 
 ## Reproducing it
 
