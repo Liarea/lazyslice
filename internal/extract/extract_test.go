@@ -296,6 +296,78 @@ func TestBatchesAreCutAtTwoThousandRows(t *testing.T) {
 	}
 }
 
+// TestBatchesAreAlsoCutByBytes is docs/reviews/2026-09-09/REVIEW.md finding
+// 9: 2,000 one-MiB values must not form one batch. The batcher is exercised
+// directly rather than through a whole keyed step, because the row-count cap
+// (batchRows, chunkSize's own 2,000) would otherwise mask whatever the byte
+// cap did — 2,000 rows of any width already flush on the row count, so the
+// case that proves the byte cap is doing anything is far fewer rows than
+// that.
+func TestBatchesAreAlsoCutByBytes(t *testing.T) {
+	const rows = 20
+	wide := strings.Repeat("x", 1<<20) // 1 MiB, one value
+
+	out := make(chan pipeline.RowBatch, rows)
+	b := &batcher{table: tbl("wide"), cols: []string{"id", "payload"}, out: out}
+	ctx := context.Background()
+	for i := range rows {
+		if err := b.add(ctx, []any{int64(i), wide}); err != nil {
+			t.Fatalf("add: %v", err)
+		}
+	}
+	if err := b.finish(ctx); err != nil {
+		t.Fatalf("finish: %v", err)
+	}
+	close(out)
+
+	var batches []pipeline.RowBatch
+	for batch := range out {
+		batches = append(batches, batch)
+	}
+
+	total := 0
+	for i, batch := range batches {
+		total += len(batch.Rows)
+		if len(batch.Rows) >= rows {
+			t.Errorf("batch %d holds %d of the %d rows: a batch of 1 MiB values must be cut well short "+
+				"of batchRows, or the byte cap is doing nothing", i, len(batch.Rows), rows)
+		}
+		if batch.Last != (i == len(batches)-1) {
+			t.Errorf("batch %d has Last=%v", i, batch.Last)
+		}
+	}
+	if total != rows {
+		t.Errorf("extracted %d rows across %d batches, want %d", total, len(batches), rows)
+	}
+	// batchBytes must stay a few MiB, not creep up toward the 20 MiB this
+	// test's rows total: pin it here so raising it has to come with a
+	// deliberate edit to this test, rather than silently widening the case
+	// below until it stops catching anything.
+	if batchBytes > 8<<20 {
+		t.Fatalf("batchBytes is %d MiB, want at most 8 MiB — this test's row/batch math assumes that bound",
+			batchBytes>>20)
+	}
+	// wantMinBatches is hardcoded, not derived from batchBytes: 20 one-MiB
+	// rows under an 8 MiB (or smaller) cap must split into at least 3
+	// batches. Deriving both this and maxRowsPerBatch from batchBytes was
+	// the hole the original finding named — every expression built that way
+	// collapses to a constant that any cap below ~19 MiB still satisfies, so
+	// raising batchBytes couldn't fail the test. This bound is independent
+	// of batchBytes and fails the moment the cap is raised past ~10 MiB.
+	const wantMinBatches = 3
+	if len(batches) < wantMinBatches {
+		t.Errorf("got %d batches for %d MiB of rows under an %d MiB cap, want at least %d",
+			len(batches), rows, batchBytes>>20, wantMinBatches)
+	}
+	maxRowsPerBatch := batchBytes/(1<<20) + 1
+	for i, batch := range batches[:len(batches)-1] {
+		if len(batch.Rows) > maxRowsPerBatch {
+			t.Errorf("non-final batch %d holds %d rows, want at most %d under an %d MiB cap",
+				i, len(batch.Rows), maxRowsPerBatch, batchBytes>>20)
+		}
+	}
+}
+
 func TestGeneratedColumnsAreNotCopied(t *testing.T) {
 	people := pipeline.Table{
 		Ref: tbl("people"),

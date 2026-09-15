@@ -1,0 +1,8 @@
+{
+  "BenchmarkExtractThroughput": {
+    "rows_per_sec": 15000000,
+    "measured": "2026-09-14",
+    "hardware": "Apple M4 (darwin/arm64), local run — see docs/PERF.md",
+    "note": "Measured at roughly 22,000,000 rows/sec locally (best of 5 one-second runs). Recorded here at a deliberately conservative ~68% of that so `make bench` does not fail a pull request over ordinary run-to-run and CI-runner-to-laptop variance; docs/PERF.md's concerns section says this should be replaced with a number measured on the actual CI runner after this job's first few real runs."
+  }
+}

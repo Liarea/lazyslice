@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
+	"hash"
 	"sync"
 
 	"github.com/Liarea/lazyslice/internal/pipeline"
@@ -58,6 +59,35 @@ type bloom struct {
 	words []uint64
 	bits  uint64
 	cells int64
+
+	// macPool and colCache are T-PERF's fix for the two allocations profiling
+	// found in positions(), the function Add and MayContain both call once
+	// per masked cell — up to millions of times in one run. Profiled over a
+	// 2,000,000-row extraction (docs/PERF.md): with mask.Apply's own hashing
+	// (the mask module, a dependency this package calls and does not
+	// reimplement) set aside, positions() was the largest CPU cost this
+	// package controls, almost all of it hmac.New allocating a fresh
+	// HMAC-SHA256 state and mac.Sum(nil) allocating a fresh 32-byte result
+	// on every call.
+	//
+	// macPool is a sync.Pool of reusable hash.Hash values rather than one
+	// hash.Hash guarded by b.mu: Add and MayContain run in different
+	// goroutines in a streaming pipeline (the comment on bloom above), and a
+	// single shared instance would have to hold b.mu for the whole hash
+	// rather than only the word write that needs it. A pooled instance needs
+	// no lock of its own; Reset() before use is what makes reuse safe (the
+	// key never changes, and hash.Hash's contract is that Reset returns it
+	// to its just-constructed state).
+	macPool sync.Pool
+
+	// colCache holds the encoded (schema, table, column) byte triple for
+	// every pipeline.ColumnRef this filter has seen, so the same three short
+	// strings are not converted to a fresh []byte on every one of a column's
+	// cells — only path and canonical vary call to call. The key set is the
+	// handful of masked columns in one run's schema, read far more often
+	// than written, from both goroutines above, which is what a sync.Map is
+	// for.
+	colCache sync.Map // pipeline.ColumnRef -> [3][]byte
 }
 
 // NewResidual returns the residual filter, sized for the number of masked cells
@@ -85,6 +115,11 @@ func NewResidual(cells int64) pipeline.Residual {
 	// holding a snapshot could test a guess against (T13's oracle, one level
 	// down).
 	_, _ = rand.Read(b.key[:])
+	// The pool's New reads b.key, so it is wired up only after the key above
+	// is filled — every hash.Hash it ever produces is keyed correctly, and
+	// there is no window where a pooled instance could be built with a zero
+	// key.
+	b.macPool.New = func() any { return hmac.New(sha256.New, b.key[:]) }
 	return b
 }
 
@@ -142,15 +177,41 @@ func (b *bloom) Bytes() int64 {
 // h2 is forced odd so that it is coprime with the (even) word-aligned bit
 // count, which keeps the k positions from collapsing onto a short cycle.
 func (b *bloom) positions(col pipeline.ColumnRef, path string, canonical []byte) (uint64, uint64) {
-	mac := hmac.New(sha256.New, b.key[:])
+	mac, ok := b.macPool.Get().(hash.Hash)
+	if !ok {
+		// macPool.New always returns a hash.Hash (hmac.New(sha256.New, ...)),
+		// so this is unreachable; the check exists to satisfy errcheck's
+		// check-type-assertions and to fail loudly rather than panic on a nil
+		// interface if that ever stopped being true.
+		panic("transform: bloom's mac pool held something other than a hash.Hash")
+	}
+	mac.Reset()
+	schema, table, column := b.columnParts(col)
 	// hash.Hash never returns an error from Write.
-	_, _ = mac.Write(mask.Encode(
-		[]byte(col.Table.Schema),
-		[]byte(col.Table.Name),
-		[]byte(col.Column),
-		[]byte(path),
-		canonical,
-	))
-	sum := mac.Sum(nil)
+	_, _ = mac.Write(mask.Encode(schema, table, column, []byte(path), canonical))
+	var buf [sha256.Size]byte
+	sum := mac.Sum(buf[:0])
+	b.macPool.Put(mac)
 	return binary.BigEndian.Uint64(sum[0:8]), binary.BigEndian.Uint64(sum[8:16]) | 1
+}
+
+// columnParts is the cached []byte form of col's three parts (see colCache
+// above). The parts never change for a given ColumnRef, so the first call for
+// a column pays for the three conversions and every later call for the same
+// column reads them back.
+func (b *bloom) columnParts(col pipeline.ColumnRef) (schema, table, column []byte) {
+	if v, ok := b.colCache.Load(col); ok {
+		if parts, ok := v.([3][]byte); ok {
+			return parts[0], parts[1], parts[2]
+		}
+	}
+	parts := [3][]byte{[]byte(col.Table.Schema), []byte(col.Table.Name), []byte(col.Column)}
+	actual, _ := b.colCache.LoadOrStore(col, parts)
+	stored, ok := actual.([3][]byte)
+	if !ok {
+		// colCache never stores anything but [3][]byte; see positions' own
+		// panic above for why this checks rather than discards ok.
+		panic("transform: bloom's column cache held something other than [3][]byte")
+	}
+	return stored[0], stored[1], stored[2]
 }

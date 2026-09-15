@@ -1,4 +1,4 @@
-# Board · 2026-09-14
+# Board · 2026-09-15
 
 | Epic | Phase | Open | In progress | Done | Cancelled | Blocked |
 |---|---|---|---|---|---|---|
@@ -7,9 +7,9 @@
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 1 | 0 | 9 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
-| E5 Hardening | 5 | 3 | 1 | 67 | 0 | 0 |
+| E5 Hardening | 5 | 3 | 1 | 68 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 26 | 0 | 24 | 4 | 0 |
+| E9 Later | later | 29 | 0 | 24 | 4 | 0 |
 
 ## Open and in progress
 
@@ -21,7 +21,6 @@
 - T-0065 [open] E6 · 20-second VHS GIF of the first run on Pagila (sonnet)
 - T-0083 [in_progress] E5 · Target type registration for CopyFrom: no owner since internal/load shipped ()
 - T-0087 [open] E9 · internal/classify's JSON leaf signal never consults the name dictionary, so verify's second net cannot score person_name or free_text over document leaves ()
-- T-0090 [open] E5 · T-PERF: performance baseline and CI throughput guard (opus)
 - T-0102 [open] E9 · A text column holding a JSON document is invisible to ARCHITECTURE.md 4's JSON rule ()
 - T-0124 [open] E9 · testdata/regressions covers plan.refused.unique_domain no longer ()
 - T-0125 [open] E9 · Makefile's vet-tagged comment still says .golangci.yml does not lint the torture tag ()
@@ -45,9 +44,14 @@
 - T-0170 [open] E9 · torture regression 013 (json-object-key-email) fails on main ()
 - T-0173 [open] E9 · Stop.Args is never populated by core.wrap, so many transcript error lines render generic while only the final exit line is specific (opus)
 - T-0174 [open] E9 · Wire --debug to print the statement trace (Source.Trace) on an ordinary failure ()
+- T-0175 [open] E9 · Give nasty.sql's stream fixtures a size parameter for perf profiling ()
+- T-0176 [open] E9 · mask.Apply's HMAC-SHA256 derivation is the largest CPU cost in the extract/transform/load pipeline ()
+- T-0177 [open] E5 · Record real ubuntu-latest bench baseline and flip bench job to blocking ()
+- T-0178 [open] E9 · TestAStoppedContainerIsOfferedAndStarted binds a fixed host port (127.0.0.1:5433) and collides under parallel container runs (sonnet)
 
 ## Recently closed
 
+- T-0090 [done] E5 · T-PERF: performance baseline and CI throughput guard → done
 - T-0029 [cancelled] E9 · Before going public: git-crypt the AI-specific paths and rewrite pre-encryption history → cancelled
 - T-0089 [done] E5 · T-FAILUX: failure UX and error catalogue drift test → done
 - T-0118 [done] E5 · internal/transform: mask an array whose sample arrives as a text literal element-wise → done
@@ -72,4 +76,3 @@
 - T-0150 [done] E9 · ARCHITECTURE.md §3.2 amendment (2026-09-08) still says a _type value is truncated and printed at 64 bytes → done
 - T-0151 [cancelled] E9 · Key the polymorphic value digest on the run's actual mask key, not the published schema fingerprint → cancelled
 - T-0152 [cancelled] E9 · ADR for T-0131's published-fingerprint value digest, or promote T-0151 → cancelled
-- T-0153 [done] E9 · plan.refused.equality_group: a code of its own for the FK equality-group refusal → done
