@@ -13,11 +13,56 @@ permissions:
   # OIDC token of this workflow is the signing identity, and .goreleaser.yaml
   # signs the checksum file with it.
   id-token: write
+  # actions: read is for the gate below, which reads the ci workflow's own
+  # run history through the REST API rather than through a git checkout.
+  actions: read
 
 jobs:
   release:
     runs-on: ubuntu-latest
     steps:
+      # T-0140: docs/reviews/2026-09-09/REVIEW.md, "Release reality" — this
+      # workflow ran `make check` only, so a tag did not have to point at a
+      # commit whose `ci` workflow (lint, forbidden, unsafe-flags, the full
+      # integration matrix, and since T-0140 also torture) had ever run, let
+      # alone passed. `make check` below is still real and still required —
+      # it is the gate for a tag pushed on an unpushed branch, or racing a
+      # branch push, per its own comment in ci.yml — but it is not `ci`, and
+      # it does not run torture. This step is the first thing the workflow
+      # does, before checkout, so a red or missing `ci` run on this exact sha
+      # fails the release before anything is built, signed or published.
+      #
+      # `head_sha` filters the ci workflow's own run list to this commit
+      # (github.sha is the tag's target commit, not the tag itself). A commit
+      # can carry more than one completed run of `ci` — a branch push and a
+      # pull request both trigger it — but only a push-to-`main` run runs the
+      # `torture` job (ci.yml: `if: github.ref == 'refs/heads/main' &&
+      # github.event_name == 'push'`); a `pull_request` run, or a push to any
+      # other branch, skips that job, and a skipped job still leaves the
+      # workflow run's own conclusion as `success`. So the query below is
+      # restricted server-side to `event=push&branch=main`, and the jq select
+      # re-checks both fields rather than trusting the filter alone, so this
+      # only ever counts the run kind that actually exercises torture.
+      - name: refuse to release unless ci succeeded on this commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          sha="${{ github.sha }}"
+          runs=$(gh api "repos/${{ github.repository }}/actions/workflows/ci.yml/runs?head_sha=${sha}&status=completed&event=push&branch=main" --jq '.workflow_runs')
+          total=$(echo "$runs" | jq 'length')
+          if [ "$total" -eq 0 ]; then
+            echo "release: no completed 'ci' run on main found for commit $sha."
+            echo "docs/RUNBOOK.md, 'Cutting a release': tag only a commit whose ci run on main is green."
+            exit 1
+          fi
+          succeeded=$(echo "$runs" | jq '[.[] | select(.conclusion == "success" and .event == "push" and .head_branch == "main")] | length')
+          if [ "$succeeded" -eq 0 ]; then
+            echo "release: $total completed 'ci' run(s) on main found for commit $sha, and none of them succeeded."
+            exit 1
+          fi
+          echo "release: ci succeeded on main for commit $sha ($succeeded of $total completed run(s))."
+
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0

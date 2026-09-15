@@ -55,7 +55,7 @@ Create the GitHub repository and push. Publish posts. Buy a domain. Anything inv
 
 ## Cutting a release
 
-1. The commit is on main and its `ci` run is green (public runners; `make torture` included since T-0140). No tag on a red or unfinished commit: the release workflow refuses it, and the refusal is the point.
+1. The commit is on main and its `ci` run is green (public runners; `make torture` included since T-0140, gated to pushes to `main` so it does not run on every pull request). No tag on a red or unfinished commit: `release.yml`'s first step queries the checks API for a completed, successful `ci` run on the tagged commit's sha, restricted to `event=push&branch=main` — the only run kind that runs `torture` — and refuses to build if there is none, before checkout or `make check` run — the refusal is the point.
 2. `git tag -a vX.Y.Z -m "vX.Y.Z"` then `git push origin vX.Y.Z`. goreleaser builds, signs, publishes the GitHub release (pre-release while `.goreleaser.yaml` says `prerelease: true`) and pushes the cask to `Liarea/homebrew-tap` with `HOMEBREW_TAP_TOKEN`.
 3. On a machine that did not build it: `brew install Liarea/tap/lazyslice && lazyslice --version`. If the version does not print, the release is withdrawn, not patched in place.
 4. Edit the release notes on GitHub only to name a breaking change the commit prefixes did not make obvious.
