@@ -33,6 +33,20 @@ no writing to a target — this package only reads.
   reproducible by accident.
 
 **Decisions made during implementation.**
+- **A batch is cut at `batchRows` (2,000) or `batchBytes` (8 MiB), whichever
+  it reaches first** (T-PERF, docs/reviews/2026-09-09/REVIEW.md finding 9:
+  "extraction batches 2,000 rows regardless of byte size. Even one batch of
+  2,000 one-MiB values can require roughly two GiB before transformation
+  overhead"). `batcher.add` (extract.go) tracks a cheap running estimate,
+  `rowEstimate` (sql.go's `batchBytes`, extract.go's `rowEstimate`): a
+  `string` or `[]byte` value counts its own length, everything else a small
+  fixed constant, so the estimate needs no reflection and no second pass over
+  a value the batcher does not otherwise inspect. It is a lower bound, not a
+  claim about wire size or the batch's true heap footprint — the point is
+  only that 2,000 one-MiB values no longer form one 2 GiB batch, not an exact
+  accounting. `TestBatchesAreAlsoCutByBytes` is the guard: 20 rows of a 1 MiB
+  value cut into several batches well short of the 2,000-row cap.
+  docs/PERF.md has the before/after batch counts and RSS for a wide-row run.
 - **`New` takes the `*pipeline.Schema`.** §2's `Extract` is given the plan and
   not the schema, and a `Step` names a table, a mode, an identity and a key
   set — no column list. The copied columns are §11.1's ("explicit column lists

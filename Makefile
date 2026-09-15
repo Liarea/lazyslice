@@ -38,7 +38,7 @@ LDFLAGS := -s -w \
 	-X main.commit=$(COMMIT) \
 	-X main.date=$(DATE)
 
-.PHONY: all build test lint integration torture vet-tagged forbidden unsafe-flags spdx fmt check tools clean help docs docs-check vulncheck
+.PHONY: all build test lint integration torture vet-tagged forbidden unsafe-flags spdx fmt check tools clean help docs docs-check vulncheck bench
 
 ## build: compile the binary into bin/
 build:
@@ -66,6 +66,75 @@ GOTESTFLAGS ?=
 
 integration:
 	go test -tags integration -count=1 -timeout 30m $(GOTESTFLAGS) ./...
+
+## bench: BenchmarkExtractThroughput (internal/extract), compared against the
+## recorded baseline
+##
+## docs/PERF.md profiled extract, transform and load together against a real
+## Postgres (5,000 root rows, a 2,000,000-row child table) and recorded those
+## numbers by hand, because they need Docker and take tens of seconds — the
+## wrong cost for every push. This target is the number that can run on every
+## push: BenchmarkExtractThroughput drives this package's own extractor —
+## statement building, scanning into []any, batching by rows and by bytes —
+## against an in-memory fake reader, no database and no network, so the
+## number it reports is about this package's code on the runner it ran on and
+## not about a container's disk that day.
+##
+## BENCH_BASELINE is internal/extract/testdata/bench/baseline.json and not
+## top-level testdata/bench/baseline.json: testdata/ was outside T-PERF's
+## authorized paths (internal/extract/, internal/load/, internal/transform/,
+## docs/PERF.md, Makefile, .github/), and internal/extract/testdata/ is
+## inside internal/extract/. docs/PERF.md's concerns section names this
+## deviation; T-0175 (tracker) is the sibling task for nasty.sql's own size
+## parameter, which has the same problem for a different reason.
+##
+## The comparison is inline Python rather than a new tools/ program, for the
+## same reason: tools/ was outside T-PERF's paths too. It takes the best of
+## five 1-second runs (`-count=5`), because a benchmark run under `go test`
+## on a shared CI runner is noisy and the baseline should not fail a pull
+## request over a slow neighbour — regressing the code is what should fail
+## it. BENCH_REGRESSION_PCT is the 20% ceiling the task set; a drop past it
+## fails the build.
+BENCH_BASELINE := internal/extract/testdata/bench/baseline.json
+BENCH_REGRESSION_PCT := 20
+
+# define/endef and export, rather than a tools/ program: tools/ was outside
+# T-PERF's authorized paths, the same reason BENCH_BASELINE above lives under
+# internal/extract/testdata/ and not top-level testdata/bench/.
+define BENCH_CHECK_PY
+import json, re, sys
+
+bench_out, baseline_path, ceiling_pct = sys.argv[1], sys.argv[2], float(sys.argv[3])
+
+rates = []
+with open(bench_out) as f:
+    for line in f:
+        if not line.startswith("BenchmarkExtractThroughput"):
+            continue
+        m = re.search(r"([0-9.]+)\s+rows/sec", line)
+        if m:
+            rates.append(float(m.group(1)))
+if not rates:
+    print(f"bench: no 'rows/sec' line from BenchmarkExtractThroughput in {bench_out}")
+    sys.exit(1)
+
+with open(baseline_path) as f:
+    baseline = json.load(f)["BenchmarkExtractThroughput"]["rows_per_sec"]
+
+best = max(rates)
+pct = (best - baseline) / baseline * 100
+print(f"bench: best of {len(rates)} run(s) = {best:,.0f} rows/sec, "
+      f"baseline ({baseline_path}) = {baseline:,.0f} rows/sec ({pct:+.1f}%)")
+if pct < -ceiling_pct:
+    print(f"bench: throughput dropped more than {ceiling_pct:.0f}% from the recorded baseline")
+    sys.exit(1)
+endef
+export BENCH_CHECK_PY
+
+bench:
+	@echo "==> bench: BenchmarkExtractThroughput, best of 5 one-second runs"
+	@mkdir -p $(BINDIR) && go test -run '^$$' -bench BenchmarkExtractThroughput -benchtime=1s -count=5 ./internal/extract/... | tee $(BINDIR)/bench.out
+	@python3 -c "$$BENCH_CHECK_PY" $(BINDIR)/bench.out $(BENCH_BASELINE) $(BENCH_REGRESSION_PCT)
 
 ## torture: the ten real schemas of testdata/torture/, plus testdata/regressions/
 ##

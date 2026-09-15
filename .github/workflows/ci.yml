@@ -374,3 +374,39 @@ jobs:
         run: make tools
       - name: no known-reachable vulnerability in either module (THREAT_MODEL.md T10)
         run: make vulncheck
+
+  # T-PERF (docs/PERF.md): BenchmarkExtractThroughput against no database, so
+  # this job needs no Docker service and runs on every push like `test`
+  # above, not only on a push to main like `torture`. It is meant to fail a
+  # pull request whose change drops extract's own throughput by more than
+  # BENCH_REGRESSION_PCT (Makefile, 20%) from the baseline recorded in
+  # internal/extract/testdata/bench/baseline.json — not top-level
+  # testdata/bench/, which was outside T-PERF's authorized paths (docs/PERF.md's
+  # concerns section, tracker T-0175).
+  #
+  # `continue-on-error: true` for now: baseline.json's 15,000,000 rows/sec was
+  # recorded on an Apple M4 (docs/PERF.md), never on this job's own
+  # ubuntu-latest runner, and an M4 running this in-memory benchmark is
+  # expected to be well ahead of a GitHub-hosted x86 runner's single-thread
+  # speed — plausibly under the 12,000,000 rows/sec floor the 20% ceiling
+  # implies, which would make this job red on every push over a baseline gap
+  # rather than a real regression. T-0177 (tracker) is to push a branch, read
+  # this job's own best-of-5 rows/sec from a real run, replace baseline.json
+  # with that number, and remove this line so the job gates for real.
+  #
+  # `ubuntu-latest` alone, not the `test` job's three-OS matrix: this is a
+  # regression gate against one recorded number, and a baseline recorded on a
+  # laptop already has to tolerate cross-machine variance (docs/PERF.md); a
+  # second and third baseline per OS is a cost this job does not need to
+  # carry to do its job.
+  bench:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: extract throughput has not dropped more than 20% from the recorded baseline (non-blocking until T-0177 records a real ubuntu-latest baseline)
+        run: make bench

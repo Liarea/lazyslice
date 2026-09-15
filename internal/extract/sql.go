@@ -32,6 +32,17 @@ const chunkSize = 2000
 // step has no chunks and is cut into batches of this size directly.
 const batchRows = 2000
 
+// batchBytes is the second cap a batch is cut at: a batcher flushes on
+// whichever of batchRows or batchBytes it reaches first. 2,000 rows was
+// never a memory bound by itself — docs/reviews/2026-09-09/REVIEW.md finding
+// 9: "extraction batches 2,000 rows regardless of byte size. Even one batch
+// of 2,000 one-MiB values can require roughly two GiB before transformation
+// overhead." 8 MiB is a few times rowEstimate's per-value assumptions for an
+// ordinary row and small enough that a table of wide (near-1-MiB) values now
+// cuts a batch every few rows instead of holding 2,000 of them at once; see
+// docs/PERF.md for the measurement.
+const batchBytes = 8 << 20
+
 // lookupLimit is the bound the Lookup read carries. A table is a Lookup step
 // only after the planner's bounded count proved it under §3's 1,000-row lookup
 // ceiling in this same snapshot (internal/plan's countProbeLimit is the same

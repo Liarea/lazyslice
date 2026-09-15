@@ -30,6 +30,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strconv"
 
 	"github.com/Liarea/lazyslice/internal/pipeline"
@@ -289,8 +290,9 @@ func lookupOrder(t *pipeline.Table, cols []string) ([]string, error) {
 	return cols, nil
 }
 
-// batcher cuts a table's rows into pipeline.RowBatch values of batchRows rows,
-// numbers them from 0 and marks the last one.
+// batcher cuts a table's rows into pipeline.RowBatch values of at most
+// batchRows rows and at most batchBytes of estimated row content, numbers
+// them from 0 and marks the last one.
 //
 // It never holds more than one batch: the slice it fills is handed to the
 // channel and replaced, so the rows of a table are in this process exactly once
@@ -300,8 +302,9 @@ type batcher struct {
 	cols  []string
 	out   chan<- pipeline.RowBatch
 
-	rows [][]any
-	seq  int
+	rows  [][]any
+	bytes int
+	seq   int
 }
 
 func (b *batcher) add(ctx context.Context, row []any) error {
@@ -309,10 +312,81 @@ func (b *batcher) add(ctx context.Context, row []any) error {
 		b.rows = make([][]any, 0, batchRows)
 	}
 	b.rows = append(b.rows, row)
-	if len(b.rows) < batchRows {
+	b.bytes += rowEstimate(row)
+	if len(b.rows) < batchRows && b.bytes < batchBytes {
 		return nil
 	}
 	return b.flush(ctx, false)
+}
+
+// rowEstimate is a cheap, mostly allocation-free lower bound on one row's
+// byte content: it is not a claim about wire or in-memory size (a string is
+// scanned once into its own allocation, a driver value carries its own
+// overhead beyond its content), only a size the batcher can compare against
+// batchBytes without decoding a value a second time. A string or []byte
+// contributes its own length; a jsonb/json or array value (pgx's default
+// decode for a column scanned into *any: map[string]any, []any, or a typed
+// slice) is walked so a large document or array still counts as something
+// close to its size rather than the fixed constant; every other value —
+// every fixed-width scalar, every driver type this package does not
+// otherwise recognise — contributes a small constant, deliberately not
+// zero, so that a table of many narrow columns still counts as something.
+// The point is 2,000 one-MiB values no longer forming one two-GiB batch
+// (docs/reviews/2026-09-09/REVIEW.md finding 9), for a jsonb or array
+// column exactly as much as a text one; it does not need to be exact to do
+// that.
+const rowEstimateFixed = 16
+
+// rowEstimateMaxDepth bounds the recursion into a decoded jsonb/array value
+// so a pathological nesting depth cannot make the estimate itself expensive.
+// Past this depth every remaining value counts as rowEstimateFixed, same as
+// any other unrecognised type.
+const rowEstimateMaxDepth = 8
+
+func rowEstimate(row []any) int {
+	n := 0
+	for _, v := range row {
+		n += valueEstimate(v, rowEstimateMaxDepth)
+	}
+	return n
+}
+
+// valueEstimate is rowEstimate's per-value walk, recursing into the shapes
+// pgx actually decodes a jsonb, json or array column into when scanned as
+// *any: map[string]any and []any from jsonb/json, and []any or a typed
+// slice ([]int64, []string, ...) from an array. depth guards against
+// unbounded recursion on a deeply nested document.
+func valueEstimate(v any, depth int) int {
+	switch val := v.(type) {
+	case string:
+		return len(val)
+	case []byte:
+		return len(val)
+	case nil:
+		return rowEstimateFixed
+	}
+	if depth <= 0 {
+		return rowEstimateFixed
+	}
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Map:
+		n := 0
+		iter := rv.MapRange()
+		for iter.Next() {
+			n += valueEstimate(iter.Key().Interface(), depth-1)
+			n += valueEstimate(iter.Value().Interface(), depth-1)
+		}
+		return n
+	case reflect.Slice, reflect.Array:
+		n := 0
+		for i := 0; i < rv.Len(); i++ {
+			n += valueEstimate(rv.Index(i).Interface(), depth-1)
+		}
+		return n
+	default:
+		return rowEstimateFixed
+	}
 }
 
 // finish sends whatever is left with Last set. A table with no rows at all
@@ -329,6 +403,7 @@ func (b *batcher) flush(ctx context.Context, last bool) error {
 		Last:  last,
 	}
 	b.rows = nil
+	b.bytes = 0
 	b.seq++
 	select {
 	case b.out <- batch:
