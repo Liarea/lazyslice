@@ -266,16 +266,75 @@ SELECT n.nspname,
    AND left(n.nspname, 3) <> 'pg_'
  ORDER BY 1, 2, 3, 4`
 
+// A domain's CHECK is in here too (conrelid is 0 rather than absent), and it
+// names its *type* rather than a relation: pg_constraint.contypid is the
+// domain. The second column carries that name and the kind says which of the
+// two a row is, because internal/plan's --allow-type-literal opt-out is per type and
+// this pass has to be able to attribute a domain's CHECK to the type the
+// operator named (the T-REDFIX review's fourth finding). Before that the row
+// carried an empty relation name and nothing said which domain it belonged to.
 const catalogConstraintsSQL = `
 SELECT n.nspname,
-       coalesce(c.relname, ''),
+       coalesce(c.relname, dt.typname, ''),
        t.conname,
-       'constraint',
+       CASE WHEN t.contypid <> 0 THEN 'domain constraint' ELSE 'constraint' END,
        pg_get_constraintdef(t.oid)
   FROM pg_constraint t
   JOIN pg_namespace n ON n.oid = t.connamespace
   LEFT JOIN pg_class c ON c.oid = t.conrelid
+  LEFT JOIN pg_type dt ON dt.oid = t.contypid
  WHERE t.contype IN ('c', 'x')
    AND n.nspname NOT IN ('pg_catalog', 'information_schema')
    AND left(n.nspname, 3) <> 'pg_'
- ORDER BY n.nspname, coalesce(c.relname, ''), t.conname`
+ ORDER BY n.nspname, coalesce(c.relname, dt.typname, ''), t.conname`
+
+// catalogEnumLabelsSQL is the fourth catalog read: the labels of every enum
+// type in a user schema (the 2026-09-15 red team's A4b and A11).
+//
+// internal/load/ddl recreates an enum with `CREATE TYPE ... AS ENUM (...)`,
+// spelling every label as a string literal, so a label is a DDL string literal
+// that crosses into the target verbatim exactly as a DEFAULT does — and
+// neither this pass nor internal/plan's read pg_enum, so
+// `CREATE TYPE assignee AS ENUM ('unassigned','enum.canary@bigcorp.com',
+// '+1-415-555-0199')` put an address and a phone number into the target under
+// a green tick, with nothing in the yml.
+//
+// The label's *ordinal* is what the refusal names, never the label text
+// (THREAT_MODEL.md T4), which is why enumsortorder is selected rather than the
+// label being used as the object name.
+const catalogEnumLabelsSQL = `
+SELECT n.nspname,
+       '',
+       t.typname || ' label ' || e.enumsortorder::text,
+       'enum label',
+       e.enumlabel
+  FROM pg_enum e
+  JOIN pg_type t ON t.oid = e.enumtypid
+  JOIN pg_namespace n ON n.oid = t.typnamespace
+ WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+   AND left(n.nspname, 3) <> 'pg_'
+ ORDER BY n.nspname, t.typname, e.enumsortorder`
+
+// catalogDomainDefaultsSQL is the fifth catalog read: a domain's DEFAULT,
+// which lives in pg_type.typdefault and not in pg_attrdef (the 2026-09-15 red
+// team's A12).
+//
+// It is one catalog table to the left of where T-0134 looked, and it is the
+// same mechanism as the 2026-09-09 review's finding 5: the value sits in the
+// target's catalog and the application's next INSERT that omits the column
+// materialises it into a row. A domain's CHECK is already covered, because
+// pg_constraint carries it with conrelid 0; its DEFAULT was covered by
+// nothing.
+const catalogDomainDefaultsSQL = `
+SELECT n.nspname,
+       '',
+       t.typname,
+       'domain default',
+       t.typdefault
+  FROM pg_type t
+  JOIN pg_namespace n ON n.oid = t.typnamespace
+ WHERE t.typtype = 'd'
+   AND t.typdefault IS NOT NULL
+   AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+   AND left(n.nspname, 3) <> 'pg_'
+ ORDER BY n.nspname, t.typname`

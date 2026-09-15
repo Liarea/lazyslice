@@ -136,7 +136,17 @@ type Target struct {
 	// connection once the DDL has created them (types.go, ARCHITECTURE.md
 	// §11.1). It is empty until the loader calls RegisterTypes.
 	types *typeRegistry
+	// sourceCluster is the source's Source.ClusterID, set by internal/core
+	// before Gate runs. It is rule 1's second disjunct for a role that cannot
+	// read system_identifier — which is the role ARCHITECTURE.md §9 itself
+	// recommends (the 2026-09-15 red team's identity-rule-1 finding).
+	sourceCluster string
 }
+
+// SetSourceCluster records the source's cluster identity for rule 1. It is
+// called by internal/core between OpenTarget and Gate, because the source read
+// it makes needs a connection the target does not have.
+func (t *Target) SetSourceCluster(id string) { t.sourceCluster = id }
 
 var _ pipeline.Target = (*Target)(nil)
 
@@ -236,10 +246,21 @@ func (t *Target) Gate(ctx context.Context, source dsn.Ref, sourceSystemID, allow
 		e.Reason = CodeProbeFailed
 		return e, err
 	}
-	if sourceSystemID != "" && systemID != "" {
+	clusterID, err := clusterIdentity(ctx, conn)
+	if err != nil {
+		e.Reason = CodeProbeFailed
+		return e, err
+	}
+
+	switch {
+	case sourceSystemID != "" && systemID != "":
 		e.SameCluster = systemID == sourceSystemID
-	} else if same, clusterErr := targetRef.SameCluster(source); clusterErr == nil {
-		e.SameCluster = same
+	case t.sourceCluster != "" && clusterID != "":
+		e.SameCluster = clusterID == t.sourceCluster
+	default:
+		if same, clusterErr := targetRef.SameCluster(source); clusterErr == nil {
+			e.SameCluster = same
+		}
 	}
 
 	sameEndpoint, err := targetRef.SameEndpoint(source)
@@ -248,8 +269,30 @@ func (t *Target) Gate(ctx context.Context, source dsn.Ref, sourceSystemID, allow
 		e.Reason = CodeProbeFailed
 		return e, fmt.Errorf("pg: gate: comparing the target with the source: %w", err)
 	}
-	sameCatalog := sourceSystemID != "" && systemID != "" &&
-		systemID == sourceSystemID && currentDB == source.Database
+	// Rule 1's second disjunct: the same catalog on the same cluster, whatever
+	// the endpoint is spelled as.
+	//
+	// Until the 2026-09-15 red team it rested on system_identifier alone, and
+	// EXECUTE on pg_control_system is not granted to PUBLIC — so for the
+	// SELECT-only source role ARCHITECTURE.md §9 itself recommends, this arm
+	// was unreachable and the endpoint comparison stood alone. Two published
+	// ports onto one container, or a second host spelling, defeated it: the
+	// run reported "dropping public.customers in the target" against the
+	// production database and did it.
+	//
+	// clusterIdentity is the same question asked of a catalog function every
+	// role can execute (source.go's sqlClusterID), so the arm now works under
+	// the recommended role. And when *neither* identity can be compared, a
+	// target whose database has the source's own name is refused rather than
+	// admitted: the endpoint spelling is exactly what an alias changes, so
+	// "the endpoints differ" is not evidence of anything here. The emptiness
+	// rule bounds what that used to cost — a populated production database is
+	// refused as not_empty — but an empty one with the source's name on the
+	// same server is the migration scenario, and the drop was real.
+	sameCatalog := currentDB == source.Database &&
+		(clusterUnknown(sourceSystemID, systemID, t.sourceCluster, clusterID) ||
+			(sourceSystemID != "" && systemID != "" && systemID == sourceSystemID) ||
+			(t.sourceCluster != "" && clusterID != "" && clusterID == t.sourceCluster))
 	if sameEndpoint || sameCatalog {
 		e.Reason = CodeSameDatabase
 		return e, nil
@@ -332,6 +375,33 @@ func systemIdentifier(ctx context.Context, conn *pgxpool.Conn) (string, error) {
 	// Execution of pg_control_system is not granted to PUBLIC. An identifier we
 	// cannot read is not an identifier that differs: the endpoint comparison
 	// stands on its own and the run says so in the header.
+	return "", nil
+}
+
+// clusterUnknown reports that neither identity could be compared: not the
+// system identifier, because a role that may not execute pg_control_system
+// reads "" for it, and not the ordinary-role cluster identity either. It is the
+// fail-closed half of rule 1 above.
+func clusterUnknown(sourceSystemID, systemID, sourceCluster, clusterID string) bool {
+	if sourceSystemID != "" && systemID != "" {
+		return false
+	}
+	return sourceCluster == "" || clusterID == ""
+}
+
+// clusterIdentity is sqlClusterID against the target. Like systemIdentifier it
+// answers "" for a read that failed for any reason other than the context
+// ending: the gate's own rule above decides what an unknown identity means, and
+// it means "refuse a target with the source's database name".
+func clusterIdentity(ctx context.Context, conn *pgxpool.Conn) (string, error) {
+	var id string
+	err := conn.QueryRow(ctx, sqlClusterID).Scan(&id)
+	if err == nil {
+		return id, nil
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return "", fmt.Errorf("pg: gate: reading the target cluster identity: %w", err)
+	}
 	return "", nil
 }
 

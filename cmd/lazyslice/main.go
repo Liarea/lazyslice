@@ -129,7 +129,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 func guardedExecute(ctx context.Context, root *cobra.Command, stderr io.Writer, req *core.Request) (code int) {
 	defer func() {
 		if r := recover(); r != nil {
-			code = reportPanic(stderr, r, req.Debug)
+			code = reportPanic(stderr, r, req.ShowRowValuesInErrors, req.Debug)
 		}
 	}()
 
@@ -147,8 +147,18 @@ func guardedExecute(ctx context.Context, root *cobra.Command, stderr io.Writer, 
 // only under --debug (CLAUDE.md, "no stack trace reaches the user without
 // --debug"). Without --debug the hint names the flag, in the same shape as
 // every other internal failure report prints.
-func reportPanic(stderr io.Writer, r any, showStack bool) int {
-	fmt.Fprintf(stderr, "lazyslice: internal error: %v\n", r)
+// The recovered value is described and not printed unless
+// --show-row-values-in-errors (THREAT_MODEL.md T4, the 2026-09-15 red team):
+// a panic message is a free-form string, and a masker or a library under one
+// that panics with the offending input in its message wrote a production value
+// into the CI log at any verbosity. core.PanicSummary is the one statement of
+// that redaction; internal/core's own panicError.Error uses it too.
+func reportPanic(stderr io.Writer, r any, showValues, showStack bool) int {
+	if showValues {
+		fmt.Fprintf(stderr, "lazyslice: internal error: %v\n", r)
+	} else {
+		fmt.Fprintf(stderr, "lazyslice: internal error: %s\n", core.PanicSummary(r))
+	}
 	if showStack {
 		_, _ = stderr.Write(debug.Stack())
 	} else {
@@ -313,6 +323,13 @@ func renderSafe(err error, showValues bool) string {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
 		return pg.RenderError(pgErr, showValues)
+	}
+	// A panic recovered off a stage goroutine travels as an error whose
+	// message names the value's type and not the value (internal/core's
+	// panicError). Under the flag that admits row values, print it.
+	var withValue interface{ PanicValue() any }
+	if showValues && errors.As(err, &withValue) {
+		return fmt.Sprintf("panic: %v", withValue.PanicValue())
 	}
 	return err.Error()
 }
@@ -796,10 +813,11 @@ func afterThePlan(next event.Sink, unmaskChanged bool) event.Sink {
 // the end, is what lets a bad shape be a single clear usage error rather than
 // five different ones.
 type rawFlags struct {
-	caps       []string // --cap, either "N" or "TABLE=N"
-	keys       []string // --key TABLE=COL,COL
-	unmask     []string // --unmask TABLE.COL=REASON
-	skipTables []string // --skip-table TABLE
+	caps              []string // --cap, either "N" or "TABLE=N"
+	keys              []string // --key TABLE=COL,COL
+	unmask            []string // --unmask TABLE.COL=REASON
+	allowTypeLiterals []string // --allow-type-literal TYPE=REASON
+	skipTables        []string // --skip-table TABLE
 }
 
 func newRawFlags() *rawFlags { return &rawFlags{} }
@@ -864,6 +882,8 @@ func bindFlags(groups []flagGroup, req *core.Request, raw *rawFlags) {
 		"Row identity for a table with no key, as TABLE=COL,COL; repeatable")
 	plan.StringArrayVar(&raw.skipTables, "skip-table", nil,
 		"Drop a child-only table to schema-only; repeatable")
+	plan.StringArrayVar(&raw.allowTypeLiterals, "allow-type-literal", nil,
+		"Keep an enum or domain whose recreated DDL holds a literal exit 13 refuses, as TYPE=REASON; repeatable")
 	plan.BoolVar(&req.PlanOnly, "plan", false,
 		"Stop after printing the plan; touch nothing")
 
@@ -950,6 +970,9 @@ func finish(cmd *cobra.Command, req *core.Request, raw *rawFlags) error {
 		return err
 	}
 	if err := parseUnmask(req, raw); err != nil {
+		return err
+	}
+	if err := parseAllowTypeLiteral(req, raw); err != nil {
 		return err
 	}
 	if err := checkCounts(req); err != nil {
@@ -1069,6 +1092,41 @@ func parseUnmask(req *core.Request, raw *rawFlags) error {
 				errUsage, col, previous, reason)
 		}
 		req.Unmask[col] = reason
+	}
+	return nil
+}
+
+// parseAllowTypeLiteral reads --allow-type-literal TYPE=REASON.
+//
+// It is --unmask's rule for the one object §11.1 recreates that is not a
+// column: an enum's labels and a domain's DEFAULT and CHECK, which
+// internal/plan refuses at exit 13 when a strong validator hits a literal in
+// them and which nothing can rewrite (a label is referenced by value by every
+// row of every column of the type). Until this flag existed that refusal had no
+// escape — it named --skip-table, which drops a table to *schema only* and
+// still recreates the type — so a source schema with one such label could not
+// be sliced at all (the T-REDFIX review's fourth finding).
+//
+// The bare form is refused for the same reason --unmask refuses it: an opt-out
+// with no reason is an opt-out nobody can review later (ARCHITECTURE.md §8).
+// The name is resolved against the source's own enums and domains in
+// internal/core, which refuses one that names nothing; this is the half that
+// can be checked without a database.
+func parseAllowTypeLiteral(req *core.Request, raw *rawFlags) error {
+	if len(raw.allowTypeLiterals) > 0 && req.AllowTypeLiterals == nil {
+		req.AllowTypeLiterals = map[string]string{}
+	}
+	for _, u := range raw.allowTypeLiterals {
+		name, reason, found := strings.Cut(u, "=")
+		if !found || strings.TrimSpace(name) == "" || strings.TrimSpace(reason) == "" {
+			return fmt.Errorf("%w: --allow-type-literal wants TYPE=REASON, got %q", errUsage, u)
+		}
+		if previous, duplicate := req.AllowTypeLiterals[name]; duplicate {
+			return fmt.Errorf(
+				"%w: --allow-type-literal %s given twice, with reasons %q and %q; one type has one reason",
+				errUsage, name, previous, reason)
+		}
+		req.AllowTypeLiterals[name] = reason
 	}
 	return nil
 }

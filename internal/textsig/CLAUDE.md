@@ -1,7 +1,7 @@
 # internal/textsig
 
 The value-only half of ARCHITECTURE.md §4's validators, plus the embedded
-English name dictionary: a pure function over one string, and nothing else.
+name dictionary: a pure function over one string, and nothing else.
 `internal/classify` scores its signals with these and `internal/verify`'s second
 net re-runs them over the loaded target, so this is the one home for both
 (tracker T-0055).
@@ -100,6 +100,89 @@ precision and recall suite (`TestPagilaPrecisionAndRecall`,
 from four schemas and keeps its name) and the second net's thresholds in
 `internal/verify`. A validator changed here that breaks either is supposed to
 break it.
+
+## The 2026-09-15 red team (`candidates.go`, `names.txt`)
+
+Three changes landed here, and each one changes what both callers see.
+
+**`Candidates(s) []string` and the four validators that read it.** A parse is
+defeated by writing the same value a different way, and the red team wrote a
+phone number as "plus four four, two oh, seven nine four six, oh nine five
+eight", an address as `grace.hopper AT realcorp DOT example`, a national
+insurance number with interleaved spaces and a card with `.` separators — every
+one of them into the target verbatim, under exit 0, with both nets agreeing the
+column was clean. `Candidates` yields the value as it stands **first**, then the
+canonical de-obfuscations: the at/dot words in four languages, a spelled-out
+digit run (with `double` and `treble`), a value written as short space-separated
+groups, and the address inside an RFC 5322 display name. `ValidEmail`,
+`ValidPhone`, `ValidLuhn` and `ValidIBAN` accept a value if **any** candidate
+parses, through `anyCandidate`.
+
+The precision argument is in the file and is the part to keep: a candidate is a
+*new string offered to the same parser*, so nothing that failed before can pass
+now except by a spelling this file produced on purpose — and each rule requires
+the whole value to look like the thing. `spelledDigits` needs every field to be
+a digit word, a literal digit run, a multiplier or a **short alphanumeric
+group** (a substitution wherever "one" appears would make one English sentence
+in ten a payment card); `collapseGroups` needs every field to be four
+characters or fewer (without it, "Meet me at the dot com office on Tuesday"
+normalises and collapses into something net/mail accepts as an address). The
+other validators are untouched: an IP, a MAC, a UUID and a URL have no folk
+spelling, and the dictionary- and entropy-backed ones are guesses a candidate
+list would only multiply.
+
+**`ValidIBAN` requires the two ISO 13616 check digits.** Characters three and
+four of an IBAN are always numeric; without that, any fifteen-to-thirty-four
+character run of letters clears mod-97 about one time in ninety-seven, which is
+why five of pagila's film titles used to. The tightening is what made IBAN
+precise enough to join `internal/plan`'s and `internal/verify`'s DDL-literal
+strong set (THREAT_MODEL.md T1's 2026-09-15 amendment). It does **not** make
+IBAN `strong` in the second net, which is a separate question about a ratio over
+a column.
+
+**The letter groups in `spelledDigits` are the T-REDFIX review's third
+finding.** The first version required the *whole* value to be digit words, so
+the brief's own A2 `ident` value — `AB nine eight seven six five four D`, a UK
+National Insurance number with interleaved spaces and spelled digits, listed as
+reaching the target verbatim — still validated as nothing, while the all-digit
+spelling of the same number (`A B 9 8 7 6 5 4 D`) worked through
+`collapseGroups`; `candidates_test.go` covered only the second, so a case the
+brief named was standing in for by a test that could not fail on it. A field
+that is four characters or fewer and alphanumeric is now written through into
+the candidate in its own case, under three guards that keep prose out: at least
+one digit actually *spelled*, at least `minMixedDigits` digits, and at least
+`minSpelledDigits` alphanumeric characters overall. `TestCandidatesDoNotInventValues`
+carries the prose cases that must stay negative, "Room 4 at the end of the hall"
+among them — every field of it is short, and it has no spelled digit.
+
+**`ValidNationalID`, and it is exactly two formats.** A US Social Security
+number and a UK National Insurance number, both strict patterns with the issuing
+authority's own exclusions. They exist for the DDL-literal passes, which run
+only the validators that are a parse. A wider "looks like an identifier" rule
+would refuse ordinary schemas, which is the failure mode that set of validators
+is narrow to avoid.
+
+**`names.txt` is no longer English only.** ARCHITECTURE.md §14 deferred the
+multilingual dictionaries to phase 5; the red team is phase 5, and it showed the
+cost in one run. The file now carries the given/surname stock of twenty-one
+languages beside the English list, under two rules stated in its own header and
+held by `TestDictionaryKeepsItsPrecisionRules`: **nothing shorter than three
+characters** (a two-letter value is an ISO code far more often than a person,
+and `TwoLetterCode` is the signal for it), and **no name that is also an
+ordinary English word** unless the list already carried it — which is why Park,
+Can and Long are not there though each is a common surname somewhere.
+`ContainsName` splits on `unicode.IsLetter` rather than `[a-zA-Z]` in the same
+change, because an ASCII splitter cut "Bogusław" into two fragments in no
+section of the file.
+
+**`PrintableText` is here and is not a validator.** It says whether a rendered
+value is text somebody wrote rather than bytes a program wrote, and it says
+nothing about whether that text is personal data. It is here because both
+callers need the same answer to the same question about the same value:
+`internal/classify` asks it before running the validators over a `bytea`
+column's samples and `internal/verify`'s second net asks it before running them
+over a `bytea` column of the loaded target (THREAT_MODEL.md T1's A4a). A second
+hand copy of it would be the drift this package exists to end.
 
 **Never:** read a column name, a neighbour, a schema or a database; return
 anything but a verdict about the string you were handed; export the dictionary's

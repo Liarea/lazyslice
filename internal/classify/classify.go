@@ -69,7 +69,12 @@ type work struct {
 	propagationRefused bool
 	// unmasked is a per-column opt-out that has not expired.
 	unmasked bool
-	family   string
+	// twoLetterCodes records that every sample was a two-letter code -- an ISO
+	// country or language column. It is read by the unknown-column arm of the
+	// neighbouring-column rule, which must not mask a lookup column of codes
+	// whose whole domain is two characters.
+	twoLetterCodes bool
+	family         string
 	// array is columnType.Array: family is the *element* family for an array
 	// column, so the two questions "is this a uuid" and "is this a uuid[]" need
 	// both fields. The key exemption is scoped to a scalar key (markNeverMasked),
@@ -330,6 +335,80 @@ var validators = []struct {
 	{pipeline.CatFreeText, phraseProse, false, func(d *textsig.Dict, s string) bool { return d.Prose(s) }},
 }
 
+// byteaTextSignal is ARCHITECTURE.md §4's bytea rule extended to the case the
+// 2026-09-15 red team's A4a found: a bytea column whose contents are printable
+// UTF-8 carrying personal data, in a table with no `certain` column for
+// byteaInPersonShapedTable to key on.
+//
+// It answers binary_personal or nothing. The category is fixed rather than
+// taken from the validator that hit, because binary_personal is the one
+// category rules.yml accepts on a bytea column and the only one whose masker
+// can write there — everything else would be the T-0054 failure by a longer
+// route.
+//
+// The gate is per value and not per column, and it is textsig.PrintableText:
+// a sample is considered when it is valid UTF-8 and at least 95% printable
+// runes, and the validators then run over the samples that are. A hit is either
+// a *strong* validator (a precise parse: an address, a phone number, an IP, a
+// MAC, a card, a URL) on any considered sample, or any validator at all
+// reaching validatorThreshold across them.
+//
+// **It used to be per column as well** — at least 95% of the whole sample set
+// had to be readable before any validator ran — and that made this signal and
+// internal/verify's second net two different rules over the same bytes, which
+// both files claimed they were not (the T-REDFIX review's second finding). A
+// bytea column that is half printable documents and half images passed that
+// gate nowhere: this package left it unmasked, and the second net — which asks
+// textsig.PrintableText per *value* and has no column ratio — refused the
+// loaded target at exit 9, with no green path, because semi_structured and
+// binary_personal cannot be reached for such a column by any other route.
+// --unmask on a column that really does hold documents was the only way
+// through, which is the refusal-an-operator-routes-around outcome this tree
+// argues against everywhere else. So the column ratio is gone and the two sides
+// ask one question per value. What it costs is the case the ratio was written
+// for — a column of images with one readable blob in it that a validator hits
+// is now masked as binary_personal rather than left alone — and that is the
+// direction it has to fail in: the same column is exit 9 in internal/verify
+// today, so masking it is strictly the kinder of the two answers, and
+// CLAUDE.md's "when in doubt, mask it" is the rule that decides it.
+func byteaTextSignal(dict *textsig.Dict, values []string, p *compiledPack) *valueSignal {
+	if len(values) == 0 {
+		return nil
+	}
+	readable := make([]string, 0, len(values))
+	for _, v := range values {
+		if textsig.PrintableText(v) {
+			readable = append(readable, v)
+		}
+	}
+	if len(readable) == 0 {
+		return nil
+	}
+	for _, v := range validators {
+		if silencedByType(p, v.cat, famText) {
+			continue
+		}
+		matched := 0
+		for _, s := range readable {
+			if v.ok(dict, s) {
+				matched++
+			}
+		}
+		if matched == 0 {
+			continue
+		}
+		if v.strong || float64(matched)/float64(len(readable)) >= validatorThreshold {
+			return &valueSignal{
+				cat:     pipeline.CatBinary,
+				phrase:  phraseByteaText,
+				matched: matched,
+				total:   len(values),
+			}
+		}
+	}
+	return nil
+}
+
 // signals is what the validators said about one column's samples.
 //
 // The four are kept apart because ARCHITECTURE.md §4's accepted-types gate
@@ -431,20 +510,39 @@ func bestSignal(dict *textsig.Dict, values []string, p *compiledPack, family str
 		sig.strong = compositeSignal(dict, values)
 		return sig
 	}
-	if family == famBytea || family == famTSVector {
+	if family == famBytea {
 		// A bytea sample is arbitrary binary, and asText renders it as a Go
 		// string: run through the text validators, a PNG reads as an address
 		// and a compressed blob reads as a secret. ARCHITECTURE.md §4 gives
 		// bytea its own rule -- "bytea in a person-shaped column is
 		// binary_personal and set to NULL" -- and the rule pack's text
-		// categories do not accept the family, so a value signal here could
-		// only produce a decision the pack itself contradicts. The name rule
-		// and byteaInPersonShapedTable are the only routes to a decision on
-		// one.
+		// categories do not accept the family, so a *text category* decided
+		// here could only produce a decision the pack itself contradicts.
 		//
-		// A tsvector is here for the same reason and one more: it is decided by
-		// its type alone (decide), so no validator's answer about it could
-		// change anything.
+		// That argument is sound and it does not cover the case the
+		// 2026-09-15 red team's A4a leaked through: a bytea holding printable
+		// UTF-8. `assets.blob_doc` held "Grace Hopper
+		// <grace.hopper1@realcorp.example> 078-05-1120" in a table with no
+		// `certain` column, so byteaInPersonShapedTable could not fire either,
+		// and the address crossed into the target verbatim under exit 0.
+		//
+		// So the guard is on the *content* and not on the family. A sample set
+		// that is valid UTF-8 and overwhelmingly printable is text somebody put
+		// in a bytea column, and the validators are asked about it; the
+		// category the hit produces is **binary_personal**, never the hit's
+		// own, because binary_personal is the one category the pack accepts on
+		// this family and its masker (NULL) is already registered — no new
+		// masker, no new writability question, and no route back to the
+		// contradiction above. A PNG fails the printability guard and is
+		// unaffected, which is what byteaTextSignal's own test pins.
+		sig.strong = byteaTextSignal(dict, values, p)
+		return sig
+	}
+	if family == famTSVector {
+		// A tsvector is decided by its type alone (decide), so no validator's
+		// answer about it could change anything. Its text form
+		// ("'academi':1 'battl':15") reads as an address to AddressShape,
+		// which is the other half of the reason not to ask.
 		return sig
 	}
 	// Below minSamples the column is *unproven*, not clean, and returning here
@@ -817,6 +915,7 @@ func (st *state) decide(w *work, col pipeline.Column, ct columnType, values []st
 			break
 		}
 		if sig.total >= minSamples && allTwoLetterCodes(values) {
+			w.twoLetterCodes = true
 			w.frags = append(w.frags, render("two_letter_codes"), render("no_name_signal"))
 			break
 		}
@@ -1029,6 +1128,143 @@ func (st *state) neighbouringColumns() {
 			w.frags = append(w.frags, render("neighbour", quoteTable(t.Ref), likely))
 		}
 	}
+	st.unknownColumnsBesideCertain()
+}
+
+// unknownColumnsBesideCertain is the second arm of the neighbouring-column
+// rule, and it is the 2026-09-15 red team's A2b.
+//
+// The arm above raises `low` to `possible`: a column that had *some* signal,
+// under the threshold, in a table with a `likely` column. What it cannot reach
+// is a free-text column with no signal at all — no name rule, no validator, no
+// type signal — sitting at `none` beside a column the classifier is certain
+// about. That column is copied verbatim, and the report says "no name or value
+// signal", which reads as a clean bill of health for a column nobody looked
+// inside. `entries.label`, `records.ident` and `blobs.payload2` were all that
+// column. CLAUDE.md's rule for that state is "when in doubt, mask it".
+//
+// So: a character column with no decision at all, in a table that already
+// holds a column at `certain`, is masked as free_text. The strength required of
+// the neighbour is `certain` and not `likely`, one step above the arm that
+// raises a column with evidence of its own, because this arm has no evidence
+// about *this* column to weigh against the false positive.
+//
+// Five exclusions, and each is a run this rule must not break rather than a
+// softening of it:
+//
+//   - A never-masked column (a generated column, a surrogate key, a FK
+//     column) and a type-conflicting decision: the same exclusions raisable
+//     applies to the arm above, for the same reasons.
+//   - A column under a unique index. free_text's generator would then have to
+//     emit d_required = n²/2ε distinct values (ARCHITECTURE.md §5), and
+//     internal/plan refuses at exit 12 when it cannot — over a column this
+//     rule masked on no evidence at all.
+//   - A column of two-letter codes. An ISO country or language column has a
+//     domain of two characters and reads as an unknown text column to every
+//     signal in §4; masking one is a plan refusal for the same reason, and it
+//     is not personal data.
+//   - A declared length under minUnknownLen. `char(4)`, `varchar(8)` and the
+//     rest are status codes, currency codes and short keys, and free_text's
+//     filler does not fit in them.
+//
+// It is not the whole answer to A2b, and the attack itself says so: its own
+// table had no `certain` column, so nothing here reaches it. What reaches
+// that one is the multilingual dictionary and textsig.Candidates. This is the
+// rail under both of them, for the next value shape neither recognises.
+func (st *state) unknownColumnsBesideCertain() {
+	for _, t := range st.schema.Tables {
+		certain := 0
+		for _, col := range t.Columns {
+			if w := st.dec[ref.ColumnRef{Table: t.Ref, Column: col.Name}]; w != nil &&
+				w.d.Confidence == pipeline.ConfCertain && identifiesAPerson(w.d.Category) {
+				certain++
+			}
+		}
+		if certain == 0 {
+			continue
+		}
+		for _, col := range t.Columns {
+			cref := ref.ColumnRef{Table: t.Ref, Column: col.Name}
+			w := st.dec[cref]
+			if !st.raisableUnknown(cref, w) {
+				continue
+			}
+			w.d.Category = pipeline.CatFreeText
+			w.d.Confidence = pipeline.ConfPossible
+			w.d.Source = pipeline.ByNeighbour
+			w.frags = append(w.frags, render("neighbour_unknown", quoteTable(t.Ref), certain))
+		}
+	}
+}
+
+// identifiesAPerson is the set of categories that make a table person-shaped
+// for the rule above: the ones that name, locate or contact an individual.
+//
+// The four it leaves out are the reason it exists. free_text, semi_structured,
+// binary_personal and derived_text are categories a column reaches **by its
+// type alone** — a tsvector is derived_text at `certain` on every schema that
+// has one, a jsonb is semi_structured at `certain` — so counting them made
+// pagila's `film` table person-shaped on the strength of its own search index
+// and masked `film.title` and `film.special_features` with it. A table is
+// person-shaped because it holds a person, not because it holds a document.
+func identifiesAPerson(cat pipeline.Category) bool {
+	switch cat {
+	case pipeline.CatEmail, pipeline.CatPersonName, pipeline.CatPhone,
+		pipeline.CatAddress, pipeline.CatGeo, pipeline.CatPersonDate,
+		pipeline.CatNationalID, pipeline.CatFinancial, pipeline.CatNetworkID,
+		pipeline.CatOnlineID, pipeline.CatCredential, pipeline.CatSpecial:
+		return true
+	case pipeline.CatNone, pipeline.CatFreeText, pipeline.CatBinary,
+		pipeline.CatSemiStruct, pipeline.CatDerivedText:
+		return false
+	}
+	return false
+}
+
+// minUnknownLen is the shortest declared length unknownColumnsBesideCertain
+// will mask. Below it a character column is a code and not a person's data, and
+// free_text's filler does not fit in it either.
+const minUnknownLen = 16
+
+// raisableUnknown is unknownColumnsBesideCertain's gate, kept apart from
+// raisable because the two ask different questions: raisable is about a
+// decision that exists, and this is about the absence of one.
+func (st *state) raisableUnknown(cref ref.ColumnRef, w *work) bool {
+	if w == nil || w.neverMask || w.typeConflict || w.twoLetterCodes {
+		return false
+	}
+	if w.d.Category != pipeline.CatNone || w.d.Confidence != pipeline.ConfNone {
+		return false
+	}
+	if !isCharacterFamily(w.family) {
+		return false
+	}
+	if st.unique[cref] {
+		return false
+	}
+	if n, ok := declaredLength(w.column); ok && n < minUnknownLen {
+		return false
+	}
+	return true
+}
+
+// isCharacterFamily is the set free_text's masker can write into: rules.yml's
+// own accepts: list for the category.
+func isCharacterFamily(family string) bool {
+	switch family {
+	case famText, famVarchar, famBpchar, famCitext:
+		return true
+	}
+	return false
+}
+
+// declaredLength is the length of a varchar(n) or char(n), from the type
+// modifier the catalog recorded. A type with no modifier reports false.
+func declaredLength(col pipeline.Column) (int, bool) {
+	if col.TypMod <= 4 {
+		return 0, false
+	}
+	return int(col.TypMod) - 4, true
 }
 
 // raisable reports whether a pass may raise a decision. A type-conflicting name

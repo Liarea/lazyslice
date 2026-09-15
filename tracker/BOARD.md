@@ -7,9 +7,9 @@
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 1 | 0 | 9 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
-| E5 Hardening | 5 | 2 | 1 | 70 | 0 | 0 |
+| E5 Hardening | 5 | 13 | 1 | 70 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 29 | 0 | 24 | 4 | 0 |
+| E9 Later | later | 31 | 0 | 24 | 4 | 0 |
 
 ## Open and in progress
 
@@ -37,7 +37,7 @@
 - T-0158 [open] E9 · Export the closed-value label list from mask so plan compares labels, not CHECK text ()
 - T-0159 [open] E9 · FK equality group: members with different type families can still mask differently ()
 - T-0162 [open] E9 · move the SQL literal scanner out of internal/pipeline into a leaf package beside internal/textsig ()
-- T-0163 [open] E9 · the plan-time DDL literal rule does not read index predicates or domain CHECKs ()
+- T-0163 [open] E5 · the plan-time DDL literal rule does not read index predicates or domain CHECKs ()
 - T-0164 [open] E9 · uniqueColumn is copied in internal/plan and internal/transform; give it a shared home ()
 - T-0166 [open] E9 · wire dsn param-drop warnings into internal/core and internal/pg's own dsn.Parse call sites ()
 - T-0168 [open] E9 · dsn.Ref.Params misses rung-2 (env/PGSERVICE) settings, so a first run through libpq env alone reruns with no sslmode at rung 0 ()
@@ -47,6 +47,19 @@
 - T-0175 [open] E9 · Give nasty.sql's stream fixtures a size parameter for perf profiling ()
 - T-0176 [open] E9 · mask.Apply's HMAC-SHA256 derivation is the largest CPU cost in the extract/transform/load pipeline ()
 - T-0178 [open] E9 · TestAStoppedContainerIsOfferedAndStarted binds a fixed host port (127.0.0.1:5433) and collides under parallel container runs (sonnet)
+- T-0180 [open] E5 · mask.Apply has no post-condition: a masker that returns its input is accepted ()
+- T-0181 [open] E5 · mask.Apply does not recover: a panicking masker escapes the module ()
+- T-0182 [open] E9 · A text column holding a JSON document is refused, not masked ()
+- T-0183 [open] E9 · verify does not assert the object its catalog pass refused is gone after the quarantine ()
+- T-0184 [open] E5 · Should a headless run auto-select a target on the source's own cluster? ()
+- T-0185 [open] E9 · ARCHITECTURE.md does not know about --allow-type-literal ()
+- T-0186 [open] E5 · --allow-type-literal is not recorded in lazyslice.yml ()
+- T-0187 [open] E5 · National-identifier validators with checksums in textsig; classify and the second net treat them as strong; a digits-family SSN shape under the ratio rule (sonnet)
+- T-0188 [open] E5 · Multilingual given-name and surname lists in textsig, sourced under CC0, so a non-English name in a column with no name rule is recognised (sonnet)
+- T-0189 [open] E5 · Catalog literals: every validator over string literals in CHECK, domain, enum and generated expressions; pattern operands detected but not rewritten; plan reads partial-index predicates (sonnet)
+- T-0190 [open] E5 · Cluster identity does not depend on the transport: sqlClusterID uses values that are the same for every session on the cluster (opus)
+- T-0191 [open] E5 · mask.Apply has a post-condition and a recover; a masker error message never reaches the operator with the value in it (opus)
+- T-0192 [open] E5 · The secret file is protected on its resolved path: symlinked parent directories and hard links refuse; password_command is screened before it is written to the yml (sonnet)
 
 ## Recently closed
 

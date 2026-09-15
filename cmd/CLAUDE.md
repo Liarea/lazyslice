@@ -40,6 +40,21 @@ updating that table.
 
 ## Decisions made during implementation
 
+- **`--allow-type-literal TYPE=REASON` is registered here and is not yet in
+  ARCHITECTURE.md §8's table — tracker T-0185.** It is the escape from §11.1's
+  type-literal refusal (exit 13 on an enum label or a domain definition carrying
+  a literal a strong validator hits), which had **no** escape before the
+  T-REDFIX review's fourth finding: the refusal named `--skip-table`, which
+  drops a table to schema only and recreates the type regardless, so a source
+  schema with one such label could not be sliced at all. It is deliberately not
+  spelled with "unmask" in its name — `TestForbiddenFlagsDoNotExist` permits the
+  exact name `unmask` and nothing else containing it, because any other such
+  spelling would read as a widening of the per-column opt-out, and this is a
+  different rail with a different object. `parseAllowTypeLiteral` refuses the
+  bare form and a duplicate type for the reason `parseUnmask` does; the name
+  itself is resolved against the source's own enums and domains in
+  `internal/core`, where a name that matches nothing is exit 2.
+
 - **`req.Mode`.** Each subcommand sets the `core.Mode` its name means before
   anything connects; `plan` also sets `PlanOnly`, so `lazyslice plan` and
   `lazyslice --plan` are one path. Without it `introspect`, `classify`, `verify`

@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"strings"
 	"sync"
+	"unicode"
 )
 
 // namesTXT is the English name dictionary (ARCHITECTURE.md §4 "Signals"). Like
@@ -159,8 +160,13 @@ func (d *Dict) ContainsName(s string) bool {
 	if len(s) > 1<<16 {
 		s = s[:1<<16]
 	}
+	// The splitter is unicode.IsLetter and not [a-zA-Z]: the dictionary carries
+	// Bogusław, Þórunn and Yıldırım since the 2026-09-15 red team, and an
+	// ASCII-only splitter cut each of those into two fragments that are in no
+	// section of names.txt, so a sentence naming a person outside the Latin-1
+	// letter set read as prose with no name in it.
 	words := strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
-		return (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && r != '\''
+		return !unicode.IsLetter(r) && r != '\''
 	})
 	for _, w := range words {
 		if len(w) < 3 {

@@ -194,6 +194,40 @@ func (s *Source) SystemID(ctx context.Context) (string, error) {
 	return id, nil
 }
 
+// ClusterID is the cluster identity rule 1 falls back to when
+// system_identifier is unreadable (sqlClusterID). It is deliberately a
+// *separate* value from SystemID rather than a fallback inside it: SystemID is
+// also what §11.2's marker binding is recorded against, and a value that
+// changes when the source cluster restarts would refuse a target lazyslice
+// itself wrote on the next run.
+//
+// An unreadable answer is "" and never an error, same as SystemID: the gate
+// decides what to do with the absence, and it now fails closed rather than
+// trusting a different endpoint spelling.
+func (s *Source) ClusterID(ctx context.Context) (string, error) {
+	if err := s.tr.Register(Shape{Name: "source.cluster_id", SQL: sqlClusterID}); err != nil {
+		return "", err
+	}
+	conn, err := s.pool.Acquire(ctx)
+	if err != nil {
+		return "", fmt.Errorf("pg: acquiring a source connection: %w", err)
+	}
+	if _, beginErr := conn.Exec(ctx, sqlBeginReadOnly); beginErr != nil {
+		conn.Release()
+		return "", fmt.Errorf("pg: opening a read-only transaction on the source: %w", beginErr)
+	}
+	defer endTx(context.WithoutCancel(ctx), conn)
+
+	var id string
+	if err := conn.QueryRow(ctx, sqlClusterID).Scan(&id); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return "", err
+		}
+		return "", nil
+	}
+	return id, nil
+}
+
 // Privileges reads what the source role can do (ARCHITECTURE.md §2). Both
 // answers change the run: a writable role is the loudest line in the header,
 // and an unreadable table is resolved at plan rather than mid-extract.
@@ -241,6 +275,30 @@ func (s *Source) Privileges(ctx context.Context) (pipeline.RolePrivileges, error
 }
 
 const sqlSystemID = `SELECT system_identifier::text FROM pg_control_system()`
+
+// sqlClusterID is the cluster identity an *ordinary* role can read, and it is
+// the 2026-09-15 red team's identity-rule-1 finding.
+//
+// ARCHITECTURE.md §9 rule 1 refuses a target that is the source, by two
+// disjuncts: the normalised endpoint, and pg_control_system's
+// system_identifier. The second is the only one that survives aliasing — the
+// same physical server reached under two published ports, two host spellings,
+// or a pooler name — and EXECUTE on pg_control_system is not granted to PUBLIC,
+// so it is silently unavailable to exactly the SELECT-only role the tool tells
+// operators to create. Under that role, `--source ...:15432/newprod --target
+// ...:15433/newprod` against one server passed rule 1 and the run dropped the
+// production table.
+//
+// pg_postmaster_start_time() is executable by PUBLIC on every supported
+// version, and it is a microsecond timestamp: two clusters that started in the
+// same microsecond is not a case. inet_server_addr() and inet_server_port() are
+// the server's own view of the connection, so two published ports mapping to
+// one container both report the container's own port — which is the aliasing
+// the endpoint comparison cannot see. Both are NULL over a unix socket, hence
+// the coalesce; the start time carries the answer on its own there.
+const sqlClusterID = `SELECT pg_postmaster_start_time()::text
+  || '|' || coalesce(host(inet_server_addr()), '')
+  || '|' || coalesce(inet_server_port()::text, '')`
 
 func sortTables(ts []ref.TableRef) {
 	sort.Slice(ts, func(i, j int) bool {

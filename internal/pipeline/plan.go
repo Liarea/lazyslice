@@ -135,6 +135,27 @@ type PlanRequest struct {
 	MemoryBudget int64
 	Keys         map[TableRef][]string // --key table=col,col, or the yml's keys: block
 	Skip         []TableRef            // --skip-table, or the yml's skipped: block
+	// AllowTypeLiterals is --allow-type-literal TYPE=REASON: the qualified name of an enum
+	// or a domain whose recreated definition the operator has said in writing
+	// does not carry a person's value, to the reason they gave.
+	//
+	// It is ARCHITECTURE.md §8's per-column escape for the one object class
+	// that is not a column. §11.1's type-literal rule (internal/plan's
+	// checkTypeLiterals) refuses an enum label or a domain definition carrying
+	// a literal a strong validator hits, at exit 13, and nothing can rewrite
+	// either — a label is referenced by value by every row of every column of
+	// the type, and a domain's DEFAULT belongs to the type rather than to any
+	// one column's masker. Without this the refusal had no escape at all:
+	// --skip-table drops a table to *schema only*, which still recreates its
+	// DDL and still needs the type, so a source schema with one such label was
+	// permanently unrunnable (the T-REDFIX review's fourth finding).
+	//
+	// A reason is required for the same purpose --unmask requires one: an
+	// opt-out nobody can review later is not an opt-out. internal/verify's
+	// catalog pass honours it too, through Plan.AllowedTypeLiterals, or the run would
+	// pass the planner and then fail at exit 9 on the object it was told to
+	// allow.
+	AllowTypeLiterals map[string]string
 	// Priv is what the source role can do, read once by internal/core through
 	// Source.Privileges before the snapshot is opened. Section 3.6 is decided
 	// from it: the planner consults Priv.Unreadable before the snapshot is used
@@ -215,6 +236,14 @@ type Plan struct {
 	// every run that carries a key, since PlanRequest.Key is nil only for
 	// such a run.
 	PendingKeyDefaults []string
+	// AllowedTypeLiterals names, in name order, every type the operator opted out of
+	// with --allow-type-literal (PlanRequest.AllowTypeLiterals) *and* whose name the source
+	// schema actually carries. internal/verify's catalog pass reads it so that
+	// the two ends of §8's escape mean the same thing, exactly as they do for a
+	// column's --unmask: an opt-out the planner honours and the verifier does
+	// not is a run that loads and then refuses at exit 9 over the object the
+	// operator was told they had allowed.
+	AllowedTypeLiterals []string
 }
 
 // Planner computes the subset. It is a client-side monotone worklist with

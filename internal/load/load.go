@@ -931,10 +931,60 @@ func DropLoaded(ctx context.Context, w pipeline.Writer, schema *pipeline.Schema,
 			failures = append(failures, err)
 		}
 	}
+	// The non-table objects this run created, after the tables that depend on
+	// them (the 2026-09-15 red team's A07). THREAT_MODEL.md T8's amendment
+	// claimed the target ends a content-class failure "either empty or holding
+	// nothing this run wrote"; that was true of tables and false of everything
+	// else the loader creates. A domain whose CHECK carried an address — the
+	// object internal/verify's catalog pass had just refused the run over —
+	// stayed in the target after the quarantine, and stayed again on every
+	// rerun, because DropTables is a list of tables.
+	//
+	// There is no CASCADE here, for the reason DropObjects' own comment gives:
+	// a type something still depends on after every table this run knows about
+	// has been dropped is something the run has not been told about, and a loud
+	// failure naming it is better than dropping a stranger's column. A failure
+	// here joins the others rather than stopping the sweep, same as a table's.
+	for _, o := range ddl.ObjectDrops(schema) {
+		sink.Send(event.Event{
+			At: time.Now(), Stage: event.Load, Kind: event.Info,
+			Code: CodeQuarantineDroppingObject,
+			Args: event.Args{event.ArgTable: o.Name},
+		})
+		if err := dropLoadedObject(ctx, w, o); err != nil {
+			failures = append(failures, err)
+		}
+	}
 	if len(failures) == 0 {
 		return nil
 	}
 	return errors.Join(failures...)
+}
+
+// dropLoadedObject drops one non-table object for DropLoaded. It takes no lock
+// ahead of the statement: there is no ACCESS EXCLUSIVE lock to take NOWAIT on a
+// type or a sequence the way there is on a table, and DROP TYPE on an object
+// nothing references does not block. A failure is returned and collected, never
+// retried: the lock-contention case dropLoadedTable retries does not arise here.
+func dropLoadedObject(ctx context.Context, w pipeline.Writer, o ddl.ObjectDrop) error {
+	tx, err := w.Begin(ctx)
+	if err != nil {
+		return refuse(CodeRefusedDDL, exitLoad, ref.TableRef{}, "", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			rollback(ctx, tx)
+		}
+	}()
+	if dropErr := tx.Exec(ctx, o.SQL); dropErr != nil {
+		return refuse(CodeRefusedDDL, exitLoad, ref.TableRef{}, "", dropErr)
+	}
+	if commitErr := tx.Commit(ctx); commitErr != nil {
+		return refuse(CodeRefusedDDL, exitLoad, ref.TableRef{}, "", commitErr)
+	}
+	committed = true
+	return nil
 }
 
 // dropLoadedTable drops one table for DropLoaded, retried only for a lock that

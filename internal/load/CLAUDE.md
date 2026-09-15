@@ -416,3 +416,37 @@ application behaving normally.
 `internal/event/catalogue.yml` carries the four new rows; **docs/ERRORS.md is
 generated from it and was outside this task's paths**, so `make docs-check` fails
 until someone runs `make docs` and commits the result — tracker **T-0148**.
+
+## The quarantine drops objects, not only tables (the 2026-09-15 red team's A07)
+
+`DropLoaded` is THREAT_MODEL.md T8's promise that after a content-class verify
+failure the target ends the run "either empty or holding nothing this run
+wrote". It iterated `ddl.DropTables` and nothing else, so the promise was true
+of tables and false of every other object this package creates. The red team put
+the address in a **domain's `CHECK`** rather than a table's, watched
+`internal/verify`'s catalog pass refuse the run at exit 9 naming it, watched the
+quarantine drop the tables, and read the domain straight back out of the
+target's `pg_constraint` — exit 9 again on every rerun, with the object still
+there.
+
+`ddl.ObjectDrops` is `DropTables`' `TableDrop` for the object classes that are
+not tables — the sequences and types `PreData` creates, each with its name so
+the drop can be announced before it happens (`DropObjects` is now a thin
+spelling of it, for the reload path that only needs the SQL). `DropLoaded` runs
+them **after** the tables, because there is no `CASCADE` here and a type
+something still depends on after every table this run knows about is gone is
+something the run has not been told about — a loud `2BP01` naming it beats
+dropping a stranger's column. A failure joins the others rather than stopping
+the sweep, the same as a table's.
+
+`dropLoadedObject` takes no lock ahead of its statement, unlike
+`dropLoadedTable`: there is no `ACCESS EXCLUSIVE` lock to take `NOWAIT` on a
+type or a sequence, and `DROP TYPE` on an object nothing references does not
+block, so the lock-contention case there is no retry to make here.
+
+Each object is announced under its own code, `load.target.quarantine_dropping_object`,
+rather than reusing the table one: a transcript that named only the tables was
+the evidence for a promise this call was not keeping.
+
+What is still owed: `internal/verify` does not re-read the target to confirm the
+object it refused over is actually gone before the run returns — **T-0183**.

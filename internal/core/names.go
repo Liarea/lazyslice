@@ -292,6 +292,64 @@ func resolveTable(name string, schema *pipeline.Schema) (ref.TableRef, error) {
 	}
 }
 
+// resolveType turns the name in an --allow-type-literal flag into the qualified name
+// of an enum or a domain of this source, on the same rules resolveTable
+// follows: a qualified name has to exist, a bare one has to be unambiguous, and
+// a name that matches nothing is refused rather than stored.
+//
+// The refusal is the point. An opt-out that silently never applied looks
+// exactly like one that did, and this one suppresses a refusal that exists to
+// keep a person's value out of the target's catalog — so a typo that quietly
+// left the rail in place would be reported as "lazyslice ignored my flag" and a
+// typo that quietly took it away would be worse.
+func resolveType(name string, schema *pipeline.Schema) (string, error) {
+	if schema == nil {
+		return "", fmt.Errorf("%q names no enum or domain in the source", name)
+	}
+	var names []string
+	for typeName := range schema.Enums {
+		names = append(names, typeName)
+	}
+	for _, d := range schema.Domains {
+		names = append(names, d.Name)
+	}
+	sort.Strings(names)
+
+	parts, err := splitQualified(name)
+	if err != nil {
+		return "", err
+	}
+	if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
+		want := parts[0] + "." + parts[1]
+		for _, n := range names {
+			if n == want {
+				return n, nil
+			}
+		}
+		return "", fmt.Errorf("%q names no enum or domain in the source", name)
+	}
+	if len(parts) != 1 || parts[0] == "" {
+		return "", fmt.Errorf("%q is not a type name: want SCHEMA.TYPE", name)
+	}
+	var found []string
+	for _, n := range names {
+		if i := strings.LastIndex(n, "."); i >= 0 && n[i+1:] == parts[0] {
+			found = append(found, n)
+		} else if i < 0 && n == parts[0] {
+			found = append(found, n)
+		}
+	}
+	switch len(found) {
+	case 1:
+		return found[0], nil
+	case 0:
+		return "", fmt.Errorf("%q names no enum or domain in the source: qualify it as SCHEMA.TYPE", name)
+	default:
+		return "", fmt.Errorf("%q is in more than one schema (%s): qualify it",
+			name, strings.Join(found, ", "))
+	}
+}
+
 func resolveBareTable(bare, name string, schema *pipeline.Schema) (ref.TableRef, error) {
 	if bare == "" {
 		return ref.TableRef{}, fmt.Errorf("%q is not a table name", name)

@@ -47,6 +47,17 @@ const (
 	// being reloaded (ARCHITECTURE.md section 11.2).
 	CodeTargetTruncating event.Code = "target.marker.bound"
 
+	// CodeTargetSameCluster is ARCHITECTURE.md §9 rule 1's warning: the target
+	// is a different database on the *same cluster* as the source. §9 and
+	// THREAT_MODEL.md T2 both require it to be printed, internal/pg has
+	// computed Eligibility.SameCluster since the gate was written, and until
+	// the 2026-09-15 red team nothing in this package or internal/render read
+	// the field — so a run that wrote a masked slice into the production
+	// server's own `postgres` maintenance database said nothing about it and
+	// exited 0. The gate's own test asserted the boolean and never the line,
+	// which is why the omission survived.
+	CodeTargetSameCluster event.Code = "target.warn.same_cluster"
+
 	// The three warnings a bound marker prints when the run that wrote it was
 	// not this one (ARCHITECTURE.md section 11.2).
 	CodeSecretChanged  event.Code = "target.marker.secret_changed"
@@ -104,6 +115,25 @@ const (
 	CodeSecretRefusedKey  event.Code = "secret.refused.no_key"
 	CodeGitignoreAdded    event.Code = "secret.gitignore.added"
 	CodeGitAbsent         event.Code = "secret.git.absent"
+
+	// CodeSecretSymlink and CodeSecretPermissive are the 2026-09-15 red team's
+	// two findings against ARCHITECTURE.md §9 "The repository" and
+	// THREAT_MODEL.md T6.
+	//
+	// The first: os.WriteFile follows a symlink, and both the .gitignore entry
+	// and the `git ls-files --error-unmatch` tracked check were applied to the
+	// link path rather than to what it resolves to. A ./lazyslice.secret left
+	// as a symlink into a cloud-synced folder therefore took the key — T13's
+	// guess-confirmation oracle for every snapshot ever made with it — out of
+	// the repository entirely, while the transcript said "added
+	// lazyslice.secret to .gitignore" and "wrote a new masking key to
+	// ./lazyslice.secret".
+	//
+	// The second: T6 promises the key file is "created 0600" and nothing
+	// re-checked an existing one, so a mode-0644 key on a shared machine or in
+	// a CI image was readable by every account and the run said nothing.
+	CodeSecretSymlink    event.Code = "secret.refused.symlink"
+	CodeSecretPermissive event.Code = "secret.refused.permissive"
 
 	// CodeConfigRead and CodeConfigWritten bracket the yml.
 	CodeConfigRead    event.Code = "config.file.read"

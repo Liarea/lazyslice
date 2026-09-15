@@ -1,8 +1,8 @@
 ---
 id: T-0163
 title: "the plan-time DDL literal rule does not read index predicates or domain CHECKs"
-epic: E9
-phase: ""
+epic: E5
+phase: 5
 status: open
 owner: ""
 created: 2026-09-14
@@ -26,6 +26,8 @@ internal/plan/ddlliteral.go (T-0134) walks every recreated column default, gener
 - 2026-09-14 created
 
 - 2026-09-14 Narrowed by T-0134's review round (2026-09-14): internal/verify/catalog.go now reads pg_index.indpred and pg_index.indexprs as well as pg_attrdef and pg_constraint, so the verify half of this task is done and an index predicate carrying a strong literal is exit 9 after the load. What remains is the plan half only: extend checkDDLLiterals over Table.Indexes and Schema.Domains so the same literal is exit 12 or 13 before anything is dropped.
+
+- 2026-09-15 moved to E5 phase 5
 
 ## Post-mortem
 

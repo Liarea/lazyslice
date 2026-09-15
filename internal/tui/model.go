@@ -891,6 +891,10 @@ func cloneRequest(r core.Request) core.Request {
 	out.TableCaps = maps.Clone(r.TableCaps)
 	out.Keys = maps.Clone(r.Keys)
 	out.Unmask = maps.Clone(r.Unmask)
+	// No screen sets --allow-type-literal (the type-literal opt-out is a flag
+	// only), but the map is cloned with the rest so that a screen that gains
+	// one cannot write through the caller's.
+	out.AllowTypeLiterals = maps.Clone(r.AllowTypeLiterals)
 	out.Explicit = maps.Clone(r.Explicit)
 	out.SkipTables = slices.Clone(r.SkipTables)
 	if out.TableCaps == nil {

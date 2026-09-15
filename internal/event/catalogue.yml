@@ -353,6 +353,16 @@
   message: "{table}.{column} is masked and its recreated DDL carries a literal lazyslice cannot rewrite: {reason}"
   args: [table, column, reason]
 
+# The 2026-09-15 red team's A4b, A11 and A12: a value hidden in the schema
+# rather than in a row. {table} carries the type's qualified name, because a
+# type is the object this refusal is about and event.ArgKey has no key for one.
+- code: target.schema.type_literal
+  kind: error
+  stage: plan
+  exit: 13
+  message: "type {table} carries a literal in {column} that parses as personal data and cannot be rewritten: {reason}"
+  args: [table, column, reason]
+
 - code: target.schema.not_recreatable
   kind: error
   stage: plan
@@ -426,10 +436,29 @@
 # not a reuse of load.target.dropping above, because the two happen at
 # different moments a transcript reader must be able to tell apart: before the
 # rows go in, and after a verify failure says they should not have.
+# ARCHITECTURE.md §9 rule 1 and THREAT_MODEL.md T2: a target on the source's own
+# cluster is eligible by design (a different database on one server is the
+# ordinary local case) and has to say so, because the write is landing on the
+# same server the production data is on.
+- code: target.warn.same_cluster
+  kind: warn
+  stage: discover
+  message: "target {database} is on the same cluster as the source: this run writes to the source's own server"
+  args: [database]
+
 - code: load.target.quarantine_dropping
   kind: info
   stage: load
   message: "dropping {table} in the target: the last run left personal data in it"
+  args: [table]
+
+# The 2026-09-15 red team's A07: the quarantine dropped tables and nothing else,
+# so a domain or an enum type this run created outlived the refusal that found
+# the personal data in it. {table} carries the object's name.
+- code: load.target.quarantine_dropping_object
+  kind: info
+  stage: load
+  message: "dropping object {table} in the target: it was created by a run that left personal data behind"
   args: [table]
 
 - code: load.table.loaded
@@ -922,6 +951,22 @@
   exit: 5
   message: "no masking key: {path} could not be read or written"
   args: [path]
+
+# The 2026-09-15 red team, against ARCHITECTURE.md §9 "The repository" and
+# THREAT_MODEL.md T6.
+- code: secret.refused.symlink
+  kind: error
+  stage: transform
+  exit: 5
+  message: "{path} is a symbolic link: the masking key would be written outside the repository, where .gitignore does not reach it"
+  args: [path]
+
+- code: secret.refused.permissive
+  kind: error
+  stage: transform
+  exit: 5
+  message: "{path} is readable by other accounts on this machine: {statement}"
+  args: [path, statement]
 
 - code: config.file.read
   kind: info

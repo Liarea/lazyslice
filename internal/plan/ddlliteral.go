@@ -5,6 +5,7 @@ package plan
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/Liarea/lazyslice/internal/event"
@@ -51,13 +52,22 @@ import (
 //     the literal in that column's DDL is not a person's. A column that already
 //     carries such an opt-out is not asked twice.
 //
-// "Strong" is email, phone and payment card — the three value shapes a parser
-// decides rather than a dictionary guesses (internal/textsig). The narrowness
-// is deliberate and is recorded in THREAT_MODEL.md T1: a name or an address
-// inside a CHECK is not refused, because the false-positive rate of those
-// signals over SQL fragments is what would make this check unusable, and
-// internal/verify's catalog pass is the second look at the artefact this one
-// admits.
+// A fourth class was added by the 2026-09-15 red team (checkTypeLiterals): an
+// enum's labels and a domain's DEFAULT and CHECK, which §11.1 also recreates
+// verbatim and which this pass did not read at all. Neither can be rewritten,
+// so both are exit 13 with no rewrite arm — and the escape is
+// `--allow-type-literal TYPE=REASON`, §8's per-column opt-out spelt for the one object
+// class that is not a column (the T-REDFIX review's fourth finding; before it
+// the refusal named --skip-table, which cannot clear it).
+//
+// "Strong" is email, phone, payment card, IBAN and national_id — the five value
+// shapes a parser decides rather than a dictionary guesses (internal/textsig,
+// and see strongValidators below for what the last two cost and why they are
+// admissible). The narrowness is deliberate and is recorded in THREAT_MODEL.md
+// T1: a name or an address inside a CHECK is not refused, because the
+// false-positive rate of those signals over SQL fragments is what would make
+// this check unusable, and internal/verify's catalog pass is the second look at
+// the artefact this one admits.
 //
 // Where it runs: after checkUniqueDomain, because the masker a default is
 // rewritten with must be the one the *rows* are masked with, and the equality
@@ -66,7 +76,7 @@ import (
 // nothing in the target has been touched — which is all §11.1 requires of a
 // refusal raised "at plan".
 
-// strongValidator is one of the three value shapes a parser decides. The names
+// strongValidator is one of the value shapes a parser decides. The names
 // are the classifier's category names, so a refusal says `email` and not a
 // value (THREAT_MODEL.md T4).
 type strongValidator struct {
@@ -74,10 +84,29 @@ type strongValidator struct {
 	ok   func(string) bool
 }
 
+// The set was three until the 2026-09-15 red team's A20, which put
+// "Alice Anderson, 42 Elm St, SSN 123-45-6789, IBAN GB33BUKB20201555555555"
+// into a CHECK on an unmasked column and watched it cross into the target under
+// exit 0. THREAT_MODEL.md T1 already stated the name-and-address half of that
+// miss and gave the reason — a CHECK is full of English words, so a dictionary
+// heuristic over one would refuse ordinary schemas — and that reason does not
+// reach the other two: a US Social Security number and a UK National Insurance
+// number are strict patterns and an IBAN is a mod-97 checksum, none of them a
+// guess. So national_id and the IBAN half of financial_account join the set,
+// and person_name and address stay out for exactly the reason the document
+// gives.
+//
+// IBAN could not have joined before this task: textsig.ValidIBAN matched any
+// fifteen-to-thirty-four-character run of letters and digits that cleared the
+// mod-97 check, which five of pagila's own film titles do. It now requires the
+// two ISO 13616 check digits in positions three and four, which every real IBAN
+// has and an all-caps title does not.
 var strongValidators = []strongValidator{
 	{name: string(pipeline.CatEmail), ok: textsig.ValidEmail},
 	{name: string(pipeline.CatPhone), ok: textsig.ValidPhone},
 	{name: string(pipeline.CatFinancial), ok: textsig.ValidLuhn},
+	{name: string(pipeline.CatFinancial), ok: textsig.ValidIBAN},
+	{name: string(pipeline.CatNationalID), ok: textsig.ValidNationalID},
 }
 
 // strongHit is the first strong validator a literal matches, or "".
@@ -121,6 +150,9 @@ func (p *run) checkDDLLiterals() error {
 	if p.cls == nil {
 		return nil
 	}
+	if err := p.checkTypeLiterals(); err != nil {
+		return err
+	}
 	for i := range p.tables {
 		t := &p.tables[i]
 		if t.Ref.Name == markerTable {
@@ -131,6 +163,147 @@ func (p *run) checkDDLLiterals() error {
 		}
 	}
 	return nil
+}
+
+// checkTypeLiterals is the object classes §11.1 recreates that belong to a
+// *type* rather than to a table: an enum's labels and a domain's whole CREATE
+// statement, which carries its DEFAULT and its CHECK.
+//
+// It is the 2026-09-15 red team's A4b, A11 and A12, and each of the three is
+// one catalog table to the side of where the 2026-09-14 amendment (T-0134)
+// looked. internal/load/ddl writes `CREATE TYPE ... AS ENUM ('a','b')` and
+// replays a domain's definition verbatim, so a value in either crosses into the
+// target exactly as a column DEFAULT does — and this pass read pg_attrdef,
+// pg_constraint and pg_index only, so `CREATE TYPE assignee AS ENUM
+// ('unassigned','enum.canary@bigcorp.com','+1-415-555-0199')` and
+// `CREATE DOMAIN tenant_d AS text DEFAULT 'domdefault.canary@bigcorp.com'` both
+// exited 0 with the values in the target's catalog.
+//
+// Everything here refuses at 13 and nothing here is rewritten, which is the one
+// place this file's three-way rule (mask / refuse at 13 / refuse at 12) collapses
+// to one outcome:
+//
+//   - An enum label cannot be rewritten. Every row of every column of that type
+//     references the label *by value*, so a masked label either breaks the
+//     column or silently remaps rows — and there is no --unmask that makes a
+//     label a person's or not a person's, because a label is not a column.
+//   - A domain's DEFAULT and CHECK belong to the type. The columns declared
+//     over the domain may be masked under different categories, or not masked
+//     at all, so there is no single masker whose output would be the right
+//     replacement — which is exactly the argument columnDefault makes for a
+//     column whose shape it declines.
+//
+// The refusal names the type and the position of the label, never the label
+// text (THREAT_MODEL.md T4).
+//
+// **The escape is --allow-type-literal TYPE=REASON, and it had to be built for this**
+// (the T-REDFIX review's fourth finding). The first version of this check named
+// --skip-table, which cannot clear it by any route: --skip-table drops a table
+// to *schema only*, so its DDL — and every type that DDL names — is still
+// recreated, and nothing in internal/core prunes Schema.Enums or
+// Schema.Domains while internal/load/ddl's typeOrder recreates every one of
+// them regardless. A source schema with a single enum label or domain
+// definition that a strong validator hit was therefore permanently unrunnable,
+// under a refusal that told the operator to try a flag with no effect on it.
+// The opt-out carries a reason for the same purpose --unmask does, it is
+// resolved against the source's own type names by internal/core (so an opt-out
+// that could never apply is exit 2 rather than silence), and
+// internal/verify's catalog pass honours the same list through
+// Plan.AllowedTypeLiterals — an escape one end of the pipeline grants and the other
+// refuses is not an escape.
+func (p *run) checkTypeLiterals() error {
+	names := make([]string, 0, len(p.schema.Enums))
+	for name := range p.schema.Enums {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if p.allowedTypeLiteral(name) {
+			continue
+		}
+		for i, label := range p.schema.Enums[name] {
+			// A label is the value itself and not an expression, so it is
+			// judged directly rather than scanned for literals inside it.
+			if hit := strongHit(pipeline.Literal{Text: label}); hit != "" {
+				return p.refuseTypeLiteral(name, "label "+strconv.Itoa(i+1), hit)
+			}
+		}
+	}
+	domains := append([]pipeline.NamedDef(nil), p.schema.Domains...)
+	sort.Slice(domains, func(a, b int) bool { return domains[a].Name < domains[b].Name })
+	for _, d := range domains {
+		if p.allowedTypeLiteral(d.Name) {
+			continue
+		}
+		for _, lit := range pipeline.Literals(d.Def) {
+			if hit := strongHit(lit); hit != "" {
+				return p.refuseTypeLiteral(d.Name, "its definition", hit)
+			}
+		}
+	}
+	return nil
+}
+
+// allowedTypeLiteral reports that the operator has said in writing, with a reason,
+// that this type's recreated definition carries no person's value
+// (--allow-type-literal TYPE=REASON). The name is the catalog's qualified one, which
+// is what internal/core resolves the flag to.
+func (p *run) allowedTypeLiteral(name string) bool {
+	_, ok := p.req.AllowTypeLiterals[name]
+	return ok
+}
+
+// allowedTypeNames is the opt-outs that name a type this schema actually
+// carries, in name order, for Plan.AllowedTypeLiterals. A name the schema does not
+// carry is already exit 2 in internal/core; filtering again here keeps the plan
+// from telling internal/verify to exempt an object nobody named.
+func (p *run) allowedTypeNames() []string {
+	if len(p.req.AllowTypeLiterals) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(p.req.AllowTypeLiterals))
+	for name := range p.req.AllowTypeLiterals {
+		if _, ok := p.schema.Enums[name]; ok {
+			out = append(out, name)
+			continue
+		}
+		for _, d := range p.schema.Domains {
+			if d.Name == name {
+				out = append(out, name)
+				break
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// refuseTypeLiteral is exit 13 naming a type. typeRef splits the qualified name
+// the catalog recorded so that the refusal reads like every other one.
+func (p *run) refuseTypeLiteral(typeName, where, hit string) error {
+	t := typeRef(typeName)
+	r := refuse(CodeTypeLiteral, exitSchema, t,
+		fmt.Sprintf("type %s carries a literal in %s that parses as %s and cannot be rewritten, "+
+			"so the target's schema would hold it as the source wrote it", typeName, where, hit),
+		event.Args{
+			event.ArgTable:  typeName,
+			event.ArgColumn: where,
+			event.ArgReason: "a literal in " + where + " parses as " + hit +
+				" and lazyslice cannot mask a type in place: --allow-type-literal " +
+				typeName + "=REASON says it is not a person's",
+		})
+	r.Column = where
+	return r
+}
+
+// typeRef splits a catalog-qualified type name into a ref.TableRef so that a
+// refusal about a type carries the same two identifiers a refusal about a table
+// does. A name with no schema part keeps the whole string as the name.
+func typeRef(name string) ref.TableRef {
+	if i := strings.LastIndex(name, "."); i > 0 {
+		return ref.TableRef{Schema: name[:i], Name: name[i+1:]}
+	}
+	return ref.TableRef{Name: name}
 }
 
 func (p *run) tableDDLLiterals(t *pipeline.Table) error {

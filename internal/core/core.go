@@ -116,7 +116,16 @@ type Request struct {
 	MemoryBudget string              // --memory-budget
 	Keys         map[string][]string // --key TABLE=COL,COL, repeatable
 	SkipTables   []string            // --skip-table, repeatable
-	PlanOnly     bool                // --plan
+	// AllowTypeLiterals is --allow-type-literal TYPE=REASON, repeatable: the per-type
+	// opt-out from ARCHITECTURE.md §11.1's type-literal refusal, keyed by the
+	// name as the operator typed it and resolved against the source's own
+	// enums and domains in planRequest. It is §8's per-column --unmask for the
+	// one object class that is not a column, and it exists because the
+	// refusal it clears had no escape at all: --skip-table drops a table to
+	// schema only, which still recreates the type (the T-REDFIX review's
+	// fourth finding).
+	AllowTypeLiterals map[string]string
+	PlanOnly          bool // --plan
 
 	// classify
 	Unmask       map[string]string // --unmask TABLE.COL=REASON, repeatable
@@ -196,18 +205,19 @@ type Reviewed struct {
 // on it, so a field nobody set holds the documented default rather than a zero.
 func NewRequest() Request {
 	return Request{
-		Take:             DefaultTake,
-		Cap:              DefaultCap,
-		Depth:            DefaultDepth,
-		RowBudget:        DefaultRowBudget,
-		MemoryBudget:     DefaultMemoryBudget,
-		ResidualProbeCap: DefaultResidualProbeCap,
-		ConfigPath:       DefaultConfigPath,
-		SecretFile:       DefaultSecretFile,
-		TableCaps:        map[string]int{},
-		Keys:             map[string][]string{},
-		Unmask:           map[string]string{},
-		Explicit:         map[string]bool{},
+		Take:              DefaultTake,
+		Cap:               DefaultCap,
+		Depth:             DefaultDepth,
+		RowBudget:         DefaultRowBudget,
+		MemoryBudget:      DefaultMemoryBudget,
+		ResidualProbeCap:  DefaultResidualProbeCap,
+		ConfigPath:        DefaultConfigPath,
+		SecretFile:        DefaultSecretFile,
+		TableCaps:         map[string]int{},
+		Keys:              map[string][]string{},
+		Unmask:            map[string]string{},
+		AllowTypeLiterals: map[string]string{},
+		Explicit:          map[string]bool{},
 	}
 }
 

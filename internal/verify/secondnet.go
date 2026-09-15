@@ -8,6 +8,7 @@ import (
 
 	"github.com/Liarea/lazyslice/internal/pipeline"
 	"github.com/Liarea/lazyslice/internal/ref"
+	"github.com/Liarea/lazyslice/internal/textsig"
 )
 
 // The second net (ARCHITECTURE.md section 6 item 4).
@@ -24,6 +25,13 @@ import (
 // reach it with (netColumn) — except under the dictionary rule below. The
 // target is small, so this is a scan and not a sample, which is what makes it
 // catch a column the 200-row sample under-represented.
+//
+// A string that came out of a *document* — a json column's leaf, or a document
+// inside a character column (withDocuments) — is scored against its own
+// denominator and never against the column's (netTally, netColumn). Counting
+// both into one number let a document dilute the column's own values out of
+// every threshold it is judged by, which is the fail-open the T-REDFIX review
+// found and netTally's comment records.
 //
 // Two things it does not catch, stated here and in internal/verify/CLAUDE.md
 // rather than implied:
@@ -133,6 +141,24 @@ type netMode struct {
 	// coverage either way; only the three the masker actually rewrites are
 	// excluded, and only when this column was masked at all.
 	docMasked bool
+	// bytea is true for a bytea column read as text (the 2026-09-15 red team's
+	// A4a). famBytea used to be outside netText altogether, on the same
+	// argument internal/classify's bestSignal made about its samples — a PNG
+	// reads as an address — so a bytea holding printable UTF-8 was read by
+	// nothing on either side and `assets.blob_doc` crossed into the target
+	// with an email address and a national identifier in it, under exit 0.
+	// netValues drops a value this flag is set on unless
+	// textsig.PrintableText accepts it, so a column of images is still read by
+	// nothing and a column of documents is read like text.
+	bytea bool
+	// maybeDocument is true for a character column, whose value may itself be
+	// a JSON document (the 2026-09-15 red team's A5b). `blobs.payload2 text`
+	// held a three-level document whose leaves were chosen so that no
+	// validator fires on the document read as one string; document() covers
+	// json, jsonb and hstore only, so neither this net nor
+	// internal/classify's leaf signal ever looked inside it. A `payload text`
+	// holding JSON is one of the commonest shapes in a real schema.
+	maybeDocument bool
 }
 
 func (s *state) netMode(col ref.ColumnRef, c pipeline.Column) (netMode, bool) {
@@ -151,22 +177,49 @@ func (s *state) netMode(col ref.ColumnRef, c pipeline.Column) (netMode, bool) {
 	case has && d.Masked:
 		return netMode{}, false
 	case netText(family):
-		return netMode{array: array, text: true}, true
+		return netMode{array: array, text: true, maybeDocument: character(family)}, true
+	case family == famBytea:
+		return netMode{array: array, text: true, bytea: true, maybeDocument: true}, true
 	case numeric(family):
 		return netMode{array: array, digits: true}, true
 	}
 	return netMode{}, false
 }
 
+// netTally is one denominator and the hits counted against it: either the
+// column's own non-NULL values, or the strings that came out of a document one
+// of those values held.
+//
+// **They are counted apart, and that is the whole of this type.** When
+// withDocuments grew its maybeDocument arm (the 2026-09-15 red team's A5b),
+// every leaf and key a document yielded was counted into the *column's*
+// nonNull — and nonNull is both the ratio's denominator and the `proven` gate
+// below, so a document could dilute the column's own values out of a refusal. A
+// two-row text column holding "221 Baker Street, London" and "ok" is unproven
+// and fails at exit 9 on the address (T-0058); the identical column with the
+// second row replaced by a four-key JSON object had a denominator of five,
+// which is `proven`, and 1/5 is under validatorThreshold, so the net recorded
+// nothing and a production address reached the target under exit 0. The same
+// dilution weakened the dictionary rule on any text column that also held a
+// document. A document is evidence about the document; it is not evidence
+// about the column's own values, in either direction, and it may not move the
+// number the column's own values are judged by.
+type netTally struct {
+	nonNull int64
+	hits    []int64
+}
+
 // netColumn runs every applicable validator over one column's whole contents.
 func (s *state) netColumn(ctx context.Context, col ref.ColumnRef, mode netMode) error {
-	nonNull := int64(0)
-	hits := make([]int64, len(validators))
+	own := netTally{hits: make([]int64, len(validators))}
+	leaf := netTally{hits: make([]int64, len(validators))}
 	// distinct holds, for the dictionary-backed validators only, the digests of
 	// up to minValues distinct values that hit. A digest rather than the value
 	// because a free_text value can be a whole document and this set outlives
 	// the row: at most minValues×32 bytes per validator, and no production value
-	// held any longer than the scan of the row it came from.
+	// held any longer than the scan of the row it came from. It is the column's
+	// own values only, because those are the only strings a dictionary-backed
+	// validator ever sees (applies, and count's fromLeaf).
 	distinct := make([]map[[sha256.Size]byte]struct{}, len(validators))
 	for i, val := range validators {
 		if val.dict && applies(val, mode) {
@@ -175,104 +228,44 @@ func (s *state) netColumn(ctx context.Context, col ref.ColumnRef, mode netMode) 
 	}
 
 	err := s.scanColumn(ctx, col.Table, col.Column, func(v any) error {
-		for _, text := range s.netValues(v, mode) {
-			nonNull++
-			for i, val := range validators {
-				if !applies(val, mode) {
-					continue
-				}
-				if val.ok(text) {
-					hits[i]++
-					if d := distinct[i]; d != nil && len(d) < minValues {
-						d[sha256.Sum256([]byte(text))] = struct{}{}
-					}
-				}
-			}
+		direct, fromLeaves := s.netStrings(v, mode)
+		for _, text := range direct {
+			own.nonNull++
+			count(text, false, mode, own.hits, distinct)
+		}
+		for _, text := range fromLeaves {
+			leaf.nonNull++
+			count(text, true, mode, leaf.hits, nil)
 		}
 		return nil
 	})
 	if err != nil {
 		return err
 	}
-	if nonNull == 0 {
+	if own.nonNull == 0 && leaf.nonNull == 0 {
 		return nil
 	}
-	// A column with fewer than minValues non-NULL values is *unproven*, not
-	// clean. Returning nil here was a fail-open with nothing above it: a
-	// three-row table yields two values, the ratio over them means nothing, and
-	// public.devices.owned_by in testdata/nasty.sql — two email addresses and a
-	// NULL — reached the target in cleartext under exit 0, with the classifier
-	// silent for the same reason and this net silent after it (THREAT_MODEL.md
-	// T1, tracker T-0058). So the validators run over
-	// whatever there is and *any* hit fails: the threshold is what a ratio
-	// buys, and below minValues there is no ratio to buy it with. One value
-	// that parses as an email is still a production email address in the
-	// target, which is the thing this net exists to refuse.
-	//
-	// The two dictionary-backed validators are outside this branch, in the loop
-	// below: a dictionary word is not a parse, so "any hit" there would be exit
-	// 9 on a two-row lookup table of English nouns (the dictionary rule, in the
-	// package comment above).
-	//
-	// nonNull is counted over the *target*, so this branch is slice-size
-	// dependent: a table --take reduces to two rows is unproven here and the
-	// same table at --take 500 is not, which makes the verdict non-monotone in
-	// the slice size for the two validators that carry no parse
-	// (textsig.AddressShape, textsig.LooksSecret). That cost is weighed against
-	// the leak above in internal/verify/CLAUDE.md, which also records the
-	// narrowing to revisit if the refusal proves noisy.
-	proven := nonNull >= minValues
 	for i, val := range validators {
-		if !applies(val, mode) || hits[i] == 0 {
+		if !applies(val, mode) {
 			continue
 		}
-		ratio := float64(hits[i]) / float64(nonNull)
-		switch {
-		case val.dict:
-			// The dictionary rule (see the package comment above and
-			// internal/verify/CLAUDE.md). Two differences from the validators
-			// that carry a parse, both narrowing, and both because a
-			// dictionary word is a word an ordinary English column may hold:
-			// the strong ratio is required whatever the column's size, so the
-			// branch below does not extend to these two; and the hits
-			// must be at least minValues *distinct* values, so a single
-			// dictionary literal repeated down a column cannot reach exit 9.
-			// The validators themselves are already the narrow ones —
-			// NameShape, not LooksLikeName; ProseName, not Prose.
-			if ratio < validatorThreshold || len(distinct[i]) < minValues {
-				continue
-			}
-		case val.strong:
-			// Second net, second bug (docs/reviews/2026-09-09/REVIEW.md
-			// finding 7): a strong validator is a precise parse, so any hit
-			// at all is one production value of that shape sitting in the
-			// target, whatever the ratio and whether or not the column is
-			// "proven". Before this case existed, a strong hit fell into the
-			// `proven && ratio < validatorThreshold` branch below like every
-			// other non-dict validator, so one email address among nineteen
-			// ordinary strings had a ratio of 5% and passed at exit 0
-			// (evidence/sparse_email.log) — the 80% column ratio is a good
-			// question for "what category is this column", and a poor one
-			// for "does this already-loaded target hold a recognisable
-			// source value". No ratio and no ratio gate here: hits[i] == 0
-			// was already filtered above, so reaching this case is the
-			// refusal.
-		default:
-			// The ratio rule, for the two validators that are a shape guess
-			// rather than a parse (credential, address): below minValues the
-			// column is unproven and any hit still fails (T-0058, above);
-			// at or above it, only a ratio at or over validatorThreshold
-			// does. Weakening this to "any hit" for these two would be exit
-			// 9 on an ordinary slug or a room number, which is not what a
-			// heuristic's occasional false positive should cost on a target
-			// that is already loaded.
-			if proven && ratio < validatorThreshold {
-				continue
-			}
+		distinctHits := 0
+		if d := distinct[i]; d != nil {
+			distinctHits = len(d)
+		}
+		// Each denominator is scored on its own, and either one failing is the
+		// refusal. A json column yields no direct values at all (own.nonNull is
+		// zero and scoreHits says nothing about it), and a text column holding
+		// a document is judged twice over two sets of values that have nothing
+		// to do with each other.
+		if !scoreHits(val, own.hits[i], own.nonNull, distinctHits) &&
+			!scoreHits(val, leaf.hits[i], leaf.nonNull, 0) {
+			continue
 		}
 		s.fail(&Refusal{
 			Code: CodeRefusedSecondNet, Exit: exitResidual, Check: checkSecondNet,
-			Table: col.Table, Column: col.Column, Count: hits[i], Reason: val.name,
+			Table: col.Table, Column: col.Column, Count: own.hits[i] + leaf.hits[i],
+			Reason: val.name,
 		})
 		// One category per column: the column is already exit 9, and a second
 		// line naming a second validator over the same values says nothing more
@@ -280,6 +273,78 @@ func (s *state) netColumn(ctx context.Context, col ref.ColumnRef, mode netMode) 
 		return nil
 	}
 	return nil
+}
+
+// scoreHits is section 4's scoring for one validator over one denominator: true
+// when those hits fail the column.
+//
+// A column with fewer than minValues non-NULL values is *unproven*, not clean.
+// Returning early there was a fail-open with nothing above it: a three-row
+// table yields two values, the ratio over them means nothing, and
+// public.devices.owned_by in testdata/nasty.sql — two email addresses and a
+// NULL — reached the target in cleartext under exit 0, with the classifier
+// silent for the same reason and this net silent after it (THREAT_MODEL.md
+// T1, tracker T-0058). So the validators run over whatever there is and *any*
+// hit fails: the threshold is what a ratio buys, and below minValues there is
+// no ratio to buy it with. One value that parses as an email is still a
+// production email address in the target, which is the thing this net exists
+// to refuse.
+//
+// The two dictionary-backed validators are outside that branch: a dictionary
+// word is not a parse, so "any hit" there would be exit 9 on a two-row lookup
+// table of English nouns (the dictionary rule, in the package comment above).
+//
+// nonNull is counted over the *target*, so the unproven branch is slice-size
+// dependent: a table --take reduces to two rows is unproven here and the same
+// table at --take 500 is not, which makes the verdict non-monotone in the slice
+// size for the two validators that carry no parse (textsig.AddressShape,
+// textsig.LooksSecret). That cost is weighed against the leak above in
+// internal/verify/CLAUDE.md, which also records the narrowing to revisit if the
+// refusal proves noisy.
+func scoreHits(val validator, hits, nonNull int64, distinctHits int) bool {
+	if hits == 0 || nonNull == 0 {
+		return false
+	}
+	ratio := float64(hits) / float64(nonNull)
+	switch {
+	case val.dict:
+		// The dictionary rule (see the package comment above and
+		// internal/verify/CLAUDE.md). Two differences from the validators
+		// that carry a parse, both narrowing, and both because a
+		// dictionary word is a word an ordinary English column may hold:
+		// the strong ratio is required whatever the column's size, so the
+		// unproven branch below does not extend to these two; and the hits
+		// must be at least minValues *distinct* values, so a single
+		// dictionary literal repeated down a column cannot reach exit 9.
+		// The validators themselves are already the narrow ones —
+		// NameShape, not LooksLikeName; ProseName, not Prose.
+		return ratio >= validatorThreshold && distinctHits >= minValues
+	case val.strong:
+		// Second net, second bug (docs/reviews/2026-09-09/REVIEW.md
+		// finding 7): a strong validator is a precise parse, so any hit
+		// at all is one production value of that shape sitting in the
+		// target, whatever the ratio and whether or not the column is
+		// "proven". Before this case existed, a strong hit fell into the
+		// `proven && ratio < validatorThreshold` branch below like every
+		// other non-dict validator, so one email address among nineteen
+		// ordinary strings had a ratio of 5% and passed at exit 0
+		// (evidence/sparse_email.log) — the 80% column ratio is a good
+		// question for "what category is this column", and a poor one
+		// for "does this already-loaded target hold a recognisable
+		// source value". No ratio gate here: hits == 0 was already
+		// filtered above, so reaching this case is the refusal.
+		return true
+	default:
+		// The ratio rule, for the two validators that are a shape guess
+		// rather than a parse (credential, address), and for the digits
+		// half of Luhn: below minValues the column is unproven and any hit
+		// still fails (T-0058, above); at or above it, only a ratio at or
+		// over validatorThreshold does. Weakening this to "any hit" for
+		// these would be exit 9 on an ordinary slug or a room number, which
+		// is not what a heuristic's occasional false positive should cost
+		// on a target that is already loaded.
+		return nonNull < minValues || ratio >= validatorThreshold
+	}
 }
 
 // applies reports whether one validator runs over the values this mode yields.
@@ -313,9 +378,9 @@ func applies(v validator, mode netMode) bool {
 // an array yields its elements, because section 4 classifies an array on its
 // element type; a masked document yields its string leaves; a NULL yields
 // nothing, because the ratio is over the non-NULL values.
-func (s *state) netValues(v any, mode netMode) []string {
+func (s *state) netStrings(v any, mode netMode) (direct, fromLeaves []string) {
 	if v == nil {
-		return nil
+		return nil, nil
 	}
 	if mode.leaves {
 		ls := leaves(v)
@@ -366,7 +431,7 @@ func (s *state) netValues(v any, mode netMode) []string {
 			}
 			out = append(out, occ.name)
 		}
-		return out
+		return nil, out
 	}
 	if elems, ok := v.([]any); ok {
 		out := make([]string, 0, len(elems))
@@ -376,7 +441,7 @@ func (s *state) netValues(v any, mode netMode) []string {
 			}
 			out = append(out, textOf(e))
 		}
-		return out
+		return s.withDocuments(out, mode)
 	}
 	text := textOf(v)
 	if mode.array {
@@ -398,8 +463,98 @@ func (s *state) netValues(v any, mode netMode) []string {
 		// a refusal with no action behind it. The masked column, where the
 		// argument is the opposite one, is refused in residual.go.
 		if elems, err := arrayLiteralElements(text); err == nil {
-			return elems
+			return s.withDocuments(elems, mode)
 		}
 	}
-	return []string{text}
+	return s.withDocuments([]string{text}, mode)
+}
+
+// withDocuments applies the two content gates this net grew from the
+// 2026-09-15 red team, and returns the strings split into the ones the
+// validators read as themselves and the ones that came out of a document.
+//
+// A bytea value is dropped unless it is readable text (mode.bytea, A4a): the
+// classifier's own argument for never running the text validators over a bytea
+// — a PNG reads as an address — is sound about bytes and says nothing about a
+// bytea holding a UTF-8 document, and the printability guard is what separates
+// the two. textsig.PrintableText is the same function internal/classify's
+// bestSignal asks, and since the T-REDFIX review's second finding it is the
+// whole of the question on both sides: that package also required 95% of the
+// sample set to be readable, so a half-printable column was unmasked there and
+// exit 9 here, which is a run with no green path. Neither side has a column
+// ratio now.
+//
+// A character (or readable bytea) value that parses as a JSON object or array
+// yields its leaves and keys as well as itself (mode.maybeDocument, A5b). They
+// are returned separately because the dictionary-backed validators must not
+// see them: internal/classify runs no dictionary signal over a document's
+// leaves, and this net may not refuse an already-loaded target on evidence the
+// classifier is structurally unable to have seen — the same rule `applies`
+// states for a json column, applied to the text column holding the same bytes.
+func (s *state) withDocuments(values []string, mode netMode) (direct, fromLeaves []string) {
+	if mode.bytea {
+		kept := values[:0:0]
+		for _, v := range values {
+			if textsig.PrintableText(v) {
+				kept = append(kept, v)
+			}
+		}
+		values = kept
+	}
+	if !mode.maybeDocument {
+		return values, nil
+	}
+	for _, v := range values {
+		doc, ok := decodeDocument(v)
+		if !ok || !isDocumentShape(doc) {
+			continue
+		}
+		for _, l := range leaves(v) {
+			if l.str && l.text != "" {
+				fromLeaves = append(fromLeaves, l.text)
+			}
+		}
+		for _, occ := range documentKeys(v) {
+			if occ.name != "" {
+				fromLeaves = append(fromLeaves, occ.name)
+			}
+		}
+	}
+	return values, fromLeaves
+}
+
+// isDocumentShape reports an object or an array, and nothing else. A bare
+// number, string or boolean is valid JSON and is not a document: reading
+// "12345" as one would double-count every numeric column in the target.
+func isDocumentShape(doc any) bool {
+	switch doc.(type) {
+	case map[string]any, []any:
+		return true
+	}
+	return false
+}
+
+// count runs the applicable validators over one string and records the hits.
+// fromLeaf marks a string that came out of a document rather than out of the
+// column: the dictionary-backed validators never see one, for the reason
+// `applies` gives, and such a string is counted into its own netTally so that a
+// document cannot move the denominator the column's own values are judged by.
+// distinct is nil on the leaf pass for the same reason — nothing there ever
+// reaches a dictionary-backed validator to record a digest for.
+func count(text string, fromLeaf bool, mode netMode, hits []int64, distinct []map[[sha256.Size]byte]struct{}) {
+	for i, val := range validators {
+		if !applies(val, mode) || (fromLeaf && val.dict) {
+			continue
+		}
+		if !val.ok(text) {
+			continue
+		}
+		hits[i]++
+		if distinct == nil {
+			continue
+		}
+		if d := distinct[i]; d != nil && len(d) < minValues {
+			d[sha256.Sum256([]byte(text))] = struct{}{}
+		}
+	}
 }

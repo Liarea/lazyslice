@@ -103,6 +103,33 @@ const (
 	// checks.
 	CodeLiteralNotRewritable event.Code = "target.schema.literal_not_rewritable"
 
+	// CodeTypeLiteral is exit 13: an enum label, or a domain's DEFAULT or
+	// CHECK, carries a literal a strong validator hits. ARCHITECTURE.md §11.1
+	// recreates a type verbatim — internal/load/ddl writes every enum label as
+	// a string literal and replays a domain's whole CREATE statement — so the
+	// value crosses into the target exactly as a column DEFAULT does, and the
+	// 2026-09-15 red team walked an email address and a phone number through
+	// both routes under exit 0 with nothing in the yml.
+	//
+	// It is 13 and never 12, and it is never rewritten. An enum label cannot
+	// be rewritten at all: every row of every column of that type references
+	// the label by value, so masking it would either break the column or
+	// silently remap rows. A domain's DEFAULT belongs to the type rather than
+	// to a column, so there is no single masker that could produce a
+	// replacement — the columns using the domain may be masked under different
+	// categories, or not masked at all.
+	//
+	// The escape is --allow-type-literal TYPE=REASON, and it is the only one.
+	// This comment used to name --skip-table, which cannot clear this refusal
+	// by any route: --skip-table drops a table to *schema only*, so its DDL and
+	// every type that DDL names are still recreated, and nothing prunes
+	// Schema.Enums or Schema.Domains. Any source schema with one such label was
+	// therefore unrunnable, under a message naming a flag with no effect on it
+	// (the T-REDFIX review's fourth finding). internal/verify's catalog pass
+	// honours the same opt-out through Plan.AllowedTypeLiterals, so the run
+	// that gets past this does not fail at exit 9 on the same object.
+	CodeTypeLiteral event.Code = "target.schema.type_literal"
+
 	// CodeNotRecreatable is exit 13: a foreign key the target's schema cannot
 	// carry (ARCHITECTURE.md §11.1, ForeignKey.NotRecreatable). It is raised at
 	// plan, before the snapshot is used for keys and before anything in the

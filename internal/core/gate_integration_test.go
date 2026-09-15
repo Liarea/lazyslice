@@ -202,3 +202,55 @@ func quietRungs(t *testing.T) {
 		t.Setenv(name, "")
 	}
 }
+
+// ARCHITECTURE.md §9 rule 1 and THREAT_MODEL.md T2 both say a target on the
+// source's own cluster is eligible *and* that the header carries
+// `same cluster as source` as a warning. internal/pg has computed
+// Eligibility.SameCluster since the gate was written and **nothing in this
+// package or internal/render read the field** — the gate's own test asserted
+// the boolean and never the rendered line, which is how the omission survived
+// until the 2026-09-15 red team pointed --source at production with no --target
+// and watched a masked slice land in the production server's own maintenance
+// database under exit 0 with nothing said about it.
+//
+// This asserts the line and not the boolean, which is the whole point.
+func TestASameClusterTargetIsWarnedAbout(t *testing.T) {
+	ctx := t.Context()
+	testutil.SkipWithoutDocker(ctx, t)
+
+	admin := testutil.Postgres(ctx, t, "")
+	source := createDatabase(ctx, t, admin, "warn_source")
+	target := createDatabase(ctx, t, admin, "warn_target")
+
+	execOn(ctx, t, source,
+		`CREATE TABLE customer (id int PRIMARY KEY, email text)`,
+		`INSERT INTO customer VALUES (1, 'a@example.com')`,
+	)
+
+	dir := t.TempDir()
+	quietRungs(t)
+
+	var codes []event.Code
+	sink := event.SinkFunc(func(e event.Event) { codes = append(codes, e.Code) })
+
+	req := Request{
+		Mode:       ModeRun,
+		Workdir:    dir,
+		Source:     source,
+		Target:     target,
+		DockerHost: "tcp://staging.example:2375",
+		ConfigPath: filepath.Join(dir, "lazyslice.yml"),
+		SecretFile: filepath.Join(dir, "lazyslice.secret"),
+		NoConfig:   true,
+		Yes:        true,
+		Root:       "public.customer",
+	}
+
+	if _, err := Run(ctx, req, sink); err != nil {
+		t.Fatalf("Run = %v, want a run that completes: a second database on one cluster is eligible", err)
+	}
+	if n := count(codes, CodeTargetSameCluster); n != 1 {
+		t.Errorf("%s was emitted %d time(s), want once: the run wrote to the source's own server "+
+			"and said nothing about it", CodeTargetSameCluster, n)
+	}
+}
