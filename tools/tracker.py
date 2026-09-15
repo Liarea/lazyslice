@@ -28,6 +28,15 @@ STATUSES = ("open", "in_progress", "done", "cancelled", "blocked")
 def today(): return datetime.date.today().isoformat()
 def slug(s): return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")[:48]
 
+def quote(v):
+    # A double-quoted YAML scalar escapes an inner double quote; T-0188's reviewer found a title that a real YAML reader rejects (2026-09-16).
+    return str(v).replace('\\', '\\\\').replace('"', '\\"')
+
+def unquote(v):
+    if len(v) >= 2 and v[0] == '"' and v[-1] == '"':
+        return v[1:-1].replace('\\"', '"').replace('\\\\', '\\')
+    return v.strip('"')
+
 def parse(path):
     text = open(path, encoding="utf-8").read()
     m = re.match(r"^---\n(.*?)\n---\n(.*)$", text, re.S)
@@ -35,11 +44,11 @@ def parse(path):
     fm = {}
     for line in m.group(1).splitlines():
         if ":" in line:
-            k, v = line.split(":", 1); fm[k.strip()] = v.strip().strip('"')
+            k, v = line.split(":", 1); fm[k.strip()] = unquote(v.strip())
     return fm, m.group(2)
 
 def dump(path, fm, body):
-    head = "\n".join(f'{k}: "{v}"' if " " in str(v) or v == "" else f"{k}: {v}" for k, v in fm.items())
+    head = "\n".join(f'{k}: "{quote(v)}"' if " " in str(v) or '"' in str(v) or v == "" else f"{k}: {v}" for k, v in fm.items())
     open(path, "w", encoding="utf-8").write(f"---\n{head}\n---\n{body}")
 
 def find(tid):
