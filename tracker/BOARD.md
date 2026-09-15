@@ -7,9 +7,9 @@
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
-| E5 Hardening | 5 | 11 | 1 | 72 | 0 | 0 |
+| E5 Hardening | 5 | 8 | 1 | 75 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 35 | 0 | 26 | 4 | 0 |
+| E9 Later | later | 48 | 0 | 26 | 4 | 0 |
 
 ## Open and in progress
 
@@ -36,7 +36,6 @@
 - T-0158 [open] E9 · Export the closed-value label list from mask so plan compares labels, not CHECK text ()
 - T-0159 [open] E9 · FK equality group: members with different type families can still mask differently ()
 - T-0162 [open] E9 · move the SQL literal scanner out of internal/pipeline into a leaf package beside internal/textsig ()
-- T-0163 [open] E5 · the plan-time DDL literal rule does not read index predicates or domain CHECKs ()
 - T-0164 [open] E9 · uniqueColumn is copied in internal/plan and internal/transform; give it a shared home ()
 - T-0166 [open] E9 · wire dsn param-drop warnings into internal/core and internal/pg's own dsn.Parse call sites ()
 - T-0168 [open] E9 · dsn.Ref.Params misses rung-2 (env/PGSERVICE) settings, so a first run through libpq env alone reruns with no sslmode at rung 0 ()
@@ -53,23 +52,37 @@
 - T-0184 [open] E5 · Should a headless run auto-select a target on the source's own cluster? ()
 - T-0185 [open] E9 · ARCHITECTURE.md does not know about --allow-type-literal ()
 - T-0186 [open] E5 · --allow-type-literal is not recorded in lazyslice.yml ()
-- T-0189 [open] E5 · Catalog literals: every validator over string literals in CHECK, domain, enum and generated expressions; pattern operands detected but not rewritten; plan reads partial-index predicates (sonnet)
-- T-0190 [open] E5 · Cluster identity does not depend on the transport: sqlClusterID uses values that are the same for every session on the cluster (opus)
 - T-0191 [open] E5 · mask.Apply has a post-condition and a recover; a masker error message never reaches the operator with the value in it (opus)
 - T-0192 [open] E5 · The secret file is protected on its resolved path: symlinked parent directories and hard links refuse; password_command is screened before it is written to the yml (sonnet)
 - T-0195 [open] E9 · classify: national_id's checksum-only formats can weak-ratio-mask an ordinary numeric business key ()
 - T-0196 [open] E9 · Migrate the tracker to GitHub Issues and Projects behind the existing tools/tracker.py command surface (sonnet)
 - T-0197 [open] E9 · R2-05/A10 residual: a name in a language names.txt does not carry still reports "no name or value signal" as a clean bill of health (sonnet)
 - T-0198 [open] E9 · special_category has no value validator; a digit/name-free special-category sentence still crosses unseen (sonnet)
+- T-0199 [open] E9 · internal/load's gate test holds its own copy of the cluster-identity SQL ()
+- T-0200 [open] E9 · A cluster identity test that reaches one server over a genuinely different socket ()
+- T-0201 [open] E9 · internal/pipeline/ddlliteral.go: validate a pattern operand both raw and with metacharacters stripped, and strip _ only for LIKE-family operators (sonnet)
+- T-0202 [open] E9 · internal/plan/ddlliteral.go: judge only the indexes the loader recreates, not the ones backing PRIMARY KEY, UNIQUE and EXCLUDE constraints (sonnet)
+- T-0203 [open] E9 · testdata/regressions: end-to-end fixtures for the round-2 DDL attempts (index predicate, pattern operand, enum label) (sonnet)
+- T-0204 [open] E9 · internal/pg: ClusterID takes the system identifier core already read instead of reading pg_control_system a second time (sonnet)
+- T-0205 [open] E9 · internal/testutil/proxy.go: close accepted connections in the same Cleanup that closes the listener (sonnet)
+- T-0206 [open] E9 · Decide the cluster identity's field set now that the maintenance-database oid is the constant 5 on PostgreSQL 15 and newer (opus)
+- T-0207 [open] E9 · verify reports its coverage and exclusions in the result: which columns the residual scan tested, which domains and tables it skipped, and why (sonnet)
+- T-0208 [open] E9 · Measured differentiation: time to a working application on the same schemas against Greenmask, overrides and dependencies counted (sonnet)
+- T-0209 [open] E9 · ARCHITECTURE.md describes the design as PostgreSQL-specific until a second engine is real (sonnet)
+- T-0210 [open] E9 · Why a row is included, boundary crossings and cap omissions visible before copy, and a decision on which job the default slice serves (opus)
+- T-0211 [open] E9 · ROADMAP.md stops naming docs/BUILD_PLAN.md as the sequencing authority (sonnet)
 
 ## Recently closed
 
 - T-0028 [done] E3 · Create GitHub repository Liarea/lazyslice and homebrew-tap, push main, add HOMEBREW_TAP_TOKEN secret → done
 - T-0090 [done] E5 · T-PERF: performance baseline and CI throughput guard → done
+- T-0163 [done] E5 · the plan-time DDL literal rule does not read index predicates or domain CHECKs → done
 - T-0177 [done] E5 · Record real ubuntu-latest bench baseline and flip bench job to blocking → done
 - T-0179 [done] E5 · Bench CI gate compares head against its parent on the same runner; absolute baseline becomes a catastrophic floor → done
 - T-0187 [done] E5 · National-identifier validators with checksums in textsig; classify and the second net treat them as strong; a digits-family SSN shape under the ratio rule → done
 - T-0188 [done] E5 · Multilingual given-name and surname lists in textsig, sourced under CC0, so a non-English name in a column with no name rule is recognised → done
+- T-0189 [done] E5 · Catalog literals: every validator over string literals in CHECK, domain, enum and generated expressions; pattern operands detected but not rewritten; plan reads partial-index predicates → done
+- T-0190 [done] E5 · Cluster identity does not depend on the transport: sqlClusterID uses values that are the same for every session on the cluster → done
 - T-0193 [done] E9 · THREAT_MODEL.md T1: national_id is now a row-path control, not only DDL-literal → done
 - T-0194 [done] E9 · internal/plan/ddlliteral.go: strongHit's national_id entry should call the narrower textsig.ValidNationalIDStructured → done
 - T-0029 [cancelled] E9 · Before going public: git-crypt the AI-specific paths and rewrite pre-encryption history → cancelled
@@ -86,6 +99,3 @@
 - T-0135 [done] E5 · dsn.Ref keeps the non-secret transport parameters so a rerun preserves sslmode and certificate paths → done
 - T-0136 [done] E5 · Second net: one strong hit in an unmasked column is a finding; classify masks a mixed column that carries a strong hit → done
 - T-0137 [done] E5 · JSON object keys that a strong validator hits are masked → done
-- T-0138 [done] E5 · mapping_file is refused explicitly until it is implemented; ADR-012 records the deferral → done
-- T-0139 [done] E5 · Torture suite fingerprints the source before the run, with a negative control → done
-- T-0140 [done] E5 · CI runs the torture suite on main and the release workflow requires a green CI run for the tagged commit → done

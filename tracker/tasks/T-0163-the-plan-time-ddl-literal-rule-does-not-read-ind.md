@@ -3,12 +3,12 @@ id: T-0163
 title: "the plan-time DDL literal rule does not read index predicates or domain CHECKs"
 epic: E5
 phase: 5
-status: open
+status: done
 owner: ""
 created: 2026-09-14
 started: ""
-closed: ""
-outcome: ""
+closed: 2026-09-15
+outcome: done
 ---
 
 # T-0163 · the plan-time DDL literal rule does not read index predicates or domain CHECKs
@@ -29,6 +29,8 @@ internal/plan/ddlliteral.go (T-0134) walks every recreated column default, gener
 
 - 2026-09-15 moved to E5 phase 5
 
+- 2026-09-15 closed: done
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+went well: closed by T-0189, which reads partial-index predicates and expression keys at plan time and domain CHECKs in both passes | went badly: sat open in E5 for a week as a known gap | change next time: file the gap inside the task that owns the code path when one is already queued

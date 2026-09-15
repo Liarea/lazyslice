@@ -29,6 +29,8 @@ The maintainer 2026-09-16: use the GitHub project system instead of text files. 
 
 - 2026-09-15 2026-09-16 the maintainer: project scope granted; internal AI tasks are shown publicly. Orchestrator created GitHub Project 3 (lazyslice, linked to the repo) with fields Epic, Owner, Kind (Type is a reserved name), Tracker id, and Status columns Backlog/Ready/In progress/Blocked/Done/Cancelled; repo labels epic:*, owner:*, type:*, area:*, filed-by-agent; milestones v0.1.0, v0.2.0, v1.0.0, Later. Views (Board by Status, Table, Roadmap by milestone) are added in the UI. Wrapper mapping: tracker open -> Ready (or Backlog for E9), blocked -> Blocked, done -> Done, cancelled -> Cancelled; epic -> Epic field and epic label; phase -> milestone; owner -> Owner field and label; post-mortem -> closing comment.
 
+- 2026-09-15 the notes above dated 2026-09-16 describe 2026-09-15; the day was misdated in the prose, not in the created field
+
 ## Post-mortem
 
 _(filled on close: what went well, what went badly, what we change next time)_
