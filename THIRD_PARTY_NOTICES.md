@@ -26,6 +26,122 @@ URL of the licence text checked.
 | `rails-activestorage` | https://github.com/rails/rails | version `8.0.2` (tag `v8.0.2`) | ActiveStorage's bundled migration template, `activestorage/db/migrate/20170806125915_create_active_storage_tables.rb`, installed via `bin/rails active_storage:install` | MIT | https://github.com/rails/rails/blob/v8.0.2/MIT-LICENSE | The `posts` and `comments` tables in the fixture are not upstream content — they come from `rails generate scaffold`/`generate model` commands run by the build script against locally-authored, trivial column lists, added only so ActiveStorage's polymorphic attachment columns have something to point at. |
 | `supabase-auth` | https://github.com/supabase/auth | commit `0907af9bd6be3c76f472c40a7dcc0dc34abeffaf` | `migrations/*.sql` (all 75) | MIT | https://github.com/supabase/auth/blob/0907af9bd6be3c76f472c40a7dcc0dc34abeffaf/LICENSE | The build script performs two mechanical substitutions before concatenation: GoTrue's Go-template namespace placeholder (`{{ index .Options "Namespace" }}`) is filled in as `auth`, and a missing trailing `;` is added between two migration files so concatenation doesn't run one file's last statement into the next file's first. Neither changes any identifier, type, or constraint upstream declared. |
 
+## `internal/textsig/names.txt` — multilingual given/family name stock (T-0188)
+
+The given-name and family-name entries `internal/textsig/names.txt` gained for
+Polish, Italian, Dutch, German, French, Spanish, Portuguese, Turkish, Swedish,
+Finnish, Icelandic, Yoruba, Igbo, Swahili, Hindi (romanised), Arabic
+(romanised), Vietnamese, Japanese (romanised), Korean (romanised) and Chinese
+(romanised via pinyin) are **not** derived from the ten `testdata/torture/`
+projects above; they are data, not code, taken from Wikidata, which dedicates
+its structured data to the public domain under **CC0 1.0** — confirmed at
+<https://www.wikidata.org/wiki/Wikidata:Licensing> ("Wikidata … structured
+data available under the Creative Commons CC0 License") on 2026-09-15. CC0 is
+a public-domain dedication, not an attribution licence, so nothing here is
+owed a byline; this section exists so the query, the date and the exact
+`wikibase:sitelinks`-ordered cut are reproducible rather than merely asserted.
+
+**The query, one language at a time.** For each language, two runs — `given`
+over `wd:Q12308941` (male given name), `wd:Q11879590` (female given name) and
+`wd:Q202444` (given name) unioned together, and `family` over `wd:Q101352`
+(family name) alone — both filtered to items carrying `wdt:P407` ("language of
+work or name") equal to that language's own Wikidata item, grouped by label and
+ordered by `MAX(?sitelinks)` descending (a proxy for how well-attested the name
+is, so `LIMIT` keeps the most frequent names rather than an arbitrary cut), run
+against `https://query.wikidata.org/sparql`:
+
+```sparql
+SELECT ?name (MAX(?sl) AS ?sitelinks) WHERE {
+  { ?item wdt:P31 wd:Q12308941 } UNION { ?item wdt:P31 wd:Q11879590 } UNION { ?item wdt:P31 wd:Q202444 }
+  ?item wdt:P407 wd:<language Q-id> .
+  ?item rdfs:label ?name .
+  ?item wikibase:sitelinks ?sl .
+  FILTER(LANG(?name) = "<label language>")
+}
+GROUP BY ?name
+ORDER BY DESC(?sitelinks)
+LIMIT 1500
+```
+
+(the `family` run is the same query with the given-name union replaced by
+`?item wdt:P31 wd:Q101352`). For the five languages whose own script is not
+Latin — Hindi, Arabic, Japanese, Korean and Chinese — `<label language>` is
+`en` rather than the language's own code, deliberately: an `auth.users`-shaped
+column in an English-schema
+database holds a romanised name (`Muhammad`, `Priya`, `Wei`), not the native
+script, and most Wikidata name items carry an English label that already is
+that romanisation. Run on 2026-09-15.
+
+| Language | `<language Q-id>` | Label read | Given fetched | Family fetched |
+|---|---|---|---:|---:|
+| Polish | `wd:Q809` | `pl` | 1,500 | 1,500 |
+| Italian | `wd:Q652` | `it` | 1,500 | 1,500 |
+| Dutch | `wd:Q7411` | `nl` | 1,500 | 1,500 |
+| German | `wd:Q188` | `de` | 1,500 | 1,500 |
+| French | `wd:Q150` | `fr` | 1,488 | 1,500 |
+| Spanish | `wd:Q1321` | `es` | 1,500 | 1,500 |
+| Portuguese | `wd:Q5146` | `pt` | 712 | 1,166 |
+| Turkish | `wd:Q256` | `tr` | 1,500 | 1,500 |
+| Swedish | `wd:Q9027` | `sv` | 593 | 1,314 |
+| Finnish | `wd:Q1412` | `fi` | 913 | 957 |
+| Icelandic | `wd:Q294` | `is` | 1,500 | 35 |
+| Yoruba | `wd:Q34311` | `yo` | 49 | 97 |
+| Igbo | `wd:Q33578` | `ig` | 58 | 20 |
+| Swahili | `wd:Q7838` | `sw` | 5 | 3 |
+| Hindi (romanised) | `wd:Q1568` | `en` | 265 | 24 |
+| Arabic (romanised) | `wd:Q13955` | `en` | 1,177 | 1,349 |
+| Vietnamese | `wd:Q9199` | `vi` | 69 | 59 |
+| Japanese (romanised) | `wd:Q5287` | `en` | 1,500 | 1,500 |
+| Korean (romanised) | `wd:Q9176` | `en` | 1,500 | 145 |
+| Chinese (romanised, pinyin) | `wd:Q7850` | `en` | 1,500 | 342 |
+
+`LIMIT 1500` is the "a few thousand per language at most" the task set;
+several languages fetched fewer because Wikidata's own coverage — items
+carrying `P407` for that language *and* at least one sitelink — runs out
+before the limit does (Swahili, Igbo, Yoruba, Vietnamese and Icelandic's own
+family-name stock all sit under 100). Swahili's five given and three family
+names are kept for completeness; they do not move any measurement below.
+
+**What happened to a raw fetched name before it became a `names.txt` line.**
+`internal/textsig`'s tokenizer (`unicode.IsLetter`-run splitting, `dict.go`)
+looks up one letter-run at a time, never a whole cell, so a multi-word fetched
+name (`"Abd al-Karim"`, a compound family name) is split into its own letter
+runs the same way a sampled value would be, and each run — lower-cased — is
+a candidate line on its own rather than the multi-word string verbatim, which
+the tokenizer could never match as a unit. Three filters then apply to every
+candidate, in this order, and a name the existing `names.txt` already carried
+skips all three (the header's own precision rules bind new entries, not old
+ones): (1) shorter than three letters is dropped, the same floor
+`TestDictionaryKeepsItsPrecisionRules` holds the whole file to; (2) a candidate
+that is also an ordinary English word per this machine's `/usr/share/dict/words`
+(Web2, BSD-licensed, not shipped — a filter input, not a dependency) is meant
+to be dropped, the same "no name that is also an ordinary English word" rule
+the existing file states — **the T-0188 review round found this filter had not
+actually run**: 23 given-section promotions of surname-section English words
+(`long`, `sun`, `young`, `berry`, `lee`, `lin`, `dang`, `kang`, `wang`, `yang`,
+`berg`, `burke`, `duncan`, `francis`, `franklin`, `gordon`, `laine`, `lloyd`,
+`mitchell`, `morris`, `nelson`, `santos`, `ahmed`) and the surname `has` were
+present in `/usr/share/dict/words` and should have been dropped; they were
+removed from the file in the review-round fix. What the filter does not and
+cannot catch, and what is knowingly still in the file: Web2 is an unabridged
+dictionary and defines many ordinary English words that are also extremely
+common given names in their own right (`mark`, `paul`, `john`, `leo`, `iris`,
+`anna`, `david`, among others) — those stay, because a candidate the *pull*
+itself sourced as a given name is not the "ordinary word wearing a name's
+clothes" case this filter and the header's rule exist to catch (street names
+and colour-name pairs built from the *surname* section's roughly two hundred
+ordinary nouns, `dict.go`'s own narrowing). (3) a candidate that is also a place name — a country, a
+capital, or a city over 100,000 population, read from Wikidata in English and
+in each of the twelve native-orthography languages above (`wd:Q515`/subclasses
+with `wdt:P1082 > 100000`, `wd:Q6256` for countries, `wd:Q5119` for capitals) —
+is dropped. The third filter exists because a family name and a place name are
+the same word constantly (an Italian surname list free of Italian city names
+is not the same list): `TestCompositeAddressAcrossFieldsFailsClosed` caught
+`Milano` — an Italian surname *and* Italy's second city — turning an address
+composite's decision to `person_name` before this filter was added, and it is
+the reason a second Wikidata pull backs this file's exclusions rather than a
+hand-typed one.
+
 ## Copyleft summary
 
 Five of the ten fixtures are under copyleft licences: `discourse`

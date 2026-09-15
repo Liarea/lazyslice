@@ -30,7 +30,15 @@ neither of 021's two fixes reaches it, and it clears the SSA's exclusion
 ranges at essentially 1.0 the same way a genuine leaked identifier column
 does; the reviewer's own probe (an account-number column and an
 invoice-number column, both ordinary) is what 023 reduces, and the fix is
-corroboration rather than a third exclusion rule.
+corroboration rather than a third exclusion rule. **024 is a ninth**, from
+the same round two's R2-05/A10: a person's full name in a language
+`internal/textsig/names.txt` did not carry crossed a column no rule pack
+pattern matches, in a table with no neighbouring personal column, under the
+same "no name or value signal" report as 018 to 020's carrier; T-0188
+reduces it against ten of the twenty languages it sourced, verified false
+before the task's change and true after — A10's own Khmer/Lao/Amharic
+instance is not one of the ten, and stays open (tracker T-0197) rather than
+closed here, because the dictionary cannot be widened far enough to reach it.
 
 The files are loaded and run by `make torture` (`internal/invariants`'s
 `TestTortureRegressions`, behind the `integration` and `torture` build tags), so
@@ -157,6 +165,7 @@ never reflect.
 | `021-ordinary-numeric-columns-clear-the-ssn-ratio.sql` | the T-0187 review round | **the other side of 020**: the digits-family entry 020 needed has no check digit, only the SSA's own exclusion ranges, so an ordinary surrogate bigint id column, an ordinary non-key dense business-number column and an ordinary YYYYMMDD date column all cleared its ratio and refused a run holding no personal data at all; fixed by excluding a value that is also a real calendar date directly and by exempting a column whose own values pack into a dense numeric range, read from the values rather than from internal/classify's decision |
 | `022-national-id-in-a-surrogate-key-column.sql` | the review round that followed the T-0187 round | **the cost of 021's first-draft fix**: gating the key exemption on internal/classify's own surrogate-key decision meant a primary key of real, non-dense SSNs — a shape classify's own signals find nothing in — was exempted along with the ordinary keys 021 pins, and crossed into the target verbatim; the values-based fix in 021 refuses it because the column is not dense, whatever classify decided about it being a key. Carries a corroborating `email` column since 023 (below) |
 | `023-sparse-fixed-prefix-reference-block-is-not-national-id.sql` | the review round that followed 022's | **the cost of 021's fix, the other side of the ratio**: a sparse column with a fixed leading prefix is neither dense (021's own exemption) nor a date (021's own exclusion), so an ordinary account-number or invoice-number column still cleared the ratio at essentially 1.0 and refused a run holding no personal data at all; fixed by requiring corroboration — a rules.yml national_id name-pattern hit on the column, or a certain-or-likely personal column in the same table — before the ratio is asked at all, which is also why 020 and 022 each gained a corroborating column of their own |
+| `024-multilingual-name-in-an-unrecognised-column.sql` | the 2026-09-15 red team round 2, R2-05/A10, and T-0188 | a person's full name in a language `internal/textsig/names.txt` did not carry, in a column called `label` no rule matches, in a table with no other personal column — reported "no name or value signal" and crossed verbatim; fixed by sourcing given/family-name stock for twenty languages from Wikidata (CC0), documented in `THIRD_PARTY_NOTICES.md`. Ten rows, one per newly-sourced language (German, French, Spanish, Portuguese, Turkish, Hindi romanised, Arabic romanised, Japanese romanised, Korean romanised, Chinese pinyin), each verified false against a pre-T-0188 checkout and true after. A10's own Khmer/Lao/Amharic names stay an open residual — tracker T-0197 — because Wikidata's CC0 coverage for them is three, twelve and thirteen items total, nowhere near usable |
 
 009's header now says `ok`. It did not always: `arrayArrivesAsLiteral` in
 `internal/plan/writeback.go` was written as a stand-in for the element-wise

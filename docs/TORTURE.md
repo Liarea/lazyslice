@@ -487,8 +487,8 @@ regression `013`, a fixture none of these three schemas touches.
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | django | 44 | 9 | 12 | 9 | 3 | 0 | **0.750** | **1.000** |
 | rails-activestorage | 36 | 7 | 15 | 7 | 8 | 0 | **0.467** | **1.000** |
-| supabase-auth | 271 | 50 | 74 | 50 | 24 | 0 | **0.676** | **1.000** |
-| all three | 351 | 66 | 101 | 66 | 35 | 0 | **0.653** | **1.000** |
+| supabase-auth | 271 | 50 | 81 | 50 | 31 | 0 | **0.617** | **1.000** |
+| all three | 351 | 66 | 108 | 66 | 42 | 0 | **0.611** | **1.000** |
 
 The first measurement of this table, before T-0104, was supabase-auth 62
 predicted, 40 TP, 22 FP, 10 FN — precision 0.645, recall 0.800 — and all three
@@ -508,6 +508,60 @@ predicted, 49 → 50 TP, 24 FP unchanged, 1 → 0 FN, precision 0.671 → 0.676,
 recall 0.980 → 1.000. supabase-auth's recall is 1.000 for the first time this
 file has measured it, and no false negative is open on any of the three
 schemas.
+
+**The table moved once more between that measurement and this one, and not
+because of anything this file's own tasks did to a name or a type rule.**
+Re-measuring supabase-auth today — before T-0188 touched anything — reads 81
+predicted, 50 TP, 31 FP, precision 0.617, against the 74/50/24/0.676 this file
+last wrote down: the schema itself is unchanged (still 271 columns), so all
+seven are rule-pack widening, not a new column. `git log` over
+`internal/classify/{classify.go,rules.yml}` since this table's own T-0119
+measurement names the mechanism: commit `a712cbc` ("Red team round 1 fixes",
+T-REDFIX, 2026-09-15) widened `credential`, `online_id` and `person_name`'s
+name patterns by roughly sixty spellings across several categories, and seven
+of `custom_oauth_providers`' and its neighbours' OAuth-plumbing columns —
+`discovery_url`/`token_url`/`userinfo_url` as `online_id`,
+`provider_type`/`token_endpoint_auth_method` as `credential`,
+`client_name`/`name_id_format` as `person_name` — now clear a name-pattern
+match that did not exist when this table was last written. T-0187 (national_id
+on the row path) is not the cause: no column in this schema decides
+`national_id`, checked directly against the emitted `columns:` block. This
+file was not re-measured after `a712cbc` landed, so the drift sat unrecorded
+until T-0188's own before/after pass surfaced it; the table above is the
+corrected "before" for what follows, not a new regression.
+
+**T-0188 (2026-09-15) sourced and re-measured names.txt's multilingual stock
+under CC0 (THIRD_PARTY_NOTICES.md) and moved none of the three schemas'
+numbers at all**: django, rails-activestorage and supabase-auth are
+12/9/3/0.750, 15/7/8/0.467 and 81/50/31/0.617 both before and after — the
+same predicted set, column for column, not merely the same counts. The
+reason is `TestFiftyNamesFromThreeSchemas` (internal/classify/names_test.go)
+first: that fixture classifies sixty-four held-out columns by *name and type
+only*, through `mapSampler{}` with no sampled values at all, so a value-level
+dictionary change cannot move it by construction, and it did not — 47/2/0/15,
+precision 0.959, recall 1.000, identical to before. The torture truth sets do
+sample real rows, and still did not move, because none of django's,
+rails-activestorage's or supabase-auth's generated data happens to contain a
+word from any of the twenty languages T-0188 added — unsurprising for three
+English-language open-source schemas' own generated fixtures, and the reason
+`testdata/regressions/024` rather than one of the ten torture schemas is what
+proves the dictionary change actually works: ten names, one per newly-sourced
+language, each verified false against a pre-T-0188 `names.txt` and true
+after, masked in a live run (`not-copied: public.reg024_records.label`).
+
+**One thing the widening did cost, and the fix for it is in the same
+change.** `TestCompositeAddressAcrossFieldsFailsClosed`
+(internal/classify/composite_type_test.go) failed on the first pull: `Milano`
+is both an Italian surname and Italy's second city, and a composite address
+whose fields spelled `(3,"Via Roma",Milano)` decided `person_name` instead of
+`address` once `Milano` entered the surname section — a family name and a
+place name collide across languages in a way the English-only list never
+surfaced. The fix is the third filter THIRD_PARTY_NOTICES.md's T-0188 section
+describes (no candidate that is also a country, a capital, or a city over
+100,000 population, read from Wikidata in English and in each native-script
+language), and the full suite — this file's fixtures, the composite tests,
+`TestDictionaryKeepsItsPrecisionRules`, the three per-language truth sets and
+`make torture` in full — passes with it in place.
 
 ### django — precision 0.750, recall 1.000
 
