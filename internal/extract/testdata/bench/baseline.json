@@ -1,8 +1,8 @@
 {
   "BenchmarkExtractThroughput": {
-    "rows_per_sec": 9780000,
+    "rows_per_sec": 3000000,
     "measured": "2026-09-15",
-    "hardware": "GitHub-hosted ubuntu-latest runner (x86_64, 4 vCPU), CI run 34927703066 bench job",
-    "note": "Best of five one-second runs on the runner itself was 10,865,118 rows/sec (T-0177). Recorded at 90% of that so the 20% ceiling in the Makefile (BENCH_REGRESSION_PCT) fails at about 72% of the measured number: shared runners vary run to run and a single-sample baseline at 100% would flag ordinary noise as a regression. The Apple M4 local figure (about 22,000,000 rows/sec) is in docs/PERF.md and is not the gate."
+    "hardware": "GitHub-hosted ubuntu-latest runner (x86_64, 4 vCPU)",
+    "note": "Catastrophic-regression floor, not a noise-tolerant baseline. ae51123 recorded a baseline from one CI run (10,865,118 rows/sec, best of five, CI run 34927703066) and made the bench job blocking against it; the very next run, with identical code, measured 6,741,072 rows/sec (CI run 34928141791) -- a 38% swing between two GitHub-hosted ubuntu-latest runs of the same commit, comfortably past the Makefile's BENCH_REGRESSION_PCT (20%) in either direction. No single number recorded on one run survives that kind of shared-runner variance as an absolute floor. `make bench-compare` (Makefile) is now the regression gate: it benchmarks a base commit and the working tree back-to-back, interleaved, on the same machine in the same invocation, so runner noise lands on both sides instead of only on whichever commit happened to run when a neighbour was busy. This file keeps `make bench` as a second, cheaper check with a narrower job: 3,000,000 rows/sec is well under half of the slower of the two measurements above, so it only fails when throughput has actually collapsed (a real break), never on ordinary runner-to-runner variance. See docs/PERF.md's CI section for the fuller account."
   }
 }

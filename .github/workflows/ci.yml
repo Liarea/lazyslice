@@ -384,17 +384,52 @@ jobs:
   # testdata/bench/, which was outside T-PERF's authorized paths (docs/PERF.md's
   # concerns section, tracker T-0175).
   #
-  # Blocking since T-0177 (2026-09-15): baseline.json now carries a number
-  # measured on this job's own runner (CI run 34927703066), recorded at 90% of
-  # the best-of-five so the 20% ceiling tolerates shared-runner variance.
+  # A single recorded baseline cannot be a blocking gate on a shared runner:
+  # T-0177 (2026-09-15) recorded one from this job's own runner (CI run
+  # 34927703066, 10,865,118 rows/sec) and made the job blocking against it;
+  # the very next run, with identical code, measured 6,741,072 rows/sec (CI
+  # run 34928141791) — a 38% swing on the same commit, well past the 20%
+  # ceiling either way. So this job now runs two checks with two different
+  # jobs to do:
   #
+  #   - `make bench-compare` is the regression gate. It benchmarks BENCH_BASE
+  #     and the working tree back-to-back, interleaved, on this same runner
+  #     in this same invocation, so runner noise lands on both sides of the
+  #     comparison instead of only on whichever commit happened to run while
+  #     a neighbour was busy. On a push, BENCH_BASE defaults to the
+  #     Makefile's HEAD~1 ("did this commit regress it"); on a pull_request,
+  #     it is set to the PR's base branch (fetched below as a
+  #     remote-tracking ref, since a shallow PR checkout does not otherwise
+  #     carry it), so a PR is compared against what it is proposing to merge
+  #     into rather than only its own latest commit.
+  #   - `make bench` stays the absolute, single-number check, but
+  #     baseline.json now records a catastrophic-regression floor
+  #     (3,000,000 rows/sec) rather than a number measured on one run and
+  #     asked to tolerate the next — see that file's own note for why. It
+  #     only fails when throughput has collapsed, not on runner-to-runner
+  #     variance.
+  #
+  # Both steps stay blocking; docs/PERF.md's CI section has the fuller
+  # account, including the two measured numbers above.
   bench:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
+      - name: fetch the pull request's base branch (bench-compare's BENCH_BASE)
+        if: github.event_name == 'pull_request'
+        run: git fetch --no-tags --depth=1 origin '${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}'
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
-      - name: extract throughput has not dropped more than 20% from the baseline recorded on this runner (T-0177)
+      - name: extract throughput has not dropped from BENCH_BASE by more than BENCH_REGRESSION_PCT, measured back-to-back on this runner
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            make bench-compare BENCH_BASE=origin/${{ github.base_ref }}
+          else
+            make bench-compare
+          fi
+      - name: extract throughput has not collapsed below the catastrophic floor (internal/extract/testdata/bench/baseline.json)
         run: make bench
