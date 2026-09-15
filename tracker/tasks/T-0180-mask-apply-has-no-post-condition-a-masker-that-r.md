@@ -3,12 +3,12 @@ id: T-0180
 title: "mask.Apply has no post-condition: a masker that returns its input is accepted"
 epic: E5
 phase: 5
-status: open
+status: done
 owner: ""
 created: 2026-09-15
-started: ""
-closed: ""
-outcome: ""
+started: 2026-09-15
+closed: 2026-09-15
+outcome: done
 ---
 
 # T-0180 · mask.Apply has no post-condition: a masker that returns its input is accepted
@@ -27,6 +27,10 @@ The 2026-09-15 red team registered a passthrough masker against the public mask 
 
 - 2026-09-15 moved to E5 phase 5
 
+- 2026-09-15 started
+
+- 2026-09-15 closed: done
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+went well: implemented inside T-0191 (f5ec705), the mask.Apply post-condition | went badly: sat as a separate open task while its code landed elsewhere | change next time: fold a red-team follow-up into the fix task that owns the path when one is queued

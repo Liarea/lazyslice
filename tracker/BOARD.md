@@ -7,7 +7,7 @@
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
-| E5 Hardening | 5 | 8 | 1 | 75 | 0 | 0 |
+| E5 Hardening | 5 | 5 | 1 | 78 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
 | E9 Later | later | 49 | 0 | 26 | 4 | 0 |
 
@@ -45,14 +45,11 @@
 - T-0175 [open] E9 · Give nasty.sql's stream fixtures a size parameter for perf profiling ()
 - T-0176 [open] E9 · mask.Apply's HMAC-SHA256 derivation is the largest CPU cost in the extract/transform/load pipeline ()
 - T-0178 [open] E9 · TestAStoppedContainerIsOfferedAndStarted binds a fixed host port (127.0.0.1:5433) and collides under parallel container runs (sonnet)
-- T-0180 [open] E5 · mask.Apply has no post-condition: a masker that returns its input is accepted ()
-- T-0181 [open] E5 · mask.Apply does not recover: a panicking masker escapes the module ()
 - T-0182 [open] E9 · A text column holding a JSON document is refused, not masked ()
 - T-0183 [open] E9 · verify does not assert the object its catalog pass refused is gone after the quarantine ()
 - T-0184 [open] E5 · Should a headless run auto-select a target on the source's own cluster? ()
 - T-0185 [open] E9 · ARCHITECTURE.md does not know about --allow-type-literal ()
 - T-0186 [open] E5 · --allow-type-literal is not recorded in lazyslice.yml ()
-- T-0191 [open] E5 · mask.Apply has a post-condition and a recover; a masker error message never reaches the operator with the value in it (opus)
 - T-0192 [open] E5 · The secret file is protected on its resolved path: symlinked parent directories and hard links refuse; password_command is screened before it is written to the yml (sonnet)
 - T-0195 [open] E9 · classify: national_id's checksum-only formats can weak-ratio-mask an ordinary numeric business key ()
 - T-0196 [open] E9 · Migrate the tracker to GitHub Issues and Projects behind the existing tools/tracker.py command surface (sonnet)
@@ -80,10 +77,13 @@
 - T-0163 [done] E5 · the plan-time DDL literal rule does not read index predicates or domain CHECKs → done
 - T-0177 [done] E5 · Record real ubuntu-latest bench baseline and flip bench job to blocking → done
 - T-0179 [done] E5 · Bench CI gate compares head against its parent on the same runner; absolute baseline becomes a catastrophic floor → done
+- T-0180 [done] E5 · mask.Apply has no post-condition: a masker that returns its input is accepted → done
+- T-0181 [done] E5 · mask.Apply does not recover: a panicking masker escapes the module → done
 - T-0187 [done] E5 · National-identifier validators with checksums in textsig; classify and the second net treat them as strong; a digits-family SSN shape under the ratio rule → done
 - T-0188 [done] E5 · Multilingual given-name and surname lists in textsig, sourced under CC0, so a non-English name in a column with no name rule is recognised → done
 - T-0189 [done] E5 · Catalog literals: every validator over string literals in CHECK, domain, enum and generated expressions; pattern operands detected but not rewritten; plan reads partial-index predicates → done
 - T-0190 [done] E5 · Cluster identity does not depend on the transport: sqlClusterID uses values that are the same for every session on the cluster → done
+- T-0191 [done] E5 · mask.Apply has a post-condition and a recover; a masker error message never reaches the operator with the value in it → done
 - T-0193 [done] E9 · THREAT_MODEL.md T1: national_id is now a row-path control, not only DDL-literal → done
 - T-0194 [done] E9 · internal/plan/ddlliteral.go: strongHit's national_id entry should call the narrower textsig.ValidNationalIDStructured → done
 - T-0029 [cancelled] E9 · Before going public: git-crypt the AI-specific paths and rewrite pre-encryption history → cancelled
@@ -97,6 +97,3 @@
 - T-0132 [done] E5 · The masker is chosen per FK-connected equality group, not per column → done
 - T-0133 [done] E5 · Core owns the run lifecycle: complete is written only after verify passes, and a residual failure empties the target → done
 - T-0134 [done] E5 · Recreated DDL carries no sensitive literal: defaults on masked columns are masked, strong hits elsewhere refuse, verify scans the target catalog → partial
-- T-0135 [done] E5 · dsn.Ref keeps the non-secret transport parameters so a rerun preserves sslmode and certificate paths → done
-- T-0136 [done] E5 · Second net: one strong hit in an unmasked column is a finding; classify masks a mixed column that carries a strong hit → done
-- T-0137 [done] E5 · JSON object keys that a strong validator hits are masked → done

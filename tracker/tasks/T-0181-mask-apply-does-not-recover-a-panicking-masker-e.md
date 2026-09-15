@@ -3,12 +3,12 @@ id: T-0181
 title: "mask.Apply does not recover: a panicking masker escapes the module"
 epic: E5
 phase: 5
-status: open
+status: done
 owner: ""
 created: 2026-09-15
-started: ""
-closed: ""
-outcome: ""
+started: 2026-09-15
+closed: 2026-09-15
+outcome: done
 ---
 
 # T-0181 · mask.Apply does not recover: a panicking masker escapes the module
@@ -27,6 +27,10 @@ The 2026-09-15 red team's thrower masker panicked with the offending value in it
 
 - 2026-09-15 moved to E5 phase 5
 
+- 2026-09-15 started
+
+- 2026-09-15 closed: done
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+went well: implemented inside T-0191 (f5ec705), masker error messages never carry the value | went badly: as T-0180 | change next time: as T-0180
