@@ -701,3 +701,106 @@ func (f gateFixture) clusterID(ctx context.Context, t *testing.T, connURL string
 	}
 	return id
 }
+
+// R2-06, 2026-09-15. One cluster, two published endpoints: the container's own
+// port, and a second route to the same server (testutil.SecondEndpoint). The
+// cluster identity §9 rule 1 leans on must be the same over both, and the gate
+// must refuse the source reached over the second one.
+//
+// **This test does not discriminate the defect it was written for, and must not
+// be cited as the thing that pins it** (T-0190 fix round, 2026-09-15). Restore
+// the pre-fix sqlClusterID — pg_postmaster_start_time() with inet_server_addr()
+// and inet_server_port() — and it still passes, by construction:
+// testutil.SecondEndpoint dials the same backend host:port the direct
+// connection uses, so the *server's* end of the socket, which is exactly what
+// inet_server_addr()/inet_server_port() report, is identical over both routes;
+// two published docker ports NAT to the container's 5432 the same way. The
+// container suite cannot reach the container over a genuinely different
+// server-side socket, so it cannot reproduce the transport difference at all.
+// What pins that class is cluster_test.go's check on the statement's own text.
+//
+// What this test is still worth keeping for is the end-to-end half: an alias
+// the gate has to see through, and a refusal on the source reached under a
+// second spelling.
+//
+// Both sides are gated with no system identifier, which is what the SELECT-only
+// source role §9 recommends produces: pg_control_system is not executable by
+// PUBLIC, so the alias is refused on the ordinary-role identity or not at all.
+func TestOneClusterReachedOverTwoEndpointsHasOneClusterIdentity(t *testing.T) {
+	ctx := context.Background()
+	f := newGateFixture(ctx, t)
+
+	second := testutil.SecondEndpoint(ctx, t, f.sourceURL)
+
+	direct := f.clusterID(ctx, t, f.sourceURL)
+	aliased := f.clusterID(ctx, t, second)
+	if direct != aliased {
+		t.Fatalf("the cluster identity is %q over the container's own endpoint and %q over a second "+
+			"endpoint onto the same server: rule 1's alias arm is defeated by the spelling, and a "+
+			"run pointed at the source over the second endpoint drops the source's own tables",
+			direct, aliased)
+	}
+
+	_, secondRef, err := dsn.Parse(second)
+	if err != nil {
+		t.Fatalf("parsing the second endpoint: %v", err)
+	}
+	if secondRef.Port == f.sourceRef.Port && secondRef.Host == f.sourceRef.Host {
+		t.Fatalf("the second endpoint %s:%d is the container's own, so nothing is aliased here",
+			secondRef.Host, secondRef.Port)
+	}
+
+	// The attack: --source names the cluster one way, --target names the same
+	// database on the same cluster the other way.
+	target, err := OpenTarget(ctx, dsn.DSN(second))
+	if err != nil {
+		t.Fatalf("opening the target over the second endpoint: %v", err)
+	}
+	defer target.Close()
+	target.SetSourceCluster(direct)
+
+	e, err := target.Gate(ctx, f.sourceRef, "", "")
+	if err != nil {
+		t.Fatalf("Gate: %v", err)
+	}
+	if e.Verdict != pipeline.Refused || e.Reason != CodeSameDatabase {
+		t.Fatalf("Verdict = %v (%s), want Refused/%s: the target is the source reached over a "+
+			"second endpoint", e.Verdict, e.Reason, CodeSameDatabase)
+	}
+	if !e.SameCluster {
+		t.Error("SameCluster = false for the source's own cluster reached over a second endpoint")
+	}
+}
+
+// The transport is not the only thing a cluster identity can accidentally
+// depend on: a *session* can render one cluster value two ways. TimeZone is set
+// per role (ALTER ROLE) and per database (ALTER DATABASE), and lazyslice reads
+// the source with the SELECT-only role §9 recommends and the target with a
+// different role against a different database, so the two sides differing is
+// ordinary rather than adversarial. With the start time cast to text, one
+// postmaster answered the two sessions with two identities, the alias arm read
+// two clusters, and the gate admitted the source's own database on the source's
+// own cluster (T-0190 fix round, 2026-09-15).
+//
+// Unlike the second-endpoint test above, this one discriminates: it fails
+// against a sqlClusterID that casts the timestamptz.
+func TestOneClusterReadUnderTwoSessionTimeZonesHasOneClusterIdentity(t *testing.T) {
+	ctx := context.Background()
+	f := newGateFixture(ctx, t)
+
+	utc := f.clusterID(ctx, t, f.sourceURL)
+
+	f.exec(ctx, t, f.sourceURL, `ALTER DATABASE `+f.sourceRef.Database+` SET TimeZone = 'Asia/Tokyo'`)
+	t.Cleanup(func() {
+		f.exec(context.WithoutCancel(ctx), t, f.sourceURL,
+			`ALTER DATABASE `+f.sourceRef.Database+` RESET TimeZone`)
+	})
+
+	tokyo := f.clusterID(ctx, t, f.sourceURL)
+	if utc != tokyo {
+		t.Fatalf("one cluster answered %q to a session in the default time zone and %q to a session "+
+			"in Asia/Tokyo: the identity is rendered by the session, so a source and a target whose "+
+			"roles or databases carry different TimeZone settings read one cluster as two and the "+
+			"gate admits the source's own database", utc, tokyo)
+	}
+}

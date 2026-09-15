@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/jackc/pgx/v5"
@@ -204,8 +205,18 @@ func (s *Source) SystemID(ctx context.Context) (string, error) {
 // An unreadable answer is "" and never an error, same as SystemID: the gate
 // decides what to do with the absence, and it now fails closed rather than
 // trusting a different endpoint spelling.
+//
+// The system identifier is appended as the identity's last field when this
+// role can read it (amended 2026-09-15, R2-06): it is the one value that
+// identifies a cluster across a restart, and a field the other side cannot
+// read is skipped rather than read as a difference, so carrying it here costs
+// a role that lacks EXECUTE on pg_control_system nothing.
 func (s *Source) ClusterID(ctx context.Context) (string, error) {
 	if err := s.tr.Register(Shape{Name: "source.cluster_id", SQL: sqlClusterID}); err != nil {
+		return "", err
+	}
+	systemID, err := s.SystemID(ctx)
+	if err != nil {
 		return "", err
 	}
 	conn, err := s.pool.Acquire(ctx)
@@ -225,7 +236,7 @@ func (s *Source) ClusterID(ctx context.Context) (string, error) {
 		}
 		return "", nil
 	}
-	return id, nil
+	return withSystemID(id, systemID), nil
 }
 
 // Privileges reads what the source role can do (ARCHITECTURE.md §2). Both
@@ -289,16 +300,144 @@ const sqlSystemID = `SELECT system_identifier::text FROM pg_control_system()`
 // ...:15433/newprod` against one server passed rule 1 and the run dropped the
 // production table.
 //
-// pg_postmaster_start_time() is executable by PUBLIC on every supported
-// version, and it is a microsecond timestamp: two clusters that started in the
-// same microsecond is not a case. inet_server_addr() and inet_server_port() are
-// the server's own view of the connection, so two published ports mapping to
-// one container both report the container's own port — which is the aliasing
-// the endpoint comparison cannot see. Both are NULL over a unix socket, hence
-// the coalesce; the start time carries the answer on its own there.
-const sqlClusterID = `SELECT pg_postmaster_start_time()::text
-  || '|' || coalesce(host(inet_server_addr()), '')
-  || '|' || coalesce(inet_server_port()::text, '')`
+// **Every value here is a property of the cluster, never of the connection**
+// (amended 2026-09-15, R2-06). The first answer to that finding was
+// pg_postmaster_start_time() with inet_server_addr() and inet_server_port(),
+// and those last two are the *connection's* own address and port: they are
+// NULL over a unix socket and they differ again behind anything that
+// re-dials, so one cluster reached over two transports reported two
+// identities and rule 1 fell to whichever spelling the operator used. The
+// red team reached one production cluster over its TCP port and over its
+// socket and the same-cluster arm never fired.
+//
+// What is left is the same for every session on the postmaster and readable
+// by an ordinary role:
+//
+//   - pg_postmaster_start_time(), executable by PUBLIC on every supported
+//     version and a microsecond timestamp: two clusters that started in the
+//     same microsecond is not a case. It is rendered with to_char() in UTC
+//     and never cast with ::text, because a timestamptz renders in the
+//     *session's* TimeZone GUC — which is set per role (ALTER ROLE), per
+//     database (ALTER DATABASE), per DSN (options=-c timezone=) and by PGTZ,
+//     and the two sides here are read by two different roles against two
+//     different databases. A ::text cast made one postmaster answer
+//     '... 19:31:22.87433+00' to one session and '... 15:31:22.87433-04' to
+//     another, which is R2-06 again through a session-dependent input.
+//   - the oid of the maintenance database (`postgres`). It is initdb-assigned
+//     and so distinguishes two clusters only below PostgreSQL 15; from 15 on
+//     the oid is pinned and every cluster answers 5, so the field costs
+//     nothing and contributes nothing there. Empty when the cluster has no
+//     such database, which is legal.
+//   - data_directory, read through pg_settings rather than
+//     current_setting() because that GUC is superuser-only and
+//     current_setting() raises on it for the role §9 recommends; the view
+//     simply omits the row instead, which is the empty string here. Any '|'
+//     in the path is folded to '_' so the field separator stays a separator.
+//   - the server version, which pins the answer further at no cost.
+//
+// Under the SELECT-only role §9 recommends, on PostgreSQL 15 or newer, that
+// leaves the postmaster start time and the server version and nothing else:
+// data_directory is superuser-only and the maintenance oid is pinned. Say so
+// rather than claim more for the identity than it has — two sibling containers
+// from one `docker compose up` are told apart by the start time alone, and a
+// collision there reads as "same cluster", which over-refuses rather than
+// admitting the source.
+//
+// Source.ClusterID appends system_identifier as a fifth field when the role
+// can read it (target.go's clusterIdentity does the same on the other side).
+// sameClusterIdentity *decides* on that field when both sides filled it and
+// falls through to the weaker positional fields only when one side could not
+// read it, so a cluster that restarted between the two reads, or whose two
+// sessions render a value differently, is still recognised as one cluster.
+const sqlClusterID = `SELECT to_char(pg_postmaster_start_time() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS.US')
+  || '|' || coalesce((SELECT oid::text FROM pg_database WHERE datname = 'postgres'), '')
+  || '|' || coalesce(replace((SELECT setting FROM pg_settings WHERE name = 'data_directory'), '|', '_'), '')
+  || '|' || current_setting('server_version')`
+
+// sameClusterIdentity compares two cluster identities.
+//
+// It is not string equality, because the two sides are read by two roles and
+// a field one role may not read is the empty string rather than a different
+// value: system_identifier is readable by a superuser target and not by the
+// SELECT-only source role §9 recommends, and data_directory is the same shape
+// of privilege.
+//
+// The comparison is hierarchical, not a vote (amended 2026-09-15, T-0190 fix
+// round). system_identifier is the strongest identity a cluster has and the
+// only one that survives a restart, so when both sides filled it, it decides
+// alone: equal is one cluster, unequal is two, and either way the answer is
+// known. Giving every field an equal veto meant a matching system identifier
+// was outvoted by any disagreement in a weaker field — a postmaster restart
+// between the source read and the gate's read changes the start time while the
+// system identifier is unchanged, and the gate stopped recognising the source's
+// own cluster.
+//
+// Only when system_identifier is missing on either side do the weaker
+// positional fields decide: each is skipped when it is empty on either side,
+// and a field both sides filled and disagree on is two clusters. known is
+// false when nothing could be compared at all, and the gate reads that as
+// "unknown", which fails closed.
+//
+// Fields are positional, so a field may be added only at the end — and
+// clusterIDSystemIDField must move with it.
+func sameClusterIdentity(a, b string) (same, known bool) {
+	if a == "" || b == "" {
+		return false, false
+	}
+	fa := strings.Split(a, clusterIDSep)
+	fb := strings.Split(b, clusterIDSep)
+	if sa, sb := clusterIDField(fa, clusterIDSystemIDField), clusterIDField(fb, clusterIDSystemIDField); sa != "" && sb != "" {
+		return sa == sb, true
+	}
+	n := len(fa)
+	if len(fb) < n {
+		n = len(fb)
+	}
+	same = true
+	for i := 0; i < n; i++ {
+		if fa[i] == "" || fb[i] == "" {
+			continue
+		}
+		known = true
+		if fa[i] != fb[i] {
+			same = false
+		}
+	}
+	if !known {
+		return false, false
+	}
+	return same, true
+}
+
+// clusterIDField reads one positional field, or "" when the identity is shorter
+// than that. A short identity is not an error here: an older field order is
+// only ever extended at the end, and a missing field is "could not read it".
+func clusterIDField(fields []string, i int) string {
+	if i >= len(fields) {
+		return ""
+	}
+	return fields[i]
+}
+
+// clusterIDSystemIDField is the position withSystemID appends the system
+// identifier at: start time, maintenance oid, data directory, server version,
+// system identifier.
+const clusterIDSystemIDField = 4
+
+// clusterIDSep separates the fields of a cluster identity. It is a character
+// no field can contain: sqlClusterID folds it out of data_directory, and every
+// other field is a timestamp, an oid, a version or a system identifier.
+const clusterIDSep = "|"
+
+// withSystemID appends the system identifier to a cluster identity as its last
+// field. An unreadable identifier is the empty string, which sameClusterIdentity
+// skips rather than reads as a difference.
+func withSystemID(clusterID, systemID string) string {
+	if clusterID == "" {
+		return ""
+	}
+	return clusterID + clusterIDSep + systemID
+}
 
 func sortTables(ts []ref.TableRef) {
 	sort.Slice(ts, func(i, j int) bool {

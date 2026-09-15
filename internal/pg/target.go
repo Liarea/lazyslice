@@ -246,17 +246,19 @@ func (t *Target) Gate(ctx context.Context, source dsn.Ref, sourceSystemID, allow
 		e.Reason = CodeProbeFailed
 		return e, err
 	}
-	clusterID, err := clusterIdentity(ctx, conn)
+	clusterID, err := clusterIdentity(ctx, conn, systemID)
 	if err != nil {
 		e.Reason = CodeProbeFailed
 		return e, err
 	}
 
+	clusterSame, clusterKnown := sameClusterIdentity(t.sourceCluster, clusterID)
+
 	switch {
 	case sourceSystemID != "" && systemID != "":
 		e.SameCluster = systemID == sourceSystemID
-	case t.sourceCluster != "" && clusterID != "":
-		e.SameCluster = clusterID == t.sourceCluster
+	case clusterKnown:
+		e.SameCluster = clusterSame
 	default:
 		if same, clusterErr := targetRef.SameCluster(source); clusterErr == nil {
 			e.SameCluster = same
@@ -280,9 +282,15 @@ func (t *Target) Gate(ctx context.Context, source dsn.Ref, sourceSystemID, allow
 	// run reported "dropping public.customers in the target" against the
 	// production database and did it.
 	//
-	// clusterIdentity is the same question asked of a catalog function every
-	// role can execute (source.go's sqlClusterID), so the arm now works under
-	// the recommended role. And when *neither* identity can be compared, a
+	// clusterIdentity is the same question asked of catalog values every role
+	// can read (source.go's sqlClusterID), so the arm now works under the
+	// recommended role. Every one of those values is a property of the
+	// *cluster* and not of the connection (amended 2026-09-15, R2-06): the
+	// first version of this arm carried inet_server_addr() and
+	// inet_server_port(), so one cluster reached over two transports — a
+	// second published port, a proxy, the unix socket — answered with two
+	// identities and the arm was defeated by the spelling again. And when
+	// *neither* identity can be compared, a
 	// target whose database has the source's own name is refused rather than
 	// admitted: the endpoint spelling is exactly what an alias changes, so
 	// "the endpoints differ" is not evidence of anything here. The emptiness
@@ -290,9 +298,9 @@ func (t *Target) Gate(ctx context.Context, source dsn.Ref, sourceSystemID, allow
 	// refused as not_empty — but an empty one with the source's name on the
 	// same server is the migration scenario, and the drop was real.
 	sameCatalog := currentDB == source.Database &&
-		(clusterUnknown(sourceSystemID, systemID, t.sourceCluster, clusterID) ||
+		(clusterUnknown(sourceSystemID, systemID, clusterKnown) ||
 			(sourceSystemID != "" && systemID != "" && systemID == sourceSystemID) ||
-			(t.sourceCluster != "" && clusterID != "" && clusterID == t.sourceCluster))
+			(clusterKnown && clusterSame))
 	if sameEndpoint || sameCatalog {
 		e.Reason = CodeSameDatabase
 		return e, nil
@@ -382,22 +390,31 @@ func systemIdentifier(ctx context.Context, conn *pgxpool.Conn) (string, error) {
 // system identifier, because a role that may not execute pg_control_system
 // reads "" for it, and not the ordinary-role cluster identity either. It is the
 // fail-closed half of rule 1 above.
-func clusterUnknown(sourceSystemID, systemID, sourceCluster, clusterID string) bool {
+//
+// clusterKnown is sameClusterIdentity's second answer: two identities can be
+// compared when at least one field is filled on both sides (amended
+// 2026-09-15, R2-06). Before that amendment this took the two identities and
+// asked only whether each was non-empty, which read "the two strings differ" as
+// positive evidence of two different clusters — and the strings differed
+// whenever the transport differed, which is the whole of the finding.
+func clusterUnknown(sourceSystemID, systemID string, clusterKnown bool) bool {
 	if sourceSystemID != "" && systemID != "" {
 		return false
 	}
-	return sourceCluster == "" || clusterID == ""
+	return !clusterKnown
 }
 
-// clusterIdentity is sqlClusterID against the target. Like systemIdentifier it
-// answers "" for a read that failed for any reason other than the context
-// ending: the gate's own rule above decides what an unknown identity means, and
-// it means "refuse a target with the source's database name".
-func clusterIdentity(ctx context.Context, conn *pgxpool.Conn) (string, error) {
+// clusterIdentity is sqlClusterID against the target, with the target's system
+// identifier as its last field (source.go's withSystemID, which is what the
+// source side composes too). Like systemIdentifier it answers "" for a read
+// that failed for any reason other than the context ending: the gate's own rule
+// above decides what an unknown identity means, and it means "refuse a target
+// with the source's database name".
+func clusterIdentity(ctx context.Context, conn *pgxpool.Conn, systemID string) (string, error) {
 	var id string
 	err := conn.QueryRow(ctx, sqlClusterID).Scan(&id)
 	if err == nil {
-		return id, nil
+		return withSystemID(id, systemID), nil
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return "", fmt.Errorf("pg: gate: reading the target cluster identity: %w", err)

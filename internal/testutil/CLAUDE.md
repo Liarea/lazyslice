@@ -2,8 +2,8 @@
 
 Fixture loaders for `testdata/`: `LoadPagila(ctx, url)`, `LoadNasty(ctx, url,
 big)`, `LoadNastyNotRecreatable(ctx, url)`, and the container helpers other
-integration tests build on — `Postgres(ctx, t, image)` and
-`PgBouncer(ctx, t, image, settings...)`. Test support code only — nothing here
+integration tests build on — `Postgres(ctx, t, image)`,
+`PgBouncer(ctx, t, image, settings...)` and `SecondEndpoint(ctx, t, url)`. Test support code only — nothing here
 is imported by non-test code.
 
 **Contract.** `testdata/README.md` is the spec this package implements: table
@@ -24,6 +24,16 @@ possible to assert against after loading. `fixtures_test.go` (behind
   `stream_docs`'s `CREATE TABLE` and `CREATE FUNCTION` sit above the gate, next
   to `stream_rows`', so both tables exist on every load and `nastyTables` lists
   both at 0 rows; only the million-row fill is gated.
+- **`SecondEndpoint` is a second route to one cluster**, not a second cluster:
+  a loopback listener in the test process that copies bytes to the server
+  `url` already names, so the same server has two `host:port` spellings. It is
+  the aliasing ARCHITECTURE.md §9 rule 1 has to see through (a second
+  published port, a proxy, a pooler name, the unix socket), and it is a
+  listener rather than a second published container port because no container
+  runtime has to cooperate for it to work. Anything a test asserts *about the
+  cluster* must be identical over both endpoints; a test that wants two
+  clusters starts a second container.
+
 - **`PgBouncer` starts its own server**, on a Docker network the two containers
   share, and returns the pooled URL and the direct one. Load a fixture through
   the direct URL — the loader speaks psql constructs a pooler has no reason to
