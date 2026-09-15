@@ -28,7 +28,7 @@ const (
 // Candidate is one database discovery found. Everything in it is either an
 // identifier or a count; Ref is redacted by construction.
 type Candidate struct {
-	Ref        dsn.Ref // host, port, database, user; String never prints a password
+	Ref        dsn.Ref // host, port, database, user, allowlisted params; String never prints a password
 	Provenance Provenance
 	Label      string // compose service, container name, env var name
 	Local      bool   // loopback, or a container whose compose working_dir matches cwd
@@ -46,6 +46,32 @@ type Candidate struct {
 	MetaSchema int    // lazyslice_meta.schema_version, 0 when absent
 	CanCreate  bool   // has_schema_privilege(current_user, 'public', 'CREATE')
 	SystemID   string // pg_control_system().system_identifier when callable
+}
+
+// IsZero reports whether c carries no data at all — every field at its zero
+// value, Ref included.
+//
+// Candidate embeds dsn.Ref by value, and Ref stopped being comparable with ==
+// once Params (T-0135) made it hold a map: a struct is comparable only when
+// every field is, so Candidate lost == right along with it. This is what the
+// one place inside internal/pipeline's own paths that used to write
+// `== (Candidate{})` needed instead; internal/core/provenance_test.go is the
+// same comparison outside them, filed as T-0165 and fixed alongside this.
+func (c Candidate) IsZero() bool {
+	return c.Ref.IsZero() &&
+		c.Provenance == FromYml && // Provenance's zero value
+		c.Label == "" &&
+		!c.Local &&
+		!c.Reachable &&
+		c.ConnectErr == "" &&
+		c.Version == 0 &&
+		c.Tables == 0 &&
+		c.Empty == nil &&
+		!c.EmptyHint &&
+		!c.Marked &&
+		c.MetaSchema == 0 &&
+		!c.CanCreate &&
+		c.SystemID == ""
 }
 
 // Discoverer walks the discovery ladder.

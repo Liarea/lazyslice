@@ -75,3 +75,24 @@ the file; let a re-read narrow a prior decision instead of only tightening it.
   than keeping a second parser.
 - **Write is atomic** (temp file plus rename): a half-written yml is a file that
   asks every question the run exists to avoid.
+- **`endpointDoc` gained `params:` (T-0135, docs/reviews/2026-09-09/REVIEW.md
+  finding 6).** `dsn.Ref` gained an allowlisted `Params` map (sslmode,
+  sslrootcert, sslcert, sslkey, connect_timeout, application_name, options —
+  see internal/dsn/CLAUDE.md) because the four identity fields alone lost a
+  first run's `sslmode=verify-full` on rerun. `endpoint()` writes it, never
+  omitted (an empty map, like every other field here); `document.config()`
+  reads it back through `refOf`, which now takes a fifth argument and passes
+  it through `dsn.FilterAllowedParams` before it reaches `Ref` — the committed
+  file is hand-editable text, and "never a secret in this file" (this file's
+  own Rules, THREAT_MODEL.md T5) has to hold against a `params:` block someone
+  added a `password:` key to, not just against what this package itself
+  writes.
+  - `r == (dsn.Ref{})` in `endpoint()` became `r.IsZero()`: `Ref` is no longer
+    comparable with `==` once one of its fields is a map. See
+    internal/dsn/CLAUDE.md's note on `Ref.Params` for what else that broke
+    outside this package's paths (`internal/core/provenance_test.go`, filed as
+    T-0165 and since landed) and what it broke inside them, fixed alongside
+    this (`emit_test.go`'s round-trip assertion, now `reflect.DeepEqual`).
+  - ARCHITECTURE.md §10's file spec does not show a `params:` key under
+    `source:`/`target:` yet (ARCHITECTURE.md is outside this task's paths, so
+    it is filed rather than edited here — **T-0167**).

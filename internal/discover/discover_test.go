@@ -3,12 +3,20 @@
 package discover
 
 import (
+	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
+	"math/big"
 	"net/netip"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
@@ -287,6 +295,135 @@ func TestBothEndpointsGivenSkipsDiscovery(t *testing.T) {
 	}
 }
 
+// docs/reviews, 2026-09-14 re-review: the sslrootcert retry's first landing
+// lived only in rung0's own loop, which Resolve never reaches when the
+// committed yml already supplies both endpoints — Resolve's own rung-0
+// short-circuit (o.Source == "" case) called refDSN directly, with no
+// retry, so the ordinary committed lazyslice.yml (this exact scenario) had
+// the unreadable cert string handed straight through and failed far from
+// here, in internal/core's own dsn.Parse. This drives Resolve itself, not
+// rung0, so a regression to the short-circuit is caught here again.
+func TestResolveRetriesWithoutAnUnreadableCertPath(t *testing.T) {
+	source := mustRef(t, "postgres://app@db.example.com:6432/shop")
+	source.Params = map[string]string{
+		"sslmode":     "verify-full",
+		"sslrootcert": filepath.Join(t.TempDir(), "does-not-exist.pem"),
+	}
+	target := mustRef(t, "postgres://app@127.0.0.1:6432/shop_test")
+	cfg := &pipeline.Config{
+		SourceRef:   source,
+		SourceLabel: "prod",
+		TargetRef:   target,
+		TargetLabel: "local",
+	}
+	var buf bytes.Buffer
+	opts := Options{Config: cfg, NeedTarget: true, progress: &buf}
+
+	res, err := Resolve(t.Context(), opts, event.SinkFunc(func(event.Event) {}))
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	_, ref, err := dsn.Parse(res.Source)
+	if err != nil {
+		t.Fatalf("res.Source = %q did not parse: %v", res.Source, err)
+	}
+	if ref.Host != "db.example.com" || ref.Database != "shop" {
+		t.Errorf("source = %s, want the endpoint the file recorded", ref)
+	}
+	if _, ok := ref.Params["sslrootcert"]; ok {
+		t.Errorf("source params = %#v, want sslrootcert dropped since it could not be read", ref.Params)
+	}
+	if ref.Params["sslmode"] != "verify-full" {
+		t.Errorf("source params = %#v, want sslmode to survive the retry", ref.Params)
+	}
+	if res.SourceProvenance != cfg.Source || res.SourceLabel != "prod" {
+		t.Errorf("source provenance/label = %v/%q, want the yml's own", res.SourceProvenance, res.SourceLabel)
+	}
+	msg := buf.String()
+	if !strings.Contains(msg, "sslrootcert") {
+		t.Errorf("progress = %q, want it to name sslrootcert", msg)
+	}
+	if !strings.Contains(msg, "cannot read") {
+		t.Errorf("progress = %q, want it to say the path could not be read", msg)
+	}
+}
+
+// docs/reviews, 2026-09-14, finding 2: a committed lazyslice.yml's source_ref
+// that fails dsn.Parse for a reason refDSNValidated's sslrootcert retry
+// cannot fix — a typoed sslmode is the finding's own example, and there is no
+// file-valued param here for withoutFileParams to strip — used to come back
+// as ("", false), which Resolve's rung-0 short-circuit read as "nothing at
+// rung 0" and would have let the run fall through to discovery instead of
+// refusing over a file it could not honour. Resolve must refuse loudly
+// instead: exit 2, naming the field and the parameter, never falling through.
+func TestResolveRefusesATypoedSslmode(t *testing.T) {
+	source := mustRef(t, "postgres://app@db.example.com:6432/shop")
+	source.Params = map[string]string{"sslmode": "verify-ful"}
+	cfg := &pipeline.Config{SourceRef: source, SourceLabel: "prod"}
+	opts := Options{Config: cfg}
+
+	res, err := Resolve(t.Context(), opts, event.SinkFunc(func(event.Event) {}))
+	if err == nil {
+		t.Fatalf("Resolve: want a refusal for the typoed sslmode, got res = %+v, nil", res)
+	}
+	r, ok := AsRefusal(err)
+	if !ok {
+		t.Fatalf("Resolve error = %T, want *Refusal", err)
+	}
+	if r.Exit != 2 {
+		t.Errorf("exit = %d, want 2 (ADR-005 usage)", r.Exit)
+	}
+	if r.Code != CodeSourceRefInvalid {
+		t.Errorf("code = %s, want %s", r.Code, CodeSourceRefInvalid)
+	}
+	if !strings.Contains(r.Args[event.ArgReason], "sslmode") {
+		t.Errorf("reason = %q, want it to name sslmode", r.Args[event.ArgReason])
+	}
+	// dsn.ParseError's own test (internal/dsn) pins that a password never
+	// reaches this text; pgconn's error otherwise legitimately quotes the
+	// (password-free) connection string it failed on alongside the parameter
+	// name, which is not itself sensitive — Ref's own fields are printable.
+	if res.Source != "" {
+		t.Errorf("Resolve returned Source = %q on a refusal, want it left unset", res.Source)
+	}
+}
+
+// The target side goes through rung0Target rather than refDSNValidated
+// directly, because rung0Target also recovers a provisioned target's
+// password — this pins that the error still surfaces through it rather than
+// being swallowed by the password lookup. connect_timeout is the finding's
+// other example of a parameter withoutFileParams cannot strip.
+func TestResolveRefusesANonNumericConnectTimeoutOnTarget(t *testing.T) {
+	source := mustRef(t, "postgres://app@db.example.com:6432/shop")
+	target := mustRef(t, "postgres://app@127.0.0.1:6432/shop_test")
+	target.Params = map[string]string{"connect_timeout": "soon"}
+	cfg := &pipeline.Config{
+		SourceRef:   source,
+		SourceLabel: "prod",
+		TargetRef:   target,
+		TargetLabel: "local",
+	}
+	opts := Options{Config: cfg, NeedTarget: true}
+
+	_, err := Resolve(t.Context(), opts, event.SinkFunc(func(event.Event) {}))
+	if err == nil {
+		t.Fatal("Resolve: want a refusal for the non-numeric connect_timeout, got nil")
+	}
+	r, ok := AsRefusal(err)
+	if !ok {
+		t.Fatalf("Resolve error = %T, want *Refusal", err)
+	}
+	if r.Exit != 2 {
+		t.Errorf("exit = %d, want 2 (ADR-005 usage)", r.Exit)
+	}
+	if r.Code != CodeTargetRefInvalid {
+		t.Errorf("code = %s, want %s", r.Code, CodeTargetRefInvalid)
+	}
+	if !strings.Contains(r.Args[event.ArgReason], "connect_timeout") {
+		t.Errorf("reason = %q, want it to name connect_timeout", r.Args[event.ArgReason])
+	}
+}
+
 // The lower-numbered rung wins the printed provenance; it does not win the
 // credential. A rung-3 container carries POSTGRES_PASSWORD out of its own
 // environment and a rung-1 $DATABASE_URL naming the same (host, port, database)
@@ -514,6 +651,156 @@ func TestUnderOrEqual(t *testing.T) {
 			t.Errorf("underOrEqual(%s, %s) = %v, want %v", child, tc.dir, got, tc.want)
 		}
 	}
+}
+
+// refDSN is rung 0's half of docs/reviews/2026-09-09/REVIEW.md finding 6: a
+// dsn.Ref carrying sslmode=verify-full and sslrootcert has to come back out as
+// query parameters a connection string carries, or the fix that keeps Params
+// on Ref does nothing for the one rung Params exists to fix (finding 3). This
+// round-trips it end to end: build the Ref by hand, rebuild a connection
+// string with refDSN, and Parse that string back — the same two steps rung 0
+// itself performs.
+func TestRefDSNRoundTripsSslrootcert(t *testing.T) {
+	caPath := writeTestCA(t)
+	r := dsn.Ref{
+		Host: "db.example.com", Port: 6432, Database: "shop", User: "app",
+		Params: map[string]string{"sslmode": "verify-full", "sslrootcert": caPath},
+	}
+
+	s, ok := refDSN(r)
+	if !ok {
+		t.Fatalf("refDSN(%+v) = false, want a connection string", r)
+	}
+	_, got, err := dsn.Parse(s)
+	if err != nil {
+		t.Fatalf("Parse(refDSN(r)) = %v", err)
+	}
+	want := map[string]string{"sslmode": "verify-full", "sslrootcert": caPath}
+	if !reflect.DeepEqual(got.Params, want) {
+		t.Errorf("round-tripped Params = %#v, want %#v", got.Params, want)
+	}
+	if got.Host != r.Host || got.Port != r.Port || got.Database != r.Database || got.User != r.User {
+		t.Errorf("round-tripped identity = %+v, want it unchanged from %+v", got, r)
+	}
+}
+
+// warnDroppedParams names a dropped key on progress and never prints its
+// value: dsn.ExtractParams's dropped list already withholds the value, but
+// this is the boundary that would leak one right back in if a caller ever
+// passed the raw string through instead.
+func TestWarnDroppedParamsNamesTheKeyNeverTheValue(t *testing.T) {
+	var buf bytes.Buffer
+	s := "postgres://app:hunter2@db.example.com:6432/shop" +
+		"?sslmode=verify-full&target_session_attrs=read-write"
+
+	warnDroppedParams(&buf, s)
+
+	out := buf.String()
+	if !strings.Contains(out, "target_session_attrs") {
+		t.Errorf("progress = %q, want it to name the dropped key target_session_attrs", out)
+	}
+	if strings.Contains(out, "read-write") || strings.Contains(out, "hunter2") {
+		t.Errorf("progress = %q, want no dropped or credential value in it", out)
+	}
+}
+
+// docs/reviews/2026-09-14, finding 2: a committed lazyslice.yml's sslrootcert
+// naming a path this machine cannot read used to make dsn.Parse fail at rung
+// 0 and silently drop that whole endpoint from the candidate list, letting
+// the walk fall through to a different database. rung0 must instead retry
+// without the unreadable file-valued params and warn by name, keeping the
+// endpoint the file recorded.
+func TestRung0RetriesWithoutAnUnreadableCertPath(t *testing.T) {
+	source := mustRef(t, "postgres://app@db.example.com:6432/shop")
+	source.Params = map[string]string{
+		"sslmode":     "verify-full",
+		"sslrootcert": filepath.Join(t.TempDir(), "does-not-exist.pem"),
+	}
+	cfg := &pipeline.Config{
+		SourceRef:   source,
+		SourceLabel: "prod",
+	}
+	var buf bytes.Buffer
+	o := Options{Config: cfg, progress: &buf}
+
+	out := rung0(o)
+
+	if len(out) != 1 {
+		t.Fatalf("got %d candidates, want the source recovered despite the unreadable cert path: %+v", len(out), out)
+	}
+	got := out[0].cand.Ref
+	if got.Host != "db.example.com" || got.Database != "shop" {
+		t.Errorf("candidate = %s, want the endpoint the file recorded", got)
+	}
+	if _, ok := got.Params["sslrootcert"]; ok {
+		t.Errorf("candidate Params = %#v, want sslrootcert dropped since it could not be read", got.Params)
+	}
+	if got.Params["sslmode"] != "verify-full" {
+		t.Errorf("candidate Params = %#v, want sslmode to survive the retry", got.Params)
+	}
+	msg := buf.String()
+	if !strings.Contains(msg, "sslrootcert") {
+		t.Errorf("progress = %q, want it to name sslrootcert", msg)
+	}
+	if !strings.Contains(msg, "cannot read") {
+		t.Errorf("progress = %q, want it to say the path could not be read", msg)
+	}
+}
+
+// A lazyslice.yml whose params all Parse cleanly is unaffected: no retry, no
+// warning, and the candidate carries every one of them.
+func TestRung0KeepsParamsWhenTheyAllParse(t *testing.T) {
+	caPath := writeTestCA(t)
+	source := mustRef(t, "postgres://app@db.example.com:6432/shop")
+	source.Params = map[string]string{"sslmode": "verify-full", "sslrootcert": caPath}
+	cfg := &pipeline.Config{SourceRef: source, SourceLabel: "prod"}
+	var buf bytes.Buffer
+	o := Options{Config: cfg, progress: &buf}
+
+	out := rung0(o)
+
+	if len(out) != 1 {
+		t.Fatalf("got %d candidates, want 1: %+v", len(out), out)
+	}
+	want := map[string]string{"sslmode": "verify-full", "sslrootcert": caPath}
+	if !reflect.DeepEqual(out[0].cand.Ref.Params, want) {
+		t.Errorf("candidate Params = %#v, want %#v", out[0].cand.Ref.Params, want)
+	}
+	if buf.Len() != 0 {
+		t.Errorf("progress = %q, want no warning when nothing was dropped", buf.String())
+	}
+}
+
+// writeTestCA writes a self-signed certificate to a file in t.TempDir and
+// returns its path, for a sslrootcert value pgconn.ParseConfig will accept.
+// Mirrors internal/dsn/dsn_test.go's helper of the same name, which is
+// unexported there and so not reusable here.
+func writeTestCA(t *testing.T) string {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generating test CA key: %v", err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		NotBefore:    time.Now(),
+		NotAfter:     time.Now().Add(time.Hour),
+		IsCA:         true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("creating test CA certificate: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "ca.pem")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("creating %s: %v", path, err)
+	}
+	defer f.Close()
+	if err := pem.Encode(f, &pem.Block{Type: "CERTIFICATE", Bytes: der}); err != nil {
+		t.Fatalf("encoding test CA certificate: %v", err)
+	}
+	return path
 }
 
 // ---------- helpers ----------

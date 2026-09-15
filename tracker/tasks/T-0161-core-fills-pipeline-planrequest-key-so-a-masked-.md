@@ -3,12 +3,12 @@ id: T-0161
 title: "core fills pipeline.PlanRequest.Key so a masked column's DEFAULT is masked instead of refused"
 epic: E5
 phase: 5
-status: open
+status: done
 owner: ""
 created: 2026-09-14
-started: ""
-closed: ""
-outcome: ""
+started: 2026-09-14
+closed: 2026-09-14
+outcome: done
 ---
 
 # T-0161 · core fills pipeline.PlanRequest.Key so a masked column's DEFAULT is masked instead of refused
@@ -27,6 +27,10 @@ T-0134 landed ARCHITECTURE.md 11.1's literal rule in internal/plan/ddlliteral.go
 
 - 2026-09-14 moved to E5 phase 5
 
+- 2026-09-14 started
+
+- 2026-09-14 closed: done
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+went well: key resolved before the plan stage for writing runs; plan-only runs use a present key or print which defaults await one; regression 011 flipped to ok with a pg_attrdef assertion; an AST test pins that all three dispatch sites read one planOnly predicate; move refuses on an empty key fingerprint (420f2c3, two fix rounds) | went badly: --require-key is silently ignored on a plan-only run (low, recorded); the torture assertion reads only the first literal of a default (low) | change next time: nothing structural

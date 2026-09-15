@@ -317,3 +317,120 @@ candidate.
   `client.ContainerList` returns `[]container.Summary` from that module, so
   naming the type makes it a direct requirement. No module was added; `make
   lint` requires the file to be tidy.
+- **`refDSN` carries `Ref.Params` as query parameters (T-0135,
+  docs/reviews/2026-09-09/REVIEW.md finding 6).** Rung 0 rebuilds a dialable
+  string from the committed `source_ref`/`target_ref`, and it used to carry
+  only host, port, database and user — so a first run with
+  `sslmode=verify-full` reran at pgx's default of `prefer`. `refDSN` does not
+  re-check `dsn.AllowedParams`: `Ref.Params` already went through
+  `dsn.FilterAllowedParams` on the way in, at `internal/emit`'s `refOf`, so by
+  the time this package sees it, it already carries only what that let
+  through.
+- **A dropped param is a warning on `progress`, not an `event.Sink` send
+  (`warnDroppedParams`).** `dsn.ExtractParams` names every connection
+  parameter a string carried that `Ref.Params` did not — the allowlist is
+  short, and `sslcompression=1` beside `sslmode=verify-full` is a real
+  connection setting an operator wrote and lazyslice silently drops. Sending
+  it as an event needs a `Code` with a row in `internal/event/catalogue.yml`
+  (`internal/event/CLAUDE.md`: "every `Code` used anywhere in the tree has a
+  row in `catalogue.yml`; CI fails on a code missing from the catalogue"), and
+  that file is outside this task's paths — exactly the situation "the pull and
+  the start print outside the event catalogue" above already names, so this
+  follows the same precedent: `progressOf(o)`, stderr by default.
+  - **Coverage is `Resolve`'s `o.Source`/`o.Target` and `walk`'s collapsed
+    candidates — not every ladder rung individually.** The two flag-named
+    strings are checked once each, at the top of `Resolve`, because
+    `Resolve`'s early return (both endpoints already named) means `walk` is
+    never called at all in that case (ADR-008 §1) and would otherwise warn on
+    nothing. `walk`'s own loop covers rung 0 (rebuilt by `refDSN`, and so never
+    carries a drop — this is belt and suspenders), rung 1 (`.env`/environment,
+    the one rung a developer's own arbitrary params realistically reach
+    through), and rungs 2-4 (libpq defaults and `provision.ConnString`, which
+    construct their own strings and so never carry a drop either).
+  - **Owed:** `internal/core`'s own `dsn.Parse(r.req.Source)` /
+    `dsn.Parse(r.req.Target)` (`internal/core/run.go`) and `internal/pg`'s two
+    `dsn.Parse` calls (`internal/pg/source.go`, `internal/pg/target.go`) parse
+    connection strings this package never sees and get no warning wired at
+    all. Both packages were outside this task's paths; filed as **T-0166**.
+- **`refDSNValidated` retries without an unreadable file-valued param instead
+  of dropping the endpoint (docs/reviews, 2026-09-14, findings 2 and, on the
+  first landing, the re-review below).** `refDSN` rebuilds a connection
+  string from a committed `Ref`, and `dsn.Parse` reads
+  `sslrootcert`/`sslcert`/`sslkey` off disk *at parse time* —
+  `pgconn.ParseConfig` builds the `tls.Config` immediately, not at connect
+  time. A `sslrootcert` path that does not exist on this machine (a
+  per-developer certificate directory is exactly `ARCHITECTURE.md` §9's own
+  worked example for why the file is shared) used to make `dsn.Parse` fail
+  outright.
+  - **First landing (rung0 only) missed the ordinary case.** The retry was
+    built into `rung0`'s own loop, but `Resolve` short-circuits rung 0 before
+    `walk`/`rung0` is ever reached whenever the committed yml supplies what
+    the run needs — `refDSN(o.Config.SourceRef)` directly at what is now
+    `Resolve`'s call into the shared helper, and `rung0Target` likewise — so
+    the ordinary committed `lazyslice.yml` (both sides recorded, the case
+    this task exists to support) got the unread cert string handed straight
+    through with no retry, and failed far from here: `internal/core`'s own
+    `dsn.Parse` of that string aborted the run with exit-code-2's "--source is
+    not a Postgres connection string", naming a flag the operator never
+    passed.
+  - **The fix is now the retry itself, factored out.** `refDSNValidated(w
+    io.Writer, r dsn.Ref) (string, error)` wraps `refDSN` with the retry and
+    the warning, and it is the only way any of the three callers — `Resolve`'s
+    rung-0 short-circuit, `rung0Target`, and `rung0`'s own walk of both sides
+    — turns a `Ref` into a dialable string. It retries once, through
+    `withoutFileParams`, with every `filePathParams` entry stripped from the
+    `Ref` before the second `refDSN`/`dsn.Parse`, and warns the dropped keys
+    by name on `progressOf(o)` (`warnUnreadableParams`) rather than staying
+    silent. A `Ref` whose non-file params (`sslmode`, `connect_timeout`,
+    `application_name`, a validated `options`) still parse without the
+    unreadable file keeps the endpoint.
+  - `refDSNValidated` takes an `io.Writer` rather than `Options` so `rung0`,
+    `rung0Target` and `Resolve` can each pass their own `progressOf(o)` without
+    the helper reaching back into `Options` itself.
+  - **A reference that is not usable at all is `("", nil)`; one that fails to
+    parse for a reason the retry cannot fix is a loud refusal, not
+    `("", false)` (docs/reviews, 2026-09-14, finding 2, second half).** The
+    first landing above closed the retry gap and left the non-recoverable
+    branch exactly as it was: an empty `Host`/`Database` and a genuine parse
+    failure both returned `("", false)`, which every caller read the same
+    way — "nothing at rung 0" — and `Resolve`'s own short-circuit fell
+    through to `walk` and discovery on either. A `sslmode=verify-ful` typo or
+    a non-numeric `connect_timeout` in a committed, otherwise-ordinary
+    `lazyslice.yml` therefore never refused: the run silently loaded whatever
+    the ladder found next, which can be a different database than the file
+    named (THREAT_MODEL.md T2 is exactly the control this restores). The two
+    cases are not the same thing and the return type now says so: an unusable
+    `Ref` (no host or no database — a `--plan` run with no target, a yml one
+    side of which was never recorded) is `("", nil)`, still meaning "nothing
+    here"; a `Ref` that does carry a host and a database but will not parse
+    even after `withoutFileParams`'s retry is `("", err)`.
+  - **`dsn.ParseError(s)` is the error `refDSNValidated` returns** — pgconn's
+    own text, which `dsn.Parse` itself discards and returns a generic message
+    instead of, because `Parse` also runs on an operator-typed connection
+    string that can hold a password and pgconn's error quotes the string it
+    failed on. `s` here was built by `refDSN` from a `Ref` and nothing else, so
+    it structurally cannot hold one (THREAT_MODEL.md T4, T5) — see
+    `dsn.ParseError`'s own doc comment in `internal/dsn/dsn.go`, which states
+    that precondition and restricts the function to a caller that can meet it.
+    pgconn's message names the parameter it objected to (`"invalid
+    connect_timeout"`, `"failed to configure TLS (sslmode is invalid)"`),
+    which is what lets the refusal name the offending parameter rather than
+    only the fact that something in the file did not parse.
+  - **`Resolve` refuses through the new `refuseInvalidRef`, exit 2** —
+    `CodeSourceRefInvalid` / `CodeTargetRefInvalid` — naming the yml field
+    (`source_ref` or `target_ref`), `dsn.ParseError`'s reason, and the fix:
+    edit the file's `source:`/`target:` block, delete it to let lazyslice
+    rediscover that side, or pass `--source`/`--target` to override it for one
+    run. `rung0Target` carries the error back the same way `refDSNValidated`
+    does, ahead of the provisioned-password lookup, so a bad `target_ref`
+    refuses before that lookup ever runs.
+  - **`rung0`'s own loop still swallows the error**, unlike `Resolve`'s two
+    direct calls. It reads `cfg.SourceRef` and `cfg.TargetRef`
+    unconditionally, including the side the operator overrode with
+    `--source`/`--target` this run — and `Resolve`'s short-circuit never
+    looks at that side's yml value at all when a flag named it (ADR-008 §1),
+    so the only way `rung0` can see a real parse error is on a value this run
+    is not using. `Resolve`'s own two calls already refuse loudly, before
+    `walk` (and so `rung0`) is ever reached, for the side that *is* in play;
+    letting `rung0` refuse a second time over an unused field would make an
+    override fail on a file it was explicitly told to ignore.

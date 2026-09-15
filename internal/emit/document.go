@@ -71,6 +71,12 @@ type endpointDoc struct {
 	Port            int     `yaml:"port"`
 	User            string  `yaml:"user"`
 	PasswordCommand *string `yaml:"password_command,omitempty"`
+	// Params is dsn.Ref.Params: the allowlisted, non-secret transport options
+	// (sslmode, sslrootcert, ...) a rerun needs to reproduce the connection
+	// (docs/reviews, 2026-09-09, finding 6). Never omitted, like every other
+	// field in this struct — an empty map here is a run that had none, not a
+	// version of lazyslice that does not write this key.
+	Params map[string]string `yaml:"params"`
 }
 
 type classifyDoc struct {
@@ -200,10 +206,10 @@ func (d document) config() (*pipeline.Config, error) {
 		Tool:              d.Tool,
 		PlanOnly:          d.PlanOnly,
 		Source:            provenanceOf(d.Source.From),
-		SourceRef:         refOf(d.Source.Host, d.Source.Port, d.Source.Database, d.Source.User),
+		SourceRef:         refOf(d.Source.Host, d.Source.Port, d.Source.Database, d.Source.User, d.Source.Params),
 		SourceLabel:       d.Source.Service,
 		Target:            provenanceOf(d.Target.From),
-		TargetRef:         refOf(d.Target.Host, d.Target.Port, d.Target.Database, d.Target.User),
+		TargetRef:         refOf(d.Target.Host, d.Target.Port, d.Target.Database, d.Target.User, d.Target.Params),
 		TargetLabel:       d.Target.Service,
 		Take:              d.Take,
 		Cap:               d.Cap,
@@ -458,11 +464,15 @@ func parseColumn(s string) (ref.ColumnRef, error) {
 // never its output (ARCHITECTURE.md section 8).
 func endpoint(p pipeline.Provenance, r dsn.Ref, label, passwordCommand string) endpointDoc {
 	from := provenanceName(p)
-	if r == (dsn.Ref{}) && label == "" {
+	if r.IsZero() && label == "" {
 		// No endpoint at all: a --plan run has no target, and pipeline.FromYml
 		// is Provenance's zero value, so writing its name here would say the
 		// yml named a database that nothing named.
 		from = ""
+	}
+	params := r.Params
+	if params == nil {
+		params = map[string]string{}
 	}
 	return endpointDoc{
 		From:            from,
@@ -472,6 +482,7 @@ func endpoint(p pipeline.Provenance, r dsn.Ref, label, passwordCommand string) e
 		Port:            r.Port,
 		User:            r.User,
 		PasswordCommand: nilIfEmpty(passwordCommand),
+		Params:          params,
 	}
 }
 

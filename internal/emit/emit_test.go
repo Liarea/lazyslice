@@ -5,6 +5,7 @@ package emit
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -23,10 +24,13 @@ func col(schema, name, column string) ref.ColumnRef {
 // sample is a config with one of everything a re-run reads back.
 func sample() *pipeline.Config {
 	return &pipeline.Config{
-		Version:      Version,
-		Tool:         "0.1.0",
-		Source:       pipeline.FromCompose,
-		SourceRef:    dsn.Ref{Host: "127.0.0.1", Port: 5432, Database: "pagila", User: "app_ro"},
+		Version: Version,
+		Tool:    "0.1.0",
+		Source:  pipeline.FromCompose,
+		SourceRef: dsn.Ref{Host: "127.0.0.1", Port: 5432, Database: "pagila", User: "app_ro", Params: map[string]string{
+			"sslmode":     "verify-full",
+			"sslrootcert": "/etc/ssl/certs/pagila-ca.pem",
+		}},
 		SourceLabel:  "db",
 		Target:       pipeline.FromFlag,
 		TargetRef:    dsn.Ref{Host: "127.0.0.1", Port: 5433, Database: "pagila_test"},
@@ -120,8 +124,14 @@ func TestWriteReadRoundTrip(t *testing.T) {
 		t.Errorf("target provenance/label = %v/%q, want %v/%q",
 			got.Target, got.TargetLabel, want.Target, want.TargetLabel)
 	}
-	if got.SourceRef != want.SourceRef || got.TargetRef != want.TargetRef {
+	if !reflect.DeepEqual(got.SourceRef, want.SourceRef) || !reflect.DeepEqual(got.TargetRef, want.TargetRef) {
 		t.Errorf("refs = %v/%v, want %v/%v", got.SourceRef, got.TargetRef, want.SourceRef, want.TargetRef)
+	}
+	// docs/reviews/2026-09-09/REVIEW.md finding 6: sslmode=verify-full and
+	// sslrootcert have to survive the write-read round trip, not just the
+	// four identity fields.
+	if got.SourceRef.Params["sslmode"] != "verify-full" || got.SourceRef.Params["sslrootcert"] != "/etc/ssl/certs/pagila-ca.pem" {
+		t.Errorf("source params = %v, want sslmode=verify-full and sslrootcert to survive", got.SourceRef.Params)
 	}
 	if got.Take != want.Take || got.Cap != want.Cap || got.Depth != want.Depth {
 		t.Errorf("take/cap/depth = %d/%d/%d, want %d/%d/%d",

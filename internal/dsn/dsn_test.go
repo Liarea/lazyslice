@@ -3,9 +3,21 @@
 package dsn
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"errors"
+	"fmt"
+	"math/big"
+	"net/url"
+	"os"
+	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The password is the reason this package exists, so the first test is that it
@@ -13,10 +25,15 @@ import (
 // Redact (THREAT_MODEL.md T5).
 func TestParseKeepsThePasswordOutOfTheRef(t *testing.T) {
 	const secret = "hunter2"
-	for _, in := range []string{
-		"postgres://app:" + secret + "@db.example.com:6432/shop?sslmode=require",
-		"host=db.example.com port=6432 dbname=shop user=app password=" + secret,
+	for _, tc := range []struct {
+		in         string
+		wantParams map[string]string
+	}{
+		{"postgres://app:" + secret + "@db.example.com:6432/shop?sslmode=require",
+			map[string]string{"sslmode": "require"}},
+		{"host=db.example.com port=6432 dbname=shop user=app password=" + secret, nil},
 	} {
+		in := tc.in
 		d, ref, err := Parse(in)
 		if err != nil {
 			t.Fatalf("Parse(%q): %v", strings.ReplaceAll(in, secret, "…"), err)
@@ -24,8 +41,8 @@ func TestParseKeepsThePasswordOutOfTheRef(t *testing.T) {
 		if string(d) != in {
 			t.Errorf("Parse returned a DSN that is not the string it was given")
 		}
-		want := Ref{Host: "db.example.com", Port: 6432, Database: "shop", User: "app"}
-		if ref != want {
+		want := Ref{Host: "db.example.com", Port: 6432, Database: "shop", User: "app", Params: tc.wantParams}
+		if !reflect.DeepEqual(ref, want) {
 			t.Errorf("Parse ref = %#v, want %#v", ref, want)
 		}
 		if strings.Contains(ref.String(), secret) {
@@ -204,5 +221,171 @@ func TestParseRefusesMultipleHosts(t *testing.T) {
 		if _, _, err := Parse(in); err != nil {
 			t.Errorf("Parse(%q): %v; want it accepted, it names one endpoint", in, err)
 		}
+	}
+}
+
+// docs/reviews/2026-09-09/REVIEW.md finding 6: sslmode=verify-full and
+// sslrootcert are exactly the pair pgconn.Config consumes into a tls.Config
+// and keeps no string form of, so they are the case Params exists for.
+//
+// sslrootcert names a file pgconn.ParseConfig reads and parses as PEM
+// immediately (it builds the cert pool at parse time, not at connect time),
+// so the path has to name a real, valid certificate or Parse itself refuses
+// the string for a reason unrelated to this test.
+func TestParseKeepsAllowlistedParams(t *testing.T) {
+	caPath := writeTestCA(t)
+	for _, in := range []string{
+		"postgres://app@db.example.com:6432/shop?sslmode=verify-full&sslrootcert=" + url.QueryEscape(caPath),
+		"host=db.example.com port=6432 dbname=shop user=app sslmode=verify-full sslrootcert=" + caPath,
+	} {
+		_, ref, err := Parse(in)
+		if err != nil {
+			t.Fatalf("Parse(%q): %v", in, err)
+		}
+		want := map[string]string{"sslmode": "verify-full", "sslrootcert": caPath}
+		if !reflect.DeepEqual(ref.Params, want) {
+			t.Errorf("Parse(%q).Params = %#v, want %#v", in, ref.Params, want)
+		}
+		if got, want := ref.String(), "app@db.example.com:6432/shop (+2 params)"; got != want {
+			t.Errorf("Ref.String() = %q, want %q", got, want)
+		}
+	}
+}
+
+// writeTestCA writes a self-signed certificate to a file in t.TempDir and
+// returns its path, for a sslrootcert value pgconn.ParseConfig will accept.
+func writeTestCA(t *testing.T) string {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generating test CA key: %v", err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		NotBefore:    time.Now(),
+		NotAfter:     time.Now().Add(time.Hour),
+		IsCA:         true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("creating test CA certificate: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "ca.pem")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("creating %s: %v", path, err)
+	}
+	defer f.Close()
+	if err := pem.Encode(f, &pem.Block{Type: "CERTIFICATE", Bytes: der}); err != nil {
+		t.Fatalf("encoding test CA certificate: %v", err)
+	}
+	return path
+}
+
+// Never password, never sslpassword, never a whole DSN in Params — and a
+// param outside the allowlist is named in ExtractParams's dropped list rather
+// than silently kept or silently lost.
+func TestExtractParamsDropsWhatIsNotAllowlisted(t *testing.T) {
+	in := "postgres://app:hunter2@db.example.com:6432/shop" +
+		"?sslmode=verify-full&sslpassword=hunter3&target_session_attrs=read-write"
+	params, dropped := ExtractParams(in)
+	if got, want := params, map[string]string{"sslmode": "verify-full"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("ExtractParams params = %#v, want %#v", got, want)
+	}
+	if got, want := dropped, []string{"target_session_attrs"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("ExtractParams dropped = %#v, want %#v (never password, never sslpassword)", got, want)
+	}
+	for _, secret := range []string{"hunter2", "hunter3"} {
+		if strings.Contains(fmt.Sprint(params), secret) || strings.Contains(fmt.Sprint(dropped), secret) {
+			t.Errorf("ExtractParams(%q) leaked a credential", strings.ReplaceAll(in, secret, "…"))
+		}
+	}
+}
+
+// docs/reviews/2026-09-14, finding 5: "options" is on AllowedParams by key,
+// but unlike every other entry it is libpq's own channel for setting an
+// arbitrary server GUC, so a key match alone let a committed lazyslice.yml set
+// search_path or similar on the source session. A safe options value (a
+// timeout, on allowedOptionSettings) survives; one naming anything else is
+// dropped whole, both through FilterAllowedParams (a Ref built from a
+// committed file) and through ExtractParams (a fresh connection string).
+func TestOptionsIsValidatedByValueNotJustByKey(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		in   string
+		keep bool
+	}{
+		{"a single allowed timeout", "-c statement_timeout=5000", true},
+		{"two allowed timeouts", "-c statement_timeout=5000 -c lock_timeout=1000", true},
+		{"search_path is not on the allowlist", "-c search_path=public", false},
+		{"one allowed setting beside one that is not", "-c statement_timeout=5000 -c search_path=public", false},
+		{"not -c syntax at all", "enable_seqscan=off", false},
+		{"empty", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := FilterAllowedParams(map[string]string{"options": tc.in})
+			_, kept := got["options"]
+			if kept != tc.keep {
+				t.Errorf("FilterAllowedParams({options: %q})[\"options\"] present = %v, want %v", tc.in, kept, tc.keep)
+			}
+		})
+	}
+}
+
+// The same value-level check applies on the ExtractParams side (a fresh
+// connection string), and a rejected options value is reported through the
+// dropped list — the same channel warnDroppedParams already uses to tell an
+// operator a setting did not survive — rather than vanishing with no trace.
+func TestExtractParamsRejectsAnUnsafeOptionsValue(t *testing.T) {
+	in := "postgres://app@db.example.com:6432/shop?sslmode=verify-full&options=" +
+		url.QueryEscape("-c search_path=public")
+	params, dropped := ExtractParams(in)
+	if _, ok := params["options"]; ok {
+		t.Errorf("ExtractParams(%q).params = %#v, want options dropped", in, params)
+	}
+	if !slices.Contains(dropped, "options") {
+		t.Errorf("ExtractParams(%q).dropped = %#v, want it to name options", in, dropped)
+	}
+}
+
+// A Ref built with no Params is IsZero exactly when the four identity fields
+// are all empty — internal/emit used to compare Ref with == for this before
+// Params made Ref incomparable.
+func TestRefIsZero(t *testing.T) {
+	if !(Ref{}).IsZero() {
+		t.Error("Ref{}.IsZero() = false, want true")
+	}
+	if (Ref{Host: "db.example.com"}).IsZero() {
+		t.Error("a Ref naming a host is not zero")
+	}
+	if (Ref{Params: map[string]string{"sslmode": "require"}}).IsZero() {
+		t.Error("a Ref carrying Params is not zero, even with no identity fields set")
+	}
+}
+
+// Parse stays generic on a bad parameter — this is what ParseError exists
+// beside it for, and the two must keep disagreeing this way (docs/reviews,
+// 2026-09-14, finding 2).
+func TestParseErrorNamesWhatParseWontSay(t *testing.T) {
+	const secret = "hunter2"
+	in := "postgres://app:" + secret + "@db.example.com:6432/shop?sslmode=verify-ful"
+
+	if _, _, err := Parse(in); err == nil || strings.Contains(err.Error(), secret) || strings.Contains(err.Error(), "sslmode") {
+		t.Errorf("Parse(%q) err = %v, want a generic error naming neither the password nor sslmode", strings.ReplaceAll(in, secret, "…"), err)
+	}
+
+	err := ParseError(in)
+	if err == nil {
+		t.Fatal("ParseError: want an error for an invalid sslmode, got nil")
+	}
+	if !strings.Contains(err.Error(), "sslmode") {
+		t.Errorf("ParseError = %q, want it to name sslmode", err)
+	}
+	// ParseError's own doc comment promises this only for a string built from
+	// a Ref, which never holds a password; pgconn redacts one anyway
+	// (belt and suspenders — this pins that behaviour rather than relying on
+	// it, since ParseError must never be pointed at operator-typed input).
+	if strings.Contains(err.Error(), secret) {
+		t.Errorf("ParseError = %q, leaked the password", err)
 	}
 }
