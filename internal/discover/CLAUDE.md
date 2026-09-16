@@ -495,3 +495,76 @@ Two changes in `chooseTarget`, and one deliberate non-change.
   the ladder for the target — `o.Target != ""` and `rung0Target`'s success
   path — and nowhere else, so `internal/core` can ask that instead of trying
   to read operator intent out of a field that does not carry it.
+
+## `--password-command` covers a discovered candidate too (T-0213 review round)
+
+The first landing of T-0213 wired `--password-command` into `internal/core`'s
+two `discover.ResolvePassword` calls — for `--source`/`--target` named on the
+command line, or resolved from a committed `lazyslice.yml` reference — and
+left this package's own promise unmet: `rung0`'s doc comment ("the candidate
+carries no password and the ordinary password sources ... supply one") and
+`rung0Target`'s both describe the command as covering *any* candidate with no
+password, and `Options` carried no `PasswordCommand` field at all. A
+committed `lazyslice.yml` plus `--password-command`, with no `--source`
+override, still failed authentication: `probe` dialled the password-less
+candidate with none, `pg.Connect` refused it, the candidate came back
+`Reachable: false`, and `chooseSource`/`chooseTarget` skipped it — the run
+refused "no source" before `internal/core`'s own call was ever reached.
+
+- **`Options.PasswordCommand`, resolved by `probe` itself, not by
+  `internal/core`.** `internal/core` cannot resolve it on this package's
+  behalf the way it does for a named endpoint: it does not see a candidate
+  until after the ladder has already chosen one, and by then every
+  password-less candidate has already been dialled and marked unreachable.
+  `probe` now checks `passwordAvailable(f.dsn)` before dialling and, when it
+  is false and `PasswordCommand` is set, resolves it and injects the result
+  into `f.dsn` with `injectPassword` — the same helper `ResolvePassword`
+  itself uses — before the dial, not after a failed one.
+- **`passwordCache` (`password.go`) makes the resolution run at most once per
+  walk, not once per password-less candidate.** `PasswordCommandTimeout`'s own
+  doc comment already argues a credential helper should not be charged
+  against the 1 s per-candidate dial budget; the same argument extends to
+  running it four times because four candidates had no password. `walk`
+  builds one `*passwordCache` (only when `PasswordCommand != ""`) and every
+  `probe` call in that walk shares it via `Options.pwCache`, unexported so a
+  caller cannot supply its own and defeat the guarantee. `sync.Once` inside
+  the cache is what makes the second and later calls return the first
+  result — success or failure — without a second invocation.
+- **The resolution happens before `dialBudget`'s context is created, not
+  inside it.** `probe` used to open its 1 s `context.WithTimeout` as its
+  first line; resolving the password after that would hand the command
+  whatever was left of one second rather than `PasswordCommandTimeout`'s own
+  30, contradicting that constant's doc comment a second way. The check and
+  the resolve call now run on the outer `ctx` `probe` was given, ahead of
+  that line — costing nothing on the ordinary path, since the cache makes it
+  a no-op after the first candidate.
+- **A resolution failure is warned once, not sent as an event or attached to
+  the candidate's `ConnectErr`.** `internal/event/catalogue.yml` has no row
+  for this and adding one is outside a fix round scoped to the paths named
+  above (see "the pull and the start print outside the event catalogue",
+  earlier in this file, for the same precedent); `passwordCache.resolve`
+  writes one line to `progressOf(o)` (ordinarily stderr) the first time it
+  fails, and the candidate falls through to the ordinary `noPassword`
+  refusal on `f.cand.ConnectErr` exactly as it would have with no
+  `--password-command` set at all — a failed credential helper must not make
+  a run that could otherwise proceed on another candidate abort the whole
+  walk.
+- **Two more findings from the same review, fixed alongside the field
+  above.** `runPasswordCommand`'s 30 second timeout was not enforced against
+  a grandchild the command backgrounds — `exec.CommandContext` kills only the
+  shell, and with `c.Stdout` a `*bytes.Buffer`, `c.Run()` waits on that pipe
+  closing rather than on the shell's own exit; `c.WaitDelay` now bounds that
+  wait to a second past the context firing (or past the shell's own exit),
+  proven by `TestPasswordCommandDoesNotBlockOnAGrandchildHoldingStdout`
+  reproducing the reviewer's own `sleep 45 &` script and measuring the
+  elapsed time rather than only the refusal string. And the newline trim left
+  a trailing `\r` on Windows, where the command runs through `cmd /C` and
+  `cmd`'s own line ending is CRLF; the trim now removes `\r` as well as `\n`.
+  `TestDiscoveredCandidateAuthenticatesWithPasswordCommand` and
+  `TestProbeResolvesPasswordCommandOnceAcrossCandidates`
+  (`password_integration_test.go`, `discover_integration_test.go`) are the
+  new tests for the field itself; `cmd/lazyslice`'s
+  `TestPasswordCommandOutputReachesNoSink` gained a second run, with a canary
+  that is a role's real password, so it actually reaches `emit` and greps
+  `lazyslice.yml` — the sink THREAT_MODEL.md T5 cares about most — which the
+  first landing's single failing-canary run never did.

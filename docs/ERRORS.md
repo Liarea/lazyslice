@@ -108,6 +108,7 @@ One row per code in the catalogue, in the file's own order. Exit is only meaning
 | `secret.refused.permissive` | transform | 5 | {path} is readable by other accounts on this machine: {statement} |
 | `secret.refused.hardlink` | transform | 5 | {path} has more than one name on disk: it may already be readable under a path .gitignore never protected |
 | `secret.password_command.withheld` | emit | - | password_command was not written to {path}: its argv looks like it embeds a value rather than fetching one; pass --password-command again on every run |
+| `secret.password_command.failed` | discover | 5 | no password for {host}: --password-command {reason} |
 | `config.file.read` | emit | - | from {path} |
 | `config.file.written` | emit | - | wrote {path} (commit it for CI) |
 | `config.refused.where_withheld` | plan | 2 | {path} records a withheld --where predicate and this run passed none: pass {flag} again, or the slice would silently be a different one |

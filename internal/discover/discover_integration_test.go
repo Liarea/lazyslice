@@ -6,6 +6,7 @@ package discover
 
 import (
 	"context"
+	"net/url"
 	"os"
 	"reflect"
 	"strconv"
@@ -125,6 +126,53 @@ func TestContainerAndEnvVarCollapseToOneCandidate(t *testing.T) {
 	}
 }
 
+// TestDiscoveredCandidateAuthenticatesWithPasswordCommand is R2-16's other
+// half (the T-0213 fix round's high finding): rung0's own doc comment ("the
+// candidate carries no password and the ordinary password sources ...
+// --password-command ... supply one") and rung0Target's promise a candidate
+// the *ladder* found, not only one named with --source, and until this round
+// nothing in this package ever ran the command for one — Options carried no
+// PasswordCommand field at all, probe dialled a password-less candidate with
+// none, pg.Connect failed authentication, the candidate came back
+// Reachable=false, and chooseSource skipped it. A committed lazyslice.yml plus
+// --password-command — the reason the flag exists — still failed
+// authentication before this test could pass.
+//
+// It drives a candidate through $DATABASE_URL (rung 1) rather than rung 0's
+// committed yml, because rung 1 needs no on-disk fixture to prove the same
+// claim: probe resolves the password before dialling, for any rung.
+func TestDiscoveredCandidateAuthenticatesWithPasswordCommand(t *testing.T) {
+	ctx := t.Context()
+	testutil.SkipWithoutDocker(ctx, t)
+	quietRungs(t)
+
+	connURL := testutil.Postgres(ctx, t, "")
+	u, err := testutil.URL(connURL)
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+	realPassword, ok := u.User.Password()
+	if !ok || realPassword == "" {
+		t.Fatalf("testutil.Postgres returned a connection string with no password: %s", connURL)
+	}
+	noPassword := *u
+	noPassword.User = url.User(u.User.Username())
+	t.Setenv("DATABASE_URL", noPassword.String())
+
+	script := writePasswordScript(t, realPassword)
+
+	res, err := Resolve(ctx, Options{Workdir: t.TempDir(), PasswordCommand: script}, event.Discard)
+	if err != nil {
+		t.Fatalf("Resolve: %v (a discovered candidate should have authenticated with --password-command's own output)", err)
+	}
+	if !passwordAvailable(dsn.DSN(res.Source)) {
+		t.Errorf("Resolve's chosen source carries no password: --password-command's output never reached the candidate before it was dialled")
+	}
+	if res.Source == noPassword.String() {
+		t.Errorf("Resolve returned the connection string unchanged; the password never reached it")
+	}
+}
+
 // Rung 4 and Q1', end to end against a real daemon: a container this tool
 // provisioned is stopped, the ladder shows it as a stopped candidate rather
 // than counting it, Q1' takes its default headlessly and starts it, and the
@@ -223,7 +271,7 @@ func TestTheDialRunsInsideAReadOnlyTransaction(t *testing.T) {
 	testutil.SkipWithoutDocker(ctx, t)
 
 	f := &found{dsn: dsn.DSN(testutil.Postgres(ctx, t, ""))}
-	tracer := probe(ctx, f)
+	tracer := probe(ctx, f, "", nil)
 	if tracer == nil {
 		t.Fatal("the dial did not get as far as an allowlist")
 	}
