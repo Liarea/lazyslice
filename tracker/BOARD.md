@@ -7,7 +7,7 @@
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
-| E5 Hardening | 5 | 5 | 1 | 79 | 0 | 0 |
+| E5 Hardening | 5 | 4 | 1 | 80 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
 | E9 Later | later | 51 | 0 | 26 | 4 | 0 |
 
@@ -47,7 +47,6 @@
 - T-0178 [open] E9 · TestAStoppedContainerIsOfferedAndStarted binds a fixed host port (127.0.0.1:5433) and collides under parallel container runs (sonnet)
 - T-0182 [open] E9 · A text column holding a JSON document is refused, not masked ()
 - T-0183 [open] E9 · verify does not assert the object its catalog pass refused is gone after the quarantine ()
-- T-0184 [open] E5 · Should a headless run auto-select a target on the source's own cluster? ()
 - T-0185 [open] E9 · ARCHITECTURE.md does not know about --allow-type-literal ()
 - T-0186 [open] E5 · --allow-type-literal is not recorded in lazyslice.yml ()
 - T-0195 [open] E9 · classify: national_id's checksum-only formats can weak-ratio-mask an ordinary numeric business key ()
@@ -74,6 +73,7 @@
 
 ## Recently closed
 
+- T-0184 [done] E5 · Should a headless run auto-select a target on the source's own cluster? → done
 - T-0192 [done] E5 · The secret file is protected on its resolved path: symlinked parent directories and hard links refuse; password_command is screened before it is written to the yml → done
 - T-0028 [done] E3 · Create GitHub repository Liarea/lazyslice and homebrew-tap, push main, add HOMEBREW_TAP_TOKEN secret → done
 - T-0090 [done] E5 · T-PERF: performance baseline and CI throughput guard → done
@@ -98,4 +98,3 @@
 - T-0130 [done] E5 · Target ownership: a run lease on the target and a lock-and-recheck before every destructive DDL → done
 - T-0131 [done] E5 · Events carry no source value: polymorphic inference reports unknown type values by count and keyed digest, and an output-sink canary test proves it → done
 - T-0132 [done] E5 · The masker is chosen per FK-connected equality group, not per column → done
-- T-0133 [done] E5 · Core owns the run lifecycle: complete is written only after verify passes, and a residual failure empties the target → done
