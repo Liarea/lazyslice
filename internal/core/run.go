@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"runtime/debug"
 	"sort"
 	"strconv"
@@ -1868,6 +1869,17 @@ func (r *run) buildConfig(report *pipeline.Report) (*pipeline.Config, error) {
 	if err != nil {
 		return nil, wrap(CodeInternal, exitInternal, err, "lazyslice.yml could not be built")
 	}
+	// R2-16 (THREAT_MODEL.md T5, T6): a --password-command whose argv looks
+	// like it embeds a value rather than fetching one is withheld from the
+	// file, not written verbatim into one whose header says it never contains
+	// a secret. The check runs here, on the Config Emit already built, rather
+	// than inside Emit itself: the warning names the config path
+	// (r.req.ConfigPath), which Emit's own signature (ARCHITECTURE.md §2's
+	// pipeline.Emitter) has no room for.
+	if cfg.PasswordCommand != "" && emit.PasswordCommandSuspicious(cfg.PasswordCommand) {
+		cfg.PasswordCommand = ""
+		r.send(event.Emit, event.Warn, CodePasswordCommandWithheld, event.Args{event.ArgPath: r.req.ConfigPath})
+	}
 	return cfg, nil
 }
 
@@ -1938,7 +1950,40 @@ func (r *run) planOnly() bool {
 //
 // A file that does not exist yet passes both: there is nothing to judge, and
 // resolveKey creates it 0600.
+//
+// **Amendment, 2026-09-16 (R2-14 and R2-15).** The two checks above judge the
+// final path component; both are on the file the run was given, which two
+// more paths reach past:
+//
+//   - **A symlinked *parent directory*.** `ln -s ../Dropbox cloudkeys` followed
+//     by `--secret-file ./cloudkeys/lazyslice.secret` names a file that does
+//     not exist yet, so os.Lstat above returns ErrNotExist and both checks
+//     pass — the symlink is in a directory component this function never
+//     looked at. `checkSecretParentSymlink` walks every directory component
+//     between the repository root and the file, with os.Lstat, and refuses
+//     with the same secret.refused.symlink/exit 5 the direct case uses. It is
+//     bounded to the repository (repo.Root, the same boundary repo.Protect
+//     uses for the .gitignore entry) rather than resolved from the filesystem
+//     root: an ambient symlink outside the repository — /tmp -> /private/tmp
+//     on macOS is one — is not a path the operator wrote, and walking past the
+//     repository root would refuse every run on such a system for a link
+//     nobody added. A repository the operator's own directory component names
+//     is exactly what the .gitignore entry and the tracked check are computed
+//     against, so that is the boundary the resolution has to match.
+//   - **A hard link.** `ln lazyslice.secret ../Dropbox/leaked.key` after a key
+//     already exists gives the copy in Dropbox a name of its own; no path
+//     check, symlink or otherwise, sees it, because the file the run reads and
+//     writes is still exactly the file it thinks it is — it merely has more
+//     than one name. `checkSecretHardlink` stats the file's link count and
+//     refuses (secret.refused.hardlink, exit 5) above one, paired with the
+//     permissive-mode refusal in the same function because both say "this key
+//     may already have been read under a name .gitignore never protected".
+//
+// Both are documented in THREAT_MODEL.md T6.
 func (r *run) checkSecretFile() error {
+	if stop := r.checkSecretParentSymlink(); stop != nil {
+		return stop
+	}
 	info, err := os.Lstat(r.req.SecretFile)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
@@ -1961,6 +2006,94 @@ func (r *run) checkSecretFile() error {
 				event.ArgStatement: "chmod 600 " + r.req.SecretFile,
 			},
 			Message: fmt.Sprintf("%s is mode %04o", r.req.SecretFile, perm),
+		}
+	}
+	if nlink, ok := hardLinkCount(info); ok && nlink > 1 {
+		return &Stop{
+			Code: CodeSecretHardlink, Exit: exitCredential,
+			Args:    event.Args{event.ArgPath: r.req.SecretFile},
+			Message: fmt.Sprintf("%s has %d names on disk: it may be readable under a path .gitignore never protected", r.req.SecretFile, nlink),
+		}
+	}
+	return nil
+}
+
+// checkSecretParentSymlink refuses when a directory component between the
+// repository root and the secret file is a symbolic link (R2-14). It walks
+// with os.Lstat rather than filepath.EvalSymlinks plus a string comparison,
+// and it starts at repo.Root's own answer rather than the filesystem root, for
+// the reason given on checkSecretFile: an ambient symlink above the
+// repository (macOS's /tmp and /var) is not the operator's doing and must not
+// turn every run on such a system into a refusal.
+//
+// The repository root is resolved from r.req.Workdir, never from
+// filepath.Dir(SecretFile) or any other path that walks through the secret
+// file's own directory chain. repo.Root's ancestor search does an os.Lstat on
+// each candidate ancestor for ".git", and Lstat follows every *intermediate*
+// path component (it only declines to follow the final one) — so resolving
+// root from a directory that is itself, or sits under, a symlink lets that
+// symlink's target supply the ".git" repo.Root finds, and root then comes
+// back *as* (or under) the symlinked path. filepath.Rel(root, abs) is then
+// "." or a suffix that starts below the symlinked component, and the walk
+// below never Lstats the component that is actually the link (2026-09-16
+// round 2 red team, R2-14 not closed). Workdir is a known-good anchor — it is
+// where the process was started, never a path this function is asked to
+// protect — so a symlink an attacker places anywhere under it, including at
+// or below the secret file's own directory, is still on the walk below.
+//
+// A directory that does not exist yet is not a link (nothing has been made
+// there to be one), and outside a repository entirely there is no .gitignore
+// boundary for a link to defeat — repo.Root's ErrNoRepository is not this
+// function's business either, the same carve-out entryFor already gives a
+// secret file named straight at a location outside the repository.
+func (r *run) checkSecretParentSymlink() error {
+	dir := filepath.Dir(r.req.SecretFile)
+	// normalise always fills Workdir from os.Getwd before a run reaches here
+	// (run.go's normalise); dir is the fallback only for a caller that built
+	// a *run by hand without it (as this package's own tests do) or for the
+	// rare process where even os.Getwd failed.
+	anchor := r.req.Workdir
+	if anchor == "" {
+		anchor = dir
+	}
+	root, err := repo.Root(anchor)
+	if errors.Is(err, repo.ErrNoRepository) {
+		return nil
+	}
+	if err != nil {
+		return wrap(CodeSecretRefusedKey, exitCredential, err, "%s could not be resolved", r.req.SecretFile)
+	}
+
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return wrap(CodeSecretRefusedKey, exitCredential, err, "%s could not be resolved", r.req.SecretFile)
+	}
+	rel, err := filepath.Rel(root, abs)
+	if err != nil {
+		return wrap(CodeSecretRefusedKey, exitCredential, err, "%s could not be resolved", r.req.SecretFile)
+	}
+	if rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		// The secret file's directory is the repository root itself, or
+		// outside the repository — nothing between root and file to walk.
+		return nil
+	}
+
+	cur := root
+	for _, comp := range strings.Split(rel, string(filepath.Separator)) {
+		cur = filepath.Join(cur, comp)
+		info, statErr := os.Lstat(cur)
+		switch {
+		case errors.Is(statErr, fs.ErrNotExist):
+			return nil
+		case statErr != nil:
+			return wrap(CodeSecretRefusedKey, exitCredential, statErr, "%s could not be resolved", r.req.SecretFile)
+		}
+		if info.Mode()&fs.ModeSymlink != 0 {
+			return &Stop{
+				Code: CodeSecretSymlink, Exit: exitCredential,
+				Args:    event.Args{event.ArgPath: r.req.SecretFile},
+				Message: fmt.Sprintf("%s is inside %s, a symbolic link: the masking key would be written outside the repository, where .gitignore does not reach it", r.req.SecretFile, cur),
+			}
 		}
 	}
 	return nil

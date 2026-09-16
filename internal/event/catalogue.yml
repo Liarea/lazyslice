@@ -968,6 +968,31 @@
   message: "{path} is readable by other accounts on this machine: {statement}"
   args: [path, statement]
 
+# The 2026-09-16 round 2 red team, against ARCHITECTURE.md §9 "The repository"
+# and THREAT_MODEL.md T6: a symlinked parent directory reuses
+# secret.refused.symlink above (checkSecretParentSymlink, internal/core) — the
+# code is the same one, printed before the direct-symlink check ever runs. A
+# hard link, which no path check can see, is its own code.
+- code: secret.refused.hardlink
+  kind: error
+  stage: transform
+  exit: 5
+  message: "{path} has more than one name on disk: it may already be readable under a path .gitignore never protected"
+  args: [path]
+
+# The 2026-09-16 round 2 red team's R2-16, against ARCHITECTURE.md §10 and
+# THREAT_MODEL.md T5: --password-command was written into lazyslice.yml
+# verbatim, and the header promises the file never contains a secret. The
+# emitted command's argv is screened by a heuristic (internal/emit) and, when
+# it looks like it embeds a value rather than fetching one — `echo` or
+# `printf` given the password as a literal argument is the plain case — the
+# command is left out of the file rather than written, and this line says so.
+- code: secret.password_command.withheld
+  kind: warn
+  stage: emit
+  message: "password_command was not written to {path}: its argv looks like it embeds a value rather than fetching one; pass --password-command again on every run"
+  args: [path]
+
 - code: config.file.read
   kind: info
   stage: emit

@@ -396,6 +396,102 @@ func TestFlagOptOutIsRecorded(t *testing.T) {
 	}
 }
 
+// The 2026-09-16 round 2 red team's R2-16 (THREAT_MODEL.md T5, T6):
+// --password-command 'echo Hunter2InCommand' put the password itself into a
+// yml whose header promises the file never contains a secret. The heuristic
+// treats the program name as free and every argument after it as suspicious
+// unless it looks like a path.
+func TestPasswordCommandSuspiciousCatchesAnEchoedPassword(t *testing.T) {
+	if !PasswordCommandSuspicious("echo Hunter2InCommand") {
+		t.Error("PasswordCommandSuspicious(\"echo Hunter2InCommand\") = false, want true")
+	}
+}
+
+func TestPasswordCommandSuspiciousAcceptsAPathShapedCommand(t *testing.T) {
+	for _, cmd := range []string{
+		"vault-fetch ./db/prod/password",
+		"/usr/local/bin/lazyslice-secret-fetch",
+		"./scripts/db-password.sh",
+	} {
+		if PasswordCommandSuspicious(cmd) {
+			t.Errorf("PasswordCommandSuspicious(%q) = true, want false", cmd)
+		}
+	}
+}
+
+func TestPasswordCommandSuspiciousCatchesABareLiteralArgument(t *testing.T) {
+	for _, cmd := range []string{
+		"printf mypassword",
+		"cat literal-not-a-path",
+		"vault read secret",
+	} {
+		if !PasswordCommandSuspicious(cmd) {
+			t.Errorf("PasswordCommandSuspicious(%q) = false, want true", cmd)
+		}
+	}
+}
+
+// The fix round of the same review: "contains a path separator" was standing
+// in for "is a path", and a base64 password carries a '/' about a third of
+// the time at 24 characters (openssl rand -base64, many secret managers) —
+// not an exotic input. A Windows-style value with backslashes and no '/' at
+// all passed the old check for the same reason.
+func TestPasswordCommandSuspiciousCatchesALiteralThatContainsASeparator(t *testing.T) {
+	for _, cmd := range []string{
+		`echo aB3/xY9+QzT=`,
+		`printf 'C:\Users\bob'`,
+	} {
+		if !PasswordCommandSuspicious(cmd) {
+			t.Errorf("PasswordCommandSuspicious(%q) = false, want true", cmd)
+		}
+	}
+}
+
+// A second fix round, same finding: an *unanchored* multi-segment word
+// (`db/prod/password`, no leading `/`, `./` or `../`) was still trusted as
+// path-shaped, so a slash-bearing password with no '+' or '=' — the shape a
+// base64 password takes roughly one time in five — was recorded verbatim.
+// Neither of these names a file that exists, so both must now be caught.
+func TestPasswordCommandSuspiciousCatchesAnUnanchoredSlashBearingLiteral(t *testing.T) {
+	for _, cmd := range []string{
+		"echo kX9mQ2/vT4ns8Lb1",
+		"printf 'p/w'",
+	} {
+		if !PasswordCommandSuspicious(cmd) {
+			t.Errorf("PasswordCommandSuspicious(%q) = false, want true", cmd)
+		}
+	}
+}
+
+// The same round's third finding: a one-word --password-command is a
+// plausible misuse of the flag by an operator who thinks it takes the
+// password directly, and a whitespace-only command should not sail through
+// buildConfig's cfg.PasswordCommand != "" gate unscreened.
+func TestPasswordCommandSuspiciousCatchesAOneWordCommandAndABlankOne(t *testing.T) {
+	for _, cmd := range []string{
+		"Hunter2InCommand",
+		"   ",
+	} {
+		if !PasswordCommandSuspicious(cmd) {
+			t.Errorf("PasswordCommandSuspicious(%q) = false, want true", cmd)
+		}
+	}
+}
+
+// A one-word command is still accepted when the word is unambiguously a
+// program: path-shaped, an existing file, or resolvable on PATH.
+func TestPasswordCommandSuspiciousAcceptsAOneWordProgram(t *testing.T) {
+	for _, cmd := range []string{
+		"/usr/local/bin/lazyslice-secret-fetch",
+		"./scripts/db-password.sh",
+		"echo",
+	} {
+		if PasswordCommandSuspicious(cmd) {
+			t.Errorf("PasswordCommandSuspicious(%q) = true, want false", cmd)
+		}
+	}
+}
+
 func TestParseAndFormatSize(t *testing.T) {
 	cases := []struct {
 		text string

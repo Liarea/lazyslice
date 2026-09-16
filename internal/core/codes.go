@@ -135,6 +135,22 @@ const (
 	CodeSecretSymlink    event.Code = "secret.refused.symlink"
 	CodeSecretPermissive event.Code = "secret.refused.permissive"
 
+	// CodeSecretHardlink is the 2026-09-16 round 2 red team's R2-15: a hard
+	// link on the secret file gives it a second name no path check, symlink or
+	// otherwise, can see, since the file the run reads and writes is still
+	// exactly the file it thinks it is. Exit 5, the same shape as
+	// CodeSecretPermissive, because both say the key may already have been
+	// read under a name .gitignore never protected.
+	CodeSecretHardlink event.Code = "secret.refused.hardlink"
+
+	// CodePasswordCommandWithheld is R2-15's sibling finding, R2-16: a
+	// --password-command whose argv looks like it embeds a value rather than
+	// fetching one (an `echo` or `printf` given the password as a literal
+	// argument, most plainly) is withheld from lazyslice.yml rather than
+	// written verbatim into a file whose header promises it never contains a
+	// secret.
+	CodePasswordCommandWithheld event.Code = "secret.password_command.withheld"
+
 	// CodeConfigRead and CodeConfigWritten bracket the yml.
 	CodeConfigRead    event.Code = "config.file.read"
 	CodeConfigWritten event.Code = "config.file.written"
