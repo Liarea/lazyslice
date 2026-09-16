@@ -1,8 +1,8 @@
 ---
 id: T-0198
 title: "special_category has no value validator; a digit/name-free special-category sentence still crosses unseen"
-epic: E9
-phase: ""
+epic: E5
+phase: 5
 status: open
 owner: sonnet
 created: 2026-09-15
@@ -24,6 +24,10 @@ ARCHITECTURE.md section 11.1's 2026-09-15 amendment (item 1, T-0189) and THREAT_
 ## Log
 
 - 2026-09-15 created
+
+- 2026-09-16 moved to E5 phase 5
+
+- 2026-09-16 re-homed to E5 by the orchestrator, 2026-09-16: round 3 confirms it live twice, including a masked column's own CHECK carrying 'HIV positive, CD4 210'. Decision: a column the run masks may not carry a non-rewritable literal in its own constraint, default or index predicate at all, whatever it parses as, unless the existing named opt-out names the column; a special_category validator supplies the category in the message. Measure on the torture suite and report how many schemas the rule newly refuses before landing it as default.
 
 ## Post-mortem
 

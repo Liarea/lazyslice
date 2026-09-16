@@ -7,9 +7,9 @@
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
-| E5 Hardening | 5 | 4 | 1 | 80 | 0 | 0 |
+| E5 Hardening | 5 | 7 | 1 | 82 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 52 | 0 | 26 | 4 | 0 |
+| E9 Later | later | 53 | 0 | 27 | 4 | 0 |
 
 ## Open and in progress
 
@@ -44,15 +44,13 @@
 - T-0174 [open] E9 · Wire --debug to print the statement trace (Source.Trace) on an ordinary failure ()
 - T-0175 [open] E9 · Give nasty.sql's stream fixtures a size parameter for perf profiling ()
 - T-0176 [open] E9 · mask.Apply's HMAC-SHA256 derivation is the largest CPU cost in the extract/transform/load pipeline ()
-- T-0178 [open] E9 · TestAStoppedContainerIsOfferedAndStarted binds a fixed host port (127.0.0.1:5433) and collides under parallel container runs (sonnet)
 - T-0182 [open] E9 · A text column holding a JSON document is refused, not masked ()
 - T-0183 [open] E9 · verify does not assert the object its catalog pass refused is gone after the quarantine ()
 - T-0185 [open] E9 · ARCHITECTURE.md does not know about --allow-type-literal ()
-- T-0186 [open] E5 · --allow-type-literal is not recorded in lazyslice.yml ()
 - T-0195 [open] E9 · classify: national_id's checksum-only formats can weak-ratio-mask an ordinary numeric business key ()
 - T-0196 [open] E9 · Migrate the tracker to GitHub Issues and Projects behind the existing tools/tracker.py command surface (sonnet)
 - T-0197 [open] E9 · R2-05/A10 residual: a name in a language names.txt does not carry still reports "no name or value signal" as a clean bill of health (sonnet)
-- T-0198 [open] E9 · special_category has no value validator; a digit/name-free special-category sentence still crosses unseen (sonnet)
+- T-0198 [open] E5 · special_category has no value validator; a digit/name-free special-category sentence still crosses unseen (sonnet)
 - T-0199 [open] E9 · internal/load's gate test holds its own copy of the cluster-identity SQL ()
 - T-0200 [open] E9 · A cluster identity test that reaches one server over a genuinely different socket ()
 - T-0201 [open] E9 · internal/pipeline/ddlliteral.go: validate a pattern operand both raw and with metacharacters stripped, and strip _ only for LIKE-family operators (sonnet)
@@ -66,16 +64,25 @@
 - T-0209 [open] E9 · ARCHITECTURE.md describes the design as PostgreSQL-specific until a second engine is real (sonnet)
 - T-0210 [open] E9 · Why a row is included, boundary crossings and cap omissions visible before copy, and a decision on which job the default slice serves (opus)
 - T-0211 [open] E9 · ROADMAP.md stops naming docs/BUILD_PLAN.md as the sequencing authority (sonnet)
-- T-0212 [open] E9 · renderSafe redacts by default, and prints a transform refusal's reason under the values flag ()
-- T-0213 [open] E5 · Wire --password-command to actually run, or refuse it as unimplemented ()
+- T-0212 [open] E5 · renderSafe redacts by default, and prints a transform refusal's reason under the values flag ()
 - T-0214 [open] E9 · A withheld password_command leaves a marker in lazyslice.yml so a later run without one is refused, as a withheld --where already is (sonnet)
 - T-0215 [open] E9 · Secret-file and password_command tests pin the bypass shapes, not only the happy attack shapes (sonnet)
 - T-0216 [open] E9 · THREAT_MODEL.md T1 does not know --allow-type-literal is recorded in the yml ()
+- T-0217 [open] E9 · internal/discover/provision: drop Force from the failed-attempt container removal, fix the retry count's off-by-one, and keep the daemon's port error when the range is exhausted (sonnet)
+- T-0218 [open] E9 · ADR-004's 'no unsafe mode' clause lists the types: block among the ways a committed file may reduce enforcement (sonnet)
+- T-0219 [open] E9 · --allow-type-literal is recorded only for a type that actually carried a literal a strong validator hit (sonnet)
+- T-0220 [open] E9 · internal/discover/password.go: the deadline check reads the derived context, the URL branch of injectPassword swallows a parse error, and the stop reason repeats the prefix (sonnet)
+- T-0221 [open] E5 · Phone numbers in national format, and phone numbers spelled out in words, are recognised: a configured phone region, and corroboration when none is configured (sonnet)
+- T-0222 [open] E5 · Cluster identity degrades field by field, and two unknown identities are treated as possibly the same cluster (sonnet)
+- T-0223 [open] E5 · mask.Apply never returns a masker's error verbatim: the module wraps it without the value (sonnet)
 
 ## Recently closed
 
+- T-0178 [done] E9 · TestAStoppedContainerIsOfferedAndStarted binds a fixed host port (127.0.0.1:5433) and collides under parallel container runs → done
 - T-0184 [done] E5 · Should a headless run auto-select a target on the source's own cluster? → done
+- T-0186 [done] E5 · --allow-type-literal is not recorded in lazyslice.yml → done
 - T-0192 [done] E5 · The secret file is protected on its resolved path: symlinked parent directories and hard links refuse; password_command is screened before it is written to the yml → done
+- T-0213 [done] E5 · Wire --password-command to actually run, or refuse it as unimplemented → done
 - T-0028 [done] E3 · Create GitHub repository Liarea/lazyslice and homebrew-tap, push main, add HOMEBREW_TAP_TOKEN secret → done
 - T-0090 [done] E5 · T-PERF: performance baseline and CI throughput guard → done
 - T-0163 [done] E5 · the plan-time DDL literal rule does not read index predicates or domain CHECKs → done
@@ -96,6 +103,3 @@
 - T-0119 [done] E5 · A table-scoped name rule, for refresh_tokens.parent and its kind → done
 - T-0127 [done] E5 · internal/plan: drop the arrayArrivesAsLiteral stand-in now that transform masks a literal array element-wise → done
 - T-0129 [done] E5 · internal/verify: an array column that arrives as a text literal is not residual-scanned element-wise → done
-- T-0130 [done] E5 · Target ownership: a run lease on the target and a lock-and-recheck before every destructive DDL → done
-- T-0131 [done] E5 · Events carry no source value: polymorphic inference reports unknown type values by count and keyed digest, and an output-sink canary test proves it → done
-- T-0132 [done] E5 · The masker is chosen per FK-connected equality group, not per column → done

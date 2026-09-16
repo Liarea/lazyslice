@@ -1,8 +1,8 @@
 ---
 id: T-0212
 title: "renderSafe redacts by default, and prints a transform refusal's reason under the values flag"
-epic: E9
-phase: ""
+epic: E5
+phase: 5
 status: open
 owner: ""
 created: 2026-09-15
@@ -24,6 +24,10 @@ T-0191 made internal/transform's Refusal.Error() withhold the masker's own messa
 ## Log
 
 - 2026-09-15 created
+
+- 2026-09-16 moved to E5 phase 5
+
+- 2026-09-16 re-homed to E5 by the orchestrator, 2026-09-16: round 3 names renderSafe's two-type allowlist as the CLI half still owed after T-0191; redact by default, allowlist what may print.
 
 ## Post-mortem
 
