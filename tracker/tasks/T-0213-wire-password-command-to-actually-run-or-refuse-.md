@@ -1,8 +1,8 @@
 ---
 id: T-0213
 title: "Wire --password-command to actually run, or refuse it as unimplemented"
-epic: E9
-phase: ""
+epic: E5
+phase: 5
 status: open
 owner: ""
 created: 2026-09-16
@@ -24,6 +24,10 @@ R2-16 (docs/reviews/2026-09-15-redteam/round2-still-leaking.json) part (b): --pa
 ## Log
 
 - 2026-09-16 created
+
+- 2026-09-16 moved to E5 phase 5
+
+- 2026-09-16 re-homed to E5 by the orchestrator, 2026-09-16: a documented flag that silently fails authentication cannot ship in v0.1.0; decision: implement it in discover (run the command, trim one trailing newline, stdout never reaches a sink), added to the redfix list after T-0178
 
 ## Post-mortem
 
