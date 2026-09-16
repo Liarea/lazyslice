@@ -137,7 +137,12 @@ type PlanRequest struct {
 	Skip         []TableRef            // --skip-table, or the yml's skipped: block
 	// AllowTypeLiterals is --allow-type-literal TYPE=REASON: the qualified name of an enum
 	// or a domain whose recreated definition the operator has said in writing
-	// does not carry a person's value, to the reason they gave.
+	// does not carry a person's value, to the reason they gave. internal/core
+	// fills this from the flag and, for a type not named on this run's command
+	// line, from the committed yml's own types: block (Config.Types) — the same
+	// shape Keys and Skip above take their yml defaults from — expiring an
+	// entry whose recorded fingerprint no longer matches the type's current
+	// one, exactly as a column's Unmask does.
 	//
 	// It is ARCHITECTURE.md §8's per-column escape for the one object class
 	// that is not a column. §11.1's type-literal rule (internal/plan's

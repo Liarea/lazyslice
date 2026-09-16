@@ -118,6 +118,26 @@ const (
 	// such run, so PendingKeyDefaults is always empty there.
 	CodePlanPendingKeyDefault event.Code = "plan.masked_default.pending_key"
 
+	// CodeTypeLiteralAllowed names one --allow-type-literal opt-out this run
+	// honours — from the flag or carried forward from the committed yml's
+	// types: block — mirroring what the column equivalent already shows in a
+	// masked/copied column's own reason (classify's "unmask_yml"/"unmask_flag"
+	// fragments): THREAT_MODEL.md T1's A4b prices a type opt-out as turning off
+	// both looks at that type's recreated DDL, so the run states, in the open,
+	// which type and why, rather than only the absence of the exit-13 refusal
+	// it would otherwise have hit.
+	CodeTypeLiteralAllowed event.Code = "plan.type_literal.allowed"
+
+	// CodeTypeLiteralOptOutExpired names a type whose --allow-type-literal
+	// opt-out in the committed yml is not honoured this run: the type's
+	// fingerprint (names.go's typeFingerprint) no longer matches the one
+	// recorded, or the type is no longer in the source's Schema.Enums/Domains
+	// at all. The column equivalent is classify.CodeColumnOptOutExpired; this
+	// is its type-literal counterpart, raised here rather than in
+	// internal/classify because a type opt-out has no classify-stage decision
+	// to expire.
+	CodeTypeLiteralOptOutExpired event.Code = "plan.type_literal.opt_out_expired"
+
 	// CodeSecretWritten, CodeSecretEphemeral, CodeSecretUnprotected and
 	// CodeSecretTracked are ARCHITECTURE.md section 9 "The repository", one
 	// code per branch, because every branch prints what it did.

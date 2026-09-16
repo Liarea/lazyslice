@@ -84,6 +84,13 @@ func sample() *pipeline.Config {
 				},
 			},
 		},
+		Types: map[string]pipeline.TypeAllow{
+			"public.status": {
+				Reason: "labels are not personal data",
+				By:     "gareth",
+				TypeFP: "3e51a0c2",
+			},
+		},
 		Plan: pipeline.PlanSummary{
 			Tables:       15,
 			Rows:         6412,
@@ -173,6 +180,18 @@ func TestWriteReadRoundTrip(t *testing.T) {
 	}
 	if got.Columns[col("public", "customer", "email")].Masker != mask.MaskerEmail {
 		t.Error("the masker did not survive the round trip")
+	}
+
+	// T-0186: --allow-type-literal's own opt-out, the types: block. Nothing
+	// exercises this round trip unless a case sets Config.Types, so it is
+	// asserted here rather than in its own test — the same file this
+	// function's own doc comment already covers.
+	typeAllow, ok := got.Types["public.status"]
+	if !ok {
+		t.Fatalf("public.status did not survive the round trip: %v", got.Types)
+	}
+	if typeAllow.Reason != "labels are not personal data" || typeAllow.By != "gareth" || typeAllow.TypeFP != "3e51a0c2" {
+		t.Errorf("the type opt-out came back as %+v, want reason, by and type", typeAllow)
 	}
 }
 
@@ -393,6 +412,30 @@ func TestFlagOptOutIsRecorded(t *testing.T) {
 	got := cfg.Columns[target].Unmask
 	if got == nil || got.Reason != "ticket 42" || got.By != "flag" || got.TypeFP != "7b20e9d1" {
 		t.Errorf("the flag's opt-out was recorded as %+v", got)
+	}
+}
+
+// Options.Types is already internal/core's finished decision (planRequest's
+// merge of the flag and the committed yml's types: block, with expiry already
+// applied) — Emit makes no decision over it and only writes what it is handed,
+// the same division Options.Unmask keeps above. This is that pass-through,
+// pinned so a future Emit change cannot drop or reinterpret the map.
+func TestEmitWritesTypeAllow(t *testing.T) {
+	cfg, err := New(Options{Types: map[string]pipeline.TypeAllow{
+		"public.status": {Reason: "ticket 42", By: "flag", TypeFP: "7b20e9d1"},
+	}}).Emit(
+		&pipeline.Plan{Root: tbl("public", "film")},
+		&pipeline.Classification{Decisions: map[ref.ColumnRef]pipeline.Decision{}},
+		nil, pipeline.PlanRequest{}, pipeline.Candidate{}, pipeline.Candidate{}, "")
+	if err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+	got, ok := cfg.Types["public.status"]
+	if !ok {
+		t.Fatalf("cfg.Types[public.status] is missing: %v", cfg.Types)
+	}
+	if got.Reason != "ticket 42" || got.By != "flag" || got.TypeFP != "7b20e9d1" {
+		t.Errorf("cfg.Types[public.status] = %+v, want reason ticket 42, by flag, fingerprint 7b20e9d1", got)
 	}
 }
 

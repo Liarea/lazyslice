@@ -305,6 +305,21 @@ type run struct {
 	key    mask.Key
 	keyFP  string
 	unmask map[ref.ColumnRef]string
+	// typeAllow is --allow-type-literal TYPE=REASON merged with the committed
+	// yml's own types: block (pipeline.Config.Types), filled by planRequest and
+	// read by emitter: the record internal/emit writes back verbatim, exactly
+	// as unmask is for columns. A prior entry whose TypeFP no longer matches
+	// the type's current fingerprint is left out here, which is how it expires
+	// (ARCHITECTURE.md §11.1's fourth arm; the same tighten-only rule ADR-004
+	// states for Unmask).
+	typeAllow map[string]pipeline.TypeAllow
+	// typeExpired names, in the committed yml's types: block, every entry
+	// planRequest did not carry forward into typeAllow because its recorded
+	// fingerprint no longer matches (or the type is gone) — the type-literal
+	// counterpart of classify.Classification.Expired, filled by the same pass
+	// that fills typeAllow and read once, by planStage, to send
+	// CodeTypeLiteralOptOutExpired.
+	typeExpired []string
 
 	// extractDone and transformDone are move's own join channels, kept here
 	// rather than as move's local variables so that close can join them too.
@@ -1407,6 +1422,25 @@ func (r *run) planStage(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// T-0186: one line per --allow-type-literal opt-out this run honours (the
+	// flag, or a still-fingerprint-matching entry carried forward from the
+	// committed yml's types: block) and one warn per yml entry that did not
+	// carry forward because its fingerprint no longer matches or the type is
+	// gone — the type-literal counterpart of classifyStage's own
+	// CodeColumnOptOutExpired loop, raised here because a type opt-out is
+	// merged and expired in this package rather than by the classifier.
+	for _, name := range sortedTypeNames(r.typeAllow) {
+		t := r.typeAllow[name]
+		r.send(event.Plan, event.Info, CodeTypeLiteralAllowed, event.Args{
+			event.ArgTable:  name,
+			event.ArgReason: t.Reason + " (opt-out by " + t.By + ")",
+		})
+	}
+	expired := append([]string(nil), r.typeExpired...)
+	sort.Strings(expired)
+	for _, name := range expired {
+		r.send(event.Plan, event.Warn, CodeTypeLiteralOptOutExpired, event.Args{event.ArgTable: name})
+	}
 	p, err := plan.New().Plan(ctx, r.reader, r.schema, r.cls, req)
 	if err != nil {
 		return asStop(err)
@@ -1456,6 +1490,11 @@ func (r *run) planStage(ctx context.Context) error {
 // Request.Explicit is what tells the two apart. Section 10 calls the yml "a
 // default the flag overrides, never a way to widen".
 func (r *run) planRequest() (pipeline.PlanRequest, error) {
+	// Rebuilt fresh on every call (planStage and buildConfig each call this):
+	// deterministic from r.req, r.prior and r.schema, so there is nothing to
+	// carry over between calls and an earlier call's entries must not linger.
+	r.typeAllow = map[string]pipeline.TypeAllow{}
+	r.typeExpired = nil
 	req := pipeline.PlanRequest{
 		Take:      r.req.Take,
 		Cap:       r.req.Cap,
@@ -1509,6 +1548,26 @@ func (r *run) planRequest() (pipeline.PlanRequest, error) {
 			req.Keys[t] = cols
 		}
 		req.Skip = append(req.Skip, p.Skipped...)
+		// The committed file's own types: block, the same shape --unmask has
+		// for columns (pipeline.Config.Types; ARCHITECTURE.md §11.1's fourth
+		// arm, §10). It expires when the type's own fingerprint no longer
+		// matches — a redefined enum or domain, or one no longer in the source
+		// — rather than being carried forward blind; a flag naming the same
+		// type below overwrites this and wins.
+		for name, t := range p.Types {
+			if t.Reason == "" {
+				continue
+			}
+			if fp, ok := typeFingerprint(name, r.schema); !ok || fp != t.TypeFP {
+				r.typeExpired = append(r.typeExpired, name)
+				continue
+			}
+			if req.AllowTypeLiterals == nil {
+				req.AllowTypeLiterals = map[string]string{}
+			}
+			req.AllowTypeLiterals[name] = t.Reason
+			r.typeAllow[name] = t
+		}
 	}
 
 	// The withheld predicate. A file that records a fingerprint and a run that
@@ -1557,6 +1616,13 @@ func (r *run) planRequest() (pipeline.PlanRequest, error) {
 			req.AllowTypeLiterals = map[string]string{}
 		}
 		req.AllowTypeLiterals[typeName] = reason
+		// Recorded with this run's own fingerprint, `by: flag`, so the next run
+		// needs no flag and the opt-out still expires when the type changes —
+		// the flag's own opt-out for a column follows the identical rule
+		// (columnConfig, internal/emit). It overwrites any entry the yml prior
+		// put here above, which is how the flag wins on the same type.
+		fp, _ := typeFingerprint(typeName, r.schema)
+		r.typeAllow[typeName] = pipeline.TypeAllow{Reason: reason, By: "flag", TypeFP: fp}
 	}
 
 	switch {
@@ -1925,6 +1991,7 @@ func (r *run) emitter() pipeline.Emitter {
 		SchemaFingerprint: r.schema.Fingerprint,
 		Prior:             r.prior,
 		Unmask:            r.unmask,
+		Types:             r.typeAllow,
 		PasswordCommand:   r.req.PasswordCommand,
 		NotRecreated:      notRecreated(r.schema),
 	})
@@ -2512,5 +2579,16 @@ func sortedColumns(m map[ref.ColumnRef]pipeline.Decision) []ref.ColumnRef {
 		out = append(out, c)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Less(out[j]) })
+	return out
+}
+
+// sortedTypeNames orders m's keys so that T-0186's plan.type_literal.allowed
+// events, and any test over them, do not depend on map iteration order.
+func sortedTypeNames(m map[string]pipeline.TypeAllow) []string {
+	out := make([]string, 0, len(m))
+	for name := range m {
+		out = append(out, name)
+	}
+	sort.Strings(out)
 	return out
 }

@@ -606,3 +606,63 @@ for a refusal that was reaching people as an internal error.
   under `--debug`: a stack frame carries no row value, so the two flags keep
   answering their own questions. `mask.Apply` should recover on its own side
   too — **T-0181**, `mask/` being its own module.
+
+## Decisions made for T-0186 (`--allow-type-literal` round-trips)
+
+- **`run.typeAllow` is `planRequest`'s own opt-out ledger for `--allow-type-
+  literal`, rebuilt on every call.** It is filled two ways, in order: first
+  from the committed file's `types:` block (`r.prior.Types`), carried forward
+  entry-for-entry but only where `names.go`'s new `typeFingerprint` still
+  matches the recorded one — the same expiry `--unmask` gets from a column's
+  `TypeFP`, applied to a type instead, and it is `internal/core` rather than
+  `internal/classify` doing the honouring because a type has no classify-stage
+  decision to expire; then from `r.req.AllowTypeLiterals` (the flag), stamped
+  with this run's own fresh fingerprint and `by: flag`, which overwrites a yml
+  entry on the same type — "the flags, last, so they win" applied to this
+  opt-out too. `r.emitter()` hands the finished map to `internal/emit` as
+  `Options.Types`; `internal/emit/CLAUDE.md`'s own T-0186 section records why
+  `Emit` treats it as already decided rather than deciding anything from it.
+  Rebuilt rather than cached because `planRequest` itself is called twice
+  (`planStage`, then `buildConfig` for the yml) and both must see the same
+  answer from the same inputs — the pattern `req.AllowTypeLiterals` next to it
+  already follows.
+- **The type fingerprint has no natural home outside this package.**
+  `pipeline.Schema` carries no per-type fingerprint the way a column carries
+  `Column.Fingerprint` (`internal/introspect`'s `columnFingerprint`), and
+  adding one there was out of this task's paths; `names.go`'s
+  `typeFingerprint` computes it from `Schema.Enums`/`Schema.Domains` instead,
+  the same `sha256(...)[:8]` shape, and it is `internal/core` and not
+  `internal/plan` that owns it for the same reason `resolveType` already does
+  (this file's earlier section): the opt-out is resolved and now also expired
+  against the source's catalog before the planner ever sees it.
+
+## Decisions made during the 2026-09-16 review round of T-0186
+
+- **`planStage` now sends `CodeTypeLiteralAllowed` (info) per honoured
+  `--allow-type-literal` opt-out and `CodeTypeLiteralOptOutExpired` (warn) per
+  yml `types:` entry `planRequest` did not carry forward** — the review found
+  both the honoured and the expired path silent, unlike the column equivalent
+  (`classify.CodeColumnOptOutExpired`, and `unmask_yml`/`unmask_flag` in a
+  masked/copied column's own printed reason). `r.typeAllow` (already existed)
+  and the new `r.typeExpired` (`run.go`, filled by the same loop over
+  `p.Types` in `planRequest`) are read once, by `planStage`, after the single
+  call to `planRequest` that call site already made — not from `buildConfig`'s
+  own second call to `planRequest`, which recomputes the same two fields
+  deterministically but must not re-send the events. `sortedTypeNames` orders
+  the honoured set so the transcript does not depend on map iteration.
+- **Test coverage the review found missing**: `internal/emit/emit_test.go`'s
+  `sample()` now sets `Config.Types`, so `TestWriteReadRoundTrip` covers the
+  `types:` block through `toDocument`/`document.config()`, and
+  `TestEmitWritesTypeAllow` pins `Options.Types`'s pass-through into
+  `Config.Types`. `internal/core/typeallow_test.go` is new: the four merge
+  states (matching fingerprint honoured; mismatched fingerprint, empty
+  `TypeFP`, and a name absent from `Schema.Enums`/`Domains` all expired) plus
+  the flag-overwrites-yml case, all driven directly through `planRequest` on a
+  bare `*run` — the pattern `refingerprint_test.go` already uses to test a
+  `run` method without a live pipeline.
+- **THREAT_MODEL.md is outside this task's paths and was not edited here.**
+  The review's third finding — T1's A4b row (line 46) still describes
+  `--allow-type-literal` as a per-run flag whose typed reason is the only
+  record, and line 88 states fingerprint expiry for columns only, both now
+  understating what the tool does since the yml `types:` block landed — is
+  filed as **T-0216** rather than fixed in place, per root CLAUDE.md's rule.
