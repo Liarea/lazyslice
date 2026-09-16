@@ -184,6 +184,14 @@ const (
 	// secret.
 	CodePasswordCommandWithheld event.Code = "secret.password_command.withheld"
 
+	// CodePasswordCommandFailed is T-0213: --password-command was set, no
+	// earlier password source resolved for the endpoint (a password in the
+	// DSN, $PGPASSWORD, ~/.pgpass), and the command itself did not supply one
+	// — a non-zero exit, a timeout, or empty stdout. {reason} names which of
+	// those it was and nothing else: never the command's stdout, which is the
+	// value under refusal here (THREAT_MODEL.md T5).
+	CodePasswordCommandFailed event.Code = "secret.password_command.failed"
+
 	// CodeConfigRead and CodeConfigWritten bracket the yml.
 	CodeConfigRead    event.Code = "config.file.read"
 	CodeConfigWritten event.Code = "config.file.written"

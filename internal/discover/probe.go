@@ -141,7 +141,26 @@ const rollbackBudget = 250 * time.Millisecond
 // What it returns is the tracer it dialled under, which is the only way a test
 // can see what the dial sent statement by statement; no production caller needs
 // it, because probe has already read its verdict.
-func probe(ctx context.Context, f *found) *pg.Tracer {
+//
+// pwCmd and cache are Options.PasswordCommand and Options.pwCache. When f has
+// no password from anywhere else and pwCmd is set, probe resolves it here,
+// before dialBudget's context is created and before f is dialled: the command
+// gets PasswordCommandTimeout's own 30 second budget rather than whatever is
+// left of the 1 second dial budget (PasswordCommandTimeout's doc comment), and
+// cache makes the resolution run at most once across every candidate this walk
+// probes, not once per candidate.
+func probe(ctx context.Context, f *found, pwCmd string, cache *passwordCache) *pg.Tracer {
+	if pwCmd != "" && !passwordAvailable(f.dsn) {
+		if pw, err := cache.resolve(ctx, pwCmd); err == nil && pw != "" {
+			f.dsn = injectPassword(f.dsn, pw)
+		}
+		// A resolution failure is not reported on f here: cache.resolve has
+		// already warned it once, on progress, and the candidate falls
+		// through to the ordinary no-password dial below, which reports
+		// noPassword on f.cand.ConnectErr exactly as it would have if
+		// PasswordCommand had never been set.
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, dialBudget)
 	defer cancel()
 

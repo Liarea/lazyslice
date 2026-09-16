@@ -103,6 +103,27 @@ type Options struct {
 	// /dev/tty and blocked in Confirm with no timeout — a hang under any
 	// automation with an allocated TTY (docker run -t, script(1), tmux).
 	Yes bool
+	// PasswordCommand is --password-command. rung0's own doc comment (below)
+	// and rung0Target's (ARCHITECTURE.md §9 Q4) both promise it supplies a
+	// password for a candidate that has none from anywhere else — the source
+	// or target a committed lazyslice.yml or the ladder itself found, not
+	// only one the operator named with --source/--target — and until T-0213's
+	// fix round nothing here ever ran it: passwordAvailable saw nothing,
+	// probe dialled with no password, and the candidate came back
+	// Reachable=false with noPassword, so chooseSource/chooseTarget could
+	// never pick it. probe now resolves this at most once per walk
+	// (pwCache, below), before dialling any candidate that needs it — never
+	// once per candidate, which would run a credential helper as many times
+	// as there are password-less candidates on the ladder.
+	//
+	// Set by internal/core's resolveEndpoints from Request.PasswordCommand,
+	// beside Yes and CreateTarget.
+	PasswordCommand string
+	// pwCache is where PasswordCommand's one resolution is cached across
+	// every candidate probe in a single Resolve or Discover call. It is
+	// unexported and built by walk, not by a caller: a caller supplying its
+	// own would defeat the "at most once" guarantee pwCache exists to give.
+	pwCache *passwordCache
 	// dial builds the read-only Docker client rungs 3 and 4 use. It is
 	// unexported so that only this package's tests can replace it.
 	dial func(dockerctx.Endpoint) (dockerAPI, error)
@@ -223,6 +244,11 @@ func (ladder) Discover(ctx context.Context, workdir string, sink event.Sink) ([]
 // short-circuits its own side, and a run that named both walks no rung and
 // makes no Docker call at all (ADR-008 §1).
 func Resolve(ctx context.Context, o Options, sink event.Sink) (Result, error) {
+	// Built here, once, so every path this function can take — walk's own
+	// loop, and noTarget's Q1/Q1' branches (sourceMajor, adopted), which
+	// receive this same o and never pass through walk — shares one
+	// *passwordCache (withPasswordCache's doc comment).
+	o = o.withPasswordCache()
 	var res Result
 	// An endpoint the operator named is FromFlag, and the provenance is set
 	// here rather than left at its zero value: pipeline.FromYml is that zero,
@@ -432,6 +458,18 @@ func (d dockerEndpoint) why() string {
 func walk(ctx context.Context, o Options, sink event.Sink) ([]found, dockerEndpoint) {
 	var cands []found
 
+	// One cache for the whole walk: every candidate probed below shares it,
+	// so --password-command runs at most once no matter how many candidates
+	// have no password from anywhere else (Options.PasswordCommand's doc
+	// comment). withPasswordCache is a no-op when Resolve already built one
+	// (the ordinary case — Resolve calls it before walk is ever reached) and
+	// only builds one here when walk is entered some other way, such as
+	// Discover's own ladder{}.Discover, which constructs a bare Options. o is
+	// this function's own copy of the caller's Options, so setting the field
+	// here does not leak the cache back to the caller or across an unrelated
+	// walk.
+	o = o.withPasswordCache()
+
 	if o.Config != nil {
 		cands = append(cands, rung0(o)...)
 	}
@@ -573,6 +611,29 @@ func rung3(ctx context.Context, o Options, sink event.Sink) ([]found, dockerEndp
 	return cands, dock
 }
 
+// withPasswordCache returns o with pwCache built, when PasswordCommand is set
+// and no caller already built one.
+//
+// It exists because Options is copied by value down three independent paths
+// that all end at probe: walk's own loop, and noTarget's Q1/Q1' branches
+// (sourceMajor, adopted), reached from Resolve rather than from walk. Building
+// the cache only inside walk — as this package did before T-0213's review
+// round — left every copy of Options that noTarget hands to sourceMajor or
+// adopted with a nil pwCache, because that Options is Resolve's own parameter
+// and never passed through walk at all: sourceMajor's probe of a source that
+// short-circuited the ladder (namedSource, never walked) and adopted's probe
+// of a freshly provisioned container both reached probe(ctx, f, pwCmd, nil)
+// with pwCmd != "" and panicked. Calling this once, at the top of Resolve,
+// before any of those paths can run, makes every copy carry the same
+// *passwordCache — including the one walk's own loop uses, since walk calls
+// this too and it is a no-op once o.pwCache is already set.
+func (o Options) withPasswordCache() Options {
+	if o.PasswordCommand != "" && o.pwCache == nil {
+		o.pwCache = &passwordCache{w: progressOf(o)}
+	}
+	return o
+}
+
 // probe dials one candidate, through Options.dialCandidate when a test supplied
 // one.
 func (o Options) probe(ctx context.Context, f *found) {
@@ -580,7 +641,7 @@ func (o Options) probe(ctx context.Context, f *found) {
 		o.dialCandidate(ctx, f)
 		return
 	}
-	probe(ctx, f)
+	probe(ctx, f, o.PasswordCommand, o.pwCache)
 }
 
 // dialDocker opens the Docker client, through Options.dial when a test supplied

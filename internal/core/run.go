@@ -564,6 +564,16 @@ func (r *run) resolveEndpoints(ctx context.Context) error {
 		Target:       r.req.Target,
 		NeedTarget:   r.req.Mode.needsTarget(),
 		CreateTarget: r.req.CreateTarget,
+		// R2-16 (THREAT_MODEL.md T5, T6, reviewed T-0213 fix round): rung0's
+		// own doc comment and ARCHITECTURE.md §9 Q4 both promise
+		// --password-command supplies a password for a candidate the ladder
+		// itself found, not only one named with --source/--target — and
+		// without this line the ladder probed every password-less candidate
+		// with none, failed auth, and left it Reachable=false, so
+		// chooseSource/chooseTarget could never choose it. discover.probe
+		// resolves this at most once per walk (Options.pwCache), so setting
+		// it here costs nothing on a run where nothing needs it.
+		PasswordCommand: r.req.PasswordCommand,
 		// --yes and "no controlling terminal" are one path (ADR-008 section 7).
 		// Without this line the flag stops at core: a run under an allocated
 		// TTY (docker run -t, script(1), tmux) opens /dev/tty and blocks in the
@@ -612,6 +622,22 @@ func refusalStop(err error) error {
 		Code: refusal.Code, Exit: refusal.Exit, Args: refusal.Args,
 		Message: refusal.Message, err: err, sent: true,
 	}
+}
+
+// passwordCommandStop is secret.password_command.failed (T-0213): --password-
+// command ran for ref and did not supply a password. err is always a
+// *discover.PasswordCommandError here — resolveEndpoints and discover's own
+// dial have already been through — so the reason it carries is the exit
+// status, the timeout or "printed no password", never the command's stdout.
+func passwordCommandStop(ref dsn.Ref, err error) *Stop {
+	reason := err.Error()
+	var pce *discover.PasswordCommandError
+	if errors.As(err, &pce) {
+		reason = pce.Reason
+	}
+	s := wrap(CodePasswordCommandFailed, exitCredential, err, "no password for %s: --password-command %s", ref.String(), reason)
+	s.Args = event.Args{event.ArgHost: ref.String(), event.ArgReason: reason}
+	return s
 }
 
 // unreachableTarget is target.refused.unreachable with the two arguments its
@@ -697,6 +723,10 @@ func (r *run) discover(ctx context.Context) error {
 	if err != nil {
 		return wrap(CodeUsage, exitUsage, err, "--source is not a Postgres connection string")
 	}
+	d, err = discover.ResolvePassword(ctx, d, r.req.PasswordCommand)
+	if err != nil {
+		return passwordCommandStop(sourceRef, err)
+	}
 	r.sourceRef = sourceRef
 	r.sourceCand = candidateOf(sourceRef, r.sourceProv, r.sourceLabel)
 
@@ -751,6 +781,10 @@ func (r *run) openTarget(ctx context.Context) error {
 	d, targetRef, err := dsn.Parse(r.req.Target)
 	if err != nil {
 		return wrap(CodeUsage, exitUsage, err, "--target is not a Postgres connection string")
+	}
+	d, err = discover.ResolvePassword(ctx, d, r.req.PasswordCommand)
+	if err != nil {
+		return passwordCommandStop(targetRef, err)
 	}
 	r.targetCand = candidateOf(targetRef, r.targetProv, r.targetLabel)
 

@@ -1014,6 +1014,20 @@
   message: "password_command was not written to {path}: its argv looks like it embeds a value rather than fetching one; pass --password-command again on every run"
   args: [path]
 
+# T-0213 (THREAT_MODEL.md T5, 2026-09-16 amendment): --password-command was
+# set and no earlier source in ARCHITECTURE.md §9's Q4 precedence (a password
+# in the connection string, $PGPASSWORD, ~/.pgpass) resolved one for this
+# endpoint, so internal/discover ran the command and it did not supply a
+# password — a non-zero exit, a 30 second timeout, or empty stdout. {reason}
+# names which of those it was and nothing else the command printed reaches
+# this line, any other event, lazyslice.yml or the trace.
+- code: secret.password_command.failed
+  kind: error
+  stage: discover
+  exit: 5
+  message: "no password for {host}: --password-command {reason}"
+  args: [host, reason]
+
 - code: config.file.read
   kind: info
   stage: emit

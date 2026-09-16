@@ -137,6 +137,34 @@ func TestCreateTargetProvisionsWithoutAQuestion(t *testing.T) {
 	}
 }
 
+// sourceMajor's probe of a --source that short-circuited the ladder shares
+// Options.pwCache with walk's own candidates, so a run with --password-command
+// and --create-target does not panic dereferencing a nil *passwordCache
+// (T-0213 review round: the two production probe call sites question.go
+// reaches, sourceMajor and adopted, used to receive Resolve's own Options
+// copy, whose pwCache was built only inside walk and so stayed nil on this
+// path). dialCandidate is deliberately left unset — every other test in this
+// file sets it, which is exactly why this gap went uncaught — so sourceMajor
+// dials the named source through the real probe, on a port nothing answers;
+// the assertion is that Resolve returns an ordinary error instead of
+// panicking, not that provisioning succeeds.
+func TestPasswordCommandDoesNotPanicResolvingANamedSourcesMajor(t *testing.T) {
+	quietEnvironment(t)
+	dir := t.TempDir()
+
+	_, err := Resolve(t.Context(), Options{
+		Workdir: dir, NeedTarget: true, CreateTarget: true,
+		Source:          "postgres://app@127.0.0.1:1/shop",
+		PasswordCommand: "echo hunter2",
+		DockerHost:      localDockerHost,
+		dial:            fakeDial(&fakeDocker{}),
+		provisioner:     refuseToProvision(t),
+	}, event.Discard)
+	if err == nil {
+		t.Fatal("Resolve: got nil error, want a refusal — the source on port 1 answers nothing")
+	}
+}
+
 // --create-target is Q1's answer and nothing more (ADR-008 §6), and Q1 fires
 // only when the ladder found nothing target-shaped. ADR-008 §1 enumerates what
 // short-circuits the ladder — --source, --target, the positional DSN and rung 0
