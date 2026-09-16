@@ -7,9 +7,9 @@
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
-| E5 Hardening | 5 | 5 | 1 | 78 | 0 | 0 |
+| E5 Hardening | 5 | 4 | 1 | 79 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 50 | 0 | 26 | 4 | 0 |
+| E9 Later | later | 52 | 0 | 26 | 4 | 0 |
 
 ## Open and in progress
 
@@ -50,7 +50,6 @@
 - T-0184 [open] E5 · Should a headless run auto-select a target on the source's own cluster? ()
 - T-0185 [open] E9 · ARCHITECTURE.md does not know about --allow-type-literal ()
 - T-0186 [open] E5 · --allow-type-literal is not recorded in lazyslice.yml ()
-- T-0192 [open] E5 · The secret file is protected on its resolved path: symlinked parent directories and hard links refuse; password_command is screened before it is written to the yml (sonnet)
 - T-0195 [open] E9 · classify: national_id's checksum-only formats can weak-ratio-mask an ordinary numeric business key ()
 - T-0196 [open] E9 · Migrate the tracker to GitHub Issues and Projects behind the existing tools/tracker.py command surface (sonnet)
 - T-0197 [open] E9 · R2-05/A10 residual: a name in a language names.txt does not carry still reports "no name or value signal" as a clean bill of health (sonnet)
@@ -70,9 +69,12 @@
 - T-0211 [open] E9 · ROADMAP.md stops naming docs/BUILD_PLAN.md as the sequencing authority (sonnet)
 - T-0212 [open] E9 · renderSafe redacts by default, and prints a transform refusal's reason under the values flag ()
 - T-0213 [open] E9 · Wire --password-command to actually run, or refuse it as unimplemented ()
+- T-0214 [open] E9 · A withheld password_command leaves a marker in lazyslice.yml so a later run without one is refused, as a withheld --where already is (sonnet)
+- T-0215 [open] E9 · Secret-file and password_command tests pin the bypass shapes, not only the happy attack shapes (sonnet)
 
 ## Recently closed
 
+- T-0192 [done] E5 · The secret file is protected on its resolved path: symlinked parent directories and hard links refuse; password_command is screened before it is written to the yml → done
 - T-0028 [done] E3 · Create GitHub repository Liarea/lazyslice and homebrew-tap, push main, add HOMEBREW_TAP_TOKEN secret → done
 - T-0090 [done] E5 · T-PERF: performance baseline and CI throughput guard → done
 - T-0163 [done] E5 · the plan-time DDL literal rule does not read index predicates or domain CHECKs → done
@@ -97,4 +99,3 @@
 - T-0131 [done] E5 · Events carry no source value: polymorphic inference reports unknown type values by count and keyed digest, and an output-sink canary test proves it → done
 - T-0132 [done] E5 · The masker is chosen per FK-connected equality group, not per column → done
 - T-0133 [done] E5 · Core owns the run lifecycle: complete is written only after verify passes, and a residual failure empties the target → done
-- T-0134 [done] E5 · Recreated DDL carries no sensitive literal: defaults on masked columns are masked, strong hits elsewhere refuse, verify scans the target catalog → partial
