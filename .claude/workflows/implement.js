@@ -33,10 +33,10 @@ Rules: you may write only under these paths: ${paths}. You may not add a module 
 
 const DEV = { type: 'object', required: ['files', 'summary', 'changelog', 'checks_output', 'checks_passed', 'concerns', 'postmortem'], properties: {
   files: { type: 'array', items: { type: 'string' } }, summary: { type: 'string', description: 'at most 150 words' },
-  changelog: { type: 'array', items: { type: 'string' }, description: 'three to eight bullets for the commit body and the release notes: each one user-visible change or fix in plain words, naming the flag, exit code, column kind or behaviour, never a file or function name or a tracker id; a doc-only change gets one bullet' },
+  changelog: { type: 'array', minItems: 1, items: { type: 'string', minLength: 40 }, description: 'three to eight bullets for the commit body and the release notes: each one user-visible change or fix in plain words, naming the flag, exit code, column kind or behaviour, never a file or function name or a tracker id; a doc-only change gets one bullet' },
   checks_output: { type: 'string', description: 'last 20 lines of make check' }, checks_passed: { type: 'boolean' },
   concerns: { type: 'array', items: { type: 'string' }, description: 'things noticed outside scope, missing deps, doubts' },
-  postmortem: { type: 'string', description: 'went well | went badly | change next time' } } }
+  postmortem: { type: 'string', minLength: 80, description: 'went well | went badly | change next time; T-0213 returned ok and a one-letter changelog, so both fields now have a floor' } } }
 
 // The fix round returns the developer's shape, but its changelog is optional and is appended to the original bullets: a fix that changes nothing a user sees adds no bullet. A required changelog here failed T-0188's landing five times (2026-09-15) when the fixer's return was rejected for the missing field.
 const FIX = { ...DEV, required: DEV.required.filter(k => k !== 'changelog') }

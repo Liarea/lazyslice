@@ -1,0 +1,8 @@
+{
+ "ee2c64f": [
+  "--password-command now runs: when no earlier password source resolves for an endpoint (a password in the DSN, PGPASSWORD, ~/.pgpass), the command runs through the shell with a 30 second limit and its output, with one trailing newline trimmed, is the password",
+  "The command's output never reaches an event, a log line, a refusal message, lazyslice.yml or the trace; its own stderr passes through to the operator untouched",
+  "A command that exits non-zero, times out or prints nothing refuses the run with a message naming the exit status and nothing else",
+  "The command also runs for an endpoint the discovery ladder resolved, not only for one named on the command line"
+ ]
+}

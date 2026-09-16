@@ -14,6 +14,8 @@ Usage: relnotes.py FROM TO [--no-other]
   TO    the ref being released; inclusive
   --no-other  omit commits that carry no bullet body
 """
+import json
+import os
 import re
 import subprocess
 import sys
@@ -23,6 +25,8 @@ SECTIONS = [
     ("Pipeline", {"core", "extract", "load", "pg", "introspect", "emit", "discover", "tui", "cli"}),
     ("Build, CI and release", {"foundations", "hardening", "ci", "bench", "release"}),
 ]
+OVERRIDES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "overrides.json")
+OVERRIDES = json.load(open(OVERRIDES_PATH)) if os.path.exists(OVERRIDES_PATH) else {}
 SKIP = re.compile(r"^(Tracker|ROADMAP|docs?/|Tracker:|chore:)", re.I)
 
 
@@ -68,6 +72,12 @@ def main(argv):
         m = re.match(r"^([a-z][a-z0-9/-]*):\s*(.*?)(?:\s*\((T-\d+[^)]*)\))?$", subject)
         stage, title, task = (m.group(1), m.group(2), m.group(3)) if m else ("other", subject, None)
         bs = bullets(body)
+        # tools/relnotes/overrides.json maps a commit's short or full sha to the bullets its body should have had;
+        # a pushed commit on a protected branch cannot be rewritten (T-0213's body was one letter, 2026-09-16).
+        for key, repl in OVERRIDES.items():
+            if sha.startswith(key):
+                bs = list(repl)
+
         if not bs:
             subjects_only.append((title, sha[:7]))
             continue
