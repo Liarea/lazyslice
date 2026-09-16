@@ -3,12 +3,12 @@ id: T-0192
 title: "The secret file is protected on its resolved path: symlinked parent directories and hard links refuse; password_command is screened before it is written to the yml"
 epic: E5
 phase: 5
-status: open
+status: done
 owner: sonnet
 created: 2026-09-15
-started: ""
-closed: ""
-outcome: ""
+started: 2026-09-16
+closed: 2026-09-16
+outcome: done
 ---
 
 # T-0192 · The secret file is protected on its resolved path: symlinked parent directories and hard links refuse; password_command is screened before it is written to the yml
@@ -25,6 +25,10 @@ Red team 2026-09-15 R2-14, R2-15, R2-16: internal/core/run.go checks the secret 
 
 - 2026-09-15 created
 
+- 2026-09-16 started
+
+- 2026-09-16 closed: done
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+went well: the three checks (a symlinked parent resolved before the mode check, a hard link refused, a password_command screened for a literal secret) each landed with a unit test, and the Opus reviewer's round-2 reproduction of a slash-bearing password recorded verbatim as a path was fixed by dropping the unanchored path branch, which made the code simpler | went badly: two fix rounds for a Sonnet task; a withheld password_command leaves lazyslice.yml byte-identical to a run that never had one, unlike the --where precedent (filed); the new tests do not pin the bypass shapes the reviewer named (filed) | change next time: a screening rule's brief lists the exact strings it must accept and refuse before code, the same lesson as T-0187
