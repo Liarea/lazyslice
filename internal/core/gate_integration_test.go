@@ -83,7 +83,28 @@ func TestAGateRefusalEndsTheRunInsteadOfTryingTheRunnerUp(t *testing.T) {
 		ConfigPath: filepath.Join(dir, "lazyslice.yml"),
 		SecretFile: filepath.Join(dir, "lazyslice.secret"),
 		NoConfig:   true,
-		Yes:        true,
+		// Not --yes, and a scripted prompter standing in for a controlling
+		// terminal: T-0184 / ADR-013 (proposed) refuses a headless run before
+		// chooseTarget's tie-break ever runs when every target-shaped
+		// candidate is on the source's own cluster, which both app_test and
+		// app_spare are here. That refusal is a different assertion than the
+		// one this test exists to pin — see
+		// TestAHeadlessRunRefusesWhenEveryCandidateIsOnTheSourceCluster below
+		// for it — so this test needs to stay interactive.
+		//
+		// Dropping Yes alone does not do that: "headless" is --yes OR no
+		// controlling terminal (internal/discover's prompterFor/isHeadless),
+		// and go test itself has no controlling terminal, so an unmodified
+		// Request with Yes left false is still headless and still trips this
+		// ADR's own refusal instead of the gate's (the 2026-09-16 reverify's
+		// finding). prompter is what resolveEndpoints copies onto
+		// discover.Options.Prompter, which is all isHeadless checks for — it
+		// is never actually asked a question here, because target-shaped
+		// candidates already exist and neither Q1 nor Q2 is reached — so its
+		// mere presence is enough to make isHeadless treat this run as
+		// interactive, exactly as a real controlling terminal would, and reach
+		// chooseTarget's tie-break and the gate's own refusal below.
+		prompter: stubPrompter{},
 	}
 
 	_, err := Run(ctx, req, sink)
@@ -112,6 +133,19 @@ func TestAGateRefusalEndsTheRunInsteadOfTryingTheRunnerUp(t *testing.T) {
 			"and wrote to a database it never showed the operator", n)
 	}
 }
+
+// stubPrompter is a discover.Prompter that answers as the old interactive run
+// did, for a test that needs resolveEndpoints's ladder to treat a run as
+// interactive with no controlling terminal available (T-0184, ADR-013 review,
+// the 2026-09-16 reverify). It is never actually asked a question by
+// TestAGateRefusalEndsTheRunInsteadOfTryingTheRunnerUp — target-shaped
+// candidates already exist there, so neither Q1 nor Q2 is reached — but
+// isHeadless only checks whether somebody is here to ask, so its presence
+// alone is what keeps that test off this ADR's own refusal.
+type stubPrompter struct{}
+
+func (stubPrompter) Confirm(_ string, def bool) (bool, error) { return def, nil }
+func (stubPrompter) Close() error                             { return nil }
 
 // count is how many times a code reached the sink.
 func count(codes []event.Code, want event.Code) int {

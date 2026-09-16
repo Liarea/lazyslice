@@ -260,6 +260,82 @@ func TestHeadlessQuestionLadderAsksNothingAndExits(t *testing.T) {
 	}
 }
 
+// T-0184, ADR-013 review finding 1: the headless same-cluster refusal must
+// fire on this package's own definition of headless — --yes OR no controlling
+// terminal (Options.Yes doc comment; prompterFor) — not on --yes alone. A CI
+// job or cron entry that simply omits --yes is still nobody at a terminal, and
+// before this test the refusal was gated on o.Yes and so missed exactly that
+// case: reachable, but only on the source's own cluster.
+//
+// No Yes and no o.Prompter here: this pins the equivalence against a process
+// with no controlling terminal, which is what go test itself is
+// (TestHeadlessQuestionLadderAsksNothingAndExits's own comment notes the same
+// reliance, and unlike that test's Q1 prompt, isHeadless opens and closes the
+// controlling terminal without ever calling Confirm, so this cannot block a
+// run started from one).
+func TestHeadlessSameClusterRefusalDoesNotNeedYes(t *testing.T) {
+	quietEnvironment(t)
+	dir := t.TempDir()
+	write(t, dir, ".env", "DATABASE_URL=postgres://app@10.0.0.5:5432/shop_test\n")
+
+	opts := Options{
+		Workdir:       dir,
+		NeedTarget:    true,
+		Source:        "postgres://app@10.0.0.5:5432/shop",
+		dialCandidate: sayVersion(16),
+	}
+
+	_, err := Resolve(t.Context(), opts, event.Discard)
+	r, ok := AsRefusal(err)
+	if !ok {
+		t.Fatalf("Resolve = %v, want the headless same-cluster refusal with no --yes at all", err)
+	}
+	if r.Code != CodeTargetHeadlessSameCluster || r.Exit != exitTarget {
+		t.Errorf("refusal = %s/exit %d, want %s/exit %d", r.Code, r.Exit, CodeTargetHeadlessSameCluster, exitTarget)
+	}
+}
+
+// The sibling of the test above (T-0184, ADR-013 review finding 4): a headless
+// run with a reachable target-shaped candidate on a genuinely different
+// cluster must still be chosen and loaded, not swept into the same-cluster
+// refusal by an over-broad check. Two reachable candidates on different
+// host:port pairs, one sharing the source's cluster and one not, and --yes:
+// Resolve returns the off-cluster candidate and never emits
+// target.refused.headless_same_cluster.
+func TestHeadlessWithAnOffClusterCandidateChoosesItInstead(t *testing.T) {
+	quietEnvironment(t)
+	dir := t.TempDir()
+	write(t, dir, ".env",
+		"DATABASE_URL=postgres://app@10.0.0.5:5432/shop_test\n"+
+			"POSTGRES_URL=postgres://app@10.0.0.9:5432/shop_scratch\n")
+
+	opts := Options{
+		Workdir:       dir,
+		NeedTarget:    true,
+		Yes:           true,
+		Source:        "postgres://app@10.0.0.5:5432/shop",
+		dialCandidate: sayVersion(16),
+	}
+
+	var codes []event.Code
+	sink := event.SinkFunc(func(e event.Event) { codes = append(codes, e.Code) })
+
+	res, err := Resolve(t.Context(), opts, sink)
+	if err != nil {
+		t.Fatalf("Resolve = %v, want the off-cluster candidate chosen, not a refusal", err)
+	}
+	if !strings.Contains(res.Target, "10.0.0.9:5432/shop_scratch") {
+		t.Errorf("target = %q, want the candidate on the source's cluster passed over "+
+			"for the one that is not", res.Target)
+	}
+	for _, c := range codes {
+		if c == CodeTargetHeadlessSameCluster {
+			t.Error("emitted the headless same-cluster refusal even though a genuinely " +
+				"off-cluster candidate was reachable")
+		}
+	}
+}
+
 // A run that named both endpoints walks no rung and makes no Docker call
 // (ADR-008 §1). The stub dialler fails the test if it is reached.
 func TestBothEndpointsGivenSkipsDiscovery(t *testing.T) {

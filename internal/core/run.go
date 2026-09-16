@@ -256,8 +256,28 @@ type run struct {
 	sourceLabel string
 	targetProv  pipeline.Provenance
 	targetLabel string
-	target      *pg.Target
-	targetPool  *pgxpool.Pool
+	// targetNamed is discover.Result.TargetNamed (resolveEndpoints): true when
+	// the operator named the target themselves — --target, the positional DSN,
+	// or a committed lazyslice.yml's target: block — false when the ladder
+	// picked it. It is what openTarget's gate step keys the T-0184 escalation
+	// on (ADR-013 review finding 1), rather than targetProv: rung 0 carries the
+	// *file's own* provenance forward (FromEnvVar, FromContainer, FromCompose —
+	// see discover.Result's doc comment), never pipeline.FromYml, so a target
+	// a committed yml named and a target the ladder chose can carry the exact
+	// same targetProv and are distinguishable only by this field. It is always
+	// set — false, not the zero value's ambiguity — whenever resolveEndpoints
+	// ran the ladder at all; a run that named both endpoints outright sets it
+	// via the FromFlag branches above instead and never calls discover.Resolve.
+	targetNamed bool
+	// headless is discover.Headless(opts) from the same discover.Options the
+	// ladder was resolved with (resolveEndpoints) — --yes OR no controlling
+	// terminal, ADR-008 §7's own definition. It is what openTarget's gate
+	// step asks before escalating Eligibility.SameCluster on a ladder-chosen
+	// target (T-0184, ADR-013 review finding 3); it is false, and unused,
+	// whenever both endpoints were named and the ladder never ran.
+	headless   bool
+	target     *pg.Target
+	targetPool *pgxpool.Pool
 	// lease is this run's ownership of the target: a dedicated target
 	// connection holding an open transaction with pg_try_advisory_xact_lock over
 	// a key derived from the target database name, taken before the gate's first
@@ -501,6 +521,7 @@ func (r *run) resolveEndpoints(ctx context.Context) error {
 	}
 	if r.req.Target != "" {
 		r.targetProv, r.targetLabel = pipeline.FromFlag, ""
+		r.targetNamed = true
 	}
 
 	if r.req.Mode != ModeRun {
@@ -518,7 +539,7 @@ func (r *run) resolveEndpoints(ctx context.Context) error {
 		return nil
 	}
 
-	res, err := discover.Resolve(ctx, discover.Options{
+	opts := discover.Options{
 		Workdir:    r.req.Workdir,
 		DockerHost: r.req.DockerHost,
 		// Rung 0 is the committed file readConfig has already read; --reconfigure
@@ -533,12 +554,30 @@ func (r *run) resolveEndpoints(ctx context.Context) error {
 		// TTY (docker run -t, script(1), tmux) opens /dev/tty and blocks in the
 		// prompt with no timeout instead of taking Q1's headless refusal.
 		Yes: r.req.Yes,
-	}, r.sink)
+		// Prompter carries Request's own unexported prompter through to the
+		// ladder unchanged; nil (the case for every real run) leaves
+		// prompterFor deciding from Yes and the controlling terminal exactly
+		// as before this field existed. TestEveryLadderOptionTheRequestCarriesIsCopied
+		// does not require this line — Request's field is unexported and so
+		// never matched against discover.Options.Prompter by name — but the
+		// ladder still needs the value copied for a test to construct an
+		// interactive run at all (T-0184, ADR-013 review, the 2026-09-16
+		// reverify).
+		Prompter: r.req.prompter,
+	}
+	res, err := discover.Resolve(ctx, opts, r.sink)
 	if err != nil {
 		return refusalStop(err)
 	}
 	r.req.Source, r.sourceProv, r.sourceLabel = res.Source, res.SourceProvenance, res.SourceLabel
 	r.req.Target, r.targetProv, r.targetLabel = res.Target, res.TargetProvenance, res.TargetLabel
+	r.targetNamed = res.TargetNamed
+	// Kept for openTarget's gate step (T-0184, ADR-013 review finding 3):
+	// discover.Headless(opts) over the same Options the ladder was resolved
+	// with, rather than a second discover.Options literal built later —
+	// TestEveryLadderOptionTheRequestCarriesIsCopied reads run.go's
+	// discover.Options literal as exactly one.
+	r.headless = discover.Headless(opts)
 	return nil
 }
 
@@ -776,6 +815,37 @@ func (r *run) openTarget(ctx context.Context) error {
 	// headless run whose target the discovery ladder chose on the production
 	// server wrote there in silence (the 2026-09-15 red team).
 	if e.SameCluster {
+		// T-0184, ADR-013 review finding 3: discover's own same-cluster check
+		// (allOnSourceCluster) is the cheap clusterKey comparison — host:port
+		// only — and two candidates can be on one physical cluster and compare
+		// unequal there (host.docker.internal vs 127.0.0.1, a pooler, an SSH
+		// tunnel). The gate's Eligibility.SameCluster is the authoritative
+		// signal (system_identifier, or cluster identity/endpoint as a
+		// fallback) and arrives too late for discover to have refused on it.
+		// So when the target was chosen by the ladder rather than named by the
+		// operator (--target, the positional DSN, or a committed
+		// lazyslice.yml — r.targetNamed is false) and the run is headless, the
+		// gate's own signal is a refusal here too, not only a warning: the
+		// control ADR-013 exists to add must not be bypassable by an address
+		// spelling discover's cheap check missed. An operator who named
+		// --target on the source's cluster on purpose is unaffected, exactly
+		// as ADR-013 says for the cheap check — and so is one whose committed
+		// lazyslice.yml already names it: r.targetNamed is the fact that
+		// matters here, not r.targetProv, because rung 0 carries the file's
+		// own provenance forward (FromEnvVar, FromContainer, FromCompose) and
+		// never stamps pipeline.FromYml, so a yml-named target can carry the
+		// same provenance a ladder-chosen one would (ADR-013 review finding 1).
+		if !r.targetNamed && r.headless {
+			return &Stop{
+				Code: CodeTargetGateSameCluster, Exit: exitTarget,
+				Args: event.Args{
+					event.ArgHost: targetRef.Host,
+					event.ArgFlag: "--target",
+				},
+				Message: "the target " + targetRef.String() + " is on " + targetRef.Host +
+					", the source's own cluster: pass --target to write there on purpose",
+			}
+		}
 		r.send(event.Discover, event.Warn, CodeTargetSameCluster, event.Args{
 			event.ArgDatabase: targetRef.Database,
 		})

@@ -238,8 +238,8 @@ func prompterFor(o Options) (p Prompter, done func(), ok bool) {
 	if o.Yes {
 		return nil, nil, false
 	}
-	if o.prompter != nil {
-		return o.prompter, func() {}, true
+	if o.Prompter != nil {
+		return o.Prompter, func() {}, true
 	}
 	opened, err := openPrompter()
 	if err != nil {
@@ -247,6 +247,29 @@ func prompterFor(o Options) (p Prompter, done func(), ok bool) {
 	}
 	return opened, func() { _ = opened.Close() }, true
 }
+
+// isHeadless answers "is there nobody to ask", reusing prompterFor's own
+// predicate rather than testing o.Yes alone (T-0184, ADR-013 review finding
+// 1): this package's definition of headless has always been --yes OR no
+// controlling terminal (Options.Yes doc comment; prompterFor above), and a
+// caller that tested o.Yes by itself would treat a CI job or cron entry that
+// simply omits --yes as interactive. It opens and immediately releases the
+// controlling terminal prompterFor would open, so it costs one open/close and
+// asks no question.
+func isHeadless(o Options) bool {
+	_, done, ok := prompterFor(o)
+	if done != nil {
+		done()
+	}
+	return !ok
+}
+
+// Headless is isHeadless, exported so that internal/core can ask the same
+// question outside this package — the gate's own same-cluster signal
+// (internal/pg's Eligibility.SameCluster) needs it too (T-0184, ADR-013
+// review finding 3), and internal/core has no controlling-terminal test of
+// its own to duplicate it with.
+func Headless(o Options) bool { return isHeadless(o) }
 
 // provisionerFor builds the write-capable Docker client, on the endpoint rung 3
 // already resolved and already established is local and reachable.

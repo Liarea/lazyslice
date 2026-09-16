@@ -53,7 +53,7 @@ func TestQ1CreatesAContainerOnlyWhenItIsAnsweredYes(t *testing.T) {
 				dial:          fakeDial(&fakeDocker{}),
 				dialCandidate: sayVersion(16),
 				provisioner:   handOut(p),
-				prompter:      asked,
+				Prompter:      asked,
 			}, event.Discard)
 
 			if len(asked.questions) != 1 {
@@ -125,7 +125,7 @@ func TestCreateTargetProvisionsWithoutAQuestion(t *testing.T) {
 		dial:          fakeDial(&fakeDocker{}),
 		dialCandidate: sayVersion(16),
 		provisioner:   handOut(p),
-		prompter:      asked,
+		Prompter:      asked,
 	}, event.Discard); err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -294,7 +294,7 @@ func TestRemoteDockerEndpointYieldsNoLocalCandidate(t *testing.T) {
 		Source:      "postgres://app@127.0.0.1:1/shop",
 		dial:        fakeDial(api),
 		provisioner: refuseToProvision(t),
-		prompter:    asked,
+		Prompter:    asked,
 	}, event.Discard)
 
 	r, ok := AsRefusal(err)
@@ -333,7 +333,7 @@ func TestStoppedTargetIsAskedBeforeTheGate(t *testing.T) {
 		dial:          fakeDial(api),
 		dialCandidate: sayVersion(16),
 		provisioner:   handOut(p),
-		prompter:      asked,
+		Prompter:      asked,
 	}, event.Discard)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
@@ -362,7 +362,7 @@ func TestStoppedTargetHeadlessStartsAndNoStops(t *testing.T) {
 		wantStart bool
 	}{
 		{name: "--yes takes the default and starts it", opts: func(o *Options) { o.Yes = true }, wantStart: true},
-		{name: "no stops the run", opts: func(o *Options) { o.prompter = &fakePrompter{answer: false} }},
+		{name: "no stops the run", opts: func(o *Options) { o.Prompter = &fakePrompter{answer: false} }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			quietEnvironment(t)
@@ -532,7 +532,7 @@ func TestPipedStdinIsNotAnAnswer(t *testing.T) {
 		dial:          fakeDial(&fakeDocker{}),
 		dialCandidate: sayVersion(16),
 		provisioner:   handOut(p),
-		prompter:      silent,
+		Prompter:      silent,
 	}, event.Discard)
 
 	if !strings.Contains(asked.String(), "start one?") {
