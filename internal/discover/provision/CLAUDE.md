@@ -112,10 +112,14 @@ adopt logic against a fake daemon; `go test -tags integration
 ./internal/discover/provision/...` runs it against a real one and skips
 cleanly when Docker is absent.
 
-**Never:** remove a container, an image or a volume; publish on anything but
-loopback; create a container on an endpoint the caller has not established is
-local; put the password in an event, in `lazyslice.yml` or in a `dsn.Ref`;
-read a compose file for a host, port, user, password or database name.
+**Never:** remove a container that was ever started or that this package
+adopted, an image, or a volume — the one narrow exception is `create()`'s own
+port-allocation retry (T-0178, below), which removes a container it just
+created and that never started, because it never became the target this
+package promises to keep; publish on anything but loopback; create a container
+on an endpoint the caller has not established is local; put the password in an
+event, in `lazyslice.yml` or in a `dsn.Ref`; read a compose file for a host,
+port, user, password or database name.
 
 ## Decisions made during implementation
 
@@ -204,12 +208,74 @@ read a compose file for a host, port, user, password or database name.
   is written from that step. An amendment to §6 step 3, or an ADR that
   supersedes it, is owed for that sentence; nothing about the wait's duration
   is.
-- **The `integration (14)` leg failed on something else again**, and it is not
-  fixed here: `FreePort` binds a port, closes it, and hands the number back, so
-  two test binaries running in parallel — `internal/discover` and
-  `internal/discover/provision` — both chose 5433 and the second container's
-  start failed with "Bind for 127.0.0.1:5433 failed: port is already allocated".
-  That race is in the product and not only in the tests: two `lazyslice`
-  runs started at once on one machine hit it too. **Owed:** a tracker task —
-  `create` should retry on the next free port when a start fails for an
-  allocated binding.
+- **The `integration (14)` leg failed on something else again**: `FreePort`
+  binds a port, closes it, and hands the number back, so two test binaries
+  running in parallel — `internal/discover` and `internal/discover/provision`
+  — both chose 5433 and the second container's start failed with "Bind for
+  127.0.0.1:5433 failed: port is already allocated". That race is in the
+  product and not only in the tests: two `lazyslice` runs started at once on
+  one machine hit it too.
+- **T-0178: `create` retries on the next free port when its own port lost the
+  race, and only then.** The bullet above was left owed; this closes it.
+  `FreePort`'s probe (bind, close, hand the number back) rules out a plain Go
+  listener on 127.0.0.1 at the instant it runs and nothing after — not another
+  process picking the same number in the same instant, and not, it turns out,
+  a port a *running* container is already publishing through the layer Docker
+  Desktop puts in front of a container's port on macOS: that reads as free to
+  the probe every single time, which is what made the naive retry (call
+  `FreePort` again, try once more) loop through its whole budget re-choosing
+  the one port that was never going to work. So the retry is two things and
+  the second is the one that matters: `create()` now loops on the *daemon's*
+  own "port is already allocated" — surfacing at `ContainerStart`, because
+  Docker Desktop's proxy layer does not appear to validate the binding at
+  `ContainerCreate` the way a plain daemon does — removing the container that
+  lost the race and asking `freePortExcluding` (unexported; `FreePort` is
+  `freePortExcluding(nil)`) for another port that is not that one. Five
+  attempts (`portAllocationRetries`), because the race itself is rare and the
+  exclusion is what keeps each attempt from being spent on the same wrong
+  answer.
+  **A caller-named port is retried too, as of the 2026-09-16 review.** The
+  first landing above excluded `Request.Port != 0` from the retry, reasoning
+  that Q1's prompt already told the operator the port before `Provision` ran,
+  so disagreeing with it silently would make the question and the container
+  lie to each other. That reasoning covered a lie the code never had to
+  choose: `askQ1` (`internal/discover/question.go`) is the *only* production
+  caller that ever names `Request.Port` — `--create-target` and the
+  integration test both leave it 0 — and it is also the path with by far the
+  longest window between `FreePort`'s bind-then-close probe and the daemon's
+  actual bind, since a human can sit on Q1's prompt for as long as they like
+  and an image pull runs after that. Excluding it left the one production path
+  this package's own CLAUDE.md names as the race's motivating case —
+  "two lazyslice runs started at once on one machine hit it too" — with no
+  retry at all, while a CLAUDE.md note and this file both went on describing
+  the race as closed.
+  So `create` now retries a caller-named port exactly like a self-chosen one,
+  and the number Q1 printed is a proposal rather than a contract: `portRetryNote`
+  writes a second progress line through `Request.Progress` — "port 5433 was
+  already taken, using 5434 instead" — whenever a retry lands on a different
+  port, so the operator is told the number they were shown is not the number
+  they got, rather than the question and the container disagreeing in
+  silence.
+  `TestASelfChosenPortThatLosesTheRaceIsRetried` and
+  `TestACallerNamedPortThatLosesTheRaceIsRetried` pin both halves against the
+  fake daemon — the fake's own `allocatedPort`/`requestedPort` model the
+  collision on the *port a container actually asks to bind* rather than on a
+  bare boolean, so an implementation that retried the identical port (the
+  naive retry above, which did not work) fails them — and
+  `TestFreePortExcludingSkipsTheGivenPorts` pins `freePortExcluding`'s `skip`
+  directly. `TestAStoppedContainerIsOfferedAndStarted` (`internal/discover`,
+  rung 4) is the integration test this was filed against, and it — and the
+  rest of `go test -tags integration ./internal/discover/...` — held stable
+  across three consecutive runs on a machine that also has an unrelated
+  container permanently bound to 5433, which is exactly the shape of collision
+  this fixes.
+  **Owed:** `adopt`'s own `ContainerStart` — reached from `Provision`'s adopt
+  of an *existing* container (Q1′ restarting a stopped target) rather than
+  from `create` — can hit the identical daemon wording for a host port that is
+  baked into that container from when it was created, and there is no retry
+  for it: recreating the container to pick a different port would discard the
+  named volume this package never removes. `adopt` now surfaces a targeted
+  message naming the container and its configured port instead of the
+  daemon's bare line, but the run still fails there rather than recovering;
+  see this file's own **Never** list — nothing here removes an adopted
+  container to work around a port collision, and nothing should.
