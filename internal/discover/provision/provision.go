@@ -86,6 +86,11 @@ const (
 	firstPort = 5433
 	lastPort  = 5632
 
+	// portAllocationRetries is how many times create() reaches back to
+	// FreePort() for a self-chosen port that lost the race to another
+	// process between the probe and the daemon's own bind.
+	portAllocationRetries = 5
+
 	// defaultReadyBudget is how long a started container has to accept a
 	// connection, and readyInterval is how often it is asked.
 	//
@@ -263,6 +268,12 @@ type Docker interface {
 	ContainerInspect(ctx context.Context, id string, options client.ContainerInspectOptions) (client.ContainerInspectResult, error)
 	ContainerCreate(ctx context.Context, options client.ContainerCreateOptions) (client.ContainerCreateResult, error)
 	ContainerStart(ctx context.Context, id string, options client.ContainerStartOptions) (client.ContainerStartResult, error)
+	// ContainerRemove is used exactly once in this package: create()'s own
+	// retry, to discard a container it just created that lost the race for
+	// the loopback port it was given and never started. It is not the
+	// removal the rest of this package refuses to do — see create()'s
+	// comment and this package's CLAUDE.md.
+	ContainerRemove(ctx context.Context, id string, options client.ContainerRemoveOptions) (client.ContainerRemoveResult, error)
 	// ContainerLogs is how the wait learns that the server is up without
 	// dialling it, and it reads only. ADR-008 section 6 step 3 already tells the
 	// operator to run `docker logs <name>` when a container does not come up;
@@ -345,6 +356,22 @@ func (p *provisioner) adopt(ctx context.Context, req Request, id, name string, c
 	if insp.Container.State == nil || !insp.Container.State.Running {
 		note(req.Progress, "lazyslice: starting "+displayName(insp, name))
 		if _, startErr := p.api.ContainerStart(ctx, id, client.ContainerStartOptions{}); startErr != nil {
+			if !created && isPortAllocated(startErr) {
+				// This is adopt()'s own path for a container that already
+				// existed before this call — Q1' restarting a stopped target,
+				// or create() re-inspecting one it just made (created is true
+				// there, so this branch never fires for it). A stopped
+				// container's host port is baked into it at ContainerCreate
+				// time and cannot be renegotiated at start the way create()'s
+				// own retry renegotiates a fresh one: recreating the
+				// container to pick a different port would discard the named
+				// volume this package never removes. So there is no retry
+				// here, only a message that names what collided rather than
+				// surfacing the daemon's bare wording.
+				return Result{}, fmt.Errorf("provision: starting %s: its port%s is now used by something else on this machine "+
+					"(the daemon says: %w) — free that port, or point --target at a different database",
+					name, configuredPortSuffix(insp), startErr)
+			}
 			return Result{}, fmt.Errorf("provision: starting %s: %w", name, startErr)
 		}
 		startedAt, booting = time.Now(), true
@@ -396,39 +423,103 @@ func (p *provisioner) create(ctx context.Context, req Request, name string) (Res
 	if err != nil {
 		return Result{}, fmt.Errorf("provision: %w", err)
 	}
-	created, err := p.api.ContainerCreate(ctx, client.ContainerCreateOptions{
-		Name: name,
-		Config: &container.Config{
-			Image: image,
-			Env: []string{
-				"POSTGRES_USER=" + role,
-				"POSTGRES_DB=" + database,
-				"POSTGRES_PASSWORD=" + secret,
-			},
-			Labels:       labels(req),
-			ExposedPorts: network.PortSet{exposed: struct{}{}},
-		},
-		HostConfig: &container.HostConfig{
-			// Bound to loopback and to nothing else. A container published on
-			// 0.0.0.0 is a database on every interface of the machine, which is
-			// the opposite of the locality THREAT_MODEL.md T2 asks of a target.
-			PortBindings: network.PortMap{exposed: []network.PortBinding{{
-				HostIP:   netip.MustParseAddr("127.0.0.1"),
-				HostPort: strconv.Itoa(port),
-			}}},
-			Mounts: []mount.Mount{{
-				Type:   mount.TypeVolume,
-				Source: volume,
-				Target: dataDirFor(req.Major),
-			}},
-		},
-	})
-	if err != nil {
-		return Result{}, fmt.Errorf("provision: creating %s: %w", name, err)
-	}
-	note(req.Progress, "lazyslice: created "+name+" from "+image+" on 127.0.0.1:"+strconv.Itoa(port))
 
-	return p.adopt(ctx, req, created.ID, name, true)
+	// The port FreePort() named is a probe, not a reservation: the loopback
+	// address it bound and closed can be taken by another process — most
+	// often another lazyslice run, or another package's own integration test,
+	// choosing a free port at the same moment — before the daemon gets to
+	// publish it at start. That is true whether create() chose the port itself
+	// or a caller named it: a caller-named req.Port (Q1's own prompt, this
+	// package's CLAUDE.md) is a proposal the operator was shown, not a
+	// contract, and Q1's window between FreePort's probe and the daemon's
+	// actual bind — a human sitting on the prompt, then an image pull — is by
+	// far the longest of any create path. So every attempt retries past a lost
+	// race, caller-named port or not; a caller-named port that moves is
+	// reported back through req.Progress (portRetryNote) so the operator is
+	// told the number they were shown is not the number they got.
+	// portAllocationRetries is generous because the race is rare and each
+	// retry costs one more FreePort scan and one create+start, not a wait.
+	// tried excludes every port a previous attempt in this same call already
+	// lost — see freePortExcluding's own comment for why the scan alone is not
+	// enough.
+	var tried map[int]bool
+	for attempt := 0; ; attempt++ {
+		created, createErr := p.api.ContainerCreate(ctx, client.ContainerCreateOptions{
+			Name: name,
+			Config: &container.Config{
+				Image: image,
+				Env: []string{
+					"POSTGRES_USER=" + role,
+					"POSTGRES_DB=" + database,
+					"POSTGRES_PASSWORD=" + secret,
+				},
+				Labels:       labels(req),
+				ExposedPorts: network.PortSet{exposed: struct{}{}},
+			},
+			HostConfig: &container.HostConfig{
+				// Bound to loopback and to nothing else. A container published on
+				// 0.0.0.0 is a database on every interface of the machine, which is
+				// the opposite of the locality THREAT_MODEL.md T2 asks of a target.
+				PortBindings: network.PortMap{exposed: []network.PortBinding{{
+					HostIP:   netip.MustParseAddr("127.0.0.1"),
+					HostPort: strconv.Itoa(port),
+				}}},
+				Mounts: []mount.Mount{{
+					Type:   mount.TypeVolume,
+					Source: volume,
+					Target: dataDirFor(req.Major),
+				}},
+			},
+		})
+		if createErr == nil {
+			note(req.Progress, "lazyslice: created "+name+" from "+image+" on 127.0.0.1:"+strconv.Itoa(port))
+			result, adoptErr := p.adopt(ctx, req, created.ID, name, true)
+			if adoptErr == nil || !isPortAllocated(adoptErr) || attempt >= portAllocationRetries {
+				return result, adoptErr
+			}
+			// The container was created but never became the target this
+			// package promises to keep: it lost the race for the port it was
+			// given and never started, so removing it is cleanup of this
+			// call's own failed attempt, not the removal the rest of this
+			// package refuses to do.
+			if _, rmErr := p.api.ContainerRemove(ctx, created.ID, client.ContainerRemoveOptions{Force: true}); rmErr != nil {
+				return Result{}, fmt.Errorf("provision: starting %s: %w (removing the container that lost the port: %w)", name, adoptErr, rmErr)
+			}
+		} else if !isPortAllocated(createErr) || attempt >= portAllocationRetries {
+			return Result{}, fmt.Errorf("provision: creating %s: %w", name, createErr)
+		}
+
+		if tried == nil {
+			tried = map[int]bool{}
+		}
+		tried[port] = true
+		lost := port
+		var err error
+		if port, err = freePortExcluding(tried); err != nil {
+			return Result{}, err
+		}
+		portRetryNote(req.Progress, lost, port)
+	}
+}
+
+// portRetryNote is the progress line create()'s retry prints whenever the
+// port it moves to differs from the one it just lost — which is every time,
+// since freePortExcluding never returns a port already in tried. It matters
+// most for a caller-named port: Q1's prompt already told the operator "on
+// port <lost>" before Provision ran, so silently landing on a different port
+// would make what was printed and what was created disagree with nothing said
+// about it.
+func portRetryNote(w io.Writer, lost, chosen int) {
+	note(w, "lazyslice: port "+strconv.Itoa(lost)+" was already taken, using "+strconv.Itoa(chosen)+" instead")
+}
+
+// isPortAllocated recognises the daemon's own words for "another process is
+// already bound to that loopback port" — the collision FreePort's bind-then-
+// close probe cannot fully close out. Matched on the message because the
+// moby client wraps this as a plain API error, with no distinct type to
+// switch on.
+func isPortAllocated(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "port is already allocated")
 }
 
 // secretFor is the POSTGRES_PASSWORD the container is created with, and the
@@ -836,6 +927,30 @@ func published(insp client.ContainerInspectResult) (host string, port int, ok bo
 	return "", 0, false
 }
 
+// configuredPortSuffix is " (127.0.0.1:<port>)" for the port a container is
+// configured to publish, read from HostConfig.PortBindings rather than from
+// NetworkSettings — the binding a stopped container carries, the same field
+// rung 4 reads for the identical reason (internal/discover's CLAUDE.md,
+// "Rung 4's port comes from HostConfig.PortBindings, not from the summary").
+// Empty when the binding cannot be read, so the message degrades to naming
+// only the container rather than failing to build at all.
+func configuredPortSuffix(insp client.ContainerInspectResult) string {
+	if insp.Container.HostConfig == nil {
+		return ""
+	}
+	want, err := network.ParsePort(postgresPort)
+	if err != nil {
+		return ""
+	}
+	for _, b := range insp.Container.HostConfig.PortBindings[want] {
+		if b.HostPort == "" {
+			continue
+		}
+		return " (127.0.0.1:" + b.HostPort + ")"
+	}
+	return ""
+}
+
 func configEnv(insp client.ContainerInspectResult) []string {
 	if insp.Container.Config == nil {
 		return nil
@@ -915,8 +1030,22 @@ func ConnString(host string, port int, user, db, secret string) string {
 //
 // It is exported because Q1's prompt names the port before Provision runs
 // (ADR-008 section 6); the value it names comes back as Request.Port.
-func FreePort() (int, error) {
+func FreePort() (int, error) { return freePortExcluding(nil) }
+
+// freePortExcluding is FreePort's scan with skip added: create()'s retry
+// passes back every port a previous attempt in the same call already lost the
+// race for, because the bind-then-close probe below only rules out a Go
+// listener on 127.0.0.1 at the moment it runs — a port Docker itself is
+// publishing (through the VM/proxy layer Docker Desktop puts in front of a
+// container's port, which this probe does not see the way it sees another
+// plain listener) reads as free every time it is asked, and without the
+// exclusion the retry would pick the very port that just failed and spend
+// every attempt on it.
+func freePortExcluding(skip map[int]bool) (int, error) {
 	for port := firstPort; port <= lastPort; port++ {
+		if skip[port] {
+			continue
+		}
 		l, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
 		if err != nil {
 			continue

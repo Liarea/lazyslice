@@ -120,6 +120,87 @@ func TestProvisionCreatesTheContainerSection9Describes(t *testing.T) {
 	}
 }
 
+// A self-chosen port that loses the race to another process (this package's
+// CLAUDE.md, "the integration (14) leg failed on something else again") does
+// not fail the run: create() removes the container that lost it and retries
+// on the next free port.
+func TestASelfChosenPortThatLosesTheRaceIsRetried(t *testing.T) {
+	stateDir(t)
+	d := newFakeDaemon()
+	d.blockFirstCreatedPort = true
+	p := &provisioner{api: d, ready: answersAt("")}
+
+	res, err := p.Provision(t.Context(), Request{Project: "shop", Workdir: "/src/shop", Major: 16})
+	if err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+	if !res.Created {
+		t.Error("Created is false on a container the retry made")
+	}
+	if len(d.removed) != 1 {
+		t.Fatalf("removed = %v, want exactly the one container that lost the race", d.removed)
+	}
+	if d.removed[0] != "c1" {
+		t.Errorf("removed %v, want the first attempt, c1", d.removed[0])
+	}
+	if !d.running["c2"] {
+		t.Error("the retry's own container was never started")
+	}
+	if _, stillThere := d.byID["c1"]; stillThere {
+		t.Error("the container that lost the race is still on the daemon")
+	}
+	// The surviving container's binding has to be a different port from the
+	// first attempt's, or an implementation that removed the loser and
+	// retried on the identical port — the naive retry this package's CLAUDE.md
+	// says was tried and did not work — would pass this test unchanged.
+	if len(d.createdPorts) != 2 {
+		t.Fatalf("createdPorts = %v, want exactly the lost attempt and the retry", d.createdPorts)
+	}
+	if d.createdPorts[1] == d.createdPorts[0] {
+		t.Errorf("retry bound port %d, want something other than the lost port %d", d.createdPorts[1], d.createdPorts[0])
+	}
+}
+
+// Q1's prompt names a port before Provision runs (this package's CLAUDE.md,
+// "Request.Port is chosen by the caller"), but that number is a proposal, not
+// a contract: Q1's window between FreePort's probe and the container's actual
+// bind — a human sitting on the prompt, then an image pull — is the longest of
+// any create path, so a caller-named port that loses the race is retried onto
+// a different one exactly like a self-chosen port, and the operator is told
+// about the change through Request.Progress.
+func TestACallerNamedPortThatLosesTheRaceIsRetried(t *testing.T) {
+	stateDir(t)
+	d := newFakeDaemon()
+	d.allocatedPort = 5433
+	var progress strings.Builder
+	p := &provisioner{api: d, ready: answersAt("")}
+
+	res, err := p.Provision(t.Context(), Request{
+		Project: "shop", Workdir: "/src/shop", Major: 16, Port: 5433, Progress: &progress,
+	})
+	if err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+	if !res.Created {
+		t.Error("Created is false on a container the retry made")
+	}
+	if len(d.removed) != 1 || d.removed[0] != "c1" {
+		t.Fatalf("removed = %v, want exactly the first attempt, c1", d.removed)
+	}
+	if !d.running["c2"] {
+		t.Error("the retry's own container was never started")
+	}
+	if len(d.createdPorts) != 2 {
+		t.Fatalf("createdPorts = %v, want exactly the lost attempt and the retry", d.createdPorts)
+	}
+	if d.createdPorts[1] == 5433 {
+		t.Errorf("retry bound port %d, want something other than the caller-named 5433", d.createdPorts[1])
+	}
+	if !strings.Contains(progress.String(), "5433 was already taken, using") {
+		t.Errorf("progress = %q, want the operator told the caller-named port moved", progress.String())
+	}
+}
+
 // postgres:18 owns /var/lib/postgresql itself and its entrypoint exits 1 rather
 // than start when anything is mounted at /var/lib/postgresql/data
 // (docker-library/postgres#1259). Below 18 the mount point cannot move, because
@@ -562,6 +643,27 @@ func TestFreePortIsInRangeAndBindable(t *testing.T) {
 	}
 }
 
+// freePortExcluding's skip is create()'s retry asking for a port other than
+// the one it just lost: a scan that ignored skip would hand the retry back
+// the exact port whose bind just failed, which is the naive retry this
+// package's CLAUDE.md says was tried and did not work.
+func TestFreePortExcludingSkipsTheGivenPorts(t *testing.T) {
+	first, err := freePortExcluding(nil)
+	if err != nil {
+		t.Fatalf("freePortExcluding(nil): %v", err)
+	}
+	second, err := freePortExcluding(map[int]bool{first: true})
+	if err != nil {
+		t.Fatalf("freePortExcluding(skip first): %v", err)
+	}
+	if second == first {
+		t.Errorf("second = %d, want anything other than the excluded port %d", second, first)
+	}
+	if second < firstPort || second > lastPort {
+		t.Errorf("second = %d, want between %d and %d", second, firstPort, lastPort)
+	}
+}
+
 // Two passwords in a row are not the same one, which is the whole of "random".
 func TestPasswordsDiffer(t *testing.T) {
 	a, err := newPassword()
@@ -636,9 +738,9 @@ func env(vars []string) map[string]string {
 }
 
 // fakeDaemon is the part of the Docker API this package uses, with a map
-// instead of a daemon. It has no remove method for the same reason Docker does
-// in this package's interface: there is no code path here that removes
-// anything.
+// instead of a daemon. ContainerRemove exists only for create()'s own
+// port-allocation retry, which removes a container it just created and that
+// never started — never one this package adopted or started for real.
 type fakeDaemon struct {
 	images     []string
 	byID       map[string]container.InspectResponse
@@ -656,6 +758,40 @@ type fakeDaemon struct {
 	blockInspect bool
 	nextID       int
 	createFail   error
+	// allocatedPort, when nonzero, makes ContainerStart fail with the daemon's
+	// "port is already allocated" wording for whichever container is asking to
+	// bind exactly that host port — modelling the collision on the port a
+	// container actually requests rather than on a bare boolean, so a fake
+	// that lets a naive retry (remove the loser, ask for the identical port
+	// again) succeed unchanged cannot pass the tests that pin this. Cleared to
+	// 0 on ContainerRemove of the container that lost it.
+	allocatedPort int
+	removed       []string
+	// createdPorts is the host port each ContainerCreate call was asked to
+	// bind, in order — d.created only ever holds the most recent call, which
+	// is not enough to compare a retry's port against the attempt it replaced.
+	createdPorts []int
+	// blockFirstCreatedPort makes ContainerCreate set allocatedPort to
+	// whichever host port its very first call is asked to bind, once — for
+	// pinning create()'s own retry against a self-chosen port, whose value a
+	// test cannot name in advance the way it names a caller-supplied one.
+	blockFirstCreatedPort bool
+}
+
+// requestedPort is the host port a container's own HostConfig asked
+// ContainerCreate to bind — the fact ContainerStart checks the collision
+// against, so the fake models the daemon's real failure mode: a bind for a
+// specific port, not a start of a specific container.
+func requestedPort(c container.InspectResponse) int {
+	if c.HostConfig == nil {
+		return 0
+	}
+	for _, b := range c.HostConfig.PortBindings[network.MustParsePort("5432/tcp")] {
+		if n, err := strconv.Atoi(b.HostPort); err == nil {
+			return n
+		}
+	}
+	return 0
 }
 
 // fakeLogs is what ContainerLogs hands back: the daemon's stream is an
@@ -739,6 +875,19 @@ func (d *fakeDaemon) ContainerCreate(_ context.Context, options client.Container
 	d.nextID++
 	id := "c" + strconv.Itoa(d.nextID)
 	binding := options.HostConfig.PortBindings[network.MustParsePort("5432/tcp")]
+	if len(binding) > 0 {
+		if n, err := strconv.Atoi(binding[0].HostPort); err == nil {
+			d.createdPorts = append(d.createdPorts, n)
+		}
+	}
+	if d.blockFirstCreatedPort {
+		d.blockFirstCreatedPort = false
+		if len(binding) > 0 {
+			if n, err := strconv.Atoi(binding[0].HostPort); err == nil {
+				d.allocatedPort = n
+			}
+		}
+	}
 	d.byID[id] = container.InspectResponse{
 		ID:              id,
 		Name:            "/" + options.Name,
@@ -750,12 +899,33 @@ func (d *fakeDaemon) ContainerCreate(_ context.Context, options client.Container
 }
 
 func (d *fakeDaemon) ContainerStart(_ context.Context, id string, _ client.ContainerStartOptions) (client.ContainerStartResult, error) {
-	if _, ok := d.byID[id]; !ok {
+	c, ok := d.byID[id]
+	if !ok {
 		return client.ContainerStartResult{}, errors.New("no such container")
+	}
+	if d.allocatedPort != 0 && requestedPort(c) == d.allocatedPort {
+		return client.ContainerStartResult{}, errors.New("Bind for 127.0.0.1:" + strconv.Itoa(d.allocatedPort) + " failed: port is already allocated")
 	}
 	d.starts[id] = true
 	d.running[id] = !d.dieOnStart
 	return client.ContainerStartResult{}, nil
+}
+
+func (d *fakeDaemon) ContainerRemove(_ context.Context, id string, _ client.ContainerRemoveOptions) (client.ContainerRemoveResult, error) {
+	c, ok := d.byID[id]
+	if !ok {
+		return client.ContainerRemoveResult{}, errors.New("no such container")
+	}
+	delete(d.byID, id)
+	delete(d.running, id)
+	d.removed = append(d.removed, id)
+	// The next attempt gets to start only if it asks for a different port: the
+	// collision is cleared here because removing the loser is what frees the
+	// port on a real daemon, not because a container was removed at all.
+	if requestedPort(c) == d.allocatedPort {
+		d.allocatedPort = 0
+	}
+	return client.ContainerRemoveResult{}, nil
 }
 
 func (d *fakeDaemon) ImageList(_ context.Context, _ client.ImageListOptions) (client.ImageListResult, error) {
