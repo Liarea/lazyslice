@@ -104,6 +104,8 @@ One row per code in the catalogue, in the file's own order. Exit is only meaning
 | `secret.refused.no_key` | transform | 5 | no masking key: {path} could not be read or written |
 | `secret.refused.symlink` | transform | 5 | {path} is a symbolic link: the masking key would be written outside the repository, where .gitignore does not reach it |
 | `secret.refused.permissive` | transform | 5 | {path} is readable by other accounts on this machine: {statement} |
+| `secret.refused.hardlink` | transform | 5 | {path} has more than one name on disk: it may already be readable under a path .gitignore never protected |
+| `secret.password_command.withheld` | emit | - | password_command was not written to {path}: its argv looks like it embeds a value rather than fetching one; pass --password-command again on every run |
 | `config.file.read` | emit | - | from {path} |
 | `config.file.written` | emit | - | wrote {path} (commit it for CI) |
 | `config.refused.where_withheld` | plan | 2 | {path} records a withheld --where predicate and this run passed none: pass {flag} again, or the slice would silently be a different one |

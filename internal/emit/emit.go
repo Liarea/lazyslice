@@ -23,7 +23,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -355,6 +357,180 @@ func HoldsLiteral(where string) bool {
 func WhereFingerprint(where string) string {
 	sum := sha256.Sum256([]byte(where))
 	return hex.EncodeToString(sum[:8])
+}
+
+// ---------- the password command ----------
+
+// PasswordCommandSuspicious is the 2026-09-16 round 2 red team's R2-16 check
+// (THREAT_MODEL.md T5, T6): a --password-command string is screened before
+// Emit writes it into lazyslice.yml, whose header promises the file "never
+// contains a secret". `--password-command 'echo Hunter2InCommand'` recorded
+// the command string verbatim, and the string *is* the password.
+//
+// The heuristic splits the command the way a shell would — quotes honoured,
+// nothing executed — and requires every word to be unambiguously *not* a
+// literal, rather than trusting anything that merely contains a slash: an
+// argument is accepted only when it is path-shaped (anchored with `/`, `./`
+// or `../`, each segment drawn only from letters, digits, `.`, `_` and `-`)
+// or names a file that actually exists. An *unanchored* multi-segment word
+// (`db/prod/password`) is not, by itself, path-shaped — a slash-bearing
+// password such as `kX9mQ2/vT4ns8Lb1` takes exactly that shape and would
+// otherwise be recorded verbatim — so an unanchored argument is trusted only
+// when it names a file that exists, via the same exists-on-disk test as
+// every other non-path-shaped word; a credential helper invoked with an
+// unanchored key that happens not to exist on this machine is screened, the
+// conservative direction. A base64 password such as `aB3/xY9+QzT=` carries a
+// `/` about a third of the time at 24 characters but also carries `+` and
+// `=`, which are not in that character class, so it fails the shape test and
+// is screened; a Windows-style value like `C:\Users\bob` has no `/` at all
+// and fails it too — a real `\`-separated path is instead caught by the
+// exists-on-disk half, which stats the argument as the host OS would resolve
+// it. The one-word case (no arguments at all) gets a third way to be safe:
+// naming a program findable on PATH, since `--password-command
+// Hunter2InCommand` — a bare word, no path shape, resolving to nothing on
+// PATH — is a plausible misreading of what the flag takes and not a command,
+// so it is screened rather than recorded as though a program name explained
+// it. A multi-word command's own first word (the program) keeps the older,
+// looser rule and is always accepted, because a credential-helper program is
+// routinely invoked by a bare, unqualified name (`vault-fetch db/prod/pass`)
+// and PATH lookup at record time would depend on the machine running lazyslice
+// rather than the shell that will actually run the command.
+//
+// It is deliberately narrow rather than clever: a flag with a literal value
+// baked in (`-p supersecret`) and a bare credential-helper subcommand
+// (`vault read`, without an argument that looks like a path) both fail the
+// shape test and are screened too, which is the conservative direction — a
+// legitimate command this trips is withheld and printed as withheld, on a
+// --password-command that can be typed again next run; a password this let
+// through would be in a committed file with no second chance (the same
+// argument HoldsLiteral makes for --where).
+//
+// A command that cannot be parsed as shell words at all (an unterminated
+// quote), or that parses to no words at all (blank or whitespace-only), is
+// also suspicious: neither is a command lazyslice can run, and nothing about
+// either makes it safe to record verbatim.
+func PasswordCommandSuspicious(cmd string) bool {
+	words, err := splitCommandWords(cmd)
+	if err != nil || len(words) == 0 {
+		return true
+	}
+	if len(words) == 1 {
+		return programNameSuspicious(words[0])
+	}
+	for _, w := range words[1:] {
+		if argumentSuspicious(w) {
+			return true
+		}
+	}
+	return false
+}
+
+// pathSegmentRE is the character class a path component may hold for
+// PasswordCommandSuspicious to trust it: no `+`, `=`, spaces or other
+// punctuation a password generator reaches for, and nothing a shell would
+// need quoting to pass through literally.
+var pathSegmentRE = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+
+// pathShaped reports whether w is anchored like a path (`/`, `./`, `../`).
+// An unanchored word — whether a bare single segment (`Hunter2InCommand`) or
+// a bare run of `/`-joined segments (`db/prod/password`) — is never
+// path-shaped on its own: a slash by itself does not distinguish a relative
+// path from a slash-bearing literal (a base64 password carries one about a
+// third of the time), so pathShaped trusts only the anchored forms and
+// leaves every unanchored word, single- or multi-segment, to
+// argumentSuspicious's exists-on-disk test (and, for the one-word case,
+// programNameSuspicious's on-PATH test). This is the R2-16 gap this function
+// exists to close.
+func pathShaped(w string) bool {
+	var body string
+	switch {
+	case strings.HasPrefix(w, "../"):
+		body = w[3:]
+	case strings.HasPrefix(w, "./"):
+		body = w[2:]
+	case strings.HasPrefix(w, "/"):
+		body = w[1:]
+	default:
+		return false
+	}
+	if body == "" {
+		return false
+	}
+	for _, seg := range strings.Split(body, "/") {
+		if seg == "" || !pathSegmentRE.MatchString(seg) {
+			return false
+		}
+	}
+	return true
+}
+
+// argumentSuspicious reports whether w, a word after the program name, is not
+// unambiguously safe to record: it is trusted only when it is path-shaped or
+// names a file that exists, exactly as the doc comment on
+// PasswordCommandSuspicious describes.
+func argumentSuspicious(w string) bool {
+	if pathShaped(w) {
+		return false
+	}
+	_, err := os.Stat(w)
+	return err != nil
+}
+
+// programNameSuspicious applies argumentSuspicious's test to a one-word
+// command (there is no argument to have leaked a password into, only the
+// question of whether this is a command at all) and adds a third way to be
+// safe: resolving to a program on PATH, which a shape or existence check
+// alone cannot tell from a bare literal.
+func programNameSuspicious(w string) bool {
+	if !argumentSuspicious(w) {
+		return false
+	}
+	_, err := exec.LookPath(w)
+	return err != nil
+}
+
+// splitCommandWords splits cmd into shell-like words: whitespace separates
+// words outside quotes, and single or double quotes group one word without
+// being part of it. It does no variable expansion and executes nothing — it
+// exists only to tell a program name and a path-shaped argument from a bare
+// literal, never to run the command.
+func splitCommandWords(cmd string) ([]string, error) {
+	var (
+		words  []string
+		cur    strings.Builder
+		inWord bool
+		quote  rune
+	)
+	flush := func() {
+		if inWord {
+			words = append(words, cur.String())
+			cur.Reset()
+			inWord = false
+		}
+	}
+	for _, r := range cmd {
+		switch {
+		case quote != 0:
+			if r == quote {
+				quote = 0
+			} else {
+				cur.WriteRune(r)
+			}
+		case r == '\'' || r == '"':
+			quote = r
+			inWord = true
+		case r == ' ' || r == '\t' || r == '\n':
+			flush()
+		default:
+			inWord = true
+			cur.WriteRune(r)
+		}
+	}
+	if quote != 0 {
+		return nil, fmt.Errorf("emit: %q is not a closed shell word", cmd)
+	}
+	flush()
+	return words, nil
 }
 
 // ---------- sizes ----------
