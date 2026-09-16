@@ -3,12 +3,12 @@ id: T-0184
 title: "Should a headless run auto-select a target on the source's own cluster?"
 epic: E5
 phase: 5
-status: open
+status: done
 owner: ""
 created: 2026-09-15
-started: ""
-closed: ""
-outcome: ""
+started: 2026-09-16
+closed: 2026-09-16
+outcome: done
 ---
 
 # T-0184 · Should a headless run auto-select a target on the source's own cluster?
@@ -27,6 +27,10 @@ The 2026-09-15 red team pointed --source at production with no --target and --ye
 
 - 2026-09-15 moved to E5 phase 5
 
+- 2026-09-16 started
+
+- 2026-09-16 closed: done
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+went well: the discover-level refusal, the gate-stage escalation and the explicit TargetNamed bit are sound; the Opus reviewer caught a committed-yml target wrongly refused at the gate because rung 0 never carries FromYml provenance, and caught ADR-013 asserting a test still passed while it was red; the by-hand finish was small, export one field and thread one seam, and the revert-and-watch reproduced the reverify's failure exactly | went badly: two fix rounds and a by-hand landing; the brief said --yes while the product's headless predicate is --yes or no controlling terminal, so the reviewer widened the rule in round 1 and the docs lagged the code to the end; the discover integration suite cannot pass on this machine while another container holds host port 5433, so four provisioning tests were skipped in the landing run (T-0178 lands next) | change next time: a brief that names a predicate uses the product's existing definition by name instead of restating it; an ADR paragraph that claims a test passes is written after running that test
