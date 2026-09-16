@@ -905,6 +905,27 @@
   message: "no masking key yet, so these masked defaults still carry the source's literal and will be masked once one exists: {reason}"
   args: [reason]
 
+# T-0186's own two codes: --allow-type-literal's opt-out, honoured or expired,
+# stated in the open the same way a column's own opt-out shows in its
+# classify.masked/copied.column reason and its own
+# classify.column.opt_out_expired warn. Raised here in plan and not in
+# internal/classify: a type opt-out is resolved and merged in internal/core
+# (planRequest), not decided by the classifier, so it has no classify-stage
+# decision to expire. {table} carries the plain "schema.type" name
+# (names.go's resolveType/typeFingerprint), not a table identifier — reusing
+# the arg rather than adding one for a name shape that already fits it.
+- code: plan.type_literal.allowed
+  kind: info
+  stage: plan
+  message: "{table}: the recreated type literal is allowed — {reason}"
+  args: [table, reason]
+
+- code: plan.type_literal.opt_out_expired
+  kind: warn
+  stage: plan
+  message: "the opt-out on type {table} is not honoured: it records no type fingerprint, or the type changed or is gone"
+  args: [table]
+
 # ARCHITECTURE.md §9 "The repository", one code per branch, because every branch
 # prints what it did. The stage is transform: the masking key is transform's
 # input, and the key is what these are about.

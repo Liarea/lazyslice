@@ -106,3 +106,39 @@ the file; let a re-read narrow a prior decision instead of only tightening it.
   - ARCHITECTURE.md §10's file spec does not show a `params:` key under
     `source:`/`target:` yet (ARCHITECTURE.md is outside this task's paths, so
     it is filed rather than edited here — **T-0167**).
+
+## Decisions made for T-0186 (`--allow-type-literal` round-trips)
+
+- **`pipeline.Config.Types` and `pipeline.TypeAllow`** carry `--allow-type-
+  literal TYPE=REASON` the way `Columns[..].Unmask` carries `--unmask` — reason,
+  `by`, and a `TypeFP` the opt-out expires against — and `document.go`'s
+  `types:` block is `unmaskDoc`'s shape again, under `typeAllowDoc`. It is
+  keyed by the catalog's own plain `"schema.type"` string (what
+  `internal/core`'s `resolveType` returns and `PlanRequest.AllowTypeLiterals`
+  already uses) rather than by a struct like `ref.TableRef`/`ref.ColumnRef`:
+  unlike a table or a column, a type name is never decomposed back into a
+  structured ref anywhere in the tree, so there is no second identifier shape
+  for the string to disagree with, and `toDocument`/`document.config()` copy it
+  unchanged in both directions — no `quoteIdent`, no `splitQualified`.
+- **Emit makes no decision over `Types`, on the same division `Unmask` keeps.**
+  For a column, `internal/classify` decides which opt-out still stands
+  (`Decision.Source`) and `columnConfig` only renders that decision. There is
+  no classify-equivalent stage for a type, so `internal/core`'s `planRequest`
+  is where the decision is made instead — merging the committed file's
+  `types:` block with this run's `--allow-type-literal` flags, expiring a
+  prior entry whose `TypeFP` no longer matches the type's current fingerprint,
+  and letting a flag on the same type win — and it hands the *already-decided*
+  map over as `Options.Types`. `Emit` copies it onto `cfg.Types` verbatim,
+  the same way it copies `Options.Unmask`'s reasons in through
+  `Classification.Decisions` rather than deciding anything itself.
+- **The type fingerprint is computed in `internal/core`, not here.** A column's
+  `TypeFP` is `internal/introspect`'s `columnFingerprint`, read off
+  `Classification.Decisions[..].TypeFP`; a type has no such field anywhere in
+  `pipeline.Schema`, and `Emit`'s own signature (plan, classification, report,
+  request, two candidates, a key fingerprint) has no schema to compute one
+  from. `internal/core/names.go`'s `typeFingerprint` — `sha256` over an enum's
+  labels in catalog order, or a domain's definition text, truncated to eight
+  hex characters, `columnFingerprint`'s own shape — is what `planRequest` calls
+  both to decide whether a prior entry has expired and to stamp a fresh one
+  when a flag is given, and the result travels to `Emit` already attached to
+  each `pipeline.TypeAllow`, not as a separate map.

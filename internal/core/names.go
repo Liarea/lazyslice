@@ -4,6 +4,7 @@ package core
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -348,6 +349,34 @@ func resolveType(name string, schema *pipeline.Schema) (string, error) {
 		return "", fmt.Errorf("%q is in more than one schema (%s): qualify it",
 			name, strings.Join(found, ", "))
 	}
+}
+
+// typeFingerprint is sha256 over an enum's labels, in the catalog's own order,
+// or a domain's definition text, truncated to eight hex characters — the same
+// shape internal/introspect's columnFingerprint uses, for the same purpose:
+// --allow-type-literal's yml-recorded opt-out (pipeline.TypeAllow.TypeFP)
+// expires when it no longer matches, so a redefined enum or domain does not
+// silently keep an exemption taken against a different definition.
+//
+// The second return is false when name names neither an enum nor a domain of
+// this schema — dropped from the source, or never there — which is also
+// "expired" for the opt-out's purpose: a type that is gone carries no literal
+// for it to be about any more.
+func typeFingerprint(name string, schema *pipeline.Schema) (string, bool) {
+	if schema == nil {
+		return "", false
+	}
+	if labels, ok := schema.Enums[name]; ok {
+		sum := sha256.Sum256([]byte(strings.Join(labels, "\x00")))
+		return hex.EncodeToString(sum[:])[:8], true
+	}
+	for _, d := range schema.Domains {
+		if d.Name == name {
+			sum := sha256.Sum256([]byte(d.Def))
+			return hex.EncodeToString(sum[:])[:8], true
+		}
+	}
+	return "", false
 }
 
 func resolveBareTable(bare, name string, schema *pipeline.Schema) (ref.TableRef, error) {

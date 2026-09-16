@@ -73,6 +73,13 @@ type document struct {
 
 	Columns map[string]columnDoc `yaml:"columns"`
 
+	// Types is --allow-type-literal's own opt-outs, one entry per enum or
+	// domain, keyed by the catalog's plain "schema.type" name — never quoted
+	// or split, unlike Root/Caps/Keys/Skipped above: a type is never
+	// decomposed back into a structured ref (pipeline.Config's own comment on
+	// Types says why), so the string travels unchanged in both directions.
+	Types map[string]typeAllowDoc `yaml:"types"`
+
 	SmallDomain []string `yaml:"small_domain"`
 
 	Plan planDoc `yaml:"plan"`
@@ -129,6 +136,14 @@ type columnDoc struct {
 }
 
 type unmaskDoc struct {
+	Reason string `yaml:"reason"`
+	By     string `yaml:"by"`
+	TypeFP string `yaml:"type,omitempty"`
+}
+
+// typeAllowDoc is one entry of the `types:` map — --allow-type-literal's own
+// opt-out, the same three fields unmaskDoc carries for a column.
+type typeAllowDoc struct {
 	Reason string `yaml:"reason"`
 	By     string `yaml:"by"`
 	TypeFP string `yaml:"type,omitempty"`
@@ -199,6 +214,10 @@ func toDocument(c *pipeline.Config) document {
 			// carries no field for it.
 			Unmask: unmaskOf(cc.Unmask),
 		}
+	}
+	d.Types = map[string]typeAllowDoc{}
+	for name, t := range c.Types {
+		d.Types[name] = typeAllowDoc{Reason: t.Reason, By: t.By, TypeFP: t.TypeFP}
 	}
 	d.SmallDomain = columnList(c.Plan.SmallDomain)
 	d.Plan = planDoc{
@@ -338,6 +357,10 @@ func (d document) config() (*pipeline.Config, error) {
 			}
 		}
 		c.Columns[col] = cc
+	}
+	c.Types = map[string]pipeline.TypeAllow{}
+	for name, td := range d.Types {
+		c.Types[name] = pipeline.TypeAllow{Reason: td.Reason, By: td.By, TypeFP: td.TypeFP}
 	}
 	return c, nil
 }

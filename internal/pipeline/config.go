@@ -57,7 +57,16 @@ type Config struct {
 	SecretFingerprint string     // sha256(K)[:8]; never the key
 	ExtraPatterns     []Pattern
 	Columns           map[ColumnRef]ColumnConfig
-	Plan              PlanSummary
+	// Types is --allow-type-literal TYPE=REASON, recorded under the yml's own
+	// types: block on the same shape Columns' Unmask has — reason required,
+	// expiring when the type's own fingerprint changes. Keyed by the catalog's
+	// plain "schema.type" name (the same string internal/core's resolveType
+	// returns and PlanRequest.AllowTypeLiterals uses), never quoted or split:
+	// unlike a table or a column, a type opt-out is never decomposed back into
+	// a structured ref, so there is nothing here for a second identifier shape
+	// to disagree with.
+	Types map[string]TypeAllow
+	Plan  PlanSummary
 }
 
 // Pattern is a user-supplied classification rule. It may add a category or
@@ -98,6 +107,23 @@ type Unmask struct {
 	// TypeFP is the column's fingerprint when the opt-out was taken. The opt-out
 	// expires when it changes, so a column that became something else is masked
 	// again rather than staying exempt.
+	TypeFP string
+}
+
+// TypeAllow is a per-type opt-out: --allow-type-literal TYPE=REASON, or the
+// yml's own types: block carrying it forward. There is no wholesale allow, by
+// design — the same loosening ADR-004 already allows for Unmask, applied to
+// the one object class that is not a column (ARCHITECTURE.md §11.1's fourth
+// arm).
+type TypeAllow struct {
+	// Reason is never empty: --allow-type-literal TYPE=REASON rejects the bare
+	// form with exit 2.
+	Reason string
+	By     string
+	// TypeFP is the type's own fingerprint (its enum labels, in catalog order,
+	// or its domain's definition) when the opt-out was taken. The opt-out
+	// expires when it changes, so a redefined type is refused again rather
+	// than staying exempt.
 	TypeFP string
 }
 

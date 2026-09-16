@@ -9,7 +9,7 @@
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 4 | 1 | 80 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 51 | 0 | 26 | 4 | 0 |
+| E9 Later | later | 52 | 0 | 26 | 4 | 0 |
 
 ## Open and in progress
 
@@ -70,6 +70,7 @@
 - T-0213 [open] E5 · Wire --password-command to actually run, or refuse it as unimplemented ()
 - T-0214 [open] E9 · A withheld password_command leaves a marker in lazyslice.yml so a later run without one is refused, as a withheld --where already is (sonnet)
 - T-0215 [open] E9 · Secret-file and password_command tests pin the bypass shapes, not only the happy attack shapes (sonnet)
+- T-0216 [open] E9 · THREAT_MODEL.md T1 does not know --allow-type-literal is recorded in the yml ()
 
 ## Recently closed
 

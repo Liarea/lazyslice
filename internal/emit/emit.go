@@ -72,6 +72,14 @@ type Options struct {
 	// Unmask is --unmask TABLE.COL=REASON, the reasons the flag gave. They are
 	// recorded with `by: flag` so that the next run needs no flag.
 	Unmask map[ref.ColumnRef]string
+	// Types is --allow-type-literal TYPE=REASON merged with the committed
+	// yml's own types: block, already decided by internal/core (planRequest):
+	// the flag's own entries carry this run's type fingerprint and `by: flag`,
+	// a yml entry still honoured is carried forward verbatim, and an expired
+	// one is already absent. Emit makes no decision over it — the same
+	// division Unmask above and Prior below keep — it only writes what
+	// internal/core decided, under Config.Types.
+	Types map[string]pipeline.TypeAllow
 	// PasswordCommand is --password-command, recorded under `password_command`
 	// as a command string and never its output (ARCHITECTURE.md section 8).
 	PasswordCommand string
@@ -134,6 +142,15 @@ func (e emitter) Emit(
 		SnapshotID:        plan.SnapshotID,
 		SecretFingerprint: keyFP,
 		Columns:           map[ref.ColumnRef]pipeline.ColumnConfig{},
+		Types:             map[string]pipeline.TypeAllow{},
+	}
+	// Types is already the merged decision (internal/core's planRequest): this
+	// run's own --allow-type-literal flags, `by: flag`, plus the committed
+	// yml's own entries still honoured, carried forward verbatim. Nothing here
+	// judges which — that division belongs to internal/core, the same way
+	// classify's Decision.Source is what tells columnConfig apart below.
+	for name, t := range e.opts.Types {
+		cfg.Types[name] = t
 	}
 
 	// The predicate, withheld when it carries a literal (THREAT_MODEL.md T5).
