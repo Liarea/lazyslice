@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/Liarea/lazyslice/internal/discover"
 	"github.com/Liarea/lazyslice/internal/emit"
 	"github.com/Liarea/lazyslice/internal/event"
 	"github.com/Liarea/lazyslice/internal/ref"
@@ -160,6 +161,12 @@ type Request struct {
 	// endpoints and the schema after introspect and the classification after
 	// classify, and refuses before the plan and before anything is written.
 	Reviewed *Reviewed
+
+	// prompter, when set, is copied onto discover.Options.Prompter by
+	// resolveEndpoints instead of letting the ladder decide from Yes and the
+	// controlling terminal; there is no flag for it, and today only a test
+	// sets it (T-0184, ADR-013 review, the 2026-09-16 reverify).
+	prompter discover.Prompter
 }
 
 // Reviewed is the snapshot an operator approved, carried into the run that

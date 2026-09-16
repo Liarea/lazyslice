@@ -130,3 +130,5 @@ One row per code in the catalogue, in the file's own order. Exit is only meaning
 | `target.refused.none` | discover | 4 | no local postgres found to load into: pass {flag} |
 | `target.refused.docker_not_local` | discover | 4 | --create-target needs a local docker endpoint: {host} is {reason} — set {flag} to a local socket, or name a database with --target |
 | `target.refused.ref_invalid` | discover | 2 | ./lazyslice.yml's target_ref does not describe a usable connection: {reason} — edit the file's target: block, delete it to let lazyslice rediscover the target, or pass {flag} to override it for this run |
+| `target.refused.headless_same_cluster` | discover | 4 | every reachable candidate is on {host}, the source's own cluster: pass {flag} to write there on purpose |
+| `target.refused.gate_same_cluster` | discover | 4 | the target on {host} is on the source's own cluster: pass {flag} to write there on purpose |

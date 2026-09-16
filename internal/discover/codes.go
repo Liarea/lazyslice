@@ -98,6 +98,19 @@ const (
 	// string from a Ref and a Ref never carries a password.
 	CodeSourceRefInvalid event.Code = "source.refused.ref_invalid"
 	CodeTargetRefInvalid event.Code = "target.refused.ref_invalid"
+
+	// CodeTargetHeadlessSameCluster is T-0184 / ADR-013 (proposed): a --yes run
+	// with no --target refuses, exit 4, when every reachable target-shaped
+	// candidate is on the source's own cluster — the 2026-09-15 red team's
+	// run, where the ladder's only target-shaped candidate was another
+	// database on the production server it was pointed at. It fires ahead of
+	// chooseTarget's tie-break, never after it: an interactive run still
+	// reaches the tie-break and the same-cluster warning
+	// (CodeTargetSameCluster, internal/core) exactly as before, and a
+	// --target named explicitly on the source's cluster stays eligible
+	// because it short-circuits the ladder before this check runs at all
+	// (ADR-008 §1, §5).
+	CodeTargetHeadlessSameCluster event.Code = "target.refused.headless_same_cluster"
 )
 
 // The ADR-005 exit codes this package returns. They are repeated here rather

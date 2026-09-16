@@ -116,9 +116,16 @@ type Options struct {
 	// starting a container is internal/discover/provision's alone, and nothing
 	// outside this file may hand this package a client that can write.
 	provisioner func(dockerctx.Endpoint) (provision.Provisioner, error)
-	// prompter answers the one blocking question. Nil opens the controlling
-	// terminal (ADR-008 §7); a test supplies its own.
-	prompter Prompter
+	// Prompter answers the one blocking question. Nil means decide from --yes
+	// and the controlling terminal as today (ADR-008 §7); a test — in this
+	// package, or internal/core's own (T-0184, ADR-013 review, the 2026-09-16
+	// reverify) — supplies its own so that isHeadless finds somebody to ask
+	// with no real terminal available. Exported so that internal/core's
+	// resolveEndpoints can copy Request's own unexported prompter field onto
+	// it; internal/core has no controlling-terminal test of its own, and
+	// before this field was exported it had no way to construct an
+	// interactive run at all.
+	Prompter Prompter
 	// progress is where the pull and the wait print. Nil is os.Stderr, which
 	// is the channel ADR-008 §7 already puts the prompt itself on.
 	progress io.Writer
@@ -151,6 +158,18 @@ type Result struct {
 	// TargetProvenance and TargetLabel are the same two facts about the target.
 	TargetProvenance pipeline.Provenance
 	TargetLabel      string
+
+	// TargetNamed is true when the target was named by the operator rather
+	// than picked by the ladder: --target, the positional DSN (both arrive as
+	// o.Target), or a committed lazyslice.yml's target: block (rung 0). It is
+	// the fact T-0184's gate escalation (internal/core/run.go, ADR-013 review
+	// finding 1) must key on instead of TargetProvenance: rung 0 carries the
+	// *file's* provenance forward (the doc comment above), never
+	// pipeline.FromYml, so a target a committed yml named can end up with the
+	// same provenance a ladder-chosen one would carry — FromEnvVar,
+	// FromContainer, FromCompose — and TargetProvenance alone cannot tell
+	// those two cases apart. TargetNamed can.
+	TargetNamed bool
 }
 
 // Refusal is a stop with the event code and the ADR-005 exit it carries.
@@ -215,6 +234,7 @@ func Resolve(ctx context.Context, o Options, sink event.Sink) (Result, error) {
 	}
 	if o.Target != "" {
 		res.Target, res.TargetProvenance = o.Target, pipeline.FromFlag
+		res.TargetNamed = true
 		warnDroppedParams(progressOf(o), o.Target)
 	}
 	if o.Config != nil {
@@ -252,6 +272,7 @@ func Resolve(ctx context.Context, o Options, sink event.Sink) (Result, error) {
 			if d != "" {
 				res.Target = d
 				res.TargetProvenance, res.TargetLabel = o.Config.Target, o.Config.TargetLabel
+				res.TargetNamed = true
 			}
 		}
 	}
@@ -284,12 +305,46 @@ func Resolve(ctx context.Context, o Options, sink event.Sink) (Result, error) {
 		return res, nil
 	}
 
-	// --create-target is not consulted here. ADR-008 §6 makes it Q1's headless
-	// answer and Q1 fires only when nothing target-shaped was found, so the
-	// flag is reached through noTarget and nowhere else; a flag that also
-	// discarded an otherwise-eligible target would be widening a frozen ADR
-	// (docs/adr/008-first-run.md, root CLAUDE.md).
-	target, runnerUp := chooseTarget(cands, source)
+	// T-0184, ADR-013 (proposed): a headless run with no --target refuses,
+	// ahead of the tie-break, when every reachable target-shaped candidate is
+	// on the source's own cluster — the 2026-09-15 red team's run. This is
+	// narrower than "nothing target-shaped was found" (noTarget/Q1, below): a
+	// candidate does exist here, it is simply on the source's own server, and
+	// nobody is at a terminal to see the decision line before the write.
+	// "Headless" is this package's own definition (Options.Yes doc comment;
+	// prompterFor, the canonical predicate askQ1 uses): --yes OR no
+	// controlling terminal, not --yes alone — a CI job or cron entry that
+	// omits --yes is still nobody at a terminal. An interactive run (a
+	// controlling terminal answers) is unaffected and reaches chooseTarget
+	// exactly as before; --target named explicitly already returned above and
+	// never reaches this line at all.
+	var target, runnerUp *found
+	if isHeadless(o) && allOnSourceCluster(cands, source) {
+		// --create-target is the one escape an operator can name here: the
+		// container it provisions is fresh and, by construction, not on the
+		// source's cluster (a different port), so the refusal does not apply
+		// to it (ADR-013 "Options considered" rejects only an *automatic*
+		// fall-through nobody asked for — this is the operator's own flag).
+		// Bypass chooseTarget's tie-break entirely rather than merely
+		// skipping the refusal: every candidate here is same-cluster, so
+		// chooseTarget would still rank one of them the winner. noTarget
+		// provisions directly when o.CreateTarget is set, regardless of cands.
+		if !o.CreateTarget || !dock.usable() {
+			return res, refuseHeadlessSameCluster(sink, source)
+		}
+		t, err := noTarget(ctx, o, cands, source, dock, sink)
+		if err != nil {
+			return res, err
+		}
+		target = t
+	} else {
+		target, runnerUp = chooseTarget(cands, source)
+	}
+	// --create-target is not otherwise consulted here. ADR-008 §6 makes it
+	// Q1's headless answer and Q1 fires only when nothing target-shaped was
+	// found, so the flag is reached through noTarget and nowhere else; a flag
+	// that also discarded an otherwise-eligible target would be widening a
+	// frozen ADR (docs/adr/008-first-run.md, root CLAUDE.md).
 	if target == nil {
 		t, err := noTarget(ctx, o, cands, source, dock, sink)
 		if err != nil {
@@ -938,6 +993,68 @@ func moreSourceLike(a, b found) bool {
 // one of these is the one a developer meant to be written to.
 var targetNamePattern = regexp.MustCompile(`(test|local|dev|snapshot|scratch)$`)
 
+// targetShaped returns the indices of cands that chooseTarget's tie-break may
+// rank: reachable, not the source, and not a maintenance database
+// (ARCHITECTURE.md §9 rule 1, the 2026-09-15 red team). It is factored out of
+// chooseTarget so that allOnSourceCluster (T-0184, ADR-013) asks the same
+// question chooseTarget is about to rank over, rather than a second definition
+// of "target-shaped" that could drift from it.
+func targetShaped(cands []found, source *found) []int {
+	var shaped []int
+	for i := range cands {
+		c := cands[i].cand
+		if !c.Reachable {
+			continue
+		}
+		if source != nil && collapseKey(c.Ref) == collapseKey(source.cand.Ref) {
+			continue
+		}
+		if maintenanceDatabase(c.Ref.Database) {
+			// The 2026-09-15 red team: with --source pointing at production and
+			// no --target, the ladder chose the production container and wrote
+			// the masked slice into its `postgres` maintenance database. A
+			// maintenance database is never what anybody means by a target —
+			// it is the database a client connects to in order to create
+			// another one — and ranking it at all is what let the ladder pick
+			// the production server over nothing. An operator who really wants
+			// to write there says --target, which is where a run records that
+			// on purpose.
+			continue
+		}
+		shaped = append(shaped, i)
+	}
+	return shaped
+}
+
+// allOnSourceCluster reports whether every target-shaped candidate is on the
+// source's own cluster (T-0184, ADR-013): the question a headless run with no
+// --target refuses over, before chooseTarget's tie-break ever picks one of
+// them to write into. An empty target-shaped set is not this state — that is
+// noTarget's (Q1's) — so it answers false rather than vacuously true.
+//
+// "On the source's own cluster" is clusterKey, the same address-based
+// host:port comparison the tie-break itself already ranks on, and not
+// Target.Gate's live system_identifier check: that needs a connection this
+// step, ahead of the 1 s per-candidate dial's target-selection use, does not
+// have (ARCHITECTURE.md §9's gate runs after discovery for exactly this
+// reason).
+func allOnSourceCluster(cands []found, source *found) bool {
+	if source == nil {
+		return false
+	}
+	shaped := targetShaped(cands, source)
+	if len(shaped) == 0 {
+		return false
+	}
+	want := clusterKey(source.cand.Ref)
+	for _, i := range shaped {
+		if clusterKey(cands[i].cand.Ref) != want {
+			return false
+		}
+	}
+	return true
+}
+
 // chooseTarget applies ADR-008 §5's terminating tie-break over the
 // target-shaped candidates and returns the winner and the runner-up.
 //
@@ -964,29 +1081,7 @@ var targetNamePattern = regexp.MustCompile(`(test|local|dev|snapshot|scratch)$`)
 // what internal/discover/CLAUDE.md forbids. The hint renders as
 // "probably empty" and gates nothing.
 func chooseTarget(cands []found, source *found) (winner, runnerUp *found) {
-	var shaped []int
-	for i := range cands {
-		c := cands[i].cand
-		if !c.Reachable {
-			continue
-		}
-		if source != nil && collapseKey(c.Ref) == collapseKey(source.cand.Ref) {
-			continue
-		}
-		if maintenanceDatabase(c.Ref.Database) {
-			// The 2026-09-15 red team: with --source pointing at production and
-			// no --target, the ladder chose the production container and wrote
-			// the masked slice into its `postgres` maintenance database. A
-			// maintenance database is never what anybody means by a target —
-			// it is the database a client connects to in order to create
-			// another one — and ranking it at all is what let the ladder pick
-			// the production server over nothing. An operator who really wants
-			// to write there says --target, which is where a run records that
-			// on purpose.
-			continue
-		}
-		shaped = append(shaped, i)
-	}
+	shaped := targetShaped(cands, source)
 	if len(shaped) == 0 {
 		return nil, nil
 	}
@@ -1034,6 +1129,32 @@ func chooseTarget(cands []found, source *found) (winner, runnerUp *found) {
 // marked nor apparently empty, because that is the one the gate is most likely
 // to refuse.
 func plausibleTarget(c pipeline.Candidate) bool { return c.Marked || c.EmptyHint }
+
+// refuseHeadlessSameCluster is exit 4 (T-0184, ADR-013 proposed): --yes, no
+// --target, and every reachable target-shaped candidate is on the source's
+// own cluster. chooseTarget's tie-break would otherwise pick one of them and
+// write there with nobody at a terminal to see the decision line first — the
+// 2026-09-15 red team's run. An interactive run is unaffected: this refusal
+// is reached only where nobody could be asked, and a --target named
+// explicitly on the source's cluster never reaches this check at all (it
+// short-circuits Resolve before the ladder is even walked).
+func refuseHeadlessSameCluster(sink event.Sink, source *found) error {
+	host := ""
+	if source != nil {
+		host = source.cand.Ref.Host
+	}
+	r := &Refusal{
+		Code: CodeTargetHeadlessSameCluster, Exit: exitTarget,
+		Args: event.Args{
+			event.ArgHost: host,
+			event.ArgFlag: "--target",
+		},
+		Message: "every reachable candidate is on " + host +
+			", the source's own cluster: pass --target to write there on purpose",
+	}
+	sendError(sink, r)
+	return r
+}
 
 // refuseNoSource is exit 3: the ladder is already printed above this line, and
 // the message is a command to run (ARCHITECTURE.md §9).

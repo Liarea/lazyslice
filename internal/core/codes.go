@@ -58,6 +58,19 @@ const (
 	// which is why the omission survived.
 	CodeTargetSameCluster event.Code = "target.warn.same_cluster"
 
+	// CodeTargetGateSameCluster is T-0184 / ADR-013's gate-stage escalation
+	// (review finding 1): the ladder already chose one target and the gate's
+	// own Eligibility.SameCluster — the authoritative system_identifier/cluster
+	// identity signal, arriving too late for discover to have refused on it
+	// (openTarget's comment on e.SameCluster) — says it is on the source's own
+	// cluster, headlessly. It is a distinct code from discover's
+	// CodeTargetHeadlessSameCluster on purpose: that one's catalogue message
+	// says "every reachable candidate is on {host}", which is true of the
+	// ladder's own pre-selection refusal and not of this one, which is about
+	// one already-chosen target the ladder's cheap clusterKey check missed
+	// (a pooler, an SSH tunnel, host.docker.internal vs 127.0.0.1).
+	CodeTargetGateSameCluster event.Code = "target.refused.gate_same_cluster"
+
 	// The three warnings a bound marker prints when the run that wrote it was
 	// not this one (ARCHITECTURE.md section 11.2).
 	CodeSecretChanged  event.Code = "target.marker.secret_changed"

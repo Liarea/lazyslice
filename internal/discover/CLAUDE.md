@@ -453,10 +453,45 @@ Two changes in `chooseTarget`, and one deliberate non-change.
 - **A candidate off the source's cluster outranks one on it**, ahead of every
   other sort key, so a genuinely separate server always wins where one is
   reachable. `clusterKey` is `collapseKey` without the database.
-- **A same-cluster candidate is still chosen when it is the only one.** That is
-  the ordinary compose setup, rule 1 admits it, and
-  `internal/core/gate_integration_test.go`'s
-  `TestAGateRefusalEndsTheRunInsteadOfTryingTheRunnerUp` pins a run whose only
-  two target candidates are on the source's cluster. Refusing it in headless
-  mode would supersede ADR-008 §5 and rule 1 both, which is an ADR and not a
-  patch — **T-0184** carries the question.
+- **A same-cluster candidate is still chosen when it is the only one — in an
+  interactive run.** That is the ordinary compose setup, rule 1 admits it, the
+  decision header and the `same cluster as source` warning print before
+  anything is written, and `internal/core/gate_integration_test.go`'s
+  `TestAGateRefusalEndsTheRunInsteadOfTryingTheRunnerUp` (interactive — `Yes`
+  false *and* a scripted `discover.Prompter` set on the request, not `Yes:
+  false` on its own: `go test` itself has no controlling terminal, and
+  headless is `--yes`, or no controlling terminal, not `--yes` alone, so a
+  bare drop of `Yes: true` is still headless and still trips the refusal below
+  before `chooseTarget` ever runs — the 2026-09-16 reverify's finding) pins the
+  gate-refusal-ends-the-run behaviour over a run whose only two target
+  candidates are on the source's cluster. **T-0184 / ADR-013** (proposed,
+  2026-09-16) answers the question this bullet used to leave open: a
+  **headless** run — `--yes`, or no controlling terminal: the run cannot ask —
+  with no `--target` now refuses at exit 4
+  (`target.refused.headless_same_cluster`) before `chooseTarget` ever runs,
+  when every reachable target-shaped candidate — the whole set `chooseTarget`
+  would have ranked, via the new `targetShaped`/`allOnSourceCluster` helpers —
+  is on the source's own cluster, naming `--target`. A `--target` named
+  explicitly (flag, positional DSN, or a committed `lazyslice.yml`) never
+  reaches the check: it short-circuits `Resolve` before the ladder is even
+  walked (ADR-008 §1), so it stays eligible exactly as rule 1 and ADR-008 §5
+  say. `internal/core/headless_same_cluster_integration_test.go` reproduces
+  the 2026-09-15 red team's run headlessly and asserts the refusal, and its
+  sibling test asserts an explicit same-cluster `--target` is untouched.
+  **`Result.TargetNamed` is the fact a second, later same-cluster check in
+  `internal/core`'s `openTarget` needs and `TargetProvenance` cannot give it**
+  (ADR-013 review finding 1). That check runs *after* the gate, on
+  `Eligibility.SameCluster` — the gate's authoritative `system_identifier`
+  comparison, which catches a same-cluster target this package's cheap
+  `clusterKey` address comparison missed (a pooler, an SSH tunnel, a
+  `host.docker.internal` vs `127.0.0.1` spelling) — and it must not fire for a
+  target the operator named, same-cluster or not. `TargetProvenance` cannot
+  answer "did the operator name this": rung 0 carries the *file's own*
+  provenance forward rather than `pipeline.FromYml` (the doc comment on
+  `Resolve`'s rung-0 branch, and on `Result` itself), so a target read back
+  from a committed `lazyslice.yml` can carry the same provenance
+  (`FromEnvVar`, `FromContainer`, `FromCompose`) a ladder-chosen candidate
+  would. `Result.TargetNamed` is set `true` at both places that short-circuit
+  the ladder for the target — `o.Target != ""` and `rung0Target`'s success
+  path — and nowhere else, so `internal/core` can ask that instead of trying
+  to read operator intent out of a field that does not carry it.
