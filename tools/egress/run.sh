@@ -79,7 +79,12 @@ cleanup() {
 	fi
 	exit "$status"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
+# A signal exits non-zero by its own route. With INT and TERM on the cleanup
+# trap itself, a signal delivered between two commands found $? at 0, and an
+# interrupted run reported itself as a passing egress test (T-0270 review).
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 command -v docker >/dev/null 2>&1 || die "docker is not on PATH"
 command -v go >/dev/null 2>&1 || die "go is not on PATH"
@@ -202,6 +207,15 @@ reject_count() {
 	echo "$count"
 }
 
+# The policy above is IPv4's. A runner with a global IPv6 address could send
+# over it uncounted, and the zero this test reports would be a zero about half
+# the stack. Docker's user-defined bridge networks carry no IPv6 unless asked
+# to, so the honest check is that this one did not: refuse to certify a run on
+# a runner that has a route the counter cannot see (T-0270 review).
+V6_GLOBAL="$(docker exec "$RUNNER" sh -c "ip -6 addr show scope global 2>/dev/null | grep -c inet6" || true)"
+[ "${V6_GLOBAL:-0}" = "0" ] ||
+	die "the runner has a global IPv6 address, which the IPv4 OUTPUT policy does not police; mirror the rules with ip6tables before trusting this test on such a daemon"
+
 BEFORE="$(reject_count)"
 [ "$BEFORE" = "0" ] || die "the reject counter was already non-zero ($BEFORE) before lazyslice ran"
 
@@ -218,7 +232,11 @@ TGT_DSN="postgres://$DB_USER:$DB_PASSWORD@$TGT_IP:5432/$DB_NAME?sslmode=disable"
 
 log "running lazyslice inside the runner"
 set +e
-docker exec -e LAZYSLICE_SECRET="$SECRET" "$RUNNER" /usr/local/bin/lazyslice \
+# The key travels in an env file under $BUILD_DIR (removed by the trap), not
+# on docker's own command line, where the host's process table would show it
+# for as long as the run lasts. The harness keeps the habit T5 documents.
+(umask 077 && printf 'LAZYSLICE_SECRET=%s\n' "$SECRET" >"$BUILD_DIR/run.env")
+docker exec --env-file "$BUILD_DIR/run.env" "$RUNNER" /usr/local/bin/lazyslice \
 	--source "$SRC_DSN" \
 	--target "$TGT_DSN" \
 	--root customers \

@@ -922,7 +922,7 @@
 - code: plan.root.decided
   kind: decision
   stage: plan
-  message: "root {table} — {reason} — {flag}"
+  message: "root {table} ({reason}) — {flag}"
   args: [table, reason, flag]
 
 - code: plan.root.candidate
