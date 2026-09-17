@@ -3,12 +3,12 @@ id: T-0251
 title: "The .gitignore protection of the secret file is verified by asking git, never by matching the file's text"
 epic: E5
 phase: 5
-status: open
+status: done
 owner: sonnet
 created: 2026-09-17
-started: ""
-closed: ""
-outcome: ""
+started: 2026-09-17
+closed: 2026-09-17
+outcome: done
 ---
 
 # T-0251 · The .gitignore protection of the secret file is verified by asking git, never by matching the file's text
@@ -25,6 +25,10 @@ Round-5 replay (docs/reviews/2026-09-15-redteam/round5-still-leaking.json, the s
 
 - 2026-09-17 created
 
+- 2026-09-17 started
+
+- 2026-09-17 closed: done
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+went well: the check asks git instead of matching text, with git absent, not ignored and no repository all falling back to the ephemeral key; the Opus reviewer caught the -v line parse breaking on a source path containing a colon, fixed with NUL-separated records and tests for colon and Windows-shaped sources, and got the warning to name the true cause; one fix round, reverify clean | went badly: the workflow's verify step failed on Docker's port-mapping race in an unrelated headless test and blocked the task, so the orchestrator ran the gate (check, core and repo integration, torture) and committed; the verify step now retries once on that race | change next time: a known environmental flake is retried by the gate, never used to block a task
