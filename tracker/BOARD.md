@@ -7,7 +7,7 @@
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
-| E5 Hardening | 5 | 5 | 1 | 98 | 0 | 0 |
+| E5 Hardening | 5 | 6 | 1 | 98 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
 | E9 Later | later | 74 | 0 | 30 | 5 | 0 |
 
@@ -94,6 +94,7 @@
 - T-0260 [open] E5 · README is true for v0.1.0: what it does, a quickstart that was run, first-run flags, exit codes at a glance, and the residuals in step with the threat model; SECURITY.md reconciled (sonnet)
 - T-0261 [open] E9 · internal/core/CLAUDE.md's T-0241 section is stale after T-0255 ()
 - T-0262 [open] E9 · The special-category rule pins the LIKE spelling at plan level, and its normalisation comment matches the code (sonnet)
+- T-0263 [open] E5 · internal/testutil outlasts Docker's port-table race: a longer bounded wait for the mapped port and one container restart before failing (sonnet)
 
 ## Recently closed
 
