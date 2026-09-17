@@ -2029,6 +2029,11 @@ func (r *run) loadRun() load.Run {
 		MarkerBound:  r.gate.MarkerBound,
 		MarkerRunID:  r.gate.MarkerRunID,
 		MarkerStatus: r.gate.MarkerStatus,
+		// The run lease itself, so the loader can re-assert it is still held
+		// before it acts on any of the above (T-0252). r.lease is set by
+		// acquireLease before the gate's first probe, and a run that could not
+		// take it never reaches this call at all — see openTarget.
+		Lease: r.lease,
 	}
 }
 

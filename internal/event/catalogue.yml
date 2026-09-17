@@ -520,6 +520,23 @@
   message: "the lazyslice_meta row that authorised truncating this target is gone or has changed: nothing was dropped ({table})"
   args: [table]
 
+# T-0252 (docs/reviews/2026-09-15-redteam/round5-still-leaking.json). The run
+# lease is a dedicated connection holding pg_try_advisory_xact_lock open,
+# idle in transaction, for the whole of a run; nothing re-asked whether it
+# still held after the gate's first probe, so a reaper, a pooler restart or a
+# dropped connection could end it with the run never noticing, and a second
+# lazyslice run could take the target apart underneath the first. The loader
+# now asks internal/pg's Lease.Alive before the whole-target recheck and
+# before each table's own lock-and-recheck, and refuses rather than falling
+# through when it is not.
+
+- code: load.refused.lease_lost
+  kind: error
+  stage: load
+  exit: 4
+  message: "the run lease on this target is no longer held: it may have been terminated, or another run may already hold the target"
+  args: []
+
 # The two schema-recreation refusals internal/load/ddl raises (§11.1). §11.1
 # raises them at plan -- before the snapshot is used for keys and before
 # anything in the target is dropped -- so their stage is plan, beside

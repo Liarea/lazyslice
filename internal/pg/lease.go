@@ -94,6 +94,21 @@ FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
 WHERE l.locktype = 'advisory' AND l.granted
   AND l.classid::bigint = $1 AND l.objid::bigint = $2 AND l.objsubid = 1
   AND l.database = (SELECT d.oid FROM pg_database d WHERE d.datname = current_database())`
+
+	// sqlLeaseAlive is Alive's own question, asked on the lease's own
+	// connection rather than a fresh one: does *this* backend still hold
+	// *this* key, granted, in pg_locks, right now. pid = pg_backend_pid()
+	// rather than a stored value is deliberate — it is the connection
+	// answering about itself, so a connection whose backend was terminated and
+	// replaced under the same pgxpool.Conn (which pgxpool never does mid-lease,
+	// but the statement should not rely on that either) cannot mistake a
+	// stranger's lock for its own.
+	sqlLeaseAlive = `SELECT EXISTS (
+  SELECT 1 FROM pg_locks
+  WHERE locktype = 'advisory' AND granted
+    AND classid::bigint = $1 AND objid::bigint = $2 AND objsubid = 1
+    AND pid = pg_backend_pid()
+)`
 )
 
 // LeaseKey is the advisory-lock key for a target database name.
@@ -334,6 +349,48 @@ func (l *Lease) Release(ctx context.Context) {
 		return
 	}
 	endLeaseTx(ctx, l.conn)
+}
+
+// Alive confirms the lease is still what it claims to be: this connection,
+// still holding its own advisory lock, granted, in pg_locks, right now
+// (T-0252, docs/reviews/2026-09-15-redteam/round5-still-leaking.json).
+//
+// AcquireLease takes the lock once, before the gate's first probe, and the
+// transaction that holds it stays open — idle in transaction — for as long as
+// the run takes: introspect, classify, plan and extract all run between the
+// moment the lock is taken and the moment the loader starts dropping tables.
+// Nothing between those two moments re-asks whether the lease still holds, and
+// an idle-in-transaction session for the length of a snapshot is exactly what a
+// server-side reaper, a pooler restart, a NAT timeout or an operator's own
+// pg_terminate_backend ends without this run ever noticing. A lease that has
+// evaporated must be a refusal, never a fall-through into dropping the same
+// tables a second run may already have taken apart — the same rule
+// AcquireLease already applies when the lock cannot be taken in the first
+// place. internal/load calls this before the whole-target recheck and before
+// each table's own lock-and-recheck, which is where that fall-through would
+// otherwise happen.
+//
+// Alive is deliberately narrow: it asks whether *this* connection still holds
+// *this* key, not whether the key is held by anybody — that broader question
+// is leaseHolder's, and it is answered from a different connection because the
+// whole point here is to ask the one connection whose answer cannot lie about
+// itself. A query that fails — because the backend behind this connection is
+// gone, which is exactly what a terminated lease looks like — reports false
+// rather than propagating the error: a connection that cannot say whether it
+// holds the lock does not hold it, as far as a caller deciding whether to drop
+// a table is concerned, and there is no third answer to give.
+func (l *Lease) Alive(ctx context.Context) bool {
+	if l == nil || l.released {
+		return false
+	}
+	hi := int64(uint32(uint64(l.key) >> 32)) //nolint:gosec // G115: the documented two halves of the key pg_locks stores
+	lo := int64(uint32(uint64(l.key)))       //nolint:gosec // G115: as above
+
+	var held bool
+	if err := l.conn.QueryRow(ctx, sqlLeaseAlive, hi, lo).Scan(&held); err != nil {
+		return false
+	}
+	return held
 }
 
 // endLeaseTx ends the lease's transaction, and closes the connection if it
