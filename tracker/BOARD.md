@@ -1,4 +1,4 @@
-# Board · 2026-09-16
+# Board · 2026-09-17
 
 | Epic | Phase | Open | In progress | Done | Cancelled | Blocked |
 |---|---|---|---|---|---|---|
@@ -7,9 +7,9 @@
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
-| E5 Hardening | 5 | 6 | 1 | 83 | 0 | 0 |
+| E5 Hardening | 5 | 2 | 1 | 87 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 62 | 0 | 27 | 4 | 0 |
+| E9 Later | later | 64 | 0 | 29 | 5 | 0 |
 
 ## Open and in progress
 
@@ -50,7 +50,6 @@
 - T-0195 [open] E9 · classify: national_id's checksum-only formats can weak-ratio-mask an ordinary numeric business key ()
 - T-0196 [open] E9 · Migrate the tracker to GitHub Issues and Projects behind the existing tools/tracker.py command surface (sonnet)
 - T-0197 [open] E9 · R2-05/A10 residual: a name in a language names.txt does not carry still reports "no name or value signal" as a clean bill of health (sonnet)
-- T-0198 [open] E5 · special_category has no value validator; a digit/name-free special-category sentence still crosses unseen (sonnet)
 - T-0199 [open] E9 · internal/load's gate test holds its own copy of the cluster-identity SQL ()
 - T-0200 [open] E9 · A cluster identity test that reaches one server over a genuinely different socket ()
 - T-0201 [open] E9 · internal/pipeline/ddlliteral.go: validate a pattern operand both raw and with metacharacters stripped, and strip _ only for LIKE-family operators (sonnet)
@@ -64,7 +63,6 @@
 - T-0209 [open] E9 · ARCHITECTURE.md describes the design as PostgreSQL-specific until a second engine is real (sonnet)
 - T-0210 [open] E9 · Why a row is included, boundary crossings and cap omissions visible before copy, and a decision on which job the default slice serves (opus)
 - T-0211 [open] E9 · ROADMAP.md stops naming docs/BUILD_PLAN.md as the sequencing authority (sonnet)
-- T-0212 [open] E5 · renderSafe redacts by default, and prints a transform refusal's reason under the values flag ()
 - T-0214 [open] E9 · A withheld password_command leaves a marker in lazyslice.yml so a later run without one is refused, as a withheld --where already is (sonnet)
 - T-0215 [open] E9 · Secret-file and password_command tests pin the bypass shapes, not only the happy attack shapes (sonnet)
 - T-0216 [open] E9 · THREAT_MODEL.md T1 does not know --allow-type-literal is recorded in the yml ()
@@ -72,20 +70,27 @@
 - T-0218 [open] E9 · ADR-004's 'no unsafe mode' clause lists the types: block among the ways a committed file may reduce enforcement (sonnet)
 - T-0219 [open] E9 · --allow-type-literal is recorded only for a type that actually carried a literal a strong validator hit (sonnet)
 - T-0220 [open] E9 · internal/discover/password.go: the deadline check reads the derived context, the URL branch of injectPassword swallows a parse error, and the stop reason repeats the prefix (sonnet)
-- T-0222 [open] E5 · Cluster identity degrades field by field, and two unknown identities are treated as possibly the same cluster (sonnet)
-- T-0223 [open] E5 · mask.Apply never returns a masker's error verbatim: the module wraps it without the value (sonnet)
 - T-0224 [open] E9 · ARCHITECTURE.md/THREAT_MODEL.md/internal/pg/CLAUDE.md claim EXECUTE on pg_control_system is not granted to PUBLIC, which is false on stock postgres:16 ()
 - T-0225 [open] E9 · internal/classify: phoneGuessRaisable applies the same exclusions as raisableUnknown (sonnet)
 - T-0226 [open] E9 · internal/classify: matchesAnyGuessRegion computes the candidates once, not once per region (sonnet)
 - T-0227 [open] E9 · A phone_region read from a hand-edited lazyslice.yml is validated the way the flag is (sonnet)
 - T-0228 [open] E9 · ARCHITECTURE.md's --phone-region flag row and the phone_region_guessed reason fragment describe the removed name-rule corroboration arm (sonnet)
 - T-0229 [open] E9 · internal/transform/codes.go: add mask.ErrMaskerFailed to maskReason's known-sentinel list ()
-- T-0230 [open] E9 · T-0229's goal mischaracterises the R2-13 regression; correct it before acting on it ()
-- T-0231 [open] E9 · special_category has no value validator in the row-level second net ()
-- T-0232 [open] E9 · Curate --unmask flags for gitlab, odoo, discourse and supabase-auth under T-0198's broadened DDL-literal rule ()
+- T-0233 [open] E9 · internal/pg: data_directory is a weak identity field, and a savepoint failure no longer collapses the whole identity (sonnet)
+- T-0234 [open] E9 · internal/pg: two code comments still say EXECUTE on pg_control_system is not granted to PUBLIC (sonnet)
+- T-0235 [open] E9 · mask: the masker-error wrap test asserts the original error is dropped, not only that the canary is absent (sonnet)
+- T-0236 [open] E9 · internal/plan: the special-category rule's loose ends: similar_escape's second argument, the bare 'aids' term, enum default lookup by bare name, and the address false-positive controls (sonnet)
+- T-0237 [open] E9 · cmd/lazyslice: renderSafe prints a sentinel's own text rather than its wrapping chain, and internal/load's refusal is value-free without a SQLSTATE (sonnet)
 
 ## Recently closed
 
+- T-0198 [done] E5 · special_category has no value validator; a digit/name-free special-category sentence still crosses unseen → done
+- T-0212 [done] E5 · renderSafe redacts by default, and prints a transform refusal's reason under the values flag → done
+- T-0222 [done] E5 · Cluster identity degrades field by field, and two unknown identities are treated as possibly the same cluster → done
+- T-0223 [done] E5 · mask.Apply never returns a masker's error verbatim: the module wraps it without the value → done
+- T-0230 [done] E9 · T-0229's goal mischaracterises the R2-13 regression; correct it before acting on it → done
+- T-0231 [done] E9 · special_category has no value validator in the row-level second net → done
+- T-0232 [cancelled] E9 · Curate --unmask flags for gitlab, odoo, discourse and supabase-auth under T-0198's broadened DDL-literal rule → cancelled
 - T-0178 [done] E9 · TestAStoppedContainerIsOfferedAndStarted binds a fixed host port (127.0.0.1:5433) and collides under parallel container runs → done
 - T-0184 [done] E5 · Should a headless run auto-select a target on the source's own cluster? → done
 - T-0186 [done] E5 · --allow-type-literal is not recorded in lazyslice.yml → done
@@ -104,10 +109,3 @@
 - T-0189 [done] E5 · Catalog literals: every validator over string literals in CHECK, domain, enum and generated expressions; pattern operands detected but not rewritten; plan reads partial-index predicates → done
 - T-0190 [done] E5 · Cluster identity does not depend on the transport: sqlClusterID uses values that are the same for every session on the cluster → done
 - T-0191 [done] E5 · mask.Apply has a post-condition and a recover; a masker error message never reaches the operator with the value in it → done
-- T-0193 [done] E9 · THREAT_MODEL.md T1: national_id is now a row-path control, not only DDL-literal → done
-- T-0194 [done] E9 · internal/plan/ddlliteral.go: strongHit's national_id entry should call the narrower textsig.ValidNationalIDStructured → done
-- T-0029 [cancelled] E9 · Before going public: git-crypt the AI-specific paths and rewrite pre-encryption history → cancelled
-- T-0089 [done] E5 · T-FAILUX: failure UX and error catalogue drift test → done
-- T-0118 [done] E5 · internal/transform: mask an array whose sample arrives as a text literal element-wise → done
-- T-0119 [done] E5 · A table-scoped name rule, for refresh_tokens.parent and its kind → done
-- T-0127 [done] E5 · internal/plan: drop the arrayArrivesAsLiteral stand-in now that transform masks a literal array element-wise → done

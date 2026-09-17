@@ -3,12 +3,12 @@ id: T-0231
 title: "special_category has no value validator in the row-level second net"
 epic: E9
 phase: ""
-status: open
+status: done
 owner: ""
 created: 2026-09-16
-started: ""
-closed: ""
-outcome: ""
+started: 2026-09-17
+closed: 2026-09-17
+outcome: done
 ---
 
 # T-0231 · special_category has no value validator in the row-level second net
@@ -25,6 +25,10 @@ T-0198 gave pipeline.CatSpecial a value validator (textsig.SpecialCategoryVocabu
 
 - 2026-09-16 created
 
+- 2026-09-17 started
+
+- 2026-09-17 closed: done
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+went well: landed inside T-0198's fix round with regression 029 | went badly: filed and closed within one task | change next time: fold a row-side twin into the brief that owns the catalog side

@@ -25,6 +25,8 @@ T-0223 added mask.ErrMaskerFailed, wrapping a masker's returned error the way Er
 
 - 2026-09-16 created
 
+- 2026-09-17 correction per T-0230 (orchestrator, 2026-09-17): the regression this goal alludes to, the module swallowing its own sentinels, was fixed in 4ca95ff; what remains is the specificity improvement only, naming mask.ErrMaskerFailed in maskReason so the exit reason says a masker failed rather than the generic type sentence
+
 ## Post-mortem
 
 _(filled on close: what went well, what went badly, what we change next time)_

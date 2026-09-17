@@ -3,12 +3,12 @@ id: T-0212
 title: "renderSafe redacts by default, and prints a transform refusal's reason under the values flag"
 epic: E5
 phase: 5
-status: open
+status: done
 owner: ""
 created: 2026-09-15
-started: ""
-closed: ""
-outcome: ""
+started: 2026-09-17
+closed: 2026-09-17
+outcome: done
 ---
 
 # T-0212 · renderSafe redacts by default, and prints a transform refusal's reason under the values flag
@@ -29,6 +29,10 @@ T-0191 made internal/transform's Refusal.Error() withhold the masker's own messa
 
 - 2026-09-16 re-homed to E5 by the orchestrator, 2026-09-16: round 3 names renderSafe's two-type allowlist as the CLI half still owed after T-0191; redact by default, allowlist what may print.
 
+- 2026-09-17 started
+
+- 2026-09-17 closed: done
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+went well: the inversion was well scoped by the round-3 finding and the transform package's own forward reference; the Opus reviewer caught that the core.Stop allowlist entry defeated the inversion because the catch-all path copied an unknown error's whole message into the Stop, and the fixer fixed the root in core rather than gating in the CLI; the second reverify asked for a shape assertion, added by the orchestrator, and the gate ran green with cmd, core and transform integration | went badly: two fix rounds and a by-hand finish for a one-line assertion; the canary end-to-end test could not be extended because no real stage returns an unclaimed error today; two lows filed (T-0237) | change next time: a reverify that finds only a missing assertion states the exact assertion so the fix round is one edit
