@@ -113,12 +113,26 @@ started nothing would fail there.
 file's own gate; grant the fixture's `postgres` role superuser; add a second
 psql construct interpreter instead of erroring loudly on the unsupported one.
 
-## The port-mapping retry is sized for `make torture` (T-TORTURE)
+## The port-mapping retry is sized for `make torture` (T-TORTURE, T-0263)
 
-`portEndpointAttempts`/`portEndpointBudget` are thirty attempts over thirty
-seconds, not ten over five. `make integration` starts about a dozen containers
-and never exhausted five seconds; `make torture` starts about forty and
-exhausted them roughly once a run, failing a different torture schema each time
-with a message about a port rather than about anything the run was testing
-(T-0052 is the race). The budget is only ever spent when the race happens: the
-first attempt succeeds otherwise and the loop returns.
+`portEndpointAttempts`/`portEndpointBudget` are a hundred and twenty attempts
+over a hundred and twenty seconds, not ten over five. They were thirty over
+thirty first, sized for `make integration`'s dozen containers, but on a 2 GB
+Docker VM shared with other containers that still exhausted often enough to
+fail six torture subtests in one gate run, each with a message about a port
+rather than about anything the run was testing (T-0052 is the race). The
+budget is only ever spent when the race happens: the first attempt succeeds
+otherwise and the loop returns.
+
+When that full budget is still exhausted, `postgresContainer` calls
+`portEndpointWithRestart` (not `portEndpointWithRetry` directly), which
+terminates the container and starts a fresh one once via `recreate` — routed
+through the same `runWithReaperRetry` that guards the initial `Run`, since a
+`Run` right after a `Terminate` is exactly the window Ryuk's stale-reaper
+race can hit — before trying again with a shorter, separate budget
+(`portEndpointRestartAttempts`/`portEndpointRestartBudget`, thirty attempts
+over thirty seconds): a container that still cannot map its port after being
+recreated is more likely wedged than merely slow, and spending the full
+hundred-and-twenty-second budget twice risks exhausting `make torture`'s 60m
+test timeout if more than a couple of its ~40 containers hit this path in one
+binary.

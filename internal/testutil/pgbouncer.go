@@ -167,7 +167,7 @@ func PgBouncer(ctx context.Context, t *testing.T, image string, settings ...map[
 		t.Fatalf("testutil: starting %s: %v", image, err)
 	}
 
-	endpoint, err := portEndpointWithRetry(ctx, ctr, pgBouncerPort+"/tcp", "", time.Sleep)
+	endpoint, err := portEndpointWithRetry(ctx, ctr, pgBouncerPort+"/tcp", "", time.Sleep, portEndpointAttempts, portEndpointBudget)
 	if err != nil {
 		t.Fatalf("testutil: resolving the mapped port of %s: %v", image, err)
 	}

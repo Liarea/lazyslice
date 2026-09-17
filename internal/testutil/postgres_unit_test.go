@@ -48,7 +48,7 @@ func TestPortEndpointWithRetryRecoversFromTransientMiss(t *testing.T) {
 	t.Parallel()
 
 	f := &fakePortEndpoint{failures: 2}
-	endpoint, err := portEndpointWithRetry(context.Background(), f, "5432/tcp", "", f.sleep)
+	endpoint, err := portEndpointWithRetry(context.Background(), f, "5432/tcp", "", f.sleep, portEndpointAttempts, portEndpointBudget)
 	if err != nil {
 		t.Fatalf("portEndpointWithRetry: unexpected error: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestPortEndpointWithRetryGivesUpAfterAllAttempts(t *testing.T) {
 	t.Parallel()
 
 	f := &fakePortEndpoint{failures: portEndpointAttempts}
-	_, err := portEndpointWithRetry(context.Background(), f, "5432/tcp", "", f.sleep)
+	_, err := portEndpointWithRetry(context.Background(), f, "5432/tcp", "", f.sleep, portEndpointAttempts, portEndpointBudget)
 	if err == nil {
 		t.Fatalf("portEndpointWithRetry: expected an error after %d failures, got nil", portEndpointAttempts)
 	}
@@ -99,7 +99,7 @@ func TestPortEndpointWithRetryReturnsContextErrorWithoutSleeping(t *testing.T) {
 	cancel()
 
 	f := &fakePortEndpoint{}
-	_, err := portEndpointWithRetry(ctx, f, "5432/tcp", "", f.sleep)
+	_, err := portEndpointWithRetry(ctx, f, "5432/tcp", "", f.sleep, portEndpointAttempts, portEndpointBudget)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("portEndpointWithRetry: error %v, want context.Canceled", err)
 	}
@@ -111,6 +111,220 @@ func TestPortEndpointWithRetryReturnsContextErrorWithoutSleeping(t *testing.T) {
 	}
 	if len(f.sleeps) != 0 {
 		t.Fatalf("portEndpointWithRetry: slept %d times, want 0 (context was already done)", len(f.sleeps))
+	}
+}
+
+// fakePortEndpointAlwaysFails never succeeds, so it drives
+// portEndpointWithRestart into its restart path deterministically.
+type fakePortEndpointAlwaysFails struct {
+	calls int
+}
+
+func (f *fakePortEndpointAlwaysFails) PortEndpoint(_ context.Context, _, _ string) (string, error) {
+	f.calls++
+	return "", fmt.Errorf("port 5432/tcp not found (attempt %d)", f.calls)
+}
+
+// fakeSecondContainer is the replacement portEndpointWithRestart's recreate
+// returns. It embeds testcontainers.Container (nil) to satisfy the interface
+// and overrides PortEndpoint to delegate to a fakePortEndpoint, since
+// portEndpointWithRestart polls the recreated container the same way it
+// polled the first one.
+type fakeSecondContainer struct {
+	testcontainers.Container
+	endpoint interface {
+		PortEndpoint(context.Context, string, string) (string, error)
+	}
+}
+
+func (f *fakeSecondContainer) PortEndpoint(ctx context.Context, port, proto string) (string, error) {
+	return f.endpoint.PortEndpoint(ctx, port, proto)
+}
+
+func TestPortEndpointWithRestartRecreatesOnceThenSucceeds(t *testing.T) {
+	t.Parallel()
+
+	first := &fakePortEndpointAlwaysFails{}
+	second := &fakePortEndpoint{failures: 1}
+	sleep := func(time.Duration) {}
+
+	terminateCalls := 0
+	terminate := func() error {
+		terminateCalls++
+		return nil
+	}
+	recreateCalls := 0
+	newCtr := &fakeSecondContainer{endpoint: second}
+	recreate := func(context.Context) (testcontainers.Container, error) {
+		recreateCalls++
+		return newCtr, nil
+	}
+
+	endpoint, ctr, err := portEndpointWithRestart(context.Background(), first, terminate, recreate, "5432/tcp", "", sleep)
+	if err != nil {
+		t.Fatalf("portEndpointWithRestart: unexpected error: %v", err)
+	}
+	if endpoint != "127.0.0.1:54321" {
+		t.Fatalf("portEndpointWithRestart: got endpoint %q, want 127.0.0.1:54321", endpoint)
+	}
+	if ctr != newCtr {
+		t.Fatalf("portEndpointWithRestart: returned container %v, want the recreated container", ctr)
+	}
+	if terminateCalls != 1 {
+		t.Fatalf("portEndpointWithRestart: terminate called %d times, want 1", terminateCalls)
+	}
+	if recreateCalls != 1 {
+		t.Fatalf("portEndpointWithRestart: recreate called %d times, want 1", recreateCalls)
+	}
+	if first.calls != portEndpointAttempts {
+		t.Fatalf("portEndpointWithRestart: first container's PortEndpoint called %d times, want %d (the full budget before restarting)", first.calls, portEndpointAttempts)
+	}
+	if second.calls != 2 {
+		t.Fatalf("portEndpointWithRestart: recreated container's PortEndpoint called %d times, want 2 (1 failure + 1 success)", second.calls)
+	}
+}
+
+// TestPortEndpointWithRestartDoesNotRestartWhenThePortResolves is the fast
+// path: a container whose port resolves, with or without a few transient
+// misses along the way, must not be terminated and recreated. Driving every
+// other portEndpointWithRestart test through a container that never resolves
+// would leave an implementation that restarts unconditionally fully green.
+func TestPortEndpointWithRestartDoesNotRestartWhenThePortResolves(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name     string
+		failures int
+	}{
+		{"resolves first try", 0},
+		{"resolves after a few transient misses", 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			f := &fakePortEndpoint{failures: tc.failures}
+			sleep := func(time.Duration) {}
+			terminateCalls, recreateCalls := 0, 0
+			terminate := func() error { terminateCalls++; return nil }
+			recreate := func(context.Context) (testcontainers.Container, error) {
+				recreateCalls++
+				return nil, nil
+			}
+
+			endpoint, ctr, err := portEndpointWithRestart(context.Background(), f, terminate, recreate, "5432/tcp", "", sleep)
+			if err != nil {
+				t.Fatalf("portEndpointWithRestart: unexpected error: %v", err)
+			}
+			if endpoint != "127.0.0.1:54321" {
+				t.Fatalf("portEndpointWithRestart: got endpoint %q, want 127.0.0.1:54321", endpoint)
+			}
+			if terminateCalls != 0 || recreateCalls != 0 {
+				t.Fatalf("portEndpointWithRestart: terminate/recreate called %d/%d times, want 0/0 (the port resolved within the first budget)", terminateCalls, recreateCalls)
+			}
+			// f does not implement testcontainers.Container, so
+			// portEndpointWithRestart's success path returns a nil container
+			// alongside the original f (see the type assertion it makes).
+			if ctr != nil {
+				t.Fatalf("portEndpointWithRestart: returned container %v, want nil (fakePortEndpoint is not a testcontainers.Container)", ctr)
+			}
+		})
+	}
+}
+
+// TestPortEndpointWithRestartRoutesRecreateThroughReaperRetry drives recreate
+// into the same "No such container" failure runWithReaperRetry exists to
+// absorb, and asserts a second Run is attempted rather than the restart
+// failing outright. The restart path terminates a container immediately
+// before calling recreate, which is exactly the window that error occurs in.
+func TestPortEndpointWithRestartRoutesRecreateThroughReaperRetry(t *testing.T) {
+	t.Parallel()
+
+	first := &fakePortEndpointAlwaysFails{}
+	second := &fakePortEndpoint{failures: 0}
+	sleep := func(time.Duration) {}
+	terminate := func() error { return nil }
+
+	recreateCalls := 0
+	newCtr := &fakeSecondContainer{endpoint: second}
+	recreate := func(context.Context) (testcontainers.Container, error) {
+		recreateCalls++
+		if recreateCalls == 1 {
+			return nil, errors.New(`Error response from daemon: No such container: abc123`)
+		}
+		return newCtr, nil
+	}
+
+	endpoint, ctr, err := portEndpointWithRestart(context.Background(), first, terminate, recreate, "5432/tcp", "", sleep)
+	if err != nil {
+		t.Fatalf("portEndpointWithRestart: unexpected error: %v", err)
+	}
+	if endpoint != "127.0.0.1:54321" {
+		t.Fatalf("portEndpointWithRestart: got endpoint %q, want 127.0.0.1:54321", endpoint)
+	}
+	if ctr != newCtr {
+		t.Fatalf("portEndpointWithRestart: returned container %v, want the recreated container", ctr)
+	}
+	if recreateCalls != 2 {
+		t.Fatalf("portEndpointWithRestart: recreate called %d times, want 2 (one stale-reaper failure, one retry)", recreateCalls)
+	}
+}
+
+func TestPortEndpointWithRestartFailsNamingT0052AfterBothAttemptsExhausted(t *testing.T) {
+	t.Parallel()
+
+	first := &fakePortEndpointAlwaysFails{}
+	sleep := func(time.Duration) {}
+	terminate := func() error { return nil }
+	second := &fakePortEndpointAlwaysFails{}
+	newCtr := &fakeSecondContainer{endpoint: second}
+	recreate := func(context.Context) (testcontainers.Container, error) {
+		return newCtr, nil
+	}
+
+	_, ctr, err := portEndpointWithRestart(context.Background(), first, terminate, recreate, "5432/tcp", "", sleep)
+	if err == nil {
+		t.Fatalf("portEndpointWithRestart: expected an error after both attempts were exhausted")
+	}
+	if !strings.Contains(err.Error(), "T-0052") {
+		t.Fatalf("portEndpointWithRestart: error %q does not name the known race", err.Error())
+	}
+	if !strings.Contains(err.Error(), "restart") {
+		t.Fatalf("portEndpointWithRestart: error %q does not say it restarted", err.Error())
+	}
+	if !strings.Contains(err.Error(), portEndpointBudget.String()) {
+		t.Fatalf("portEndpointWithRestart: error %q does not say how long it waited", err.Error())
+	}
+	if first.calls != portEndpointAttempts {
+		t.Fatalf("portEndpointWithRestart: first container's PortEndpoint called %d times, want %d", first.calls, portEndpointAttempts)
+	}
+	if second.calls != portEndpointRestartAttempts {
+		t.Fatalf("portEndpointWithRestart: recreated container's PortEndpoint called %d times, want %d (the shorter restart budget spent after restarting)", second.calls, portEndpointRestartAttempts)
+	}
+	if ctr != newCtr {
+		t.Fatalf("portEndpointWithRestart: returned container %v, want the recreated container even on failure, so cleanup targets it", ctr)
+	}
+}
+
+func TestPortEndpointWithRestartDoesNotRestartOnContextError(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	f := &fakePortEndpoint{}
+	terminateCalls, recreateCalls := 0, 0
+	terminate := func() error { terminateCalls++; return nil }
+	recreate := func(context.Context) (testcontainers.Container, error) {
+		recreateCalls++
+		return nil, nil
+	}
+
+	_, _, err := portEndpointWithRestart(ctx, f, terminate, recreate, "5432/tcp", "", f.sleep)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("portEndpointWithRestart: error %v, want context.Canceled", err)
+	}
+	if terminateCalls != 0 || recreateCalls != 0 {
+		t.Fatalf("portEndpointWithRestart: terminate/recreate called %d/%d times, want 0/0 (a cancelled context is not the T-0052 race)", terminateCalls, recreateCalls)
 	}
 }
 

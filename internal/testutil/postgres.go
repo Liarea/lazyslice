@@ -46,20 +46,39 @@ const (
 	startupTimeout = 3 * time.Minute
 
 	// portEndpointAttempts and portEndpointBudget bound the retry of
-	// PortEndpoint below: ~30 attempts spread over ~30 seconds. The wait
+	// PortEndpoint below: ~120 attempts spread over ~120 seconds. The wait
 	// strategy above already confirmed Postgres is accepting connections, but
 	// Docker's own port-mapping table can lag a beat behind that log line, so
 	// the first PortEndpoint call can still report the port unmapped (T-0052).
 	//
-	// It was ten attempts over five seconds until `make torture` measured it.
-	// That suite starts about forty containers in a row against `integration`'s
-	// twelve, and at that rate the five seconds ran out about once a run — on a
-	// different schema each time, with a message about a port rather than about
-	// anything the run was testing. Thirty seconds costs nothing when the port
-	// is there, because the first attempt succeeds and the loop returns; it is
-	// only ever spent on the race it exists for.
-	portEndpointAttempts = 30
-	portEndpointBudget   = 30 * time.Second
+	// It was ten attempts over five seconds until `make torture` measured it,
+	// then thirty over thirty. On a 2 GB Docker VM shared with other
+	// containers, thirty seconds still exhausted often enough to fail six
+	// torture subtests in one gate run (T-0263) — a different schema each
+	// time, with a message about a port rather than about anything the run
+	// was testing. A hundred and twenty seconds costs nothing when the port is
+	// there, because the first attempt succeeds and the loop returns; it is
+	// only ever spent on the race it exists for. When even that is exhausted,
+	// portEndpointWithRestart below terminates the container and starts it
+	// once more rather than spending a second multi-minute budget on a
+	// container that may simply be wedged.
+	portEndpointAttempts = 120
+	portEndpointBudget   = 120 * time.Second
+
+	// portEndpointRestartAttempts and portEndpointRestartBudget bound the
+	// second bounded wait in portEndpointWithRestart, after the container has
+	// already been terminated and started fresh. A fresh container that
+	// cannot map its port in thirty seconds is not going to in a hundred and
+	// twenty: the first budget exists to absorb Docker's port-table lag
+	// behind a real, working container, and a container that still cannot
+	// map its port after being recreated is more likely wedged than merely
+	// slow. Using the full portEndpointBudget again here would let a single
+	// container spend startupTimeout+portEndpointBudget twice over --
+	// roughly ten minutes -- which risks exhausting `make torture`'s 60m test
+	// timeout on its own if two or three of its ~40 containers hit this path
+	// in one binary (T-0263).
+	portEndpointRestartAttempts = 30
+	portEndpointRestartBudget   = 30 * time.Second
 )
 
 // Postgres starts a Postgres container and returns a connection URL for it.
@@ -115,10 +134,10 @@ func postgresContainer(ctx context.Context, t *testing.T, image string, extra ..
 	}
 	opts = append(opts, extra...)
 
-	ctr, err, termErr := runWithReaperRetry(ctx,
-		func(ctx context.Context) (testcontainers.Container, error) {
-			return testcontainers.Run(ctx, image, opts...)
-		},
+	run := func(ctx context.Context) (testcontainers.Container, error) {
+		return testcontainers.Run(ctx, image, opts...)
+	}
+	ctr, err, termErr := runWithReaperRetry(ctx, run,
 		func(c testcontainers.Container) error {
 			return testcontainers.TerminateContainer(c)
 		},
@@ -126,18 +145,22 @@ func postgresContainer(ctx context.Context, t *testing.T, image string, extra ..
 	if termErr != nil {
 		t.Logf("testutil: terminating orphaned %s after stale-reaper retry: %v", image, termErr)
 	}
-	// Registered before the error is checked, and nil-safe, because
-	// testcontainers.Run returns a container alongside its error precisely so
-	// that a container which started but failed its wait strategy can still be
-	// terminated. That is the likely failure here, given the startup timeout
-	// this file exists to bound, and Ryuk does not reap it wherever
-	// TESTCONTAINERS_RYUK_DISABLED is set.
+	// current is the container t.Cleanup terminates. It is registered before
+	// the error is checked, and nil-safe, because testcontainers.Run returns a
+	// container alongside its error precisely so that a container which
+	// started but failed its wait strategy can still be terminated. That is
+	// the likely failure here, given the startup timeout this file exists to
+	// bound, and Ryuk does not reap it wherever TESTCONTAINERS_RYUK_DISABLED is
+	// set. portEndpointWithRestart below may replace current with a fresh
+	// container (T-0052); the closure reads current at cleanup time, not now,
+	// so it always terminates whichever container is live.
+	current := ctr
 	t.Cleanup(func() {
 		// A separate context: ctx may already be cancelled by the time the test
 		// finishes, and a leaked container outlives the run.
 		stop, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
-		if termErr := testcontainers.TerminateContainer(ctr, testcontainers.StopContext(stop)); termErr != nil {
+		if termErr := testcontainers.TerminateContainer(current, testcontainers.StopContext(stop)); termErr != nil {
 			t.Logf("testutil: terminating %s: %v", image, termErr)
 		}
 	})
@@ -145,7 +168,13 @@ func postgresContainer(ctx context.Context, t *testing.T, image string, extra ..
 		t.Fatalf("testutil: starting %s: %v", image, err)
 	}
 
-	endpoint, err := portEndpointWithRetry(ctx, ctr, "5432/tcp", "", time.Sleep)
+	endpoint, newCtr, err := portEndpointWithRestart(ctx, ctr,
+		func() error { return testcontainers.TerminateContainer(ctr) },
+		run, "5432/tcp", "", time.Sleep)
+	if newCtr != nil {
+		ctr = newCtr
+	}
+	current = ctr
 	if err != nil {
 		t.Fatalf("testutil: resolving the mapped port of %s: %v", image, err)
 	}
@@ -224,14 +253,16 @@ type portEndpointer interface {
 }
 
 // portEndpointWithRetry resolves the mapped host:port for port/proto,
-// retrying with a bounded backoff (portEndpointAttempts attempts spread over
-// portEndpointBudget) before giving up. sleep is injected so a unit test can
-// drive the loop without actually waiting.
-func portEndpointWithRetry(ctx context.Context, c portEndpointer, port, proto string, sleep func(time.Duration)) (string, error) {
-	delay := portEndpointBudget / portEndpointAttempts
+// retrying with a bounded backoff (attempts spread over budget) before
+// giving up. Callers pass portEndpointAttempts/portEndpointBudget for the
+// first wait and portEndpointRestartAttempts/portEndpointRestartBudget for
+// the second, shorter one after a restart. sleep is injected so a unit test
+// can drive the loop without actually waiting.
+func portEndpointWithRetry(ctx context.Context, c portEndpointer, port, proto string, sleep func(time.Duration), attempts int, budget time.Duration) (string, error) {
+	delay := budget / time.Duration(attempts)
 
 	var lastErr error
-	for attempt := 1; attempt <= portEndpointAttempts; attempt++ {
+	for attempt := 1; attempt <= attempts; attempt++ {
 		// Checked before every call, including the first: a context that is
 		// already cancelled or past its deadline is not the T-0052 port-mapping
 		// race below, and burning the retry budget's sleeps on it would only
@@ -244,12 +275,83 @@ func portEndpointWithRetry(ctx context.Context, c portEndpointer, port, proto st
 			return endpoint, nil
 		}
 		lastErr = err
-		if attempt < portEndpointAttempts {
+		if attempt < attempts {
 			sleep(delay)
 		}
 	}
 	return "", fmt.Errorf("port not mapped after %d attempts over %s (known startup race between the container reporting ready and Docker's port table catching up, see T-0052): %w",
-		portEndpointAttempts, portEndpointBudget, lastErr)
+		attempts, budget, lastErr)
+}
+
+// portEndpointWithRestart resolves ctr's mapped port with portEndpointWithRetry
+// and, only if that whole bounded wait is exhausted, terminates ctr and starts
+// a replacement once via recreate before trying the same bounded wait exactly
+// one more time. A container's port table can still be missing after the full
+// budget on a loaded Docker daemon (T-0263: a 2 GB VM shared with other
+// containers), and a wedged container is more often fixed by a fresh one than
+// by waiting on the same one longer.
+//
+// It returns the container the caller should use from here on: ctr unchanged
+// on success or on a context error, or the replacement once a restart
+// happened, so the caller's cleanup terminates the container that is actually
+// running.
+//
+// terminate and recreate are injected, like run and terminate in
+// runWithReaperRetry, so a unit test can drive this against fakes instead of
+// a real Docker daemon; ctr is typed as portEndpointer for the same reason.
+// The real caller's terminate closes over the same testcontainers.Container
+// it polls, and recreate is testcontainers.Run with that container's own
+// options.
+func portEndpointWithRestart(
+	ctx context.Context,
+	ctr portEndpointer,
+	terminate func() error,
+	recreate func(context.Context) (testcontainers.Container, error),
+	port, proto string,
+	sleep func(time.Duration),
+) (string, testcontainers.Container, error) {
+	endpoint, err := portEndpointWithRetry(ctx, ctr, port, proto, sleep, portEndpointAttempts, portEndpointBudget)
+	if err == nil {
+		if asContainer, ok := ctr.(testcontainers.Container); ok {
+			return endpoint, asContainer, nil
+		}
+		return endpoint, nil, nil
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		// The failure is the caller's context, not the T-0052 race: a restart
+		// cannot fix that, and would only mask it.
+		return "", nil, err
+	}
+
+	if termErr := terminate(); termErr != nil {
+		return "", nil, fmt.Errorf("port not mapped after %s (T-0052) and the container could not be terminated for the retry: %w", portEndpointBudget, termErr)
+	}
+	// recreate goes through runWithReaperRetry, not a bare call: this Run
+	// starts immediately after a Terminate, which is exactly the window
+	// runWithReaperRetry's own doc comment warns about -- a Run that races
+	// Ryuk's bookkeeping for the container just removed can fail with a
+	// "No such container" error that has nothing to do with the image. This
+	// restart path is the one Run call site most likely to land in that
+	// window, since it is preceded by a Terminate rather than by the reaper
+	// having settled between tests.
+	newCtr, runErr, restartTermErr := runWithReaperRetry(ctx, recreate,
+		func(c testcontainers.Container) error {
+			return testcontainers.TerminateContainer(c)
+		},
+	)
+	if restartTermErr != nil {
+		return "", newCtr, fmt.Errorf("port not mapped after %s (T-0052); restarting hit the stale-reaper race and the orphaned attempt could not be terminated: %w", portEndpointBudget, restartTermErr)
+	}
+	if runErr != nil {
+		return "", newCtr, fmt.Errorf("port not mapped after %s (T-0052); restarted the container and it failed to start again: %w", portEndpointBudget, runErr)
+	}
+
+	endpoint, retryErr := portEndpointWithRetry(ctx, newCtr, port, proto, sleep, portEndpointRestartAttempts, portEndpointRestartBudget)
+	if retryErr != nil {
+		return "", newCtr, fmt.Errorf("port not mapped after %s, restarted the container once, and it was still not mapped after another %s (known startup race between the container reporting ready and Docker's port table catching up, see T-0052): %w",
+			portEndpointBudget, portEndpointRestartBudget, retryErr)
+	}
+	return endpoint, newCtr, nil
 }
 
 // URL parses a connection URL produced by Postgres. It exists so that a test
