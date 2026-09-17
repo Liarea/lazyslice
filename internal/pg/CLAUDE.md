@@ -1055,3 +1055,108 @@ locally) and what the fail-closed arm must not take down.
   where `sameClusterIdentity` must read the weak fields' disagreement as
   "different cluster" — the only outcome the split can produce that the
   default arm cannot.
+
+## A read replica: the postmaster start time is decisive one-directionally (T-0241, the 2026-09-17 round-4 red team)
+
+`docs/reviews/2026-09-15-redteam/round4-still-leaking.json`, "a read
+replica": `--source` a streaming standby under the `SELECT`-only role §9
+recommends, `--target` a database on that standby's own primary, stock
+privileges. A primary and its hot standby share `system_identifier` but never
+the postmaster start time — the standby's postmaster started strictly after
+the primary's, when `pg_basebackup` finished, not when the cluster did — and
+under the restricted role that field was the one surviving decisive field
+once `system_identifier` was unreadable, so `sameClusterIdentity` read
+"different cluster" with total confidence and the gate let the write through
+with no `same cluster as source` line. Two independent changes, deliberately
+kept separate the way ClusterID and SystemID already are.
+
+- **`clusterIDDifferenceUnreliableField` is the mirror image of
+  `clusterIDWeakField`, and so far names exactly one field: the postmaster
+  start time (position 0).** A weak field (the maintenance oid, the server
+  version) can prove two clusters different but never that they are the
+  same; the start time is the opposite — a match remains as decisive as any
+  other non-weak field (two independent postmasters starting in the same
+  microsecond is not a case), but a *mismatch* no longer decides anything on
+  its own, because a standby's start time is guaranteed to mismatch its own
+  primary's. `sameClusterIdentity`'s comparison loop now branches on
+  agreement before it branches on which field disagreed: an agreeing field
+  still sets `known` (and `decisive` when it is not weak) exactly as before;
+  a disagreeing field is checked against
+  `clusterIDDifferenceUnreliableField` first, and the start time's
+  disagreement is skipped — read exactly as a field neither side filled —
+  while every other field's disagreement still sets `same = false` and
+  `known = true` as before. `data_directory` is unaffected: nothing forces a
+  standby's data directory to disagree with its primary's the way the start
+  time is forced to, so it still decides "different cluster" on
+  disagreement, and `TestADataDirectoryDisagreementStillProvesTwoClusters`
+  (cluster_test.go) pins that this fix did not quietly widen into "no field's
+  disagreement matters."
+  **Consequence, stated rather than hidden:** a weaker role that could
+  previously distinguish two genuinely different clusters from a start-time
+  mismatch alone now reads that shape as unknown too —
+  `TestSameClusterIdentitySkipsFieldsOneSideCouldNotRead`'s former "two
+  clusters, weaker role" case is renamed and its expectation changed
+  (`(false, true)` → `(false, false)`) to say so. That is the fail-closed
+  direction: an honest "unknown" that costs a warning line (or ADR-013's
+  headless refusal) is preferred to a confident "different" that a standby
+  can produce and a genuinely different cluster can too, with nothing here
+  able to tell which. `TestGateDistinguishesAGenuinelyDifferentClusterFromWeakFieldsAlone`
+  (this file, T-0222 section above) still proves a weaker role can
+  distinguish two real clusters — through the server version, a field this
+  fix does not touch.
+  `TestAStandbysStartTimeDisagreementWithoutSystemIdentifierIsUnknown`
+  (cluster_test.go) pins the round-4 shape end to end, over hand-written
+  identity strings for the reason `gate_integration_test.go`'s own T-0222
+  cases already give: a primary-and-standby integration fixture needs
+  `pg_basebackup` run inside a second container on a Docker network the two
+  share, which is more than `internal/testutil`'s `Postgres`, `PgBouncer` and
+  `SecondEndpoint` build (`internal/testutil/CLAUDE.md` lists all three; none
+  stands up a second *server*). That gap is recorded in THREAT_MODEL.md T2's
+  2026-09-17 amendment rather than silently left implicit.
+- **`Source.Replica` is a new, independent, positive check — not a repair of
+  the identity comparison above, and it does not wait on that comparison's
+  answer.** `pg_is_in_recovery()` is executable by `PUBLIC` on every
+  supported version, unlike `pg_control_system` and (on a hardened cluster)
+  `pg_postmaster_start_time()`, so it needs no grant and no fallback. When it
+  answers true, `pg_stat_wal_receiver`'s `sender_host`/`sender_port` are read
+  too, scanned as `sql.NullString` because that view restricts those two
+  columns to a superuser or a role holding `pg_read_all_stats` — an ordinary
+  role sees `NULL` there, not a permission error, which is why
+  `readReplicaStatus` treats an unreadable sender the same way `SystemID`
+  and `ClusterID` treat an unreadable field: the zero value, never an error.
+  It runs inside its own `REPEATABLE READ READ ONLY` transaction, registered
+  against the source tracer, for the same T-0076/T-0082 reason `SystemID`
+  does — no statement this package sends may reach the source outside a
+  transaction. `target.go` has no equivalent: nothing here ever asks whether
+  a *target* is in recovery, because a run refuses a remote or a same-cluster
+  target on other grounds long before replication status would matter.
+  `internal/core`'s `discover` calls it once, alongside `SystemID`, and
+  prints `source.warn.standby` whenever it is true — interactive runs
+  included, because an operator watching is exactly who should be told the
+  database being read is not itself the primary — and refuses a headless run
+  with no `--target` outright (`source.refused.standby_no_target`), *whether
+  or not* `Eligibility.SameCluster` ends up true: that signal can still be
+  fooled by a standby whose `data_directory` genuinely differs from its
+  primary's, which the identity fix above does not and must not change, and
+  the round-4 red team's second reproduction reached its target through a
+  discovered `$DATABASE_URL` on a ladder whose cheap `clusterKey` check never
+  flags a standby and its primary as one cluster at all — they ordinarily
+  publish on different ports. `TestReplicaOnAnOrdinarySourceIsNotAStandby`
+  (`replica_integration_test.go`) is the one thing proven against a real
+  server: an ordinary, non-standby source answers `pg_is_in_recovery()`
+  false with no error and no second statement sent, under the same role §9
+  recommends. `internal/core/names_test.go`'s `TestStandbyNoTargetRefusal`
+  pins the headless-refusal decision as a pure function, the way
+  `TestSameClusterVerdict` (this package) pins the identity comparison one
+  layer down; the `Standby == true` half is the same untested-against-a-real-
+  server gap the paragraph above names.
+- **The recommended-role snippet, and `internal/core`'s `CodeRoleWritable`
+  message that renders the same statement, both gain
+  `GRANT EXECUTE ON FUNCTION pg_control_system() TO lazyslice_ro;`.**
+  ARCHITECTURE.md §9's "the identity works without it" claim (the T-0190
+  section above) was false for exactly this shape: without the grant, the
+  identity degrades to the postmaster start time and the server version, and
+  the start time is now the one field that can never settle a standby
+  against its own primary. Granting `EXECUTE` restores `system_identifier`,
+  which decides the comparison outright and needs none of this section's
+  reasoning at all.

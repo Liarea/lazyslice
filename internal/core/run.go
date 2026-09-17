@@ -770,10 +770,62 @@ func (r *run) discover(ctx context.Context) error {
 		})
 	}
 
+	// T-0241 (round-4 red team, docs/reviews/2026-09-15-redteam/round4-still-leaking.json,
+	// "a read replica"): a positive, privilege-free check beside the identity
+	// comparison openTarget's Gate call makes below, independent of it —
+	// pg_is_in_recovery() is executable by PUBLIC on every supported version,
+	// and this still catches a standby the cluster identity's own
+	// data_directory field could otherwise clear (a standby and its primary
+	// can genuinely differ there). A source that will not answer is not a
+	// refusal here either, the same swallow-the-error convention SystemID and
+	// ClusterID already use two lines up — only what a "yes" reveals is.
+	if replica, replicaErr := src.Replica(ctx); replicaErr == nil && replica.Standby {
+		r.send(event.Discover, event.Warn, CodeSourceStandby, event.Args{
+			event.ArgHost:   sourceRef.Host,
+			event.ArgReason: standbySenderReason(replica),
+		})
+		// A headless run with no --target has nobody to show that warning to
+		// and nothing this cheap to tell the standby's own primary apart from
+		// an unrelated server by address alone — the discovery ladder's
+		// clusterKey comparison is exactly the address-only check the
+		// round-4 red team's second reproduction (the compose-file/env-var
+		// shape) walked straight past, because a standby and its primary
+		// ordinarily publish on different ports. A --target the operator
+		// named, on the standby's primary or anywhere else, is unaffected:
+		// this rail is about what the ladder may pick unsupervised, exactly
+		// as ADR-013's own escalations are.
+		if stop := standbyNoTargetRefusal(r.req.Mode.needsTarget(), r.headless, r.targetNamed, sourceRef); stop != nil {
+			return stop
+		}
+	}
+
 	if !r.req.Mode.needsTarget() {
 		return nil
 	}
 	return r.openTarget(ctx)
+}
+
+// standbyNoTargetRefusal is T-0241's headless rail (round-4 red team,
+// docs/reviews/2026-09-15-redteam/round4-still-leaking.json), as a pure
+// function so it can be pinned without a database — the same reason
+// sameClusterVerdict (internal/pg/target.go, pinned by cluster_test.go's
+// TestSameClusterVerdict) is factored out rather than left inline in Gate.
+// It is called only once discover has already confirmed the source answered
+// pg_is_in_recovery() true; a nil result means proceed, a non-nil one is the
+// refusal to return verbatim.
+func standbyNoTargetRefusal(needsTarget, headless, targetNamed bool, sourceRef dsn.Ref) *Stop {
+	if !needsTarget || !headless || targetNamed {
+		return nil
+	}
+	return &Stop{
+		Code: CodeSourceStandbyNoTarget, Exit: exitTarget,
+		Args: event.Args{
+			event.ArgHost: sourceRef.Host,
+			event.ArgFlag: "--target",
+		},
+		Message: "the source " + sourceRef.String() + " is a streaming standby and no --target " +
+			"was given: lazyslice cannot tell its primary apart from an unrelated server",
+	}
 }
 
 // openTarget opens the write side and runs the gate (ARCHITECTURE.md section 9).

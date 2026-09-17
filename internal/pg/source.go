@@ -4,6 +4,7 @@ package pg
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"regexp"
@@ -37,6 +38,24 @@ const (
 	sqlSetSnapshotShape = `SET TRANSACTION SNAPSHOT {snapshot}`
 
 	sqlRole = `SELECT current_user, current_setting('is_superuser') = 'on'`
+
+	// sqlIsInRecovery is pg_is_in_recovery(): true on a streaming standby,
+	// executable by PUBLIC on every supported version, unlike
+	// pg_control_system() and (on a hardened cluster) pg_postmaster_start_time()
+	// (T-0241, round-4 red team).
+	sqlIsInRecovery = `SELECT pg_is_in_recovery()`
+
+	// sqlWalReceiverSender names the primary a standby is streaming from, when
+	// the role may read it: pg_stat_wal_receiver restricts sender_host and
+	// sender_port to a superuser or a role holding pg_read_all_stats, and an
+	// ordinary role sees them as NULL rather than an error, which is why
+	// readReplicaStatus scans them as nullable. The view carries one row while
+	// a WAL receiver process is running and none otherwise, which is why this
+	// is sent only after sqlIsInRecovery has answered true. sender_port is
+	// cast to text for the same reason every other numeric field here is: the
+	// source pool runs in pgx.QueryExecModeExec and every value comes back in
+	// text format.
+	sqlWalReceiverSender = `SELECT sender_host, sender_port::text FROM pg_stat_wal_receiver`
 
 	sqlTablePrivileges = `SELECT n.nspname, c.relname,
        has_table_privilege(c.oid, 'INSERT') OR has_table_privilege(c.oid, 'UPDATE') OR has_table_privilege(c.oid, 'DELETE'),
@@ -245,6 +264,89 @@ func (s *Source) ClusterID(ctx context.Context) (string, error) {
 		return "", err
 	}
 	return withSystemID(id, systemID), nil
+}
+
+// ReplicaStatus is what Source.Replica reads about the source's own
+// replication role (T-0241, round-4 red team:
+// docs/reviews/2026-09-15-redteam/round4-still-leaking.json). It answers a
+// question the cluster identity cannot: a streaming standby and its primary
+// are one cluster by system_identifier and two different postmasters by
+// every other field this package reads, so nothing in ClusterID's identity
+// can, on its own, say "the database this run just wrote to is the primary
+// feeding the database it just read." This is the positive, cheap,
+// privilege-free check that says so directly instead.
+type ReplicaStatus struct {
+	// Standby is pg_is_in_recovery(): true when the source is a streaming
+	// standby of some primary.
+	Standby bool
+	// SenderHost and SenderPort name the primary this standby is streaming
+	// from (pg_stat_wal_receiver), each empty when Standby is false or the
+	// role may not read it — a role without pg_read_all_stats or superuser
+	// sees NULL there, not a permission error.
+	SenderHost string
+	SenderPort string
+}
+
+// Replica reads pg_is_in_recovery() on the source and, when it is true, the
+// primary it is streaming from. Like SystemID and ClusterID, an unreadable
+// answer is the zero ReplicaStatus and never an error — the caller decides
+// what the absence means — and it runs inside its own REPEATABLE READ READ
+// ONLY transaction, registered against the allowlist, for the same reason
+// SystemID does (T-0076, T-0082): no statement this package sends may reach
+// the source outside a transaction.
+func (s *Source) Replica(ctx context.Context) (ReplicaStatus, error) {
+	if err := s.tr.Register(
+		Shape{Name: "source.replica.is_in_recovery", SQL: sqlIsInRecovery},
+		Shape{Name: "source.replica.wal_receiver_sender", SQL: sqlWalReceiverSender},
+	); err != nil {
+		return ReplicaStatus{}, err
+	}
+	conn, err := s.pool.Acquire(ctx)
+	if err != nil {
+		return ReplicaStatus{}, fmt.Errorf("pg: acquiring a source connection: %w", err)
+	}
+	if _, beginErr := conn.Exec(ctx, sqlBeginReadOnly); beginErr != nil {
+		conn.Release()
+		return ReplicaStatus{}, fmt.Errorf("pg: opening a read-only transaction on the source: %w", beginErr)
+	}
+	defer endTx(context.WithoutCancel(ctx), conn)
+
+	return readReplicaStatus(ctx, conn)
+}
+
+// readReplicaStatus is Replica's statement sequence, shared by nothing else:
+// unlike SystemID and ClusterID, target.go has no reason to ask whether a
+// write target is in recovery.
+func readReplicaStatus(ctx context.Context, conn *pgxpool.Conn) (ReplicaStatus, error) {
+	var st ReplicaStatus
+	if err := conn.QueryRow(ctx, sqlIsInRecovery).Scan(&st.Standby); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return ReplicaStatus{}, err
+		}
+		return ReplicaStatus{}, nil
+	}
+	if !st.Standby {
+		return st, nil
+	}
+	var host, port sql.NullString
+	if err := conn.QueryRow(ctx, sqlWalReceiverSender).Scan(&host, &port); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return ReplicaStatus{}, err
+		}
+		// pg_is_in_recovery() already answered true, above: this role simply
+		// cannot read pg_stat_wal_receiver's sender columns (T-0241's
+		// unreadable-not-absent distinction), or the WAL receiver row was
+		// gone by the time this ran (a promotion mid-run). Either way the
+		// standby fact stands; only the sender is missing.
+		return st, nil
+	}
+	if host.Valid {
+		st.SenderHost = host.String
+	}
+	if port.Valid {
+		st.SenderPort = port.String
+	}
+	return st, nil
 }
 
 // Privileges reads what the source role can do (ARCHITECTURE.md §2). Both
@@ -565,20 +667,42 @@ func readClusterID(ctx context.Context, conn *pgxpool.Conn, inTransaction bool) 
 // "unknown", which fails closed.
 //
 // Not every positional field is evidence of sameness, though every one of
-// them is evidence of difference (T-0222 review round). The start time and
-// data_directory are specific enough to a running cluster that two clusters
-// agreeing on them is not a case worth worrying about; the maintenance
-// database's oid and the server version are not — the oid is pinned at 5 for
-// every cluster from PostgreSQL 15 on (clusterIDWeakField), and the version is
-// shared by every cluster built from the same image. Two identities whose
-// only common fields are those two, and which agree on both, have proven
-// nothing about sameness: known stays false and the gate reads it as
-// unknown, the same fail-closed direction as no common field at all, rather
-// than a confident "same cluster" a role denied the start time (a hardened
-// cluster that revokes pg_postmaster_start_time from PUBLIC) could produce
-// against any other cluster built from the same image. Disagreement on
-// either still decides "different cluster" on its own, because a mismatch
-// needs no specificity to be believed.
+// them but one is evidence of difference (T-0222 review round; the start time
+// carve-out below is T-0241, the round-4 red team). data_directory is
+// specific enough to a running cluster that two clusters agreeing on it is
+// not a case worth worrying about, and disagreeing on it is real evidence of
+// difference; the maintenance database's oid and the server version prove
+// neither — the oid is pinned at 5 for every cluster from PostgreSQL 15 on
+// (clusterIDWeakField), and the version is shared by every cluster built from
+// the same image, so agreement on either is not evidence of one cluster.
+// Two identities whose only common fields are those two, and which agree on
+// both, have proven nothing about sameness: known stays false and the gate
+// reads it as unknown, the same fail-closed direction as no common field at
+// all, rather than a confident "same cluster" a role denied the start time (a
+// hardened cluster that revokes pg_postmaster_start_time from PUBLIC) could
+// produce against any other cluster built from the same image. Disagreement
+// on either weak field still decides "different cluster" on its own, because
+// a mismatch needs no specificity to be believed.
+//
+// **The postmaster start time is the one field whose disagreement is not
+// believed either (T-0241, docs/reviews/2026-09-15-redteam/round4-still-leaking.json).**
+// A primary and its own streaming standby are two postmasters of one
+// cluster, and a standby's start time is necessarily later than its
+// primary's — it started when pg_basebackup finished, not when the cluster
+// did — so a start-time mismatch is not evidence the two clusters differ the
+// way a data_directory or a weak-field mismatch is. Unlike data_directory,
+// which still decides "different" on disagreement, a start-time mismatch
+// contributes nothing at all: neither same nor known is touched by it, the
+// same as a field neither side filled. Agreement on the start time is
+// unaffected and remains as strong evidence of sameness as ever — two
+// independent postmasters starting in the same microsecond is not a case.
+// The consequence is the one ARCHITECTURE.md §9's fail-closed reasoning
+// already states for the oid and the version, read in the opposite
+// direction: when system_identifier is missing on either side and the start
+// time is the only field that disagrees, the verdict downgrades to unknown
+// rather than a confident "different cluster" — which is what let a run
+// whose --source was a standby and whose --target was a database on that
+// standby's own primary print no warning and write there.
 //
 // Fields are positional, so a field may be added only at the end — and
 // clusterIDSystemIDField must move with it.
@@ -601,10 +725,22 @@ func sameClusterIdentity(a, b string) (same, known bool) {
 		if fa[i] == "" || fb[i] == "" {
 			continue
 		}
-		known = true
-		if fa[i] != fb[i] {
-			same = false
+		if fa[i] == fb[i] {
+			known = true
+			if !clusterIDWeakField(i) {
+				decisive = true
+			}
+			continue
 		}
+		if clusterIDDifferenceUnreliableField(i) {
+			// The start time: a standby's postmaster always started later
+			// than its primary's, so a mismatch here is not evidence the
+			// clusters differ. Read it exactly as a field neither side
+			// filled — it decides nothing, in either direction.
+			continue
+		}
+		known = true
+		same = false
 		if !clusterIDWeakField(i) {
 			decisive = true
 		}
@@ -621,6 +757,10 @@ func sameClusterIdentity(a, b string) (same, known bool) {
 	}
 	return same, true
 }
+
+// clusterIDStartTimeField is the postmaster start time's position —
+// clusterIDDifferenceUnreliableField's one field.
+const clusterIDStartTimeField = 0
 
 // clusterIDMaintenanceOIDField and clusterIDServerVersionField are the two
 // positions clusterIDWeakField names.
@@ -640,6 +780,23 @@ const (
 // an oid that differs below PostgreSQL 15, proves two different clusters.
 func clusterIDWeakField(i int) bool {
 	return i == clusterIDMaintenanceOIDField || i == clusterIDServerVersionField
+}
+
+// clusterIDDifferenceUnreliableField reports whether positional field i can
+// only prove two cluster identities the same, never that they differ — the
+// mirror image of clusterIDWeakField, and so far it names exactly one field
+// (T-0241, round-4 red team: docs/reviews/2026-09-15-redteam/round4-still-leaking.json).
+// The postmaster start time (position 0) is otherwise the strongest field
+// sameClusterIdentity has short of system_identifier itself, which is
+// exactly why an unqualified disagreement on it used to decide "different
+// cluster" outright — and exactly why that was wrong for a primary and its
+// own streaming standby, whose start times can never agree: the standby's
+// postmaster started when pg_basebackup finished, strictly after the
+// primary's. Agreement is unaffected: two independent postmasters starting
+// in the same microsecond is not a case worth worrying about, so a match
+// here remains as decisive as any other non-weak field.
+func clusterIDDifferenceUnreliableField(i int) bool {
+	return i == clusterIDStartTimeField
 }
 
 // clusterIDField reads one positional field, or "" when the identity is shorter

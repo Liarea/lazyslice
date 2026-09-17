@@ -71,6 +71,28 @@ const (
 	// (a pooler, an SSH tunnel, host.docker.internal vs 127.0.0.1).
 	CodeTargetGateSameCluster event.Code = "target.refused.gate_same_cluster"
 
+	// CodeSourceStandby is T-0241's header line (round-4 red team,
+	// docs/reviews/2026-09-15-redteam/round4-still-leaking.json, "a read
+	// replica"): the source answered pg_is_in_recovery() true. Unlike the
+	// cluster-identity fields, this is a direct, positive statement rather
+	// than an inference from what two identities happen to share, and it is
+	// printed whenever the source is a standby, not only headlessly — the
+	// operator watching an interactive run is exactly who should be told the
+	// database being read is not itself the primary.
+	CodeSourceStandby event.Code = "source.warn.standby"
+
+	// CodeSourceStandbyNoTarget is T-0241's second rail, exit 4: a headless
+	// run — --yes, or no controlling terminal — whose source is a streaming
+	// standby and whose --target was not named refuses outright, because
+	// nothing this cheap can tell a standby's own primary apart from an
+	// unrelated server by address alone (round-4's second reproduction, "a
+	// target URL taken from a compose file that points at prod"). It is
+	// independent of, and does not wait on, Eligibility.SameCluster: that
+	// signal can still be fooled by a data_directory that genuinely differs
+	// between a standby and its primary, and this rail does not depend on
+	// the cluster identity being able to prove anything at all.
+	CodeSourceStandbyNoTarget event.Code = "source.refused.standby_no_target"
+
 	// The three warnings a bound marker prints when the run that wrote it was
 	// not this one (ARCHITECTURE.md section 11.2).
 	CodeSecretChanged  event.Code = "target.marker.secret_changed"
