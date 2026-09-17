@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -274,6 +275,9 @@ func TestHeadlessQuestionLadderAsksNothingAndExits(t *testing.T) {
 // controlling terminal without ever calling Confirm, so this cannot block a
 // run started from one).
 func TestHeadlessSameClusterRefusalDoesNotNeedYes(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a GitHub windows runner gives go test a console, so CONIN$ opens and the process is not headless; the unix legs pin the equivalence this test is about")
+	}
 	quietEnvironment(t)
 	dir := t.TempDir()
 	write(t, dir, ".env", "DATABASE_URL=postgres://app@10.0.0.5:5432/shop_test\n")

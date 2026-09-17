@@ -6,6 +6,7 @@ package core
 
 import (
 	"io/fs"
+	"reflect"
 	"syscall"
 )
 
@@ -20,5 +21,20 @@ func hardLinkCount(info fs.FileInfo) (nlink uint64, ok bool) {
 	if !ok {
 		return 0, false
 	}
-	return uint64(st.Nlink), true
+	// Stat_t.Nlink is uint16 on darwin, uint32 on some linux ports and uint64
+	// on linux/amd64. A plain uint64(...) conversion is required on the first
+	// two and is an unconvert finding on the third, and a //nolint for it is
+	// an unused-directive finding everywhere else (nolintlint, allow-unused:
+	// false) -- CI's lint job was red on exactly that from 2026-09-16. Reading
+	// the field's value by kind is the one spelling every platform accepts;
+	// it runs once per run.
+	return reflect.ValueOf(st.Nlink).Uint(), true
+}
+
+// permissiveMode reports the permission bits of a secret file when group or
+// other can reach it. The bits mean what they say on every platform this file
+// builds for.
+func permissiveMode(info fs.FileInfo) (perm fs.FileMode, permissive bool) {
+	perm = info.Mode().Perm()
+	return perm, perm&0o077 != 0
 }

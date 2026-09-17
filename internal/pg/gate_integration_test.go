@@ -995,10 +995,17 @@ func TestGateDistinguishesAGenuinelyDifferentClusterFromWeakFieldsAlone(t *testi
 		t.Fatalf("ClusterID = %q, want a non-empty server-version field (%d)", sourceCluster, clusterIDServerVersionField)
 	}
 
-	// A second, genuinely different cluster: postgres:14 rather than the
-	// source's own postgres:16, so the server version — the one weak field
-	// this role can read on both sides — is certain to disagree.
-	otherURL := testutil.Postgres(ctx, t, "postgres:14")
+	// A second, genuinely different cluster on a different major from the
+	// source's own, so the server version — the one weak field this role can
+	// read on both sides — is certain to disagree. The source is whatever
+	// $LAZYSLICE_TEST_POSTGRES_IMAGE names: CI's five-major matrix runs this
+	// test against a postgres:14 source too, where a hardcoded postgres:14
+	// here agreed with it and the job was red from 2026-09-16.
+	otherImage := "postgres:14"
+	if strings.HasPrefix(fields[clusterIDServerVersionField], "14") {
+		otherImage = "postgres:16"
+	}
+	otherURL := testutil.Postgres(ctx, t, otherImage)
 	target, err := OpenTarget(ctx, dsn.DSN(otherURL))
 	if err != nil {
 		t.Fatalf("opening the target: %v", err)
@@ -1011,8 +1018,8 @@ func TestGateDistinguishesAGenuinelyDifferentClusterFromWeakFieldsAlone(t *testi
 		t.Fatalf("Gate: %v", err)
 	}
 	if e.SameCluster {
-		t.Fatal("SameCluster = true: the target is a postgres:14 container, genuinely different " +
-			"from the postgres:16 source, and its server version disagrees with the source's own " +
+		t.Fatal("SameCluster = true: the target is a " + otherImage + " container, genuinely different " +
+			"from the source, and its server version disagrees with the source's own " +
 			"under a role that can read no other field — sameClusterIdentity's weak-field " +
 			"disagreement must decide \"different cluster\" on its own here, not fall back to the " +
 			"unknown-defaults-true arm the test above exercises")

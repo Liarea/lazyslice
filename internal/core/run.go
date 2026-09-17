@@ -2275,7 +2275,7 @@ func (r *run) checkSecretFile() error {
 			Message: fmt.Sprintf("%s is a symbolic link", r.req.SecretFile),
 		}
 	}
-	if perm := info.Mode().Perm(); perm&0o077 != 0 {
+	if perm, permissive := permissiveMode(info); permissive {
 		return &Stop{
 			Code: CodeSecretPermissive, Exit: exitCredential,
 			Args: event.Args{

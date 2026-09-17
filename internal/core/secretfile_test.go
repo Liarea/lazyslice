@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -38,6 +39,9 @@ func TestSecretFileIsRefusedWhenItIsASymlink(t *testing.T) {
 }
 
 func TestSecretFileIsRefusedWhenOthersCanReadIt(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("windows has no permission bits to judge: Go reports every writable file as 0666 and permissiveMode answers false there (hardlink_windows.go)")
+	}
 	dir := t.TempDir()
 	secret := filepath.Join(dir, "lazyslice.secret")
 	if err := os.WriteFile(secret, []byte("00\n"), 0o600); err != nil {
@@ -196,6 +200,9 @@ func TestSecretFileWithASymlinkedParentButNoRepositoryIsAccepted(t *testing.T) {
 // the file the run reads and writes is still exactly the file it thinks it
 // is.
 func TestSecretFileIsRefusedWhenItHasMoreThanOneName(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("hardLinkCount is unimplemented on windows (hardlink_windows.go); THREAT_MODEL.md T6 records the gap")
+	}
 	dir := t.TempDir()
 	secret := filepath.Join(dir, "lazyslice.secret")
 	if err := os.WriteFile(secret, []byte("00\n"), 0o600); err != nil {
