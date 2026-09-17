@@ -99,7 +99,14 @@ if (!verify || !verify.passed) {
 const bullets = (dev.changelog && dev.changelog.length ? dev.changelog : [dev.summary]).map(b => '- ' + String(b).replace(/\s+/g, ' ').trim()).join('\n')
 const trailers = `Task: ${a.id}\nReview: ${nReviewers} reviewer${nReviewers === 1 ? '' : 's'}, ${round} fix round${round === 1 ? '' : 's'}`
 const message = `${(a.stage || 'peripheral')}: ${a.title} (${a.id})\n\n${bullets}\n\n${trailers}\n`
-const commit = await agent(`Repo: ${REPO}. Write the following commit message, exactly and completely, to the file ${REPO}/.git/COMMIT_MSG_${a.id} (create it; do not edit it):\n<<<\n${message}>>>\nThen run: cd ${REPO} && git add -A && git commit -F .git/COMMIT_MSG_${a.id} && rm -f .git/COMMIT_MSG_${a.id}, and report the short hash. If there is nothing to commit, say so. Do not change any other file.`,
+// The message file lives outside the repository and staging is scoped to the task's paths plus tracker/: writing under .git/ and git add -A tripped a safety classifier twice (T-0178, T-0221, 2026-09-16) and a blocked commit then bled into the next task's commit. A commit that did not happen blocks the task instead of reporting merged with no hash.
+const MSG = `/private/tmp/claude-501/lazyslice-scratch/COMMIT_MSG_${a.id}`
+const stagePaths = [...(a.paths || []), 'tracker/', 'docs/ERRORS.md', 'docs/FLAGS.md', 'docs/KEYBINDINGS.md'].map(p => `'${p}'`).join(' ')
+const commit = await agent(`Repo: ${REPO}. Create the directory /private/tmp/claude-501/lazyslice-scratch if it is missing and write the following commit message, exactly and completely, to the file ${MSG} (create it; do not edit it):\n<<<\n${message}>>>\nThen run: cd ${REPO} && git add -A -- ${stagePaths} && git commit -F ${MSG} && rm -f ${MSG}, and report the short hash. If git rejects a pathspec because a path does not exist, drop that path from the list and run the same command again. Do not use git add -A without the path list, and do not change any other file. If there is nothing to commit, report hash as the empty string and say why.`,
   { label: `commit:${a.id}`, phase: 'Verify', model: 'haiku', effort: 'low', schema: { type: 'object', required: ['hash'], properties: { hash: { type: 'string' } } } })
+if (!commit || !commit.hash) {
+  log(`Task ${a.id}: verified but not committed`)
+  return { id: a.id, status: 'blocked', findings: [{ severity: 'high', file: 'tracker/', line: 0, issue: 'the commit step did not commit; the tree holds the verified work', fix: 'commit by hand with the lazyslice-commit skill, then resume from the next task' }], dev, postmortem: dev.postmortem }
+}
 
 return { id: a.id, status: 'merged', hash: commit ? commit.hash : '', files: dev.files, summary: dev.summary, concerns: dev.concerns, findings_low: findings.filter(f => f.severity === 'low'), rounds: round, postmortem: dev.postmortem }
