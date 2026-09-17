@@ -123,7 +123,13 @@ func TestSystemIDRunsInsideAReadOnlyTransaction(t *testing.T) {
 		}
 		shapes = append(shapes, s.Shape)
 	}
-	want := []string{"source.begin", "source.system_id", "source.rollback"}
+	// source.system_id.privilege is sqlCanReadSystemID, checked before
+	// sqlSystemID is ever sent (T-0222, R2-06's R3 replay): guarding the call
+	// inside its own statement does not work, because Postgres checks EXECUTE
+	// for a function call before any CASE or subquery branch around it runs
+	// (source.go's sqlCanReadSystemID comment), so the check has to be a
+	// statement with no reference to the guarded function at all.
+	want := []string{"source.begin", "source.system_id.privilege", "source.system_id", "source.rollback"}
 	if len(shapes) != len(want) {
 		t.Fatalf("SystemID sent the shapes %v, want %v: the identity read is the statement that used "+
 			"to be on an autocommit path, and nothing this package sends may be", shapes, want)

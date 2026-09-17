@@ -152,9 +152,13 @@ func (s *Source) Close() { s.pool.Close() }
 
 // SystemID reads pg_control_system().system_identifier, which sees through a
 // pooler alias and a DNS name to the cluster itself (ARCHITECTURE.md §9 rule 1).
-// Execution of pg_control_system is not granted to PUBLIC, so an unreadable
-// identifier is the empty string and not an error: the gate's identity rule
-// then rests on the normalised endpoint alone.
+// A role that cannot execute pg_control_system answers "" and not an error:
+// the gate's identity rule then rests on the normalised endpoint alone.
+//
+// The privilege is checked first, in its own statement (sqlCanReadSystemID),
+// and pg_control_system() is called only when that check passes (amended
+// 2026-09-16, T-0222, R2-06's R3 replay) — see readSystemID's own comment for
+// why a guard inside the same statement as the call does not work.
 //
 // It is a statement on the source, so it needs a shape; it is registered here
 // rather than in SourceShapes because a run that never asks never sends it.
@@ -172,7 +176,10 @@ func (s *Source) Close() { s.pool.Close() }
 // behind, and the Tracer refuses a statement that arrives on an idle source
 // connection, so the scoping is checked rather than remembered (T-0082).
 func (s *Source) SystemID(ctx context.Context) (string, error) {
-	if err := s.tr.Register(Shape{Name: "source.system_id", SQL: sqlSystemID}); err != nil {
+	if err := s.tr.Register(
+		Shape{Name: "source.system_id.privilege", SQL: sqlCanReadSystemID},
+		Shape{Name: "source.system_id", SQL: sqlSystemID},
+	); err != nil {
 		return "", err
 	}
 	conn, err := s.pool.Acquire(ctx)
@@ -185,18 +192,15 @@ func (s *Source) SystemID(ctx context.Context) (string, error) {
 	}
 	defer endTx(context.WithoutCancel(ctx), conn)
 
-	var id string
-	if err := conn.QueryRow(ctx, sqlSystemID).Scan(&id); err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return "", err
-		}
-		return "", nil
+	id, err := readSystemID(ctx, conn)
+	if err != nil {
+		return "", err
 	}
 	return id, nil
 }
 
 // ClusterID is the cluster identity rule 1 falls back to when
-// system_identifier is unreadable (sqlClusterID). It is deliberately a
+// system_identifier is unreadable (readClusterID). It is deliberately a
 // *separate* value from SystemID rather than a fallback inside it: SystemID is
 // also what §11.2's marker binding is recorded against, and a value that
 // changes when the source cluster restarts would refuse a target lazyslice
@@ -212,7 +216,14 @@ func (s *Source) SystemID(ctx context.Context) (string, error) {
 // read is skipped rather than read as a difference, so carrying it here costs
 // a role that lacks EXECUTE on pg_control_system nothing.
 func (s *Source) ClusterID(ctx context.Context) (string, error) {
-	if err := s.tr.Register(Shape{Name: "source.cluster_id", SQL: sqlClusterID}); err != nil {
+	if err := s.tr.Register(
+		Shape{Name: "source.cluster_id.privilege", SQL: sqlCanReadClusterStartTime},
+		Shape{Name: "source.cluster_id.savepoint", SQL: sqlSavepointClusterStartTime},
+		Shape{Name: "source.cluster_id.start_time", SQL: sqlClusterIDStartTime},
+		Shape{Name: "source.cluster_id.release_savepoint", SQL: sqlReleaseSavepointClusterStartTime},
+		Shape{Name: "source.cluster_id.rollback_to_savepoint", SQL: sqlRollbackToSavepointClusterStartTime},
+		Shape{Name: "source.cluster_id.rest", SQL: sqlClusterIDRest},
+	); err != nil {
 		return "", err
 	}
 	systemID, err := s.SystemID(ctx)
@@ -229,12 +240,9 @@ func (s *Source) ClusterID(ctx context.Context) (string, error) {
 	}
 	defer endTx(context.WithoutCancel(ctx), conn)
 
-	var id string
-	if err := conn.QueryRow(ctx, sqlClusterID).Scan(&id); err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return "", err
-		}
-		return "", nil
+	id, err := readClusterID(ctx, conn, true)
+	if err != nil {
+		return "", err
 	}
 	return withSystemID(id, systemID), nil
 }
@@ -285,6 +293,29 @@ func (s *Source) Privileges(ctx context.Context) (pipeline.RolePrivileges, error
 	return priv, nil
 }
 
+// sqlCanReadSystemID checks EXECUTE on pg_control_system() before
+// sqlSystemID ever calls it, as a *separate statement* (amended 2026-09-16,
+// T-0222, R2-06's R3 replay). A `CASE WHEN has_function_privilege(...) THEN
+// ... ELSE ” END` wrapped around the call in one statement looks like it
+// should short-circuit and never was going to work: Postgres checks EXECUTE
+// for every function call in a plan at executor-initialisation time, before
+// any CASE branch, WHERE clause or scalar subquery around it is evaluated —
+// measured by hand against postgres:16, where a role denied EXECUTE still
+// got "permission denied for function pg_postmaster_start_time" out of a
+// CASE, a scalar subquery and a CTE alike. `internal/pg`'s
+// `TestGateRecognisesTheSourceClusterWithPostmasterStartTimeDenied` does not
+// exercise any of those three shapes or assert a permission error; it only
+// runs the already-split statements end to end. The regression pin for this
+// design is `TestTheClusterStartTimeIsGuardedByASeparateStatement`, which
+// fails if a future edit recombines the guard and the guarded call into one
+// statement. The only way to keep the call out of the plan Postgres builds is
+// to keep it out of the *statement*: check the privilege first, in a
+// statement that carries no reference to the guarded function at all, and
+// only send the statement that does when the check passed.
+const sqlCanReadSystemID = `SELECT has_function_privilege('pg_control_system()', 'EXECUTE')`
+
+// sqlSystemID reads system_identifier through pg_control_system(), sent only
+// after sqlCanReadSystemID has passed (readSystemID).
 const sqlSystemID = `SELECT system_identifier::text FROM pg_control_system()`
 
 // sqlClusterID is the cluster identity an *ordinary* role can read, and it is
@@ -349,10 +380,165 @@ const sqlSystemID = `SELECT system_identifier::text FROM pg_control_system()`
 // falls through to the weaker positional fields only when one side could not
 // read it, so a cluster that restarted between the two reads, or whose two
 // sessions render a value differently, is still recognised as one cluster.
-const sqlClusterID = `SELECT to_char(pg_postmaster_start_time() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS.US')
-  || '|' || coalesce((SELECT oid::text FROM pg_database WHERE datname = 'postgres'), '')
+//
+// **The postmaster start time is behind its own privilege check, in its own
+// statement, and the other three fields are a second statement that carries
+// no privileged function call at all** (amended 2026-09-16, T-0222, R2-06's
+// R3 replay: docs/reviews/2026-09-15-redteam/round3-still-leaking.json). This
+// used to be one SELECT concatenating all four fields with `||`, and a role
+// denied EXECUTE on pg_postmaster_start_time() — a hardened production
+// cluster that revokes monitoring functions from PUBLIC, the same class of
+// hardening the original R2-06 finding's premise already assumed for
+// pg_control_system — made the *whole* SELECT raise a permission error, which
+// Source.ClusterID and target.go's clusterIdentity both caught and answered
+// as "". That wiped out the maintenance-database oid, data_directory and the
+// server version too, none of which needs any privilege this role did not
+// already have, and turned a cluster whose identity was three-quarters
+// readable into one the gate could not compare at all — exactly the "unknown"
+// state rule 1's alias arm falls back from into an endpoint-spelling
+// comparison, which is what an alias, a second published port or a different
+// transport changes. Guarding the call with `CASE WHEN
+// has_function_privilege(...)` inside that one statement does not fix it —
+// see sqlCanReadSystemID's comment: Postgres checks EXECUTE for the whole
+// plan before any branch of it runs. Splitting the guarded field into its own
+// statement, sent only after sqlCanReadClusterStartTime has passed
+// (readClusterID), is what makes the degradation real.
+const (
+	sqlCanReadClusterStartTime = `SELECT has_function_privilege('pg_postmaster_start_time()', 'EXECUTE')`
+
+	// sqlClusterIDStartTime is the field sqlCanReadClusterStartTime guards.
+	sqlClusterIDStartTime = `SELECT to_char(pg_postmaster_start_time() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS.US')`
+
+	// sqlClusterIDRest is the three fields that carry no privilege check:
+	// every role that can connect can read all three, so they are always sent
+	// and readClusterID prepends sqlClusterIDStartTime's field (or "") ahead
+	// of them with clusterIDSep, preserving the positional layout below.
+	sqlClusterIDRest = `SELECT coalesce((SELECT oid::text FROM pg_database WHERE datname = 'postgres'), '')
   || '|' || coalesce(replace((SELECT setting FROM pg_settings WHERE name = 'data_directory'), '|', '_'), '')
   || '|' || current_setting('server_version')`
+)
+
+// The three SAVEPOINT statements readClusterID takes around
+// sqlClusterIDStartTime when it is called inside an open transaction
+// (Source.ClusterID). A fixed name is safe here: readClusterID never nests —
+// Source.ClusterID's transaction runs one at a time on its own connection —
+// so there is never a second SAVEPOINT of this name to collide with.
+const (
+	sqlSavepointClusterStartTime           = `SAVEPOINT cluster_start_time`
+	sqlReleaseSavepointClusterStartTime    = `RELEASE SAVEPOINT cluster_start_time`
+	sqlRollbackToSavepointClusterStartTime = `ROLLBACK TO SAVEPOINT cluster_start_time`
+)
+
+// readSystemID runs sqlCanReadSystemID and, only when it passes,
+// sqlSystemID — see sqlCanReadSystemID's comment for why the check has to be
+// a separate statement. conn must already have a transaction open when the
+// caller needs one (Source.SystemID's REPEATABLE READ READ ONLY); the gate's
+// probes on the target run it on an ungrouped autocommit connection, which is
+// just as safe here because neither statement writes anything.
+//
+// An error other than the context ending is read as "unreadable", the same
+// answer as a failed privilege check: the caller does not distinguish why a
+// field is missing, only that it is.
+func readSystemID(ctx context.Context, conn *pgxpool.Conn) (string, error) {
+	var can bool
+	if err := conn.QueryRow(ctx, sqlCanReadSystemID).Scan(&can); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return "", err
+		}
+		return "", nil
+	}
+	if !can {
+		return "", nil
+	}
+	var id string
+	if err := conn.QueryRow(ctx, sqlSystemID).Scan(&id); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return "", err
+		}
+		return "", nil
+	}
+	return id, nil
+}
+
+// readClusterID runs sqlCanReadClusterStartTime and, only when it passes,
+// sqlClusterIDStartTime, then always sqlClusterIDRest, and joins the two into
+// the positional identity sameClusterIdentity compares. A role denied the
+// start time still contributes the other three fields; a role denied
+// everything answers "" the same way it always has. Shared by
+// Source.ClusterID (its own REPEATABLE READ READ ONLY transaction) and
+// target.go's clusterIdentity (the gate's ungrouped probes), which is what
+// keeps the two sides of the comparison reading the same fields the same way.
+//
+// inTransaction must be true only when conn already has a transaction open —
+// Source.ClusterID's case — and false when it does not — target.go's
+// clusterIdentity, called on the gate's autocommit connection, where every
+// statement is its own implicit transaction and one failing never touches the
+// next. Inside an open transaction, a failed sqlClusterIDStartTime — the
+// privilege revoked between the two statements, or any other server error —
+// leaves the transaction aborted, and sqlClusterIDRest sent on it next would
+// itself fail with 25P02 "current transaction is aborted" and be read as
+// "unreadable", losing the whole identity rather than the one field the
+// privilege check could not guarantee. A SAVEPOINT taken before
+// sqlClusterIDStartTime and released or rolled back to afterward keeps that
+// failure scoped to the one statement, so sqlClusterIDRest still runs on a
+// transaction that is not aborted (T-0222 review round).
+func readClusterID(ctx context.Context, conn *pgxpool.Conn, inTransaction bool) (string, error) {
+	var canStartTime bool
+	if err := conn.QueryRow(ctx, sqlCanReadClusterStartTime).Scan(&canStartTime); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return "", err
+		}
+		return "", nil
+	}
+	var startTime string
+	if canStartTime {
+		if inTransaction {
+			if _, err := conn.Exec(ctx, sqlSavepointClusterStartTime); err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					return "", err
+				}
+				return "", nil
+			}
+		}
+		if err := conn.QueryRow(ctx, sqlClusterIDStartTime).Scan(&startTime); err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return "", err
+			}
+			// The privilege check just said yes; a read that still fails is
+			// treated as "this field is unreadable", the same as a check that
+			// said no, rather than losing the fields sqlClusterIDRest can
+			// still supply.
+			startTime = ""
+			if inTransaction {
+				// The failed statement aborted the transaction. Roll back to
+				// the savepoint taken above it so sqlClusterIDRest below runs
+				// on a transaction that is open again, instead of itself
+				// failing with 25P02 and losing the rest of the identity too.
+				if _, rbErr := conn.Exec(ctx, sqlRollbackToSavepointClusterStartTime); rbErr != nil {
+					if errors.Is(rbErr, context.Canceled) || errors.Is(rbErr, context.DeadlineExceeded) {
+						return "", rbErr
+					}
+					return "", nil
+				}
+			}
+		} else if inTransaction {
+			if _, err := conn.Exec(ctx, sqlReleaseSavepointClusterStartTime); err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+					return "", err
+				}
+				return "", nil
+			}
+		}
+	}
+	var rest string
+	if err := conn.QueryRow(ctx, sqlClusterIDRest).Scan(&rest); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return "", err
+		}
+		return "", nil
+	}
+	return startTime + clusterIDSep + rest, nil
+}
 
 // sameClusterIdentity compares two cluster identities.
 //
@@ -378,6 +564,22 @@ const sqlClusterID = `SELECT to_char(pg_postmaster_start_time() AT TIME ZONE 'UT
 // false when nothing could be compared at all, and the gate reads that as
 // "unknown", which fails closed.
 //
+// Not every positional field is evidence of sameness, though every one of
+// them is evidence of difference (T-0222 review round). The start time and
+// data_directory are specific enough to a running cluster that two clusters
+// agreeing on them is not a case worth worrying about; the maintenance
+// database's oid and the server version are not — the oid is pinned at 5 for
+// every cluster from PostgreSQL 15 on (clusterIDWeakField), and the version is
+// shared by every cluster built from the same image. Two identities whose
+// only common fields are those two, and which agree on both, have proven
+// nothing about sameness: known stays false and the gate reads it as
+// unknown, the same fail-closed direction as no common field at all, rather
+// than a confident "same cluster" a role denied the start time (a hardened
+// cluster that revokes pg_postmaster_start_time from PUBLIC) could produce
+// against any other cluster built from the same image. Disagreement on
+// either still decides "different cluster" on its own, because a mismatch
+// needs no specificity to be believed.
+//
 // Fields are positional, so a field may be added only at the end — and
 // clusterIDSystemIDField must move with it.
 func sameClusterIdentity(a, b string) (same, known bool) {
@@ -394,6 +596,7 @@ func sameClusterIdentity(a, b string) (same, known bool) {
 		n = len(fb)
 	}
 	same = true
+	decisive := false
 	for i := 0; i < n; i++ {
 		if fa[i] == "" || fb[i] == "" {
 			continue
@@ -402,11 +605,41 @@ func sameClusterIdentity(a, b string) (same, known bool) {
 		if fa[i] != fb[i] {
 			same = false
 		}
+		if !clusterIDWeakField(i) {
+			decisive = true
+		}
 	}
 	if !known {
 		return false, false
 	}
+	if same && !decisive {
+		// Every field that could be compared was a weak one, and they all
+		// agreed. That is not evidence of one cluster — only disagreement on
+		// a weak field would have been — so this is reported as unknown
+		// rather than a "same cluster" the fields do not support.
+		return false, false
+	}
 	return same, true
+}
+
+// clusterIDMaintenanceOIDField and clusterIDServerVersionField are the two
+// positions clusterIDWeakField names.
+const (
+	clusterIDMaintenanceOIDField = 1
+	clusterIDServerVersionField  = 3
+)
+
+// clusterIDWeakField reports whether positional field i can only prove two
+// cluster identities different, never that they are the same. The
+// maintenance database's oid (position 1) is initdb-assigned only below
+// PostgreSQL 15; from 15 on it is pinned at 5 for every cluster, so two
+// clusters agreeing on it says nothing about them being the same cluster —
+// and the server version (position 3) is shared by every cluster built from
+// the same image, most obviously two sibling containers from one `docker
+// compose up`. Disagreement on either is still real: a version mismatch, or
+// an oid that differs below PostgreSQL 15, proves two different clusters.
+func clusterIDWeakField(i int) bool {
+	return i == clusterIDMaintenanceOIDField || i == clusterIDServerVersionField
 }
 
 // clusterIDField reads one positional field, or "" when the identity is shorter
@@ -425,8 +658,8 @@ func clusterIDField(fields []string, i int) string {
 const clusterIDSystemIDField = 4
 
 // clusterIDSep separates the fields of a cluster identity. It is a character
-// no field can contain: sqlClusterID folds it out of data_directory, and every
-// other field is a timestamp, an oid, a version or a system identifier.
+// no field can contain: sqlClusterIDRest folds it out of data_directory, and
+// every other field is a timestamp, an oid, a version or a system identifier.
 const clusterIDSep = "|"
 
 // withSystemID appends the system identifier to a cluster identity as its last
