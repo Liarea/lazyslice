@@ -189,7 +189,25 @@ func TestSameClusterIdentitySkipsFieldsOneSideCouldNotRead(t *testing.T) {
 		{"one cluster, two roles", superuser, readonly, true, true},
 		{"one cluster, one role", superuser, superuser, true, true},
 		{"two clusters", superuser, different, false, true},
-		{"two clusters, weaker role", readonly, different, false, true},
+		// T-0241, round-4 red team (docs/reviews/2026-09-15-redteam/round4-still-leaking.json):
+		// this used to be "two clusters, weaker role", asserting (false, true)
+		// on the strength of the start time alone — readonly (the SELECT-only
+		// role §9 recommends) can read neither data_directory nor
+		// system_identifier, so start time and the two weak fields were all
+		// it had. That was wrong: a standby's postmaster start time always
+		// disagrees with its primary's, so the same three fields describe a
+		// standby of the same cluster as `different` just as well as they
+		// describe a second, unrelated one, and there is nothing left here to
+		// tell the two apart. The verdict is now the fail-closed "unknown",
+		// not a confident "different cluster" — see
+		// TestAStandbysStartTimeDisagreementWithoutSystemIdentifierIsUnknown
+		// below for the full round-4 shape, and
+		// TestGateDistinguishesAGenuinelyDifferentClusterFromWeakFieldsAlone
+		// (gate_integration_test.go) for what still does distinguish a
+		// weaker role's two genuinely different clusters (a version or a
+		// pre-PG15 oid mismatch).
+		{"a weaker role sees only a start-time disagreement: unknown, not a genuinely different cluster",
+			readonly, different, false, false},
 		{"the system identifier decides over a restarted postmaster", superuser, restarted, true, true},
 		{"the system identifier decides against agreeing weaker fields", superuser,
 			"2026-09-15 01:54:11.534898|5|/var/lib/postgresql/data|16.4|7000000000000000002", false, true},
@@ -278,5 +296,83 @@ func TestSameClusterVerdict(t *testing.T) {
 		if got := sameClusterVerdict(c.sourceSystemID, c.systemID, c.clusterSame, c.clusterKnown); got != c.want {
 			t.Errorf("%s: sameClusterVerdict = %v, want %v", c.name, got, c.want)
 		}
+	}
+}
+
+// TestAStandbysStartTimeDisagreementWithoutSystemIdentifierIsUnknown pins the
+// round-4 red team's read-replica shape end to end (T-0241,
+// docs/reviews/2026-09-15-redteam/round4-still-leaking.json, "a read
+// replica"): --source a streaming standby under the SELECT-only role §9
+// recommends, --target a database on that standby's own primary. A primary
+// and its standby share system_identifier but never the postmaster start
+// time — the standby's postmaster necessarily started later, when
+// pg_basebackup finished — and the SELECT-only role cannot read
+// system_identifier at all, so before this fix the one surviving decisive
+// field (the start time) disagreed and the gate read "different cluster"
+// with a green exit.
+//
+// This is a pure-function pin over sameClusterIdentity and sameClusterVerdict
+// together, standing in for the primary-and-standby integration test
+// THREAT_MODEL.md T2 (2026-09-17 amendment) records as a gap:
+// internal/testutil has no way to stand up a streaming standby (it would need
+// pg_basebackup run inside a second container, on a network the two share,
+// which nothing here builds), so the two cluster identities below are
+// hand-written exactly as Source.ClusterID and target.go's clusterIdentity
+// would build them from a real primary/standby pair, the way
+// TestSameClusterIdentitySkipsFieldsOneSideCouldNotRead and
+// TestGateRecognisesTheSourceClusterWithPostmasterStartTimeDenied already
+// stand in for privilege states no fixture grants a role by name.
+func TestAStandbysStartTimeDisagreementWithoutSystemIdentifierIsUnknown(t *testing.T) {
+	const (
+		// start | maintenance db oid | data directory | server version | system identifier
+		//
+		// The source: a streaming standby, read under the SELECT-only role,
+		// which can execute neither pg_control_system() nor read
+		// data_directory (superuser-only). Started well after the primary.
+		standbySource = "2026-09-17 09:41:07.220118|5||16.4|"
+		// The target: a database on the standby's own primary, read by a
+		// superuser role (the shape every one of the round-4 reproductions
+		// uses for --target), which can read everything. The primary started
+		// first, so the start time disagrees; the system identifier — the
+		// one field that would decide this — the source could not fill.
+		primaryTarget = "2026-09-17 08:58:19.435516|5|/var/lib/postgresql/data|16.4|7686364092739128680"
+	)
+
+	same, known := sameClusterIdentity(standbySource, primaryTarget)
+	if same || known {
+		t.Errorf("sameClusterIdentity(standby, primary) = (%v, %v), want (false, false): "+
+			"a start-time disagreement with no system_identifier on the source side must not read "+
+			"as a confident \"different cluster\" — it is exactly the standby/primary shape",
+			same, known)
+	}
+
+	// sameClusterVerdict is what Eligibility.SameCluster actually becomes:
+	// with the identity unknown and no system identifier on the source side,
+	// the gate must answer "possibly the same cluster" (true) rather than
+	// "different" (false) — the direction that printed no warning and wrote
+	// into the standby's own primary.
+	if verdict := sameClusterVerdict("", "7686364092739128680", same, known); !verdict {
+		t.Error("sameClusterVerdict is false for the standby/primary shape: SameCluster must be " +
+			"true so the same_cluster warning prints (and, headlessly with no --target, ADR-013's " +
+			"escalation refuses) rather than staying silent the way the round-4 red team measured")
+	}
+}
+
+// A start-time disagreement is the one field this package no longer
+// believes; every other field still is, including one it can prove
+// "different" with when it is the only field that disagrees. Without this,
+// clusterIDDifferenceUnreliableField could be widened to cover every field —
+// answering every comparison "unknown" — and every test above would still
+// pass.
+func TestADataDirectoryDisagreementStillProvesTwoClusters(t *testing.T) {
+	const (
+		a = "2026-09-17 09:41:07.220118|5|/var/lib/postgresql/data|16.4|"
+		b = "2026-09-17 09:41:07.220118|5|/var/lib/postgresql/data-2|16.4|"
+	)
+	same, known := sameClusterIdentity(a, b)
+	if same || !known {
+		t.Errorf("sameClusterIdentity(a, b) = (%v, %v), want (false, true): two identities that "+
+			"agree on the start time but disagree on data_directory are still two different "+
+			"clusters, and that must still be decisive", same, known)
 	}
 }

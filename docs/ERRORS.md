@@ -82,6 +82,8 @@ One row per code in the catalogue, in the file's own order. Exit is only meaning
 | `target.decided` | discover | - | target {database} on {host} — {flag} |
 | `source.role.writable` | discover | - | the role {role} can write to {count} table(s) in {database} — recommend a read-only role: {statement} |
 | `source.refused.writable_role` | discover | 6 | the source role {role} can write and --require-read-only-role is set |
+| `source.warn.standby` | discover | - | source {host} is a streaming standby{reason} |
+| `source.refused.standby_no_target` | discover | 4 | source {host} is a streaming standby and no {flag} was given: lazyslice cannot tell its primary apart from an unrelated server |
 | `source.refused.statement` | extract | 7 | the source refused a statement this run sent: its shape is not on the allowlist, which is a bug in lazyslice and not in your database |
 | `target.marker.bound` | discover | - | {database} carries lazyslice's own marker for this source: it will be truncated and reloaded |
 | `target.marker.secret_changed` | discover | - | secret changed — masked values will differ from the ones already in the target |

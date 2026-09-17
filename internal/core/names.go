@@ -265,7 +265,32 @@ func readOnlyRoleStatement(r dsn.Ref) string {
 	return "CREATE ROLE lazyslice_ro LOGIN PASSWORD '…'; " +
 		"GRANT CONNECT ON DATABASE " + db + " TO lazyslice_ro; " +
 		"GRANT USAGE ON SCHEMA public TO lazyslice_ro; " +
-		"GRANT SELECT ON ALL TABLES IN SCHEMA public TO lazyslice_ro;"
+		"GRANT SELECT ON ALL TABLES IN SCHEMA public TO lazyslice_ro; " +
+		// T-0241 (round-4 red team): without this grant, the cluster identity
+		// ARCHITECTURE.md section 9 rule 1 falls back to under this role
+		// degrades exactly the way the standby/primary shape needs it not
+		// to — the postmaster start time disagrees between a standby and its
+		// own primary by construction, and it is the one field left standing
+		// once system_identifier is unreadable. The identity does not work
+		// without this the way an earlier version of section 9 claimed;
+		// granting it is what restores the one field that decides a
+		// standby/primary pair correctly rather than falling to "unknown."
+		"GRANT EXECUTE ON FUNCTION pg_control_system() TO lazyslice_ro;"
+}
+
+// standbySenderReason renders CodeSourceStandby's {reason} placeholder: the
+// primary a standby is streaming from, when pg_stat_wal_receiver told us
+// (T-0241), or nothing when it did not — an unreadable sender is not the same
+// as not being a standby, only the detail is missing.
+func standbySenderReason(r pg.ReplicaStatus) string {
+	switch {
+	case r.SenderHost != "" && r.SenderPort != "":
+		return " (its primary is " + r.SenderHost + ":" + r.SenderPort + ")"
+	case r.SenderHost != "":
+		return " (its primary is " + r.SenderHost + ")"
+	default:
+		return ""
+	}
 }
 
 // modeName is a step's mode as the plan prints it.

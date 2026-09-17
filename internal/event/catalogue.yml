@@ -786,6 +786,34 @@
   message: "the source role {role} can write and --require-read-only-role is set"
   args: [role]
 
+# T-0241, round-4 red team (docs/reviews/2026-09-15-redteam/round4-still-leaking.json,
+# "a read replica"): pg_is_in_recovery() is PUBLIC-executable on every
+# supported version, so this prints whenever the source is a streaming
+# standby, whether or not the cluster identity above could tell — an operator
+# watching an interactive run is exactly who should be told the database
+# being read is not itself the primary. {reason} carries the primary's
+# sender_host/sender_port from pg_stat_wal_receiver where the role could read
+# them, and is empty otherwise.
+- code: source.warn.standby
+  kind: warn
+  stage: discover
+  message: "source {host} is a streaming standby{reason}"
+  args: [host, reason]
+
+# The second, independent rail beside the warning above: a headless run with
+# no --target has nobody to show that warning to, and the discovery ladder's
+# clusterKey comparison — host and port only — cannot tell a standby's own
+# primary apart from an unrelated server, because the two ordinarily publish
+# on different ports (round-4's second reproduction, "a target URL taken from
+# a compose file that points at prod"). A --target the operator named, on the
+# standby's primary or anywhere else, never reaches this check.
+- code: source.refused.standby_no_target
+  kind: error
+  stage: discover
+  exit: 4
+  message: "source {host} is a streaming standby and no {flag} was given: lazyslice cannot tell its primary apart from an unrelated server"
+  args: [host, flag]
+
 - code: source.refused.statement
   kind: error
   stage: extract

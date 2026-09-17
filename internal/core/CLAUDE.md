@@ -682,3 +682,40 @@ for a refusal that was reaching people as an internal error.
   directly, so a re-run with no flag classifies and verifies under the same
   region the committed file already recorded — not the request's own
   (unset) field.
+
+## Decisions made for T-0241 (2026-09-17, round-4 red team's "a read replica")
+
+`docs/reviews/2026-09-15-redteam/round4-still-leaking.json`. `internal/pg/CLAUDE.md`'s own T-0241 section carries the identity-comparison and `Source.Replica` halves of this fix; this section is the wiring on this side.
+
+- **`discover` calls `src.Replica(ctx)` once, right beside the existing
+  `SystemID`/`Writable`-role checks, and swallows a read error the same way
+  those two do** — `if replicaErr == nil && replica.Standby`, not a `Stop`.
+  It is placed before the `!r.req.Mode.needsTarget()` early return so the
+  header line prints for every mode that opens a source (`lazyslice classify
+  --source URL` included, the same reach `CodeRoleWritable` already has),
+  but the refusal itself is gated on `needsTarget()` inside
+  `standbyNoTargetRefusal` — refusing a mode that touches no target at all
+  would name a flag that fixes nothing.
+- **`standbyNoTargetRefusal(needsTarget, headless, targetNamed bool, sourceRef
+  dsn.Ref) *Stop` is a pure function, on purpose, the same reason
+  `internal/pg`'s `sameClusterVerdict` is factored out of `Gate` rather than
+  left inline** (`internal/pg/CLAUDE.md`, "Rule 1 under the role §9
+  recommends"): a primary-and-standby fixture is out of `internal/testutil`'s
+  reach today (see the T-0241 sections in this package's and `internal/pg`'s
+  CLAUDE.md and THREAT_MODEL.md T2's 2026-09-17 amendment), so the decision
+  this function makes is pinned as a pure function
+  (`names_test.go`'s `TestStandbyNoTargetRefusal`) instead of driven through
+  a live run. It reads exactly the three facts `openTarget`'s own
+  `!r.targetNamed && r.headless` escalation reads for the same reason (ADR-013's
+  third escalation) — this rail and that one are siblings, not the same
+  check: this one fires before a target is even chosen, on the source's own
+  answer to `pg_is_in_recovery()`, and does not wait on
+  `Eligibility.SameCluster` at all, because that signal can still be fooled
+  by a standby whose `data_directory` genuinely differs from its primary's.
+- **`standbySenderReason` and the `pg_control_system` grant belong in
+  `names.go`**, beside `readOnlyRoleStatement`, which is the file this
+  package already uses for "render a prose fragment from typed data" —
+  `standbySenderReason` builds `CodeSourceStandby`'s `{reason}` placeholder
+  from `pg.ReplicaStatus`, and `readOnlyRoleStatement` is the CREATE-ROLE
+  block `CodeRoleWritable` renders, which now carries the grant
+  ARCHITECTURE.md §9's recommended-role snippet does.

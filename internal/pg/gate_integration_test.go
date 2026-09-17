@@ -1097,3 +1097,105 @@ func TestReadClusterIDRecoversFromAFailedStartTimeReadInsideATransaction(t *test
 		t.Fatalf("the transaction is not usable after readClusterID: %v", err)
 	}
 }
+
+// T-0241 fix round (review). The start-time carve-out cluster_test.go's
+// TestSameClusterIdentitySkipsFieldsOneSideCouldNotRead pins as a pure
+// function has a cost beyond the standby shape it was written for, and that
+// cost was previously stated nowhere and pinned nowhere against a real
+// server: under the recommended SELECT-only role, on PostgreSQL 15+, the
+// only fields either side can compare once system_identifier and
+// data_directory are both unreadable are the maintenance oid and the server
+// version — both clusterIDWeakField, both provable only on disagreement — so
+// discounting a start-time disagreement unconditionally (rather than only
+// when nothing else could tell the clusters apart) leaves two genuinely
+// unrelated clusters of the same Postgres major with nothing left to
+// disagree on. That is the ordinary shape of a production --source and a
+// locally built --target of the same major, which is what a headless,
+// ladder-chosen run (`lazyslice --yes`, no --target — the CI shape) and an
+// interactive run against an explicitly named --target both produce.
+//
+// This is accepted, not fixed here: ARCHITECTURE.md §9's Fourth amendment and
+// THREAT_MODEL.md T2's 2026-09-17 amendment both now say so, in the
+// fail-closed direction CLAUDE.md's "when in doubt, mask it" already argues
+// for — a false "possibly same cluster" costs a warning line or (ADR-013) a
+// headless refusal an operator clears with --target or the pg_control_system
+// grant; a false "different cluster" is the production write T-0241 exists to
+// stop. This test is the pin the review asked for, against two real,
+// independently created containers of one image, so the cost stays provable
+// rather than only asserted in prose.
+func TestGateReadsTwoUnrelatedSameVersionClustersAsPossiblySameUnderTheRecommendedRole(t *testing.T) {
+	ctx := context.Background()
+	f := newGateFixture(ctx, t)
+
+	const role = "gate_no_start_time_3"
+	f.exec(ctx, t, f.sourceURL,
+		`CREATE ROLE `+role+` LOGIN PASSWORD 'lazyslice' NOSUPERUSER`,
+		`GRANT CONNECT ON DATABASE `+f.sourceRef.Database+` TO `+role,
+		`REVOKE EXECUTE ON FUNCTION pg_control_system() FROM PUBLIC`,
+		`REVOKE EXECUTE ON FUNCTION pg_postmaster_start_time() FROM PUBLIC`,
+	)
+	t.Cleanup(func() {
+		f.exec(context.WithoutCancel(ctx), t, f.sourceURL,
+			`GRANT EXECUTE ON FUNCTION pg_control_system() TO PUBLIC`,
+			`GRANT EXECUTE ON FUNCTION pg_postmaster_start_time() TO PUBLIC`)
+	})
+
+	restricted := *f.base
+	restricted.User = url.UserPassword(role, "lazyslice")
+
+	src, err := OpenSource(ctx, dsn.DSN(restricted.String()))
+	if err != nil {
+		t.Fatalf("opening the source as %s: %v", role, err)
+	}
+	defer src.Close()
+
+	sourceSystemID, err := src.SystemID(ctx)
+	if err != nil {
+		t.Fatalf("SystemID: %v", err)
+	}
+	if sourceSystemID != "" {
+		t.Fatalf("SystemID = %q for a role with no EXECUTE on pg_control_system, want \"\"", sourceSystemID)
+	}
+	sourceCluster, err := src.ClusterID(ctx)
+	if err != nil {
+		t.Fatalf("ClusterID: %v", err)
+	}
+
+	// A second, independently created cluster of the SAME Postgres version —
+	// the ordinary case, deliberately not the round-4 standby shape — under a
+	// database name that does not match the source's, so this test isolates
+	// the cost from rule 1's separate, unrelated same-database-name refusal
+	// (CodeSameDatabase), which would fire on its own if the two names
+	// happened to match instead.
+	otherURL := testutil.Postgres(ctx, t, "")
+	otherBase, err := testutil.URL(otherURL)
+	if err != nil {
+		t.Fatalf("parsing the second container's url: %v", err)
+	}
+	f.exec(ctx, t, otherURL, `CREATE DATABASE gate_unrelated`)
+	otherBase.Path = "/gate_unrelated"
+	targetURL := otherBase.String()
+
+	target, err := OpenTarget(ctx, dsn.DSN(targetURL))
+	if err != nil {
+		t.Fatalf("opening the target: %v", err)
+	}
+	defer target.Close()
+	target.SetSourceCluster(sourceCluster)
+
+	e, err := target.Gate(ctx, f.sourceRef, sourceSystemID, "")
+	if err != nil {
+		t.Fatalf("Gate: %v", err)
+	}
+	if !e.SameCluster {
+		t.Fatal("SameCluster = false: two independently created containers of the same Postgres " +
+			"version, read under a role denied EXECUTE on pg_control_system and " +
+			"pg_postmaster_start_time, must read as possibly the same cluster — the only fields " +
+			"either side can compare (the maintenance oid and the server version) are both weak and " +
+			"agree, and T-0241 now discounts their disagreeing start times unconditionally rather " +
+			"than only for a standby. This is the accepted cost ARCHITECTURE.md §9's Fourth " +
+			"amendment and THREAT_MODEL.md T2's 2026-09-17 amendment both state; if this assertion " +
+			"starts failing because the carve-out was narrowed instead, update both documents to " +
+			"match, do not just delete this test")
+	}
+}
