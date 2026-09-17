@@ -510,8 +510,8 @@
   kind: error
   stage: load
   exit: 4
-  message: "{table} was approved empty and now holds {count} rows: the target changed after it was approved, and nothing was dropped"
-  args: [table, count]
+  message: "{table} in the target changed after the gate approved it, before anything was dropped: {reason}"
+  args: [table, reason]
 
 - code: load.refused.marker_changed
   kind: error

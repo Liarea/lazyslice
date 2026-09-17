@@ -99,19 +99,35 @@ func asStop(err error) error {
 
 	var loadRefusal *load.Refusal
 	if errors.As(err, &loadRefusal) {
+		args := event.Args{
+			event.ArgTable:  loadRefusal.Table.String(),
+			event.ArgColumn: loadRefusal.Object,
+			event.ArgReason: loadRefusal.SQLState,
+			// The count a lock-and-recheck refusal names: how many rows the
+			// table held when the gate had approved it as empty
+			// (ARCHITECTURE.md section 11.2). It is zero for every other load
+			// refusal, whose templates do not reference {count}.
+			event.ArgCount: strconv.FormatInt(loadRefusal.Rows, 10),
+		}
+		// load.refused.target_changed prints {reason} instead of SQLState,
+		// which is always empty for it anyway (the refusal is never a
+		// PgError): dropOne's own per-table recheck names the row count it
+		// found under its lock, and T-0242's whole-target recheck below names
+		// a *set* of tables instead, with no row count for any of them —
+		// pg.ProbeEmptiness never counts rows, the same reason the gate's own
+		// probe does not (internal/pg/probe.go). Every other load refusal
+		// keeps SQLState in {reason}, unchanged.
+		if loadRefusal.Code == load.CodeRefusedTargetChanged {
+			args[event.ArgReason] = targetChangedReason(loadRefusal)
+			if len(loadRefusal.Tables) > 0 {
+				args[event.ArgTable] = joinTableRefs(loadRefusal.Tables)
+				args[event.ArgCount] = strconv.Itoa(len(loadRefusal.Tables))
+			}
+		}
 		return &Stop{
 			Code: loadRefusal.Code, Exit: loadRefusal.Exit, Table: loadRefusal.Table,
-			Column: loadRefusal.Object,
-			Args: event.Args{
-				event.ArgTable:  loadRefusal.Table.String(),
-				event.ArgColumn: loadRefusal.Object,
-				event.ArgReason: loadRefusal.SQLState,
-				// The count a lock-and-recheck refusal names: how many rows the
-				// table held when the gate had approved it as empty
-				// (ARCHITECTURE.md section 11.2). It is zero for every other load
-				// refusal, whose templates do not reference {count}.
-				event.ArgCount: strconv.FormatInt(loadRefusal.Rows, 10),
-			},
+			Column:  loadRefusal.Object,
+			Args:    args,
 			Message: loadRefusal.Error(), err: err,
 		}
 	}
@@ -249,6 +265,37 @@ func refusedTables(e pipeline.Eligibility) string {
 	if len(names) > most {
 		return strings.Join(names[:most], ", ") +
 			" and " + strconv.Itoa(len(names)-most) + " more"
+	}
+	return strings.Join(names, ", ")
+}
+
+// targetChangedReason renders load.refused.target_changed's {reason}: the
+// row count dropOne's own per-table recheck found under its lock (T-0130),
+// or, for T-0242's whole-target recheck, the fact that the tables it named
+// were never part of the plan the gate approved in the first place.
+func targetChangedReason(r *load.Refusal) string {
+	if len(r.Tables) == 1 {
+		return "it was not part of the plan the gate approved, and it now holds rows"
+	}
+	if len(r.Tables) > 1 {
+		return strconv.Itoa(len(r.Tables)) +
+			" tables were not part of the plan the gate approved, and they now hold rows"
+	}
+	return "it was approved empty and now holds " + strconv.FormatInt(r.Rows, 10) + " row(s)"
+}
+
+// joinTableRefs names a list of tables for a refusal's {table} placeholder,
+// capped and sorted the way refusedTables above caps and sorts a map of
+// them: identifiers only, in order, never a row.
+func joinTableRefs(tables []ref.TableRef) string {
+	names := make([]string, 0, len(tables))
+	for _, t := range tables {
+		names = append(names, t.String())
+	}
+	sort.Strings(names)
+	const most = 5
+	if len(names) > most {
+		return strings.Join(names[:most], ", ") + " and " + strconv.Itoa(len(names)-most) + " more"
 	}
 	return strings.Join(names, ", ")
 }

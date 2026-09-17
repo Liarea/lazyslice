@@ -229,6 +229,95 @@ func TestARowInsertedAfterTheGateIsNotDropped(t *testing.T) {
 	}
 }
 
+// A table created in the target after the gate approved it — never a member
+// of this run's plan — is not silently dropped, or loaded around.
+//
+// This is T-0242's round-4 replay
+// (docs/reviews/2026-09-15-redteam/round4-still-leaking.json): the gate
+// approves an empty, unmarked target, the run is held up on the source, a
+// third party CREATEs a table the plan never named and puts production rows
+// in it, and the run resumes. dropOne's own per-table recheck only ever
+// visits the tables in this run's plan, so before T-0242 that table was
+// simply invisible to it: the run printed "dropping public.items", dropped
+// it, loaded its own row, and exited 0 with prod_secrets — and its rows —
+// still sitting in the target it had just called a successful load. Now the
+// whole-target recheck runs first, before any table is even locked, lists the
+// target's current tables fresh, finds prod_secrets occupied and unaccounted
+// for, and refuses before touching anything.
+func TestATableCreatedAfterTheGateIsRefused(t *testing.T) {
+	ctx := t.Context()
+	testutil.SkipWithoutDocker(ctx, t)
+	quietRungs(t)
+
+	source, target := raceDatabases(ctx, t)
+
+	guard := holdSource(ctx, t, source, "items")
+
+	watcher := newGateWatcher()
+	done := make(chan error, 1)
+	go func() {
+		_, err := Run(ctx, raceRequest(t, source, target), watcher)
+		done <- err
+	}()
+
+	watcher.waitForGate(t)
+
+	// Strictly after the gate, strictly before the first drop, and not a
+	// table this run's plan will ever name.
+	execOn(ctx, t, target,
+		`CREATE TABLE prod_secrets (id integer PRIMARY KEY, email text)`,
+		`INSERT INTO prod_secrets VALUES (1, 'ceo@bigcorp.example'), (2, 'cfo@bigcorp.example')`,
+	)
+	guard.release(ctx)
+
+	var err error
+	select {
+	case err = <-done:
+	case <-time.After(5 * time.Minute):
+		t.Fatal("the run never finished")
+	}
+
+	var stop *Stop
+	if !errors.As(err, &stop) {
+		t.Fatalf("Run = %v, want the whole-target recheck refusal", err)
+	}
+	if stop.Code != load.CodeRefusedTargetChanged || stop.Exit != exitTarget {
+		t.Fatalf("stop = %s/exit %d, want %s/exit %d",
+			stop.Code, stop.Exit, load.CodeRefusedTargetChanged, exitTarget)
+	}
+	if got := stop.Args[event.ArgTable]; got != "public.prod_secrets" {
+		t.Errorf("the refusal names table %q, want public.prod_secrets", got)
+	}
+
+	// Nothing was dropped at all: the whole-target recheck runs before the
+	// first table-specific lock, so items — the one table in this run's own
+	// plan — is exactly as the fixture left it.
+	if n := scalarOn(ctx, t, target,
+		`SELECT count(*)::int FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE n.nspname = 'public' AND c.relname = 'items'`); n != 1 {
+		t.Errorf("public.items is gone; the whole-target recheck must refuse before any table is dropped (count %d)", n)
+	}
+	if n := scalarOn(ctx, t, target, `SELECT count(*)::int FROM items`); n != 0 {
+		t.Errorf("the target's items holds %d rows, want the 0 the fixture created it with", n)
+	}
+
+	// And the point of the whole thing: the rows nobody authorised are still
+	// exactly as somebody left them.
+	if n := scalarOn(ctx, t, target, `SELECT count(*)::int FROM prod_secrets`); n != 2 {
+		t.Errorf("prod_secrets holds %d rows, want the 2 the test inserted: nothing here is lazyslice's to touch", n)
+	}
+
+	// The run says so about itself: the marker row it wrote before the drop
+	// loop (ARCHITECTURE.md section 11.2) is closed failed, not left at
+	// running and not complete (THREAT_MODEL.md T8) — the whole-target
+	// recheck runs after that write and before the first drop, not before it.
+	status := stringOn(ctx, t, target,
+		`SELECT status FROM lazyslice_meta ORDER BY started_at DESC LIMIT 1`)
+	if status != pg.StatusFailed {
+		t.Errorf("the marker says %q after the refusal, want %q", status, pg.StatusFailed)
+	}
+}
+
 // raceDatabasesWithASecondTable is the same fixture with one more table, so
 // that a refusal can happen on the *second* drop rather than the first.
 //
@@ -394,6 +483,83 @@ func TestAMarkerDeletedAfterTheGateIsNotTruncated(t *testing.T) {
 		`SELECT status FROM lazyslice_meta ORDER BY started_at DESC LIMIT 1`)
 	if status != pg.StatusFailed {
 		t.Errorf("the marker says %q after the refusal, want %q", status, pg.StatusFailed)
+	}
+}
+
+// A marker-bound reload is not refused for a table the previous run legitimately
+// filled, just because today's source has since dropped the table that used to
+// produce it.
+//
+// This is T-0242 round 5
+// (docs/reviews/2026-09-16-redteam/round5-marker-bound-false-positive.json):
+// on a bound marker, pg.Target.Gate returns Eligible as soon as the marker binds
+// — before checkEmpty, ARCHITECTURE.md §9 rule 5, ever runs — so the gate never
+// asked anything about any table on this path. The whole-target recheck (T-0242
+// round 4) compared the target's occupied tables against *this run's plan*,
+// which for a marker-bound reload is built from today's source schema alone;
+// a table the previous run loaded, whose source table has since been dropped,
+// is not in today's plan and not in anything the gate looked at either, so it
+// read as "appeared since the gate" and refused load.refused.target_changed on
+// a table nobody touched. Now the whole-target recheck skips entirely on a
+// bound marker, and this asserts the reload it used to break succeeds, leaving
+// the orphaned table exactly as the previous run left it.
+func TestAMarkerBoundReloadIgnoresATableItsSourceNoLongerHas(t *testing.T) {
+	ctx := t.Context()
+	testutil.SkipWithoutDocker(ctx, t)
+	quietRungs(t)
+
+	source, target := raceDatabasesWithASecondTable(ctx, t)
+
+	// A first run, unheld: the target ends up marker-bound, holding items and
+	// notes. notes has no foreign key onto items (the fixture's root), so the
+	// plan recreates it but copies no rows into it — the ordinary shape for a
+	// table outside the root's own reach (ARCHITECTURE.md §3's
+	// schema-only step).
+	if _, err := Run(ctx, raceRequest(t, source, target), event.Discard); err != nil {
+		t.Fatalf("the run that marks the target: %v", err)
+	}
+
+	// A row in notes, put there directly rather than through a second run:
+	// on a bound marker the target's rows are the previous run's own by
+	// design (TestARecheckOfTheWholeTargetIgnoresAnOccupiedPlanTable's own
+	// comment says so for a plan table, and notes is no different once it is
+	// no longer in the plan at all) — what matters here is only that notes
+	// is *occupied* when the second run's gate reads the target, which is
+	// the whole-target recheck's own rule 5 question. An empty orphaned
+	// table never reached the bug: an unoccupied table was never in
+	// ProbeEmptiness's own "occupied" answer to begin with, whichever plan
+	// it was compared against.
+	execOn(ctx, t, target, `INSERT INTO notes VALUES (1)`)
+
+	// Strictly between the two runs, the source drops the table the target's
+	// notes came from — the shape of a schema that has moved on, not of
+	// anything the target is answerable for.
+	execOn(ctx, t, source, `DROP TABLE notes`)
+
+	if _, err := Run(ctx, raceRequest(t, source, target), event.Discard); err != nil {
+		t.Fatalf("the marker-bound reload = %v, want nil: notes is the previous run's own table, "+
+			"not a table that appeared since the gate", err)
+	}
+
+	// The reload's own plan — today's source, which no longer has notes —
+	// touched only items; notes and its row are exactly as the first run left
+	// them.
+	if n := scalarOn(ctx, t, target,
+		`SELECT count(*)::int FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE n.nspname = 'public' AND c.relname = 'notes'`); n != 1 {
+		t.Errorf("notes is gone after the reload; the reload's plan never named it and must not have touched it (count %d)", n)
+	}
+	if n := scalarOn(ctx, t, target, `SELECT count(*)::int FROM notes`); n != 1 {
+		t.Errorf("notes holds %d rows after the reload, want the 1 row the first run left — untouched, not truncated", n)
+	}
+	if n := scalarOn(ctx, t, target, `SELECT count(*)::int FROM items`); n != 1 {
+		t.Errorf("the target's items holds %d rows, want the 1 the reload loaded", n)
+	}
+
+	status := stringOn(ctx, t, target,
+		`SELECT status FROM lazyslice_meta ORDER BY started_at DESC LIMIT 1`)
+	if status != pg.StatusComplete {
+		t.Errorf("the marker says %q after the reload, want %q", status, pg.StatusComplete)
 	}
 }
 
