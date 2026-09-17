@@ -7,9 +7,9 @@
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
-| E5 Hardening | 5 | 3 | 1 | 92 | 0 | 0 |
+| E5 Hardening | 5 | 7 | 1 | 93 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 71 | 0 | 29 | 5 | 0 |
+| E9 Later | later | 72 | 0 | 29 | 5 | 0 |
 
 ## Open and in progress
 
@@ -49,7 +49,6 @@
 - T-0185 [open] E9 · ARCHITECTURE.md does not know about --allow-type-literal ()
 - T-0195 [open] E9 · classify: national_id's checksum-only formats can weak-ratio-mask an ordinary numeric business key ()
 - T-0196 [open] E9 · Migrate the tracker to GitHub Issues and Projects behind the existing tools/tracker.py command surface (sonnet)
-- T-0197 [open] E5 · R2-05/A10 residual: a name in a language names.txt does not carry still reports "no name or value signal" as a clean bill of health (sonnet)
 - T-0199 [open] E9 · internal/load's gate test holds its own copy of the cluster-identity SQL ()
 - T-0200 [open] E9 · A cluster identity test that reaches one server over a genuinely different socket ()
 - T-0201 [open] E9 · internal/pipeline/ddlliteral.go: validate a pattern operand both raw and with metacharacters stripped, and strip _ only for LIKE-family operators (sonnet)
@@ -89,9 +88,16 @@
 - T-0248 [open] E9 · docs/READ_ONLY_ROLE.md exists, with the role snippet ARCHITECTURE.md section 9 points at (sonnet)
 - T-0249 [open] E9 · internal/core populates Run.TargetTables so the loader's extra-tables path is not dead (sonnet)
 - T-0250 [open] E9 · Pin T-0197's nothing_recognised/sub_threshold_signal split with a regression test ()
+- T-0251 [open] E5 · The .gitignore protection of the secret file is verified by asking git, never by matching the file's text (sonnet)
+- T-0252 [open] E5 · The run lease is re-asserted before the first drop and before each table drop; a lost lease refuses the load (sonnet)
+- T-0253 [open] E5 · The certain-neighbour rail raises both ends of a validated foreign key together, or refuses the pair (sonnet)
+- T-0254 [open] E5 · Special-category vocabulary matches a term glued to the next token by an underscore, and stripping a LIKE metacharacter leaves a separator (sonnet)
+- T-0255 [open] E5 · A standby's data directory is not evidence of a different cluster, and the standby's sender address is compared with the target (sonnet)
+- T-0256 [open] E9 · The absence-of-evidence sentence covers every family the validators ran over, and pluralises its count (sonnet)
 
 ## Recently closed
 
+- T-0197 [done] E5 · R2-05/A10 residual: a name in a language names.txt does not carry still reports "no name or value signal" as a clean bill of health → done
 - T-0198 [done] E5 · special_category has no value validator; a digit/name-free special-category sentence still crosses unseen → done
 - T-0212 [done] E5 · renderSafe redacts by default, and prints a transform refusal's reason under the values flag → done
 - T-0222 [done] E5 · Cluster identity degrades field by field, and two unknown identities are treated as possibly the same cluster → done
@@ -116,4 +122,3 @@
 - T-0177 [done] E5 · Record real ubuntu-latest bench baseline and flip bench job to blocking → done
 - T-0179 [done] E5 · Bench CI gate compares head against its parent on the same runner; absolute baseline becomes a catastrophic floor → done
 - T-0180 [done] E5 · mask.Apply has no post-condition: a masker that returns its input is accepted → done
-- T-0181 [done] E5 · mask.Apply does not recover: a panicking masker escapes the module → done
