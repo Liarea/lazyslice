@@ -7,9 +7,9 @@
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
-| E5 Hardening | 5 | 2 | 0 | 105 | 0 | 0 |
+| E5 Hardening | 5 | 3 | 0 | 105 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 81 | 0 | 32 | 5 | 0 |
+| E9 Later | later | 80 | 0 | 32 | 5 | 0 |
 
 ## Open and in progress
 
@@ -46,7 +46,7 @@
 - T-0183 [open] E9 · verify does not assert the object its catalog pass refused is gone after the quarantine ()
 - T-0185 [open] E9 · ARCHITECTURE.md does not know about --allow-type-literal ()
 - T-0195 [open] E9 · classify: national_id's checksum-only formats can weak-ratio-mask an ordinary numeric business key ()
-- T-0196 [open] E9 · Migrate the tracker to GitHub Issues and Projects behind the existing tools/tracker.py command surface (sonnet)
+- T-0196 [open] E5 · Migrate the tracker to GitHub Issues and Projects behind the existing tools/tracker.py command surface (sonnet)
 - T-0199 [open] E9 · internal/load's gate test holds its own copy of the cluster-identity SQL ()
 - T-0200 [open] E9 · A cluster identity test that reaches one server over a genuinely different socket ()
 - T-0201 [open] E9 · internal/pipeline/ddlliteral.go: validate a pattern operand both raw and with metacharacters stripped, and strip _ only for LIKE-family operators (sonnet)
