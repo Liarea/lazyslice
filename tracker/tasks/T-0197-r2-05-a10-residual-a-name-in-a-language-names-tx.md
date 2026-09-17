@@ -1,7 +1,7 @@
 ---
 id: T-0197
 title: "R2-05/A10 residual: a name in a language names.txt does not carry still reports \"no name or value signal\" as a clean bill of health"
-epic: E9
+epic: E5
 phase: 5
 status: open
 owner: sonnet
@@ -26,6 +26,10 @@ The 2026-09-15 round-2 red team's A10 (Khmer, Lao and Amharic transliterations i
 - 2026-09-15 created
 
 - 2026-09-15 front matter re-serialised with escaped inner quotes (T-0188 review, low finding)
+
+- 2026-09-17 moved to E5 phase 5
+
+- 2026-09-17 re-homed to E5 and narrowed by the orchestrator, 2026-09-17, after rounds 2, 3 and 4 each asked for the same thing: only the reason string. A sampled character column with no hit renders as absence of evidence ('nothing recognised in N samples; not proof the column is impersonal') and 'no name or value signal' stays for columns nothing could look inside. Widening names.txt stays refused; the certain-neighbour rail's length floor is its own task.
 
 ## Post-mortem
 
