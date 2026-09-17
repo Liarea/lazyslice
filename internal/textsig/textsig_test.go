@@ -67,3 +67,25 @@ func TestURLIsNotACredential(t *testing.T) {
 		}
 	}
 }
+
+// SupportedPhoneRegion is exact and case-sensitive against libphonenumber's
+// own table: no synonym resolution, so a common non-ISO spelling ("UK") and a
+// lower-case one ("gb") both answer false, and only the upper-case ISO code
+// answers true. cmd/lazyslice's --phone-region validation (T-0221 review
+// round, finding 1) is the caller that normalises to upper case before this
+// ever runs; this function itself does no normalising.
+func TestSupportedPhoneRegion(t *testing.T) {
+	t.Parallel()
+
+	for _, region := range []string{"GB", "US", "DE", "JP"} {
+		if !SupportedPhoneRegion(region) {
+			t.Errorf("SupportedPhoneRegion(%q) = false, want true", region)
+		}
+	}
+
+	for _, region := range []string{"gb", "UK", "", "ZZ", "GBR", "notaregion"} {
+		if SupportedPhoneRegion(region) {
+			t.Errorf("SupportedPhoneRegion(%q) = true, want false", region)
+		}
+	}
+}

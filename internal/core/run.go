@@ -305,6 +305,13 @@ type run struct {
 	key    mask.Key
 	keyFP  string
 	unmask map[ref.ColumnRef]string
+	// phoneRegion is the resolved --phone-region / phone_region this run
+	// classified with (T-0221), filled by classifyPrior: r.req.PhoneRegion
+	// when the flag was given, else the committed yml's own value, else "".
+	// internal/emit and internal/verify both read it from here rather than
+	// from r.req directly, so a re-run with no flag still classifies and
+	// verifies under the region the committed file already recorded.
+	phoneRegion string
 	// typeAllow is --allow-type-literal TYPE=REASON merged with the committed
 	// yml's own types: block (pipeline.Config.Types), filled by planRequest and
 	// read by emitter: the record internal/emit writes back verbatim, exactly
@@ -1370,7 +1377,16 @@ func (r *run) classifyStage() error {
 // exactly that case by branching on `by: flag` (its honourOptOut).
 func (r *run) classifyPrior() (*pipeline.Config, error) {
 	r.unmask = map[ref.ColumnRef]string{}
-	if len(r.req.Unmask) == 0 {
+	// T-0221: the flag, when given, wins over the committed yml's own
+	// phone_region -- "the flags, last, so they win", the same rule
+	// planRequest states for --allow-type-literal. r.phoneRegion is read by
+	// the emitter and by verify.Options further down execute, so it is set
+	// here whether or not the unmask-driven copy below runs.
+	r.phoneRegion = r.req.PhoneRegion
+	if r.phoneRegion == "" && r.prior != nil {
+		r.phoneRegion = r.prior.PhoneRegion
+	}
+	if len(r.req.Unmask) == 0 && r.req.PhoneRegion == "" {
 		return r.prior, nil
 	}
 
@@ -1382,6 +1398,9 @@ func (r *run) classifyPrior() (*pipeline.Config, error) {
 		for k, v := range r.prior.Columns {
 			prior.Columns[k] = v
 		}
+	}
+	if r.req.PhoneRegion != "" {
+		prior.PhoneRegion = r.req.PhoneRegion
 	}
 	for name, reason := range r.req.Unmask {
 		col, err := resolveColumn(name, r.schema)
@@ -1842,7 +1861,10 @@ func (r *run) move(ctx context.Context) (*pipeline.Report, error) {
 	}
 
 	r.start(event.Verify)
-	report, verifyErr := verify.New(verify.Options{ProbeCap: r.req.ResidualProbeCap}).Verify(
+	report, verifyErr := verify.New(verify.Options{
+		ProbeCap:    r.req.ResidualProbeCap,
+		PhoneRegion: r.phoneRegion,
+	}).Verify(
 		ctx, r.source, readableWriter{Writer: writer, pool: r.targetPool},
 		r.schema, r.plan, r.cls, residual, lr,
 	)
@@ -2027,6 +2049,7 @@ func (r *run) emitter() pipeline.Emitter {
 		Unmask:            r.unmask,
 		Types:             r.typeAllow,
 		PasswordCommand:   r.req.PasswordCommand,
+		PhoneRegion:       r.phoneRegion,
 		NotRecreated:      notRecreated(r.schema),
 	})
 }

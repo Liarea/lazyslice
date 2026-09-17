@@ -46,6 +46,7 @@ import (
 	"github.com/Liarea/lazyslice/internal/pg"
 	"github.com/Liarea/lazyslice/internal/pipeline"
 	"github.com/Liarea/lazyslice/internal/render"
+	"github.com/Liarea/lazyslice/internal/textsig"
 	"github.com/Liarea/lazyslice/internal/tui"
 )
 
@@ -892,6 +893,8 @@ func bindFlags(groups []flagGroup, req *core.Request, raw *rawFlags) {
 		"Per-column opt-out, as TABLE.COL=REASON; the bare form is exit 2; repeatable")
 	classify.BoolVar(&req.StrictSchema, "strict-schema", false,
 		"Exit 10 on any column the committed yml has never seen")
+	classify.StringVar(&req.PhoneRegion, "phone-region", "",
+		"ISO 3166-1 alpha-2 region libphonenumber recognises (e.g. GB; anything else is exit 2) a national-format phone column is read under, alongside the guessed regions every run already tries; recorded as phone_region and shown in the reasons output")
 
 	transform := byTitle["transform"]
 	transform.StringVar(&req.SecretFile, "secret-file", core.DefaultSecretFile,
@@ -978,6 +981,9 @@ func finish(cmd *cobra.Command, req *core.Request, raw *rawFlags) error {
 	if err := checkCounts(req); err != nil {
 		return err
 	}
+	if err := checkPhoneRegion(req); err != nil {
+		return err
+	}
 
 	for _, t := range raw.skipTables {
 		if strings.TrimSpace(t) == "" {
@@ -1015,6 +1021,34 @@ func checkCounts(req *core.Request) error {
 		return fmt.Errorf("%w: --memory-budget wants a size such as 256MiB, got %q",
 			errUsage, req.MemoryBudget)
 	}
+	return nil
+}
+
+// checkPhoneRegion normalises --phone-region to the upper-case form
+// libphonenumber's own region table uses and refuses anything it does not
+// recognise, exit 2, the way a misspelled --memory-budget already is.
+//
+// Without this, a flag value libphonenumber cannot use reached the
+// classifier and the second net unchecked: internal/textsig.ValidPhoneRegion
+// answers false for every number under an unrecognised region, so a typo
+// ("gb") or a spelling libphonenumber has no entry for at all ("UK" -- its
+// own code for the United Kingdom is "GB") silently zeroed out the
+// region-aware validator entry with no warning, exit 0, on a run that
+// classified the same column correctly with no flag at all (T-0221 review
+// round, finding 1). Normalising here, once, is also what lets every reader
+// downstream -- internal/classify, internal/verify, the emitted
+// lazyslice.yml -- compare region strings byte for byte without each
+// re-deriving the same upper-case rule.
+func checkPhoneRegion(req *core.Request) error {
+	if req.PhoneRegion == "" {
+		return nil
+	}
+	region := strings.ToUpper(strings.TrimSpace(req.PhoneRegion))
+	if !textsig.SupportedPhoneRegion(region) {
+		return fmt.Errorf("%w: --phone-region wants an ISO 3166-1 alpha-2 region libphonenumber recognises (e.g. GB), got %q",
+			errUsage, req.PhoneRegion)
+	}
+	req.PhoneRegion = region
 	return nil
 }
 

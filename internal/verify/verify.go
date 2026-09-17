@@ -59,6 +59,16 @@ type Options struct {
 	// value means no probe may be issued at all, which makes the first hit
 	// unconfirmable and therefore exit 9.
 	ProbeCap int
+	// PhoneRegion is --phone-region / the yml's own phone_region (T-0221),
+	// the same value internal/classify read to decide the row. The second
+	// net's phone entry (validators.go) stays strong on this and on
+	// textsig.PhoneRegionHint's international-only reading ("ZZ") only --
+	// never on internal/classify's own short guessed-region list, which is
+	// corroboration-gated there for a reason that does not survive being
+	// asked of an already-loaded target: a ten-digit account column that
+	// happens to clear one of those regions by chance would refuse a correct
+	// run with no green path short of --unmask. See secondnet.go's count.
+	PhoneRegion string
 }
 
 // New returns the verifier.

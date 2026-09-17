@@ -82,6 +82,14 @@ type work struct {
 	array  bool
 	table  ref.TableRef
 	column pipeline.Column
+	// guessedPhone is set in base(), whatever --phone-region says, when the
+	// column's values clear validatorThreshold under some region in
+	// phoneGuessRegions but decided nothing else -- see guessedPhoneHit and
+	// guessedPhoneColumns (T-0221, widened by its own review round: a
+	// configured region is the one region trusted without corroboration,
+	// and this fallback still covers every other one). It is never acted on
+	// without corroboration.
+	guessedPhone *valueSignal
 }
 
 // state is one Classify call.
@@ -96,6 +104,20 @@ type state struct {
 	// pkOrUnique is every column that can be the referenced side of an edge,
 	// which is the condition ARCHITECTURE.md §4 puts on FK propagation.
 	pkOrUnique map[ref.ColumnRef]bool
+	// region is --phone-region / the yml's phone_region, or "" when neither
+	// is set. It is resolved once, here, and read by buildValidators (which
+	// this state's own validators list is built from) and by decide (to name
+	// the region in the reason). base's own guessed-region pass runs whatever
+	// this holds (T-0221's own review round, finding 2): a configured region
+	// is the one region trusted without corroboration, not a reason to skip
+	// the corroboration-gated fallback for every other one.
+	region string
+	// validators is this call's ordered validator list: baseValidators, with
+	// a region-aware phone entry spliced in right after the international-
+	// only one when region is set (buildValidators). It replaces the package
+	// var every prior version of this file read directly, because the phone
+	// entry's ok func now closes over a per-call value.
+	validators []validatorEntry
 }
 
 // Classify decides every column of every table. It is pure: it issues no SQL,
@@ -109,6 +131,10 @@ func (classifier) Classify(schema *pipeline.Schema, s pipeline.Sampler, prior *p
 	if err != nil {
 		return nil, err
 	}
+	region := ""
+	if prior != nil {
+		region = prior.PhoneRegion
+	}
 	st := &state{
 		schema:     schema,
 		sampler:    s,
@@ -116,10 +142,17 @@ func (classifier) Classify(schema *pipeline.Schema, s pipeline.Sampler, prior *p
 		dec:        map[ref.ColumnRef]*work{},
 		unique:     map[ref.ColumnRef]bool{},
 		pkOrUnique: map[ref.ColumnRef]bool{},
+		region:     region,
+		validators: buildValidators(region),
 	}
 	st.indexKeys()
 	st.base()
 	st.byteaInPersonShapedTable()
+	// T-0221's own pass (guessedPhoneColumns) runs inside neighbouringColumns,
+	// after Decision.TableHasLikelyPersonalColumn is filled and before its
+	// unknownColumnsBesideCertain arm, which would otherwise sweep the same
+	// character column into free_text first -- see neighbouringColumns' own
+	// comment.
 	st.neighbouringColumns()
 	st.keyChildren()
 	st.foreignKeys()
@@ -290,10 +323,12 @@ type valueSignal struct {
 	total   int
 }
 
-// validators is the ordered list ARCHITECTURE.md §4 names. Order is precedence:
-// the first one that reaches the threshold decides, so an address that parses as
-// an email is an email and a note that mentions a street is prose.
-var validators = []struct {
+// validatorEntry is one row of the ordered validator list. It used to be an
+// anonymous struct literal (baseValidators' own element type still is one, by
+// composite literal); it is named here only so that bestSignal, byteaTextSignal
+// and compositeSignal can take a built list as a parameter (buildValidators,
+// T-0221) instead of reading the package var they used to share.
+type validatorEntry = struct {
 	cat    pipeline.Category
 	phrase string
 	// strong marks the validators internal/verify's second net also marks
@@ -311,7 +346,14 @@ var validators = []struct {
 	// nothing in ordinary text is a run of digits, so it stays strong.
 	strong bool
 	ok     func(*textsig.Dict, string) bool
-}{
+}
+
+// baseValidators is the ordered list ARCHITECTURE.md §4 names, before
+// buildValidators splices in the region-aware phone entry T-0221 adds when a
+// region is configured. Order is precedence: the first one that reaches the
+// threshold decides, so an address that parses as an email is an email and a
+// note that mentions a street is prose.
+var baseValidators = []validatorEntry{
 	{pipeline.CatEmail, phraseAddresses, true, func(_ *textsig.Dict, s string) bool { return textsig.ValidEmail(s) }},
 	// national_id joined the list at T-0187 (the 2026-09-15 round-2 red team,
 	// R2-01/A2, R2-02/A6, R2-03/A7): textsig.ValidNationalID was correct and
@@ -372,6 +414,13 @@ var validators = []struct {
 	{pipeline.CatNationalID, phraseNationalID, false, func(_ *textsig.Dict, s string) bool { return textsig.ValidNationalIDChecksumOnly(s) }},
 	{pipeline.CatFinancial, phraseIBAN, false, func(_ *textsig.Dict, s string) bool { return textsig.ValidIBAN(s) }},
 	{pipeline.CatFinancial, phraseLuhn, true, func(_ *textsig.Dict, s string) bool { return textsig.ValidLuhn(s) }},
+	// ValidPhone parses under textsig.PhoneRegionHint ("ZZ"), which only ever
+	// admits an already-international number -- a national-format column
+	// (07911 123456, 020 7946 0958) scores zero here whatever the ratio
+	// (T-0221, the 2026-09-15 round-3 red team's kontaktnr/contact finding:
+	// docs/reviews/2026-09-15-redteam/round3-still-leaking.json). It stays
+	// exactly this narrow on purpose: buildValidators (below) is what adds
+	// the region-aware companion entry, and only when a region is configured.
 	{pipeline.CatPhone, phraseE164, true, func(_ *textsig.Dict, s string) bool { return textsig.ValidPhone(s) }},
 	{pipeline.CatNetworkID, phraseIP, true, func(_ *textsig.Dict, s string) bool { return textsig.ValidIP(s) }},
 	{pipeline.CatNetworkID, phraseMAC, true, func(_ *textsig.Dict, s string) bool { return textsig.ValidMAC(s) }},
@@ -390,6 +439,99 @@ var validators = []struct {
 	{pipeline.CatPersonName, phraseNameDict, false, func(d *textsig.Dict, s string) bool { return d.LooksLikeName(s) }},
 	{pipeline.CatAddress, phraseAddrShape, false, func(_ *textsig.Dict, s string) bool { return textsig.AddressShape(s) }},
 	{pipeline.CatFreeText, phraseProse, false, func(d *textsig.Dict, s string) bool { return d.Prose(s) }},
+}
+
+// buildValidators returns this call's ordered validator list (T-0221): a copy
+// of baseValidators with a second phone entry spliced in immediately after the
+// international-only one, when and only when region is non-empty.
+//
+// It has to be built per call and not once at init, because the entry's ok
+// func closes over region -- the operator's --phone-region flag or the
+// committed yml's phone_region, resolved once in Classify. Splicing it in
+// right after the existing phone entry, rather than appending it, is what
+// keeps the two on one footing in the precedence order §4 states: neither
+// moves ahead of national_id/financial (which come first) or behind
+// network_id/online_id/credential/person_name/address/free_text (which come
+// after), so an address-shaped or IBAN-shaped value that also happens to
+// parse under the configured region is still decided by the earlier entry,
+// exactly as the two phone entries decide before address and free_text do.
+//
+// A region an operator configured is trusted evidence on the same footing as
+// the international-only entry: parsing under a specific libphonenumber
+// region is as precise a claim as parsing under none at all, so this entry is
+// `strong` too and is decided through the same generic ratio loop bestSignal
+// already runs -- no corroboration gate. With no region configured, the
+// national-format path is guessedPhoneHit/guessedPhoneColumns instead, a
+// separate corroboration-gated pass and never a validators-list entry: an
+// ordinary ratio entry here would mask a column outright the moment a guessed
+// region's numbering plan happened to fit, which is exactly the false
+// positive a ten-digit account or order-number column risks (see
+// guessedPhoneColumns's own comment).
+func buildValidators(region string) []validatorEntry {
+	if region == "" {
+		return baseValidators
+	}
+	out := make([]validatorEntry, 0, len(baseValidators)+1)
+	for _, v := range baseValidators {
+		out = append(out, v)
+		if v.cat == pipeline.CatPhone {
+			out = append(out, validatorEntry{
+				cat: pipeline.CatPhone, phrase: phraseE164Region, strong: true,
+				ok: func(_ *textsig.Dict, s string) bool { return textsig.ValidPhoneRegion(s, region) },
+			})
+		}
+	}
+	return out
+}
+
+// phoneGuessRegions is the short, fixed list of libphonenumber regions
+// guessedPhoneHit tries when no --phone-region / phone_region is configured
+// (T-0221). It is short on purpose and not phonenumbers.GetSupportedRegions()'s
+// full two hundred and forty-odd: every region added here is one more chance
+// an ordinary ten-digit account number or order code clears somebody's
+// numbering plan by accident, which is the false positive guessedPhoneColumns'
+// corroboration gate exists to catch rather than avoid by emptying the list.
+// The fifteen chosen are large calling-code populations spanning distinct
+// numbering-plan shapes (length, trunk prefixes), which is what "look like a
+// phone number to somebody's dial plan" can mean without an operator naming
+// one.
+var phoneGuessRegions = []string{
+	"US", "CN", "IN", "ID", "BR", "PK", "NG", "GB", "DE", "FR", "JP", "MX", "RU", "ES", "IT",
+}
+
+// guessedPhoneHit reports the ratio of values that parse as a phone number
+// under any one of phoneGuessRegions -- an OR across the list, because which
+// region (if any) is right is exactly what nobody has said, and "some region
+// somewhere accepts it" is the whole of the claim this makes. It answers nil
+// below minSamples, for bestSignal's own reason: a coincidental hit in one or
+// two values is not evidence about a column.
+//
+// Its result is never acted on directly (base, below): it decides nothing on
+// its own, only offers a candidate to guessedPhoneColumns' corroboration
+// gate.
+func guessedPhoneHit(values []string) *valueSignal {
+	if len(values) < minSamples {
+		return nil
+	}
+	matched := 0
+	for _, v := range values {
+		if matchesAnyGuessRegion(v) {
+			matched++
+		}
+	}
+	if matched == 0 {
+		return nil
+	}
+	return &valueSignal{cat: pipeline.CatPhone, phrase: phraseGuessedPhone, matched: matched, total: len(values)}
+}
+
+func matchesAnyGuessRegion(s string) bool {
+	for _, region := range phoneGuessRegions {
+		if textsig.ValidPhoneRegion(s, region) {
+			return true
+		}
+	}
+	return false
 }
 
 // byteaTextSignal is ARCHITECTURE.md §4's bytea rule extended to the case the
@@ -428,7 +570,7 @@ var validators = []struct {
 // direction it has to fail in: the same column is exit 9 in internal/verify
 // today, so masking it is strictly the kinder of the two answers, and
 // CLAUDE.md's "when in doubt, mask it" is the rule that decides it.
-func byteaTextSignal(dict *textsig.Dict, values []string, p *compiledPack) *valueSignal {
+func byteaTextSignal(dict *textsig.Dict, values []string, p *compiledPack, vs []validatorEntry) *valueSignal {
 	if len(values) == 0 {
 		return nil
 	}
@@ -441,7 +583,7 @@ func byteaTextSignal(dict *textsig.Dict, values []string, p *compiledPack) *valu
 	if len(readable) == 0 {
 		return nil
 	}
-	for _, v := range validators {
+	for _, v := range vs {
 		if silencedByType(p, v.cat, famText) {
 			continue
 		}
@@ -513,10 +655,55 @@ func (st *state) base() {
 			}
 			st.dec[cref] = w
 			values := st.samples(cref, ct)
-			sig := bestSignal(dict, values, st.pack, ct.Family)
+			sig := bestSignal(dict, values, st.pack, ct.Family, st.validators)
 			st.decide(w, col, ct, values, sig)
 			st.appendContext(w, t, ct, sig.total)
 			st.markNeverMasked(w, t, col, ct)
+			// T-0221, widened by its own review round (finding 2): computed
+			// whenever nothing above already decided the column, whatever
+			// --phone-region says. The first landing skipped this block
+			// entirely once st.region was non-empty, on the reasoning that
+			// the configured region's entry in st.validators had already
+			// had its say inside bestSignal, above -- true only for numbers
+			// *in* that region: a column of US-format numbers under
+			// --phone-region GB masked with no flag at all and was left
+			// unmasked, "no name or value signal", the moment GB was named,
+			// because a configured region replaced the fifteen-region
+			// fallback instead of adding to it. A configured region is not
+			// evidence about every *other* region a real multi-country
+			// database also holds, so this pass now runs unconditionally:
+			// the configured region is the one region trusted without
+			// corroboration, and this pass is still the corroboration-gated
+			// fallback for every other region. Running unconditionally also
+			// closes the same review round's first finding's belt-and-
+			// braces half -- an unusable --phone-region value (a typo, a
+			// non-ISO spelling) can no longer disable this fallback,
+			// because nothing here reads st.region at all any more; a bad
+			// value is refused earlier, at the flag surface (cmd/lazyslice),
+			// and even one that reached here regardless would leave this
+			// pass exactly as active as no flag at all.
+			//
+			// Only on a character family. A digits-family column (bigint,
+			// integer, numeric) is exactly the family internal/verify's own
+			// national_id digits entry exists to scan unmasked, ratio-scored
+			// and itself corroboration-gated (T-0187 third review round):
+			// masking one here on a guessed-region coincidence would decide
+			// it phone before that entry ever saw it, over a column whose
+			// real shape may be a national identifier this package's own
+			// (digits-family-blind) national_id entry cannot recognise --
+			// testdata/regressions/020-ssn-stored-as-bigint.sql is exactly
+			// that column, corroborated by the same neighbour signal for the
+			// same coincidental reason its own header already explains for
+			// national_id's checksum-only formats. Restricting the guess to
+			// text/varchar/bpchar/citext leaves that column for verify's own
+			// entry to decide, exactly as it does today.
+			if w.d.Confidence < pipeline.ConfPossible &&
+				isCharacterFamily(ct.Family) && !silencedByType(st.pack, pipeline.CatPhone, ct.Family) {
+				if hit := guessedPhoneHit(values); hit != nil &&
+					float64(hit.matched)/float64(hit.total) >= validatorThreshold {
+					w.guessedPhone = hit
+				}
+			}
 		}
 	}
 }
@@ -554,7 +741,7 @@ func (st *state) samples(c ref.ColumnRef, ct columnType) []string {
 //
 // The gate is narrower than the rule pack's accepts: lists, because those lists
 // answer a slightly different question. See silencedByType.
-func bestSignal(dict *textsig.Dict, values []string, p *compiledPack, family string) signals {
+func bestSignal(dict *textsig.Dict, values []string, p *compiledPack, family string, vs []validatorEntry) signals {
 	sig := signals{total: len(values)}
 	if sig.total == 0 {
 		return sig
@@ -564,7 +751,7 @@ func bestSignal(dict *textsig.Dict, values []string, p *compiledPack, family str
 		return sig
 	}
 	if family == famComposite {
-		sig.strong = compositeSignal(dict, values)
+		sig.strong = compositeSignal(dict, values, vs)
 		return sig
 	}
 	if family == famBytea {
@@ -592,7 +779,7 @@ func bestSignal(dict *textsig.Dict, values []string, p *compiledPack, family str
 		// masker, no new writability question, and no route back to the
 		// contradiction above. A PNG fails the printability guard and is
 		// unaffected, which is what byteaTextSignal's own test pins.
-		sig.strong = byteaTextSignal(dict, values, p)
+		sig.strong = byteaTextSignal(dict, values, p, vs)
 		return sig
 	}
 	if family == famTSVector {
@@ -618,7 +805,7 @@ func bestSignal(dict *textsig.Dict, values []string, p *compiledPack, family str
 	// matching is the noise minSamples was written about — raising it would
 	// mask a column on the strength of a single row.
 	proven := sig.total >= minSamples
-	for _, v := range validators {
+	for _, v := range vs {
 		matched := 0
 		for _, s := range values {
 			if v.ok(dict, s) {
@@ -743,7 +930,7 @@ func silencedByType(p *compiledPack, cat pipeline.Category, family string) bool 
 // is what the refusal names. A composite the splitter cannot read is scored as
 // one opaque value, which is what happened to every composite before this
 // existed.
-func compositeSignal(dict *textsig.Dict, values []string) *valueSignal {
+func compositeSignal(dict *textsig.Dict, values []string, vs []validatorEntry) *valueSignal {
 	fields := make([][]string, 0, len(values))
 	for _, v := range values {
 		// The raw sample first: precedence inside one record is the validator
@@ -755,7 +942,7 @@ func compositeSignal(dict *textsig.Dict, values []string) *valueSignal {
 		}
 		fields = append(fields, record)
 	}
-	for _, v := range validators {
+	for _, v := range vs {
 		matched := 0
 		for _, record := range fields {
 			for _, f := range record {
@@ -985,6 +1172,26 @@ func (st *state) decide(w *work, col pipeline.Column, ct columnType, values []st
 		}
 		w.frags = append(w.frags, render("no_signal"))
 	}
+	// T-0221: names the region a national-format phone hit was read under,
+	// whichever branch above used it -- sig.strong decided the column outright
+	// (best, above) or sig.strongHit masked it as free_text on a minority hit.
+	// Both draw from st.validators' single region-aware entry, so at most one
+	// of the two can ever carry the phrase.
+	if regionAssumed(sig) {
+		w.frags = append(w.frags, render("phone_region_configured", quoteIdent(st.region)))
+	}
+}
+
+// regionAssumed reports whether sig's strong or strongHit signal is the
+// region-aware phone entry buildValidators adds (T-0221) -- the one entry
+// whose phrase is phraseE164Region, never set unless a region was configured.
+func regionAssumed(sig signals) bool {
+	for _, v := range [2]*valueSignal{sig.strong, sig.strongHit} {
+		if v != nil && v.cat == pipeline.CatPhone && v.phrase == phraseE164Region {
+			return true
+		}
+	}
+	return false
 }
 
 // decideComposite is the fail-closed answer for a column of a composite type
@@ -1211,6 +1418,16 @@ func (st *state) neighbouringColumns() {
 			w.frags = append(w.frags, render("neighbour", quoteTable(t.Ref), likely))
 		}
 	}
+	// T-0221: after TableHasLikelyPersonalColumn is filled (above, so the
+	// corroboration signal exists) and before unknownColumnsBesideCertain
+	// (below), which would otherwise sweep the same column into free_text
+	// first -- a character column with no signal at all, beside a `certain`
+	// person-identifying neighbour, is exactly the shape both this pass and
+	// that one can reach, and a real phone hit deserves its own category
+	// rather than the generic catch-all one. unknownColumnsBesideCertain's
+	// own raisableUnknown skips a column this pass has already decided
+	// (Category != CatNone), so the two never fight over one column.
+	st.guessedPhoneColumns()
 	st.unknownColumnsBesideCertain()
 }
 
@@ -1355,6 +1572,77 @@ func declaredLength(col pipeline.Column) (int, bool) {
 // never raised at all, and a decision with no category has nothing to raise.
 func (st *state) raisable(w *work) bool {
 	return !w.typeConflict && !w.neverMask && w.d.Category != pipeline.CatNone
+}
+
+// ---------- pass 3b: guessed-region phone corroboration (T-0221) ----------
+
+// guessedPhoneColumns is the "no --phone-region configured" half of T-0221.
+// base (above) already asked, per column, whether its values parse as a phone
+// number under some region drawn from phoneGuessRegions (guessedPhoneHit);
+// this pass decides whether that guess is trusted enough to mask on, and it
+// is trusted only with corroboration: a proven personal neighbour sits in
+// the same table (Decision.TableHasLikelyPersonalColumn, which
+// neighbouringColumns just filled for every column -- the same signal
+// internal/verify's national_id digits entry reads for its own
+// requiresCorroboration gate, T-0187's third review round, and the pattern
+// this task's brief names).
+//
+// An earlier landing also tried to corroborate off the column's own name
+// matching rules.yml's phone pattern, but that arm could never fire: this
+// pass only ever sees a column whose confidence is still below ConfPossible
+// (base only sets w.guessedPhone under that same guard), and a name that
+// matches rules.yml's phone pattern on a character family is always
+// nameAccepted (rules.yml's phone entry accepts exactly
+// text/varchar/bpchar/citext, the family isCharacterFamily restricts this
+// whole guessed-region feature to) -- so decide's hasName && nameAccepted
+// branch had already raised the column to ConfPossible or above before this
+// pass could ever see it with guessedPhone set. A named safety gate no input
+// can reach is worse than no gate, so the name-match arm and
+// work.nameMatchedPhone were removed (T-0221 review round, finding 3)
+// instead of kept as documentation of a corroboration path that does not
+// exist. Without a personal neighbour, the guess decides nothing and the
+// column is left exactly as base's earlier passes left it. A ten-digit
+// account number or an order code
+// clears one of phoneGuessRegions' fifteen numbering plans often enough by
+// chance -- the same shape of false positive internal/verify/validators.go's
+// own requiresCorroboration comment measures for a sparse, fixed-prefix
+// national_id digits column -- so masking on the guess alone here would be
+// the row-path version of the leak that gate exists to prevent on the loaded
+// target.
+//
+// It is called from inside neighbouringColumns, after the loop that fills
+// Decision.TableHasLikelyPersonalColumn for every column (not only the ones
+// that pass goes on to raise) and before unknownColumnsBesideCertain, which
+// would otherwise sweep the same unsignalled character column into the
+// generic free_text catch-all first — see neighbouringColumns' own comment
+// on the ordering. Running before keyChildren/foreignKeys/sameColumnName
+// makes a column this pass masks visible to every later pass exactly as one
+// neighbouringColumns masked would be.
+func (st *state) guessedPhoneColumns() {
+	for _, col := range st.order {
+		w := st.dec[col]
+		if w == nil || w.guessedPhone == nil || !st.phoneGuessRaisable(w) {
+			continue
+		}
+		if !w.d.TableHasLikelyPersonalColumn {
+			continue
+		}
+		hit := w.guessedPhone
+		w.d.Category = pipeline.CatPhone
+		w.d.Confidence = pipeline.ConfPossible
+		w.frags = append(w.frags,
+			render("samples", hit.matched, hit.total, hit.phrase),
+			render("phone_region_guessed"))
+	}
+}
+
+// phoneGuessRaisable is guessedPhoneColumns' own gate, kept apart from
+// raisable above because that one requires an existing category
+// (w.d.Category != CatNone) -- a guessed-region hit routinely starts from
+// CatNone, exactly as unknownColumnsBesideCertain's column does, so this
+// checks the never-mask and type-conflict guards on their own instead.
+func (st *state) phoneGuessRaisable(w *work) bool {
+	return !w.neverMask && !w.typeConflict && w.d.Confidence < pipeline.ConfPossible
 }
 
 // ---------- pass 4: FK propagation and shared column names ----------
