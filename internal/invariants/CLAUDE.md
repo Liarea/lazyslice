@@ -305,13 +305,21 @@ differs subtly from the invariant of the same name is worse than no assertion.
   quoting the total alone overstates the masking evidence by eight. The counts
   are part of the claim, `tortureSchemas` above is what they are counted from,
   and docs/TORTURE.md and ROADMAP.md's gate-5 line both carry them (ROADMAP.md's
-  own line is owed the same update from a task whose paths reach it — T-0257's
-  did not). It was
+  own line already names twenty-eight, from T-0257's landing, and T-0258 left
+  the count where it was, so that line is owed nothing further). It was
   forty-five and thirty-seven `--unmask` until T-0112 removed the eighteen that
   existed only because `CatCredential` had no generator wide enough for a unique
-  column (T-0098, fixed by `mask/gen_credential.go`) and re-ran the suite.
-  T-0114 carried the same correction into `mask/`, which was outside T-0112's
-  paths, and T-HARD-C's run re-counted the split unchanged.
+  column (T-0098, fixed by `mask/gen_credential.go`) and re-ran the suite. It
+  moved to twenty-eight and twenty `--unmask` under T-0257, when
+  `internal/plan`'s new `checkFKPairRefusal` cost metabase a second one over a
+  pair a later classify pass (`propagateKeys`) went on to reconcile anyway;
+  T-0258 narrowed that check to skip a pair only once both ends are already
+  genuinely `Decision.Masked` under the same final category, which the
+  metabase `core_session.id`/`login_history.session_id` pair is not, so its
+  second `--unmask` remains and the count stays at twenty-eight
+  (docs/TORTURE.md's own T-0257 and T-0258 sections have the full account).
+  T-0114 carried the credential_unique correction into `mask/`, which was
+  outside T-0112's paths, and T-HARD-C's run re-counted the split unchanged.
 - **`make torture` exits 0** (T-HARD-C, 2026-09-09: all four `TestTorture*`
   functions report `--- PASS`, 57 s). It did not between `credential_unique`
   landing and T-0113: `testdata/regressions/004-composite-unique-index-all-masked.sql`

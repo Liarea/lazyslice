@@ -885,12 +885,26 @@ func TestTortureCatalogueMatchesTheFixtures(t *testing.T) {
 	// generator did were removed and the suite re-run: supabase-auth 6,
 	// gitlab 8, mastodon 2, calcom 1, discourse 1.
 	//
-	// It was 19/7/1 until T-0257. internal/plan's new checkFKPairRefusal
-	// (fkpair.go) reads Decision.Refused, which internal/classify has set
-	// since T-0253 whenever a validated foreign key's partner cannot be
-	// raised the same way; metabase's public.core_session.id/
-	// public.login_history.session_id pair needed a second --unmask to
-	// clear it (docs/TORTURE.md's own T-0257 section has the full account).
+	// It was 19/7/1 until T-0257, then 20/7/1 through T-0257 alone.
+	// internal/plan's new checkFKPairRefusal (fkpair.go) reads
+	// Decision.Refused, which internal/classify has set since T-0253
+	// whenever a validated foreign key's partner cannot be raised the same
+	// way; metabase's public.core_session.id/public.login_history.session_id
+	// pair needed a second --unmask to clear it (docs/TORTURE.md's own
+	// T-0257 section has the full account). T-0258 first narrowed the check
+	// to skip a pair whose two ends a later classify pass (propagateKeys,
+	// sameColumnName) already brings into agreement -- treating either end
+	// as "resolved" once it was genuinely Masked *or* left unmasked on the
+	// operator's own say-so -- which moved the count back to 19/7/1. A
+	// review round found that cut too wide: it also skipped the refusal for
+	// a pair where only ONE end is genuinely masked and the other is an
+	// operator's own --unmask, copied verbatim across the validated FK --
+	// exactly the metabase shape itself, and exactly the shape
+	// internal/classify's own markNeverMasked comment describes as
+	// unvalidatable at load (I1, THREAT_MODEL.md T8). The check now
+	// requires both ends to be genuinely Decision.Masked, metabase's second
+	// --unmask is back, and the count is 20/7/1 again (docs/TORTURE.md's own
+	// T-0258 section has the corrected account).
 	byKind := map[string]int{}
 	for _, s := range tortureSchemas {
 		for _, f := range s.flags {
