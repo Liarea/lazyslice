@@ -7,9 +7,9 @@
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
-| E5 Hardening | 5 | 7 | 1 | 96 | 0 | 0 |
+| E5 Hardening | 5 | 5 | 1 | 98 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 72 | 0 | 30 | 5 | 0 |
+| E9 Later | later | 74 | 0 | 30 | 5 | 0 |
 
 ## Open and in progress
 
@@ -88,12 +88,12 @@
 - T-0248 [open] E9 · docs/READ_ONLY_ROLE.md exists, with the role snippet ARCHITECTURE.md section 9 points at (sonnet)
 - T-0249 [open] E9 · internal/core populates Run.TargetTables so the loader's extra-tables path is not dead (sonnet)
 - T-0250 [open] E9 · Pin T-0197's nothing_recognised/sub_threshold_signal split with a regression test ()
-- T-0254 [open] E5 · Special-category vocabulary matches a term glued to the next token by an underscore, and stripping a LIKE metacharacter leaves a separator (sonnet)
-- T-0255 [open] E5 · A standby's data directory is not evidence of a different cluster, and the standby's sender address is compared with the target (sonnet)
 - T-0256 [open] E9 · The absence-of-evidence sentence covers every family the validators ran over, and pluralises its count (sonnet)
 - T-0258 [open] E5 · internal/plan's fk-pair refusal can fire on a pair a later classify pass already reconciles ()
 - T-0259 [open] E5 · README's flag table is generated and checked, and a release tag refuses a README that does not name it (sonnet)
 - T-0260 [open] E5 · README is true for v0.1.0: what it does, a quickstart that was run, first-run flags, exit codes at a glance, and the residuals in step with the threat model; SECURITY.md reconciled (sonnet)
+- T-0261 [open] E9 · internal/core/CLAUDE.md's T-0241 section is stale after T-0255 ()
+- T-0262 [open] E9 · The special-category rule pins the LIKE spelling at plan level, and its normalisation comment matches the code (sonnet)
 
 ## Recently closed
 
@@ -113,6 +113,8 @@
 - T-0251 [done] E5 · The .gitignore protection of the secret file is verified by asking git, never by matching the file's text → done
 - T-0252 [done] E5 · The run lease is re-asserted before the first drop and before each table drop; a lost lease refuses the load → done
 - T-0253 [done] E5 · The certain-neighbour rail raises both ends of a validated foreign key together, or refuses the pair → done
+- T-0254 [done] E5 · Special-category vocabulary matches a term glued to the next token by an underscore, and stripping a LIKE metacharacter leaves a separator → done
+- T-0255 [done] E5 · A standby's data directory is not evidence of a different cluster, and the standby's sender address is compared with the target → done
 - T-0257 [done] E9 · internal/plan has no exit-12 refusal for an FK pair unknownColumnsBesideCertain cannot raise → done
 - T-0178 [done] E9 · TestAStoppedContainerIsOfferedAndStarted binds a fixed host port (127.0.0.1:5433) and collides under parallel container runs → done
 - T-0184 [done] E5 · Should a headless run auto-select a target on the source's own cluster? → done
@@ -120,5 +122,3 @@
 - T-0192 [done] E5 · The secret file is protected on its resolved path: symlinked parent directories and hard links refuse; password_command is screened before it is written to the yml → done
 - T-0213 [done] E5 · Wire --password-command to actually run, or refuse it as unimplemented → done
 - T-0221 [done] E5 · Phone numbers in national format, and phone numbers spelled out in words, are recognised: a configured phone region, and corroboration when none is configured → done
-- T-0028 [done] E3 · Create GitHub repository Liarea/lazyslice and homebrew-tap, push main, add HOMEBREW_TAP_TOKEN secret → done
-- T-0090 [done] E5 · T-PERF: performance baseline and CI throughput guard → done
