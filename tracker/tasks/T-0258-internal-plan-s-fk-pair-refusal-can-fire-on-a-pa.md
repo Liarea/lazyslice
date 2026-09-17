@@ -3,12 +3,12 @@ id: T-0258
 title: "internal/plan's fk-pair refusal can fire on a pair a later classify pass already reconciles"
 epic: E5
 phase: 5
-status: open
+status: done
 owner: ""
 created: 2026-09-17
 started: ""
-closed: ""
-outcome: ""
+closed: 2026-09-17
+outcome: done
 ---
 
 # T-0258 · internal/plan's fk-pair refusal can fire on a pair a later classify pass already reconciles
@@ -29,6 +29,8 @@ internal/plan/fkpair.go's checkFKPairRefusal (T-0257) refuses whenever Decision.
 
 - 2026-09-17 re-homed to E5 by the orchestrator, 2026-09-17: a needless --unmask on a real schema (Metabase) is a first-run cost v0.1.0 should not carry; narrow checkFKPairRefusal to skip a pair whose two ends are already masked under the same final category, keep the refusal for type conflicts and two-letter codes, and drop the second Metabase flag with the count back to 27
 
+- 2026-09-17 closed: done
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+went well: review caught that the first, wider cut treated an operator-unmasked parent as a resolved end, which would have let a masked child load against a verbatim parent with no rail catching it; the landed rule requires both ends genuinely masked under one category, with a test for each refusal that must still fire | went badly: the first cut was measured against the Metabase fixture, whose session_id is always NULL, so the torture count going back to twenty-seven looked like proof when it was a fixture blind spot; two fix rounds then left one stale paragraph in internal/invariants/CLAUDE.md and the task blocked on prose, finished by hand | change next time: a narrowing of a safety refusal is judged by the shapes it newly admits, not by a fixture's flag count; the count stays at twenty-eight and ROADMAP says why (commit 477ea5b)
