@@ -79,7 +79,7 @@ func sample() *pipeline.Config {
 				TypeFP:     "3e51a0c2",
 				Unmask: &pipeline.Unmask{
 					Reason: "product catalogue text, no personal data",
-					By:     "gareth",
+					By:     "sam",
 					TypeFP: "3e51a0c2",
 				},
 			},
@@ -87,7 +87,7 @@ func sample() *pipeline.Config {
 		Types: map[string]pipeline.TypeAllow{
 			"public.status": {
 				Reason: "labels are not personal data",
-				By:     "gareth",
+				By:     "sam",
 				TypeFP: "3e51a0c2",
 			},
 		},
@@ -175,7 +175,7 @@ func TestWriteReadRoundTrip(t *testing.T) {
 		t.Errorf("the quoted column came back as %s/%v", legacy.Category, legacy.Confidence)
 	}
 	film := got.Columns[col("public", "film", "description")]
-	if film.Unmask == nil || film.Unmask.By != "gareth" || film.Unmask.TypeFP != "3e51a0c2" {
+	if film.Unmask == nil || film.Unmask.By != "sam" || film.Unmask.TypeFP != "3e51a0c2" {
 		t.Errorf("the opt-out came back as %+v, want reason, by and type", film.Unmask)
 	}
 	if got.Columns[col("public", "customer", "email")].Masker != mask.MaskerEmail {
@@ -190,7 +190,7 @@ func TestWriteReadRoundTrip(t *testing.T) {
 	if !ok {
 		t.Fatalf("public.status did not survive the round trip: %v", got.Types)
 	}
-	if typeAllow.Reason != "labels are not personal data" || typeAllow.By != "gareth" || typeAllow.TypeFP != "3e51a0c2" {
+	if typeAllow.Reason != "labels are not personal data" || typeAllow.By != "sam" || typeAllow.TypeFP != "3e51a0c2" {
 		t.Errorf("the type opt-out came back as %+v, want reason, by and type", typeAllow)
 	}
 }
@@ -356,7 +356,7 @@ func TestMergeCarriesTheOptOutForward(t *testing.T) {
 		Columns: map[ref.ColumnRef]pipeline.ColumnConfig{
 			target: {Unmask: &pipeline.Unmask{
 				Reason: "product catalogue text, no personal data",
-				By:     "gareth",
+				By:     "sam",
 				TypeFP: "3e51a0c2",
 			}},
 		},
@@ -373,7 +373,7 @@ func TestMergeCarriesTheOptOutForward(t *testing.T) {
 		t.Fatalf("Emit: %v", err)
 	}
 	got := cfg.Columns[target]
-	if got.Unmask == nil || got.Unmask.By != "gareth" {
+	if got.Unmask == nil || got.Unmask.By != "sam" {
 		t.Fatalf("the opt-out was not carried forward: %+v", got.Unmask)
 	}
 	if len(cfg.ExtraPatterns) != 1 {

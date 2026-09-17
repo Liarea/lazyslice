@@ -1229,7 +1229,7 @@ columns:
     masker: free_text
     unmask:
       reason: "product catalogue text, no personal data"   # never empty; --unmask TABLE.COL=REASON
-      by: gareth                                           # or "flag" for --unmask
+      by: sam                                              # or "flag" for --unmask
       type: 3e51a0c2               # this opt-out expires if the column's type changes
   public.country.country:
     category: none

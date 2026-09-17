@@ -42,25 +42,25 @@ func TestPlanRequestTypeAllowExpiry(t *testing.T) {
 	}{
 		{
 			name:    "matching fingerprint is honoured",
-			prior:   pipeline.TypeAllow{Reason: "labels are not personal data", By: "gareth", TypeFP: statusFP},
+			prior:   pipeline.TypeAllow{Reason: "labels are not personal data", By: "sam", TypeFP: statusFP},
 			honour:  true,
 			expired: false,
 		},
 		{
 			name:    "mismatched fingerprint expires",
-			prior:   pipeline.TypeAllow{Reason: "labels are not personal data", By: "gareth", TypeFP: "deadbeef"},
+			prior:   pipeline.TypeAllow{Reason: "labels are not personal data", By: "sam", TypeFP: "deadbeef"},
 			honour:  false,
 			expired: true,
 		},
 		{
 			name:    "empty TypeFP expires",
-			prior:   pipeline.TypeAllow{Reason: "labels are not personal data", By: "gareth", TypeFP: ""},
+			prior:   pipeline.TypeAllow{Reason: "labels are not personal data", By: "sam", TypeFP: ""},
 			honour:  false,
 			expired: true,
 		},
 		{
 			name:    "a name absent from Enums/Domains expires",
-			prior:   pipeline.TypeAllow{Reason: "gone now", By: "gareth", TypeFP: "anything"},
+			prior:   pipeline.TypeAllow{Reason: "gone now", By: "sam", TypeFP: "anything"},
 			honour:  false,
 			expired: true,
 		},
@@ -116,7 +116,7 @@ func TestPlanRequestFlagOverwritesYmlTypeAllow(t *testing.T) {
 	statusFP, _ := typeFingerprint("public.status", schema)
 
 	prior := &pipeline.Config{Types: map[string]pipeline.TypeAllow{
-		"public.status": {Reason: "the committed reason", By: "gareth", TypeFP: statusFP},
+		"public.status": {Reason: "the committed reason", By: "sam", TypeFP: statusFP},
 	}}
 	req := normalise(Request{AllowTypeLiterals: map[string]string{"public.status": "the flag's own reason"}})
 	r := &run{req: req, sink: &collector{}, schema: schema, prior: prior}
@@ -148,8 +148,8 @@ func TestPlanRequestPopulatesEventsForPlanStage(t *testing.T) {
 	statusFP, _ := typeFingerprint("public.status", schema)
 
 	prior := &pipeline.Config{Types: map[string]pipeline.TypeAllow{
-		"public.status":     {Reason: "labels are not personal data", By: "gareth", TypeFP: statusFP},
-		"public.ssn_domain": {Reason: "stale", By: "gareth", TypeFP: "deadbeef"},
+		"public.status":     {Reason: "labels are not personal data", By: "sam", TypeFP: statusFP},
+		"public.ssn_domain": {Reason: "stale", By: "sam", TypeFP: "deadbeef"},
 	}}
 	r := &run{req: normalise(Request{}), sink: &collector{}, schema: schema, prior: prior}
 	if _, err := r.planRequest(); err != nil {

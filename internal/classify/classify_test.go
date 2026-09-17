@@ -525,14 +525,14 @@ func TestAnOptOutExpiresWithTheType(t *testing.T) {
 	live := mustClassify(t, nil).Decisions[notes].TypeFP
 
 	current := &pipeline.Config{Columns: map[ref.ColumnRef]pipeline.ColumnConfig{
-		notes: {Unmask: &pipeline.Unmask{Reason: "product text", By: "gareth", TypeFP: live}},
+		notes: {Unmask: &pipeline.Unmask{Reason: "product text", By: "sam", TypeFP: live}},
 	}}
 	if d := mustClassify(t, current).Decisions[notes]; d.Masked {
 		t.Errorf("%s = %+v, want a live opt-out honoured", notes, d)
 	}
 
 	stale := &pipeline.Config{Columns: map[ref.ColumnRef]pipeline.ColumnConfig{
-		notes: {Unmask: &pipeline.Unmask{Reason: "product text", By: "gareth", TypeFP: "deadbeef"}},
+		notes: {Unmask: &pipeline.Unmask{Reason: "product text", By: "sam", TypeFP: "deadbeef"}},
 	}}
 	cls := mustClassify(t, stale)
 	if d := cls.Decisions[notes]; !d.Masked {
@@ -1022,7 +1022,7 @@ func priorsUnderTest(t *testing.T) []*pipeline.Config {
 			},
 			Columns: map[ref.ColumnRef]pipeline.ColumnConfig{
 				col(tPeople, "notes"): {Unmask: &pipeline.Unmask{
-					Reason: "a free-form reason a user wrote", By: "gareth", TypeFP: fp("notes", "text")}},
+					Reason: "a free-form reason a user wrote", By: "sam", TypeFP: fp("notes", "text")}},
 				col(tLegacy, "Notes"):     {Unmask: &pipeline.Unmask{Reason: "another one", By: "flag"}},
 				col(tAudit, "entry_uid"):  {Category: pipeline.CatOnlineID, Confidence: pipeline.ConfCertain},
 				col(tOrders, "placed_at"): {},
@@ -1030,9 +1030,9 @@ func priorsUnderTest(t *testing.T) []*pipeline.Config {
 				col(tPeople, "ref"): {Category: pipeline.CatSemiStruct, Confidence: pipeline.ConfCertain},
 				// An opt-out that records no fingerprint, and one whose
 				// fingerprint is stale.
-				col(tSites, "contact_email"): {Unmask: &pipeline.Unmask{Reason: "shared inbox", By: "gareth"}},
+				col(tSites, "contact_email"): {Unmask: &pipeline.Unmask{Reason: "shared inbox", By: "sam"}},
 				col(tDevices, "owned_by"): {Unmask: &pipeline.Unmask{
-					Reason: "stale", By: "gareth", TypeFP: "deadbeef"}},
+					Reason: "stale", By: "sam", TypeFP: "deadbeef"}},
 			},
 		},
 	}
@@ -1407,8 +1407,8 @@ func TestAnOptOutWithNoFingerprintIsIgnored(t *testing.T) {
 		name string
 		u    pipeline.Unmask
 	}{
-		{"no fingerprint", pipeline.Unmask{Reason: "hand written", By: "gareth"}},
-		{"no reason", pipeline.Unmask{By: "gareth", TypeFP: fp("notes", "text")}},
+		{"no fingerprint", pipeline.Unmask{Reason: "hand written", By: "sam"}},
+		{"no reason", pipeline.Unmask{By: "sam", TypeFP: fp("notes", "text")}},
 		{"nothing at all", pipeline.Unmask{}},
 	} {
 		u := tc.u
