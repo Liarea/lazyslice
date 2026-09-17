@@ -243,3 +243,135 @@ func TestRedTeamNeighbourRaisesASilentColumn(t *testing.T) {
 		}
 	}
 }
+
+// The 2026-09-15 round-4 red team's native-script variant against A2b's own
+// fix (T-0239): the same Amharic names as TestRedTeamA2bNoColumnNameSignalAtAll,
+// in a column declared varchar(12), in a table that DOES hold a `certain`
+// email neighbour -- the exact shape unknownColumnsBesideCertain exists for,
+// defeated by minUnknownLen's old floor of sixteen. A given name, a surname,
+// a postcode, a national ID and a phone number all fit in twelve characters,
+// so a short declared length was never evidence the column is impersonal; the
+// control column (the same schema with the column declared `text`) is what
+// tells "the length exclusion let it through" apart from "the rail does not
+// fire here at all".
+func TestRedTeamRound4A2bShortDeclaredLengthBesideCertain(t *testing.T) {
+	t.Parallel()
+	tbl := ref.TableRef{Schema: "public", Name: "members"}
+	names := []string{"ኣበበ ኪዳነ", "ተስፋዬ ኪዳነ", "ገብረ ኣበበ", "ኪዳነ ተስፋዬ", "ኣበበ ገብረ"}
+	newSchema := func(typeName string, typMod int32) *pipeline.Schema {
+		return &pipeline.Schema{Tables: []pipeline.Table{
+			tt("public", "members", []string{"id"},
+				tc("id", "bigint"),
+				pipeline.Column{
+					Name: "ስም", TypeName: typeName, TypMod: typMod,
+					Nullable: true, Fingerprint: fp("ስም", typeName),
+				},
+				tc("email", "text"),
+			),
+		}}
+	}
+	s := mapSampler{
+		col(tbl, "ስም"):    anyOf(names[0], names[1], names[2], names[3], names[4]),
+		col(tbl, "email"): anyOf("user1@realcorp.example", "user2@realcorp.example", "user3@realcorp.example"),
+	}
+
+	// The leaking shape: varchar(12), TypMod = declared length (12) + 4.
+	cls, err := New().Classify(newSchema("character varying(12)", 16), s, nil)
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+	if d := cls.Decisions[col(tbl, "ስም")]; !d.Masked {
+		t.Errorf("members.ስም is %s/%d and not masked beside a certain email column: %s",
+			d.Category, int(d.Confidence), d.Reason)
+	}
+
+	// The control from the attack's own reproduction: the identical schema and
+	// samples with no declared length at all (TypMod 0, i.e. plain `text`) were
+	// already masked before this fix; asserting it here too pins that the
+	// varchar(12) run above is not masked for some unrelated reason.
+	cls, err = New().Classify(newSchema("text", 0), s, nil)
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+	if d := cls.Decisions[col(tbl, "ስም")]; !d.Masked {
+		t.Errorf("members.ስም (declared text) is %s/%d and not masked beside a certain email column: %s",
+			d.Category, int(d.Confidence), d.Reason)
+	}
+}
+
+// The T-0239 fix-round review's own finding: unknownColumnsBesideCertain's
+// declared-length floor (lowered by the test above) newly reached a
+// validated foreign key's character-family column, at either end, and this
+// package has no pass that reconciles a decision this rail alone made back
+// across a join (indexFKColumns's own comment, and unknownColumnsBesideCertain's
+// FK exclusion in raisableUnknown). testdata/regressions/031 pins the shape
+// under the Docker-gated make torture; this is the same schema at the unit
+// level so a future edit to indexFKColumns, raisableUnknown or a foreign
+// key's Validated/Virtual handling cannot silently reintroduce the
+// half-loaded-target shape with every committed, non-Docker check still
+// green.
+func TestRedTeamRound4A2bValidatedFKColumnsExcludedBothEnds(t *testing.T) {
+	t.Parallel()
+	currencies := ref.TableRef{Schema: "public", Name: "currencies"}
+	members := ref.TableRef{Schema: "public", Name: "members"}
+	newSchema := func(withFK bool) *pipeline.Schema {
+		schema := &pipeline.Schema{Tables: []pipeline.Table{
+			tt("public", "currencies", []string{"code"},
+				pipeline.Column{
+					Name: "code", TypeName: "character varying(3)", TypMod: 7,
+					Nullable: false, Fingerprint: fp("code", "character varying(3)"),
+				},
+			),
+			tt("public", "members", []string{"id"},
+				tc("id", "bigint"),
+				tc("email", "text"),
+				pipeline.Column{
+					Name: "currency", TypeName: "character varying(3)", TypMod: 7,
+					Nullable: false, Fingerprint: fp("currency", "character varying(3)"),
+				},
+			),
+		}}
+		if withFK {
+			schema.FKs = []pipeline.ForeignKey{
+				fk("members_currency_fkey", members, []string{"currency"}, currencies, []string{"code"}),
+			}
+		}
+		return schema
+	}
+	s := mapSampler{
+		col(currencies, "code"): anyOf("USD", "EUR", "GBP", "JPY"),
+		col(members, "email"): anyOf("member01@realcorp.example", "member02@realcorp.example",
+			"member03@realcorp.example", "member04@realcorp.example"),
+		col(members, "currency"): anyOf("USD", "EUR", "GBP", "JPY"),
+	}
+
+	// The FK shape (regression 031): both ends of a validated, non-virtual
+	// foreign key stay unmasked, so the same values are not copied verbatim
+	// on one side and replaced with free_text on the other.
+	cls, err := New().Classify(newSchema(true), s, nil)
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+	if d := cls.Decisions[col(currencies, "code")]; d.Masked {
+		t.Errorf("currencies.code is %s/%d and masked despite being the parent end of a validated foreign key: %s",
+			d.Category, int(d.Confidence), d.Reason)
+	}
+	if d := cls.Decisions[col(members, "currency")]; d.Masked {
+		t.Errorf("members.currency is %s/%d and masked despite being the child end of a validated foreign key: %s",
+			d.Category, int(d.Confidence), d.Reason)
+	}
+
+	// The control: the identical members.currency column with no FK edge at
+	// all is still raised by unknownColumnsBesideCertain -- this pins the FK
+	// exclusion above as the reason members.currency stays unmasked, rather
+	// than an unrelated one (the column's shape not reaching the rail at
+	// all).
+	cls, err = New().Classify(newSchema(false), s, nil)
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+	if d := cls.Decisions[col(members, "currency")]; !d.Masked {
+		t.Errorf("members.currency (no FK) is %s/%d and not masked beside a certain email column: %s",
+			d.Category, int(d.Confidence), d.Reason)
+	}
+}

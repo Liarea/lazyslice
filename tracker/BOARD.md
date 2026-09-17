@@ -9,7 +9,7 @@
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 8 | 1 | 87 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 63 | 0 | 29 | 5 | 0 |
+| E9 Later | later | 64 | 0 | 29 | 5 | 0 |
 
 ## Open and in progress
 
@@ -86,6 +86,7 @@
 - T-0240 [open] E5 · National-identifier corroboration counts a masked personal neighbour at any confidence and outranks the dense-sequence exemption; character-family identifiers get the same path (sonnet)
 - T-0241 [open] E5 · A streaming standby as source, with the target on its own primary, is refused: a start-time disagreement without the system identifier is unknown, a standby source is announced, and a headless run with no --target refuses on a standby (sonnet)
 - T-0242 [open] E5 · Before the first drop, the whole target is re-checked for emptiness under the run lease, and a table that appeared since the gate refuses the load (sonnet)
+- T-0243 [open] E9 · internal/classify/CLAUDE.md's A2b account is stale after T-0239 ()
 
 ## Recently closed
 
