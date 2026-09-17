@@ -267,6 +267,31 @@ next change to this module argues with a decision rather than rediscovering it.
   naming the category, the masker id and the panic value's *type*. `panicKind`
   is `core.PanicSummary`'s rule restated here because this module may not import
   `internal/`; it is blunter on purpose, since there is no flag here to offer.
+- **`Apply` wraps a *generator's own* returned error the same way it wraps a
+  panic** (`mask.go`, T-0223, round-3 replay R2-13; round-4 replay R3-1).
+  Before this, `maskCell` returned a third-party masker's error straight out
+  of the public module: a masker's message is free-form text it can write
+  however it likes, and
+  `'cannot mask "victim.canary@bigcorp.example": unsupported shape'` reached
+  any caller of `Apply`, `mask/` being importable on its own under ADR-006 and
+  its contract not able to rely on the binary's redaction (`core.PanicSummary`
+  never runs there). `maskCell` wraps that free-form residue in
+  `ErrMaskerFailed`, naming the category, the masker id and the returned
+  error's *type* via `panicKind` — the same helper the panic path uses, and
+  for the same reason: the original error is not kept. The first fix wrapped
+  *every* error `Mask` returned, including this module's own documented,
+  value-free sentinels and typed errors (`ErrNoRoom` foremost — every
+  built-in generator's "the column is too short to hold a masked value"), so
+  `errors.Is(err, ErrNoRoom)` on an `Apply` error went from true to false and
+  the module's contract broke silently. `isModuleError` now recognises this
+  module's own sentinels and `*NoRoomError`/`*DomainError` and returns them
+  unwrapped; only a residue that is none of those gets the `ErrMaskerFailed`
+  treatment. `internal/transform/codes.go`'s `maskReason` names every other
+  mask sentinel by hand so its exit-code text is the sentinel's own safe words
+  rather than the generic "an error of type %T" fallback; `ErrMaskerFailed`
+  itself is still not named there (T-0229), which only affects a *third-party*
+  masker's own error, since `ErrNoRoom` and the module's other sentinels now
+  reach `maskReason` unwrapped as before.
 - **Arrays are the caller's loop.** §5 masks an array element-wise with `h`
   computed per element; `Value` has no array form, and dimensions and lower
   bounds are a pgx concern, so `internal/transform` maps `Apply` over the

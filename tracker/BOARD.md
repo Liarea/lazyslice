@@ -9,7 +9,7 @@
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 6 | 1 | 83 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 58 | 0 | 27 | 4 | 0 |
+| E9 Later | later | 60 | 0 | 27 | 4 | 0 |
 
 ## Open and in progress
 
@@ -79,6 +79,8 @@
 - T-0226 [open] E9 · internal/classify: matchesAnyGuessRegion computes the candidates once, not once per region (sonnet)
 - T-0227 [open] E9 · A phone_region read from a hand-edited lazyslice.yml is validated the way the flag is (sonnet)
 - T-0228 [open] E9 · ARCHITECTURE.md's --phone-region flag row and the phone_region_guessed reason fragment describe the removed name-rule corroboration arm (sonnet)
+- T-0229 [open] E9 · internal/transform/codes.go: add mask.ErrMaskerFailed to maskReason's known-sentinel list ()
+- T-0230 [open] E9 · T-0229's goal mischaracterises the R2-13 regression; correct it before acting on it ()
 
 ## Recently closed
 
