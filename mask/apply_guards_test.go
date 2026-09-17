@@ -194,6 +194,66 @@ func TestApplyTurnsAPanickingMaskerIntoAValueFreeError(t *testing.T) {
 	}
 }
 
+// A masker that returns an error rather than panicking is wrapped the same
+// way: the sentinel names the masker id and the category, never the error's
+// own message, which can quote the value the masker failed on (T-0223,
+// round-3 replay R2-13).
+func TestApplyWrapsAMaskersReturnedError(t *testing.T) {
+	m := funcMasker{
+		mask: func([32]byte, Value, Constraints) (Value, error) {
+			return Value{}, fmt.Errorf("cannot mask %q: unsupported shape", victim)
+		},
+		domain: 1 << 40,
+	}
+	_, err := guarded(t, m, CatEmail, Value{Text: victim}, Constraints{TypeTag: "text"})
+	if !errors.Is(err, ErrMaskerFailed) {
+		t.Fatalf("err = %v, want ErrMaskerFailed", err)
+	}
+	if strings.Contains(strings.ToLower(err.Error()), "victim") {
+		t.Errorf("the wrapped error quotes the value: %q", err)
+	}
+	if !strings.Contains(err.Error(), "rt_probe") {
+		t.Errorf("the error does not name the masker: %q", err)
+	}
+	if !strings.Contains(err.Error(), string(CatEmail)) {
+		t.Errorf("the error does not name the category: %q", err)
+	}
+}
+
+// The ErrMaskerFailed wrap is for a generator's own free-form error only.
+// This module's own documented, value-free errors — ErrNoRoom foremost, the
+// column-too-short refusal every built-in generator returns from Mask — pass
+// through unwrapped, so errors.Is still reaches them (T-0223 round-4 replay
+// R3-1: the round-3 fix wrapped every error unconditionally and broke this).
+func TestApplyPassesItsOwnSentinelThroughUnwrapped(t *testing.T) {
+	m := funcMasker{
+		mask: func([32]byte, Value, Constraints) (Value, error) {
+			return Value{}, ErrNoRoom
+		},
+		domain: 0,
+	}
+	_, err := guarded(t, m, CatEmail, Value{Text: victim}, Constraints{TypeTag: "text"})
+	if !errors.Is(err, ErrNoRoom) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrNoRoom) == true", err)
+	}
+	if errors.Is(err, ErrMaskerFailed) {
+		t.Fatalf("err = %v, ErrNoRoom must not also be wrapped in ErrMaskerFailed", err)
+	}
+}
+
+// The same guarantee end to end, through a real registered masker and Apply
+// itself: a column too narrow for gen_email's shortest output still surfaces
+// as ErrNoRoom to a caller of the public entry point, not as an opaque
+// ErrMaskerFailed (the reviewers' exact repro for T-0223 round-4 replay
+// R3-1).
+func TestApplyLetsErrNoRoomThroughForANarrowColumn(t *testing.T) {
+	k := testKey(t)
+	_, err := Apply(k, CatEmail, MaskerEmail, Value{Text: victim}, Constraints{TypeTag: "varchar", MaxLen: 8})
+	if !errors.Is(err, ErrNoRoom) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrNoRoom) == true", err)
+	}
+}
+
 // The second call the post-condition makes is the generator's code too, and a
 // panic from it is recovered and described like any other.
 func TestApplyRecoversAPanicFromThePostConditionsSecondCall(t *testing.T) {

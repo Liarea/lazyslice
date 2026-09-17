@@ -211,6 +211,16 @@ var (
 	// T7). This module is importable on its own (ADR-006), so its contract does
 	// not depend on the parent binary's redaction.
 	ErrMaskerPanic = errors.New("the masker panicked")
+	// ErrMaskerFailed is a generator that returned an error instead of a
+	// value. maskCell wraps it the way it wraps a panic (T-0223, round-3
+	// replay R2-13): a sentinel naming the masker id, the category and the
+	// *type* of the returned error — never the error's own message, which is
+	// free-form text a masker can write however it likes and is where a
+	// masker that quotes the offending value in its error ("cannot mask
+	// %q") used to cross this module's public boundary verbatim. This module
+	// is importable on its own (ADR-006), so its contract does not depend on
+	// the parent binary's redaction.
+	ErrMaskerFailed = errors.New("the masker returned an error")
 )
 
 // NoRoomError is the plan-time half of ErrNoRoom: the column cannot hold any
@@ -258,6 +268,28 @@ func (e *DomainError) Error() string {
 	return fmt.Sprintf(
 		"category %s: masker %s can emit %d distinct values, %d rows need %d",
 		e.Category, e.ID, e.Domain, e.Rows, e.Required)
+}
+
+// isModuleError reports whether err is one of this module's own value-free
+// errors — a sentinel from the var block above, or a *NoRoomError /
+// *DomainError wrapping one — rather than a generator's free-form message.
+// maskCell uses it to decide what ErrMaskerFailed exists to hide: a
+// generator's own text, never this module's documented, value-free refusals
+// (T-0223 round-4 replay R3-1). Wrapping those unconditionally made
+// errors.Is(err, ErrNoRoom) false for every generator's most common refusal —
+// a column too short for a masked value — which is also the one
+// internal/transform/codes.go's maskReason names by hand for its exit-code
+// text.
+func isModuleError(err error) bool {
+	if errors.Is(err, ErrNoRoom) || errors.Is(err, ErrUnknownMasker) ||
+		errors.Is(err, ErrNoCategory) || errors.Is(err, ErrRowCountUnknown) ||
+		errors.Is(err, ErrPassthrough) || errors.Is(err, ErrMaskerPanic) ||
+		errors.Is(err, ErrMaskerFailed) {
+		return true
+	}
+	var noRoom *NoRoomError
+	var domain *DomainError
+	return errors.As(err, &noRoom) || errors.As(err, &domain)
 }
 
 // Result is one masked cell.
@@ -309,11 +341,17 @@ func Apply(k Key, cat Category, id ID, in Value, c Constraints) (Result, error) 
 	return Result{Out: out, Canonical: canon.bytes(), TypeTag: tag, Masked: true}, nil
 }
 
-// maskCell calls the generator behind the two guards the module owes a caller
+// maskCell calls the generator behind the guards the module owes a caller
 // that cannot see inside it: a recover, so a panicking masker becomes an error
-// naming the masker and nothing else, and the post-condition, so a masker that
-// tracks its input is a refusal rather than a cell the caller records as masked
-// (THREAT_MODEL.md T7, T12).
+// naming the masker and nothing else; the same treatment for a *generator's*
+// own error — one that is not already one of this module's sentinels or typed
+// errors — so its free-form message, which can quote the value it failed on,
+// never crosses this module's public boundary (T-0223); and the
+// post-condition, so a masker that tracks its input is a refusal rather than
+// a cell the caller records as masked (THREAT_MODEL.md T7, T12). This
+// module's own errors — ErrNoRoom foremost — pass through unwrapped
+// (isModuleError, T-0223 round-4 replay R3-1), so errors.Is/As still reaches
+// them.
 //
 // Both guards are in one place because the post-condition calls the generator a
 // second time, with a sentinel input, and that call is the generator's code too
@@ -327,7 +365,11 @@ func maskCell(m Masker, cat Category, id ID, h [32]byte, in Value, canon Value, 
 	}()
 	out, err = m.Mask(h, in, c)
 	if err != nil {
-		return Value{}, err
+		if isModuleError(err) {
+			return Value{}, err
+		}
+		return Value{}, fmt.Errorf("%w: category %s: masker %s returned %s",
+			ErrMaskerFailed, cat, id, panicKind(err))
 	}
 	if !looksLikeItsInput(out, in, canon) {
 		return out, nil
@@ -354,11 +396,13 @@ func maskCell(m Masker, cat Category, id ID, h [32]byte, in Value, canon Value, 
 	return Value{}, fmt.Errorf("%w: category %s: masker %s", ErrPassthrough, cat, id)
 }
 
-// panicKind names the type of a recovered panic value and never the value
-// itself. It is core.PanicSummary's rule in the module that cannot import it —
-// mask depends on the standard library and two third-party packages, and
-// nothing under internal/ (ADR-006) — and it is deliberately blunter: there is
-// no flag here to offer, because this module has no flags.
+// panicKind names the type of a recovered panic value, or of a masker's
+// returned error, and never the value or the error's message — either can
+// quote the input it failed on. It is core.PanicSummary's rule in the module
+// that cannot import it — mask depends on the standard library and two
+// third-party packages, and nothing under internal/ (ADR-006) — and it is
+// deliberately blunter: there is no flag here to offer, because this module
+// has no flags.
 func panicKind(v any) string {
 	if v == nil {
 		return "a nil value"
