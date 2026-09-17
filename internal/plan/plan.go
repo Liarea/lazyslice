@@ -230,6 +230,13 @@ func (p *run) plan(ctx context.Context) (*pipeline.Plan, error) {
 	if err := p.checkWriteBack(); err != nil {
 		return nil, err
 	}
+	// The FK-pair refusal runs beside the write-back check for the same
+	// reason: it needs no row count, only which tables are in scope, and it
+	// should stop the run before the first key is fetched (fkpair.go,
+	// T-0253, T-0257).
+	if err := p.checkFKPairRefusal(); err != nil {
+		return nil, err
+	}
 	if err := p.resolveIdentities(ctx); err != nil {
 		return nil, err
 	}

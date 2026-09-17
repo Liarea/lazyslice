@@ -84,6 +84,20 @@ const (
 	// operator's schema (T-0132 review).
 	CodeEqualityGroup event.Code = "plan.refused.equality_group"
 
+	// CodeFKPair is exit 12: internal/classify decided a validated foreign
+	// key's partner cannot be raised the same way as the column beside it --
+	// it already carries a decision ARCHITECTURE.md §4 forbids overriding, or
+	// measured two-letter-code evidence -- and left both ends unmasked rather
+	// than raise one and copy the other (Decision.Refused,
+	// Decision.RefusedPartner; internal/classify/classify.go's fkPairs,
+	// T-0253, T-0257). Before this check read that signal, both ends loaded
+	// copied verbatim under exit 0, the same leak T-0253 closed for the
+	// common case. The refusal names both columns and the reason; the escape
+	// is --unmask on each, since unmasking only one still leaves the other's
+	// identical values in the target with nothing recorded that they were
+	// left there (fkpair.go).
+	CodeFKPair event.Code = "plan.refused.fk_pair"
+
 	// CodeDDLLiteral is exit 12: a string literal inside a column default, a
 	// CHECK constraint or a generated expression on a column this run does not
 	// mask, which a strong validator reads as an email address, a telephone

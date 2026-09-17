@@ -299,12 +299,14 @@ differs subtly from the invariant of the same name is worse than no assertion.
 - **Nine clean and one refused is the gate**, and
   `TestTortureCatalogueMatchesTheFixtures` refuses a second failing schema as
   firmly as it refuses a directory with no catalogue entry. It is nine clean
-  **with twenty-seven flags**, and the kinds do not merge: nineteen
+  **with twenty-eight flags**, and the kinds do not merge: twenty
   `--unmask`, seven `--skip-table` and one `--key`. `--unmask` copies a column
   of personal data into the target verbatim and `--skip-table` drops a table, so
   quoting the total alone overstates the masking evidence by eight. The counts
   are part of the claim, `tortureSchemas` above is what they are counted from,
-  and docs/TORTURE.md and ROADMAP.md's gate-5 line both carry them. It was
+  and docs/TORTURE.md and ROADMAP.md's gate-5 line both carry them (ROADMAP.md's
+  own line is owed the same update from a task whose paths reach it — T-0257's
+  did not). It was
   forty-five and thirty-seven `--unmask` until T-0112 removed the eighteen that
   existed only because `CatCredential` had no generator wide enough for a unique
   column (T-0098, fixed by `mask/gen_credential.go`) and re-ran the suite.

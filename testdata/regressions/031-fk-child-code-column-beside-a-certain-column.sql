@@ -1,12 +1,13 @@
 -- root:   public.reg031_members
 -- take:   20
--- expect: ok
--- found:  the T-0239 fix-round review
--- why:    unknownColumnsBesideCertain swept a validated foreign-key child's
---         character column into free_text while its parent stayed unmasked,
---         a decision internal/plan cannot catch and internal/load turns into
---         a half-loaded target
--- not-masked: public.reg031_currencies.code, public.reg031_members.currency
+-- expect: exit 12 plan.refused.unique_domain
+-- found:  the T-0239 fix-round review, corrected by the round-5 red team (T-0253)
+-- why:    unknownColumnsBesideCertain used to exclude a validated foreign
+--         key's character-family columns outright, both ends, and left real
+--         personal data unmasked on both sides wherever the shape carried
+--         names rather than currency codes (round-5 red team, T-0253,
+--         testdata/regressions/035); this schema is the control that pins
+--         the correct outcome for the shape the exclusion was written for
 --
 -- T-0239 lowered unknownColumnsBesideCertain's declared-length floor from
 -- sixteen characters to two, so that a short character column with no name or
@@ -29,21 +30,47 @@
 -- the target already half loaded (plan/unique.go's own header names this
 -- exact failure mode, tracker T-0132).
 --
--- The fix excludes a validated, non-virtual foreign key's character-family
--- columns -- both ends -- from unknownColumnsBesideCertain's reach: a rail
--- with no evidence of its own about a column should not be the thing that
--- puts the two ends of a join out of step, the same reasoning the rail
--- already applies to a unique index and to an integer or uuid key column
--- (markNeverMasked's own exemption for "a generated column, a surrogate key,
--- a FK column"). Neither column is personal data -- an ISO-style currency
--- code is the same shape the rail's own two-letter-code exclusion already
--- carves out for a two-character code -- so both staying unmasked is the
--- correct outcome, not a residual gap; a genuinely personal FK-linked column
--- is still reached by every other pass (a name hit, a value validator, FK
--- propagation from a masked parent).
+-- The fix-round review's own fix excluded a validated, non-virtual foreign
+-- key's character-family columns -- both ends -- from
+-- unknownColumnsBesideCertain's reach entirely, on the argument that neither
+-- column here is personal data and that a genuinely personal FK-linked
+-- column is still reached by every other pass. **That argument does not hold
+-- for every schema this rail can see, only for this one.** The round-5 red
+-- team's FK variant put the same native-script personal names T-0239's own
+-- attack used behind a validated foreign key, with a parent that holds no
+-- `certain` column of its own for any other pass to key on, and the blanket
+-- exclusion copied real personal data verbatim on both ends under exit 0
+-- (testdata/regressions/035-native-script-fk-child-beside-a-certain-column.sql).
+--
+-- The fix now is fkPairs (internal/classify/classify.go, called from
+-- unknownColumnsBesideCertain, T-0253): a column this rail would otherwise
+-- raise alone, at either end of a validated foreign key, is raised together
+-- with every column connected to it across such an edge, under the same
+-- category, so the join stays in agreement instead of disagreeing. **For
+-- this schema that means the plan refuses rather than loads**: reg031_currencies
+-- is a four-row lookup table under a unique index (its primary key), and
+-- `free_text`'s masker draws from a fixed word list rather than an unbounded
+-- alphabet -- three-letter words are scarce enough that its widest generator
+-- offers only 3 distinct values here, nowhere near the ~8,000,000
+-- ARCHITECTURE.md §5's d_required asks of a four-row unique column at
+-- one-in-a-million collision odds. `internal/plan`'s existing, unmodified
+-- unique-index domain check (`checkUniqueDomain`) refuses at exit 12 naming
+-- both reg031_currencies.code and reg031_members.currency together -- the
+-- same "joined by foreign keys and mask alike, so this refusal covers all of
+-- them" message the fix-round review's own T-0132 mechanism already prints --
+-- with `--unmask` the escape for each. That refusal is the correct answer
+-- ARCHITECTURE.md §5 already specifies for a unique column a category's
+-- generator cannot fill; it is not a new check, and it is not the
+-- half-loaded-target failure mode this file used to pin, because nothing is
+-- loaded at all. This regression exists to keep it that way: masking
+-- currency codes was never the point, and a future change that made this
+-- schema load with mismatched values would be the T-0132 defect all over
+-- again.
 --
 -- reg031_members.email carries the addresses every `expect: ok` regression
--- needs for the leak check (README.md, "What each file asserts").
+-- would need for the leak check; this file expects a refusal instead, so the
+-- harness checks the exit code and event code only (README.md, "What each
+-- file asserts").
 
 CREATE TABLE public.reg031_currencies (
     code varchar(3) PRIMARY KEY,

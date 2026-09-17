@@ -8,8 +8,8 @@ second container, and put through the invariants.
 make torture
 ```
 
-Nine of the ten snapshot cleanly **with twenty-seven flags between them —
-nineteen `--unmask`, seven `--skip-table` and one `--key`**. That whole sentence
+Nine of the ten snapshot cleanly **with twenty-eight flags between them —
+twenty `--unmask`, seven `--skip-table` and one `--key`**. That whole sentence
 is the result, and the split is part of it rather than a footnote: `--unmask`
 copies a column of personal data into the target verbatim and `--skip-table`
 drops a table, so the two are not interchangeable evidence and the total is
@@ -29,10 +29,14 @@ new `--unmask` flags, and four more schemas newly refused outright, pending
 curation this file once left unfinished — and the fix round that followed,
 which found curating the rest was either unnecessary or, twice, genuinely
 unsafe, and narrowed the rule instead of curating through it. The count did
-not move in the end: metabase's own two new flags turned out not to be
+not move there in the end: metabase's own two new flags turned out not to be
 needed either once the rule was narrowed, so twenty-seven flags, nineteen
-`--unmask`, is both where this section starts and where "the fix round"
-below leaves it.
+`--unmask`, is where that section starts and where "the fix round" below
+leaves it. **The T-0257 section, the last one below, is what moves it to the
+count at the top of this file**: `internal/plan` gained the exit-12 refusal
+`internal/classify`'s own `Decision.Refused` had gone unread since T-0253, and
+wiring it up cost metabase one more `--unmask` — twenty-eight flags, twenty
+`--unmask`, is the count `make torture` reports today.
 
 It was forty-five flags — thirty-seven `--unmask` — when this file was first
 written. Eighteen of those `--unmask` flags were one defect, T-0098, and the
@@ -678,6 +682,107 @@ either was never reached by this rail in the first place or is still reached,
 correctly, by some other pass (a name hit, a value validator, or FK
 propagation from an already-masked parent). That expectation is unmeasured
 and stated as one.
+
+## T-0253 review round: fkPairs bounded to direct partners, and a shared lookup parent's own blast radius
+
+T-0253's own review found two things `fkPairs` (the fix above's replacement
+for the blanket FK exclusion) got wrong, neither reached by `make torture`'s
+ten schemas — both are about a shape none of the ten declares, a table whose
+only certain personal column sits beside an FK child of a lookup table that
+other, unrelated tables also reference.
+
+**First, a bug:** `fkPairs` walked the whole connected foreign-key component
+reachable from the column being raised, not only its direct partner. A
+column two hops away — in a table with no relationship at all to the
+`certain` neighbour that justified the raise — could veto the whole pairing
+on its own shape (a type conflict, a two-letter code), leaving the real
+FK-linked column copied verbatim: the exact leak this rail exists to close,
+triggered by a column that never should have had a vote. Fixed by bounding
+`fkPairs` to direct partners only; a masked parent still reaches every other
+table that references it through `propagateKeys` (a separate, later pass
+that already does this unconditionally, per ARCHITECTURE.md §4), which
+records a type conflict on one disagreeing child rather than vetoing the
+parent's own masking. `internal/classify/CLAUDE.md`'s own section on this
+amendment has the full account;
+`TestFKPairIgnoresAnUnrelatedGrandchildOfASharedLookupParent`
+(`internal/classify/redteam_test.go`) pins it at the unit level.
+
+**Second, not a bug, but worth stating rather than leaving as a first-run
+surprise: masking a shared lookup parent still cascades to every table that
+references it, whatever those tables hold.** `currencies(code PK)`
+referenced by both `members(email certain, currency)` and
+`invoices(id, currency)` masks `members.currency` and `currencies.code`
+together (the fix above), and `propagateKeys` then masks `invoices.currency`
+too, because ARCHITECTURE.md §4's propagation is unconditional once a parent
+is masked — `invoices` never had a `certain` column and has no relationship
+to `members`, and is masked anyway, because leaving its copy of a masked
+parent's values unmasked would break the join. Where the shared parent is
+narrow and under a unique index — an ISO country or currency code, a status
+enum stored as a lookup table — `free_text`'s fixed word list cannot meet
+§5's `d_required` at more than a handful of rows, and the whole run refuses
+at exit 12 rather than loading a mismatched join
+(`testdata/regressions/031`, `035`). A production schema with a small,
+widely-shared lookup table referenced from many otherwise-unrelated tables,
+where only one of those tables happens to hold a `certain` personal column,
+should expect the same: a full refusal naming the whole equality group, not
+a partial mask of only the tables that look related. This is
+ARCHITECTURE.md §4's own propagation rule working as specified, not
+something `fkPairs`' own bound above changes — narrowing `fkPairs` to direct
+partners stops an unrelated column from vetoing a raise, it does not, and
+was never going to, stop a raise from cascading once it happens.
+
+## T-0257: the fk-pair refusal wired into internal/plan, and metabase's new flag
+
+`fkPairs` (both sections above) has refused a pair since T-0253 whenever a
+direct partner already carries a decision this rail must not override — a
+type-conflicting name hit, or measured two-letter-code evidence — and has
+recorded that refusal on `Decision.Refused` and `Decision.RefusedPartner`
+since the same task's own review round. Until this task, nothing read it:
+`internal/plan` had no check over the field, so both ends of such a pair
+still loaded copied verbatim under exit 0, the pre-T-0253 leak reopened for
+this one shape. `internal/plan/fkpair.go`'s `checkFKPairRefusal` is the fix —
+it runs beside `checkWriteBack`, before the first key is fetched, and stops
+the run at exit 12 naming both columns of the pair with an `--unmask` escape
+for each, unless the operator has already unmasked both.
+
+**One of the ten needed the escape.** `metabase.core_session.id` is a
+`character varying(254)` session token, decided `credential` on its own
+value signal (200 of 200 samples look like secrets) before
+`unknownColumnsBesideCertain` ever runs, and already carried an `--unmask`
+of its own for an unrelated reason (its value is an opaque, regenerated
+token, not a fixed secret worth refusing over). `login_history.session_id`,
+its validated foreign-key child, has no samples of its own and sits beside
+`login_history.ip_address` (a `certain` `network_id` column in the same
+table) — exactly the shape `unknownColumnsBesideCertain` exists to raise as
+`free_text`. `fkPairs` asks whether the parent, `core_session.id`, can be
+raised the same way, finds it already carrying the `credential` decision
+above, and refuses the pair: `plan.refused.fk_pair`, naming both columns.
+The run now carries a second `--unmask`,
+`public.login_history.session_id=an opaque session id, the same value as
+the session it belongs to`
+(`internal/invariants/torture_catalogue_test.go`), and the settled count at
+the top of this file moves from twenty-seven flags to **twenty-eight —
+twenty `--unmask`, seven `--skip-table`, one `--key`**.
+
+**Worth naming rather than leaving as a silent cost: this one refusal looks
+narrower than it is.** FK propagation (`propagateKeys`, a separate,
+unconditional pass that runs after `unknownColumnsBesideCertain`) carries a
+masked parent's category onto every child referencing it regardless of what
+`fkPairs` decided, and `core_session.id` is masked — so `login_history.
+session_id` ends up `credential` too, matching its parent, whether or not
+`fkPairs` ever refused the pair. `Decision.Refused` is set at the point in
+the pipeline where `fkPairs` runs, and nothing clears it when a later pass
+(`propagateKeys`, `sameColumnName`) goes on to bring the two ends into
+agreement anyway — so `internal/plan`'s new check refuses a pair here that
+the classifier's own later passes were always going to resolve safely. That
+is the correct default given root CLAUDE.md's "when in doubt, mask it" — a
+refusal that costs an operator one `--unmask` is the safe direction, and a
+check that tried to predict which later pass would run and agree is a wider
+change than this task's brief asked for — but it is not free, and a task
+that narrows `checkFKPairRefusal` to skip a pair once both ends are already
+`Masked` under the same final `Category` would remove this one flag without
+weakening what the refusal is for. Filed as **T-0258** rather than done here,
+to stay inside this task's own paths.
 
 ## Found and not fixed
 

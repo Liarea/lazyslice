@@ -83,9 +83,24 @@ type Decision struct {
 	// masking a substitution recoverable by frequency. It is printed, listed in
 	// the yml and named under "what the green tick does not prove".
 	SmallDomain bool
-	// Refused is non-empty when a unique column's domain is too small for the
-	// planned row count (exit 12).
+	// Refused is non-empty when classify has decided the run must refuse
+	// this column rather than mask or copy it -- internal/plan turns a
+	// non-empty Refused into an exit-12 refusal naming the column (and
+	// RefusedPartner, when set), with --unmask the escape for each
+	// (internal/plan/fkpair.go, T-0257), the way it already does for a
+	// masked column under a unique index whose domain is too small for the
+	// planned row count. The one source that sets it today is
+	// unknownColumnsBesideCertain's own fkPairs (T-0253,
+	// internal/classify/classify.go): a validated foreign key's partner
+	// cannot be raised the same way as this column -- it already carries a
+	// decision ARCHITECTURE.md §4 forbids overriding, or measured
+	// two-letter-code evidence -- so raising this column alone would copy
+	// the pair, and refusing the run is the only outcome that never does.
 	Refused string
+	// RefusedPartner is the foreign-key partner named in Refused's message,
+	// set alongside it by the same source. It is the zero ColumnRef when
+	// Refused is empty.
+	RefusedPartner ColumnRef
 	// NameMatchedNationalID reports that rules.yml's national_id name pattern
 	// (priority 75) matched this column's name -- internal/classify's own
 	// pack.matchColumn answer, carried here independent of whether the type

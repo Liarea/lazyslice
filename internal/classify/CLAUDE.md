@@ -1216,3 +1216,176 @@ ordinary name-match branch on a column whose name matches `rules.yml`'s
 phone pattern, holding guessed-region-shaped values, in a table with no
 personal neighbour at all — asserting it is still masked as phone, on the
 name alone, with no corroboration from `guessedPhoneColumns` needed.
+
+## A validated foreign key's columns are raised together, or not at all (T-0239, T-0253)
+
+`unknownColumnsBesideCertain` (the "2026-09-15 red team" section above, A2b)
+used to exclude a validated, non-virtual foreign key's character-family
+columns outright, at either end, the moment `minUnknownLen`'s floor dropped
+from sixteen characters to two (T-0239's fix-round review;
+`testdata/regressions/031-fk-child-code-column-beside-a-certain-column.sql`).
+The reasoning was that "a genuinely personal FK-linked column is still
+reached by every other pass — a name hit, a value validator, or FK
+propagation once one end is masked on real evidence."
+
+**The 2026-09-17 round-5 red team disproved that claim**
+(`docs/reviews/2026-09-15-redteam/round5-still-leaking.json`, the classifier
+attacker's FK variant, tracker T-0253). A validated foreign key's
+character-family child can carry the exact shape this rail exists for — a
+native-script name, no name rule, no value hit — beside a `certain` email
+neighbour, with a parent whose own table holds no `certain` column for any
+other pass to key on. Nothing else in this package reaches such a child
+either: `keyChildren` only reconciles the integer/uuid key case
+(`isKeyFamily`), and `propagateKeys` only ever propagates a masked **parent**
+forward, never a masked child back. The blanket exclusion copied real
+personal data verbatim on both ends of the join under exit 0
+(THREAT_MODEL.md T1) — worse than the half-loaded target (T-0132's failure
+mode, an exit-8 `VALIDATE` after every row has moved) it was written to
+avoid, which is a refusal that costs a rerun rather than a leak that costs
+nothing at all.
+
+**The fix is `fkPairs`, called from `unknownColumnsBesideCertain` once a
+column has already passed `raisableUnknown` on its own signals.** It asks
+whether every column directly paired to it across `indexFKColumns`'s
+`fkPartners` map — `cref`'s own edges, not the wider connected component
+those partners may themselves sit in — can be raised the same way
+(`fkPartnerRaisable`): character family, no name or value signal of its own,
+above `minUnknownLen`. If every direct partner qualifies, all of them are
+raised together with `cref`, under the same category (`free_text`) and the
+same confidence, so the join stays in agreement and `internal/plan`'s
+equality-group masker choice (T-0132, `internal/plan/equality.go`) has one
+category on both sides to work from rather than a masked child and a copied
+parent. If any direct partner does not qualify, **neither `cref` nor that
+partner is raised**: masking `cref` alone would still copy the pair, which is
+the one outcome this rule must never produce.
+
+A lookup table referenced by two children, or a chain of keys, is still
+brought into agreement once one end of it is masked — but by `propagateKeys`
+(below, in "columns are decided in a fixed order"), a separate pass that runs
+after this one and already propagates a masked parent to *every* column
+referencing it, unconditionally, per ARCHITECTURE.md §4's own "a masked PK or
+unique column's decision overrides the decision on every column referencing
+it". `fkPairs` walked that whole component itself until this task's own fix
+round: a partner two hops from `cref`, in a table with no relationship at all
+to the `certain` neighbour that justified raising `cref`, could veto the
+pairing on its own shape (a two-letter code, a type conflict) and leave
+`cref` copied verbatim — the exact leak this rail exists to close, reached by
+a column that never should have had a vote on it. `propagateKeys` does not
+have that failure mode: it records `type_conflict` on the one child that
+cannot accept the propagated category and masks everyone else regardless, so
+letting it own everything beyond `cref`'s direct edge closes the vote-by-
+proxy hole without changing what testdata/regressions/031 and 035 mask (both
+are a single direct edge; see their own headers).
+`TestFKPairIgnoresAnUnrelatedGrandchildOfASharedLookupParent`
+(`internal/classify/redteam_test.go`) pins the fix: an `invoices` table that
+shares `currencies` as a lookup parent with `members`, and whose own FK
+column is not a character type at all, no longer blocks `members.currency`
+and `currencies.code` from being raised.
+
+**This narrows, but does not remove, the blast radius a shared lookup parent
+carries.** Masking a parent PK still cascades to every table that references
+it, including one with no relationship to the `certain` column that started
+the raise (`invoices` above is left alone only because its own column type
+refuses `propagateKeys`' category, not because the cascade skips unrelated
+tables in general) — that cascade is ARCHITECTURE.md §4's own rule, not
+`fkPairs`' choice, and a schema where the shared parent is a small table
+under a unique index refuses the whole run at exit 12 rather than loading a
+mismatched join (the paragraph below). A real schema with a widely-shared,
+narrow lookup table (a status code, a country code) referenced from many
+otherwise-unrelated tables, where one of those tables happens to hold a
+`certain` personal column, is expected to refuse in full for the same
+reason `testdata/regressions/031` does — measured, not assumed, and named
+here rather than left as a surprise on a first run.
+
+A member under a unique index is not excluded from the pairing the way a
+column's own uniqueness already excludes it from firing at all
+(`raisableUnknown`'s pre-existing check, unchanged): it is a partner
+*because* the certain neighbour supplies the evidence the standalone
+exclusion says it has none of, and `internal/plan`'s own unique-index domain
+check (`checkUniqueDomain`, unmodified) is what admits or refuses the masked
+result on its own existing terms once both ends carry a decision — the same
+backstop a lone unique column already relies on. **Measured against both
+regressions below, a small lookup table refuses rather than loads**:
+`free_text`'s generator draws from a fixed word list, not an unbounded
+alphabet, so a narrow unique column's domain (3 distinct values for a
+three-character column, 635 for a twelve-character one) is nowhere near
+ARCHITECTURE.md §5's `d_required` for even a handful of rows, and
+`internal/plan` refuses at exit 12, naming both ends of the pair together
+with `--unmask` for each — the same message T-0132's equality-group
+mechanism already prints, unmodified by this task. That refusal is the
+correct answer named in the round-5 attack's own fix text ("refuse the run
+at exit 12 ... the way `internal/plan` already refuses a unique-indexed
+column free_text cannot fill"), reached with no new code in `internal/plan`
+at all: once both ends carry the same category, the existing mechanism
+already asks the right question.
+`testdata/regressions/031` now pins that refusal (its own schema is
+unchanged since the T-0239 review; its header moved from both ends unmasked
+to `exit 12 plan.refused.unique_domain`);
+`testdata/regressions/035-native-script-fk-child-beside-a-certain-column.sql`
+pins the round-5 attack's own schema, the identical refusal. Both
+`TestRedTeamRound5FKNativeScriptChildBesideCertainColumn` and
+`TestRedTeamRound4A2bValidatedFKColumnsRaisedTogether`
+(`internal/classify/redteam_test.go`) pin the classifier's own half of this
+— both ends raised, under the same category — at the unit level, where
+`internal/plan` does not run; the refusal itself is what `make torture`
+proves.
+
+**The direct-partner bound above had its own leak, found and fixed in
+T-0253's second review round.** Bounding `fkPairs` to `cref`'s direct
+partners is safe *downward* — a masked parent still reaches every other
+child through `propagateKeys`, unconditionally — but it is not safe
+*upward*: when a raised partner is itself the **child** end of a further
+validated foreign key, that further parent is never reached by anything.
+`propagateKeys` only ever pushes a decision from a masked parent down to its
+children; nothing in this package ever raises an unmasked parent because one
+of its children just got masked, which is the same asymmetry T-0253 exists
+to fix in the first place, moved one hop further out. A chain — a natural
+key, a child referencing it, a grandchild referencing the child — used to
+raise the grandchild and the child together and leave the natural key itself
+copied verbatim, holding the identical values (THREAT_MODEL.md T1), and also
+left the load with a masked child and an unmasked parent across that further
+edge (the T-0132 half-loaded-target shape, T8) — the very failure mode this
+rail exists to prevent, reintroduced by the fix that closed the sibling
+finding above.
+
+Closed by walking `fkParents` — `indexFKColumns`'s new directional half of
+`fkPartners`, a child's own parent column(s) and nothing else — transitively
+from `cref` and from every column `fkPairs` has already collected, gating
+each further parent through `fkPartnerRaisable` exactly as a direct one, until
+nothing new is found. A disqualified ancestor, however many hops up, still
+refuses the whole set: masking the columns below it and leaving it copied
+would be the same leak. The *downward* bound is unchanged — this never walks
+from a raised column to a further child of its own, only to its own
+parents — because that direction is `propagateKeys`'s to cover, and walking
+it here transitively would resurrect the medium finding the direct-partner
+bound was written to close.
+`testdata/regressions/036-chained-fk-native-script-names-three-tables-deep.sql`
+pins a three-table chain with a distinct column name at every hop
+(`slug_root`/`slug_mid`/`slug_leaf`) — identical names would let the
+same-name pass (`sameColumnName`, below) mask the grandparent for an
+unrelated reason and hide the bug — and refuses at exit 12 the same way 031
+and 035 do, since every table in the chain is a small table under a unique
+index. `TestFKPairWalksUpwardThroughAChainedForeignKey`
+(`internal/classify/redteam_test.go`) pins the same shape at the unit level.
+
+**A direct partner that already carries a decision this rail must not
+override, and internal/plan is what refuses the run over it (T-0257,
+closed alongside this task).** A type-conflicting name hit (ARCHITECTURE.md
+§4 never lets a raising pass move one) or a measured two-letter-code value
+shape (real evidence the column is a code lookup, not personal data) blocks
+the whole pairing, and `Classify` is pure and pluggable-refusal-free, so
+this package cannot make a run stop by itself: it can only leave both ends
+unmasked and record why. `Decision.Refused` and `Decision.RefusedPartner`
+(`internal/pipeline/classify.go`) are set on both ends the moment `fkPairs`
+blocks a pair, naming the reason and the other column, and
+`internal/plan/fkpair.go`'s `checkFKPairRefusal` is what reads that signal
+and refuses the run at exit 12, naming both columns of the pair, with an
+`--unmask` escape for each — the correct answer named in the round-5
+attack's own fix text, in the style `internal/plan/unique.go` already uses
+for a unique-indexed column `free_text` cannot fill. Before that check
+existed, both ends stayed unmasked and loaded copied verbatim under exit 0,
+the pre-T-0253 leak reopened for this one shape; `TestFKPairRefusedWhenPartnerIsTwoLetterCodes`
+and `TestFKPairRefusedWhenPartnerHasTypeConflict` still hold this package's
+own half of it — neither column masked, both `Refused` naming the other —
+and `internal/plan/fkpair_test.go`'s `TestFKPairIsRefusedAtPlan` holds the
+exit-12 refusal that Decision now drives.

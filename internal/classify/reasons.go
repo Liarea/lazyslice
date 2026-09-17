@@ -211,6 +211,27 @@ var fragments = []*fragment{
 		pattern: `propagated through foreign key ` + reIdent + ` from ` + reQualified,
 	},
 	{
+		// T-0253: unknownColumnsBesideCertain's join-safety pairing
+		// (fkPairs). A column at either end of a validated foreign key is
+		// raised together with every column paired to it, never alone, so
+		// each member's line names the other so the pairing is auditable
+		// from either side.
+		name:    "fk_pair",
+		format:  "raised together with %s so a validated foreign key stays in agreement",
+		pattern: `raised together with ` + reQualified + ` so a validated foreign key stays in agreement`,
+	},
+	{
+		// T-0253/T-0257: fkPairs' own refusal, when a validated foreign
+		// key's partner cannot be raised the same way. Rendered onto the
+		// blocked column's ordinary Reason (so the explain line says why
+		// nothing was raised) and, through the same fixed template set,
+		// onto the new Decision.Refused field that internal/plan does
+		// not read yet (see that field's own comment).
+		name:    "fk_pair_refused",
+		format:  "cannot be raised without copying foreign-key partner %s: refusing the pair rather than masking one end",
+		pattern: `cannot be raised without copying foreign-key partner ` + reQualified + `: refusing the pair rather than masking one end`,
+	},
+	{
 		name:    "same_name",
 		format:  "column name %s is %s in %s",
 		pattern: `column name ` + reIdent + ` is ` + reCategory + ` in ` + reQualified,

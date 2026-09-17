@@ -33,6 +33,7 @@ One row per code in the catalogue, in the file's own order. Exit is only meaning
 | `plan.refused.unwritable` | plan | 12 | {table}.{column} cannot be masked in place: {reason} |
 | `plan.refused.unique_domain` | plan | 12 | {table}.{column} is under a unique index and cannot be masked without collisions: {reason} |
 | `plan.refused.equality_group` | plan | 12 | {table}.{column} is in a group of columns joined by foreign keys that must mask alike, and no masker fits all of them: {reason} |
+| `plan.refused.fk_pair` | plan | 12 | {table}.{column} is one end of a validated foreign key that cannot be masked without leaving the other end's identical values unmasked: {reason} |
 | `plan.refused.ddl_literal` | plan | 12 | {table}.{column} is not masked and its recreated DDL carries a literal that parses as personal data: {reason} |
 | `target.schema.literal_not_rewritable` | plan | 13 | {table}.{column} is masked and its recreated DDL carries a literal lazyslice cannot rewrite: {reason} |
 | `target.schema.type_literal` | plan | 13 | type {table} carries a literal in {column} that parses as personal data and cannot be rewritten: {reason} |

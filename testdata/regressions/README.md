@@ -79,10 +79,21 @@ beside a `certain` email column, masking the child to `free_text` while its
 parent stayed unmasked -- the two ends of one join left in disagreement,
 which internal/plan's equality and write-back checks both judge by type and
 so cannot catch, and which internal/load turns into a half-loaded target at
-`VALIDATE` (T-0132's own failure mode). Fixed by excluding a validated,
-non-virtual foreign key's character-family columns, both ends, from
-`unknownColumnsBesideCertain`'s reach, the same way the rail already excludes
-a unique index and an integer or uuid key column.
+`VALIDATE` (T-0132's own failure mode). The fix-round review's own fix
+excluded a validated, non-virtual foreign key's character-family columns,
+both ends, from `unknownColumnsBesideCertain`'s reach, the same way the rail
+already excludes a unique index and an integer or uuid key column -- **and
+the round-5 red team found that exclusion itself leaking** (see `035`
+below), so `031`'s header now pins the corrected behaviour: both ends are
+raised together, under the same category, rather than neither masked at
+all -- and because reg031_currencies is a four-row table under a unique
+index whose column is only three characters wide, `free_text`'s fixed word
+list cannot offer the domain ARCHITECTURE.md §5 asks for, so
+`internal/plan`'s existing, unmodified unique-index domain check refuses the
+run at exit 12 rather than loading it. Its schema is unchanged; its
+`expect` key moved from `ok` to `exit 12 plan.refused.unique_domain`, and
+the `equal-masked:`/`not-copied:` keys came back out, since the harness
+checks neither on a non-zero exit (T-0253).
 
 **032 and 033 are a sixteenth and a seventeenth**, from the round-4 red
 team's three A9b replays against `taxref`/`msisdn`-shaped tables
@@ -120,6 +131,95 @@ corroborate through it. `requiresCorroboration`'s own three-signal
 untouched, so `032` and `033` -- which corroborate through
 `TableHasMaskedPersonalColumn` -- still refuse; `034`'s own header has the
 full account.
+
+**035 is a nineteenth**, from the 2026-09-17 round-5 red team's classifier
+attacker, the FK variant
+(`docs/reviews/2026-09-15-redteam/round5-still-leaking.json`): **a leak,
+where `031`'s original shape was only a load-time refusal risk**. `031`'s own
+fix (above) excluded a validated foreign key's character-family columns from
+`unknownColumnsBesideCertain`'s reach entirely, at either end, on the claim
+that a genuinely personal FK-linked column is still reached by every other
+pass. `035` replays `030`'s own native-script names -- real Amharic names, in
+a column named `ስም` ("name", in the language the column's own name is
+written in too) -- as a validated foreign key child of a lookup table
+holding the same names, whose own table has no `certain` column for any
+other pass to key on; nothing else in `internal/classify` ever reached
+either end, and both crossed into the target verbatim beside a real `email`
+column that was masked correctly. Fixed by `fkPairs`
+(`internal/classify/classify.go`, T-0253): a column this rail would
+otherwise raise alone, at either end of a validated foreign key, is raised
+together with every column connected to it across such an edge, under the
+same category, so the join stays in agreement instead of both ends being
+excluded from the rail's reach. reg035_name_dim is a five-row table under a
+unique index (its primary key) whose column is twelve characters wide, and
+`free_text`'s fixed word list offers only 635 distinct values there --
+nowhere near ARCHITECTURE.md §5's `d_required` for five rows -- so
+`internal/plan`'s existing, unmodified unique-index domain check refuses the
+run at exit 12, naming both `ስም` columns together with `--unmask` for each:
+the refusal the round-5 attack's own fix text asked for, reached with no new
+code in `internal/plan` at all. `031` is the same mechanism's other control,
+also a small unique lookup table, also a refusal now instead of a mask (its
+header moved accordingly, above). Where a partner cannot be raised the same
+way --
+it already carries a decision ARCHITECTURE.md §4 forbids overriding, or a
+measured two-letter-code shape -- neither end is raised, which
+`internal/classify/redteam_test.go`'s `TestFKPairRefusedWhenPartnerIsTwoLetterCodes`
+and `TestFKPairRefusedWhenPartnerHasTypeConflict` pin at the unit level; that
+residual copies the pair rather than refusing the run, and tracker **T-0257**
+carries the `internal/plan` work to turn it into an exit-12 refusal instead.
+
+**036 is a twentieth**, from the T-0253 review round that followed `035`'s
+own fix rather than from a torture schema: bounding `fkPairs` to cref's
+*direct* partners closed the medium finding that walking the whole connected
+component caused, but reopened the leak `035` closes one hop further out.
+`reg036_members.slug_leaf` (cref) and its direct partner
+`reg036_name_mid.slug_mid` are raised together, exactly as `035` pins -- but
+`slug_mid` is itself the child end of a *further* validated foreign key, to
+`reg036_name_root.slug_root`, and nothing but `fkPairs`' own upward walk
+ever reaches that further parent: `propagateKeys` (a separate, later pass)
+only ever pushes a decision from a masked parent down to its children, never
+up from an unmasked one. Before the fix, `reg036_name_root.slug_root` stayed
+`CatNone` and carried the same real names verbatim (THREAT_MODEL.md T1), and
+the load would `VALIDATE` a foreign key between a masked child and an
+unmasked parent (`031`'s own T-0132 half-loaded-target shape, T8). Fixed by
+walking `fkParents` -- the child-to-parent half of `fkPartners`
+(`internal/classify/classify.go`) -- transitively from cref and from every
+column already raised, so a chain of keys is brought into agreement as far
+up as it goes; the *downward* bound `035`'s own fix relies on is unchanged,
+since walking that direction transitively is the medium finding all over
+again. `reg036_name_root` and `reg036_name_mid` are both five-row tables
+under a unique index (their own primary keys), so this refuses at exit 12
+the same way `035` does, naming the columns `--unmask` can release.
+`internal/classify/redteam_test.go`'s
+`TestFKPairWalksUpwardThroughAChainedForeignKey` pins the same shape with
+three distinct column names (`slug_root`/`slug_mid`/`slug_leaf`), on
+purpose: identical names at every hop would let the same-name pass mask the
+grandparent for an unrelated reason and hide this bug.
+
+**037 is a twenty-first**, from tracker **T-0257** rather than from a
+torture schema: `035` and `036` are both the *raised-together* half of
+`fkPairs` -- a partner that qualifies, refused afterwards only because the
+lookup table it sits in is too small for `free_text`'s domain. `037` is the
+other half, the one `TestFKPairRefusedWhenPartnerIsTwoLetterCodes` and
+`TestFKPairRefusedWhenPartnerHasTypeConflict`
+(`internal/classify/redteam_test.go`) hold at the unit level: a partner that
+does not qualify at all, because it already carries a decision
+ARCHITECTURE.md §4 forbids overriding. `reg037_profiles.dob` is `citext`, so
+`person_date`'s name pattern matches "dob" but the type does not accept it,
+and `internal/classify` records a type conflict at `low` rather than a date.
+`reg037_members.linkval`, a validated foreign key child of `dob`, has no
+name or value signal of its own, so `unknownColumnsBesideCertain` would
+otherwise raise it alone beside `reg037_members.email` (a certain column in
+the same table) and leave `dob`'s identical values copied on the other side
+of the join -- the leak `fkPairs` exists to close. Before **T-0257**,
+nothing read the refusal `fkPairs` already recorded on both columns
+(`Decision.Refused`, `Decision.RefusedPartner`), and both loaded copied
+verbatim under exit 0; `internal/plan/fkpair.go`'s `checkFKPairRefusal` is
+the fix, and this file is its torture-schema guard, refusing at exit 12,
+naming both `reg037_members.linkval` and `reg037_profiles.dob`, with
+`--unmask` the escape for each. `internal/plan/fkpair_test.go`'s
+`TestFKPairIsRefusedAtPlan` pins the same shape at the unit level, driving a
+hand-built `Decision` through the planner directly.
 
 The files are loaded and run by `make torture` (`internal/invariants`'s
 `TestTortureRegressions`, behind the `integration` and `torture` build tags), so
@@ -178,6 +278,21 @@ something if a change stops recreating the constraint. It is what 010 asserts,
 beside a `unique-masked:` on the parent: the parent's values are masked,
 distinct and unusable, and the child holds the same ones. Either key alone would
 pass a run that copied both columns verbatim.
+
+**031, 035 and 036 (T-0253) were expected to need this pairing and,
+measured, need neither key.** All three raise a validated foreign key's ends
+together under `free_text`, and every parent involved -- including `036`'s
+further one, reached only by `fkPairs`' upward walk -- is a small table
+under a unique index whose declared width `free_text`'s fixed word list
+cannot fill to ARCHITECTURE.md §5's `d_required` — so `internal/plan`'s
+existing unique-index domain check refuses every run at exit 12 before
+anything loads, and `expect: exit 12 plan.refused.unique_domain` is the
+whole assertion: the harness checks neither optional key on a non-zero exit
+(see 020, above), and there are no rows in the target for `equal-masked:` or
+`not-copied:` to read. A schema whose FK-paired lookup table held enough
+rows, or whose column were wide enough for a bigger word-list domain, would
+load rather than refuse, and would need the `equal-masked:`/`not-copied:`
+pairing this note first described — none of the three is that schema.
 
 A third, added by **T-0161**:
 
@@ -283,10 +398,13 @@ until T-0221. It is what 025 sets.
 | `025-national-format-phone-region-kontaktnr.sql` | the 2026-09-15 red team round 3, attack:1:r3 | **a leak with no obfuscation needed for half of it**: a real UK phone number, dictated in words in one column and written plainly with spaces and brackets in another (`kontaktnr`, a name no rule pack pattern matches), crossed verbatim under exit 0 because every phone validator parsed under a fixed international-only region hint; fixed by `--phone-region REGION` (T-0221), which parses a second candidate under the configured region on the same strong footing the international entry has, on both nets |
 | `026-ten-digit-account-number-is-not-a-guessed-phone.sql` | the T-0221 review round (not a torture-schema reduction — see this file's own prose above) | the false-positive control T-0221's corroboration gate needs: an ordinary ten-digit account number, in a character column with no name or neighbour signal, must stay unmasked when no `--phone-region` is configured, because a short built-in list of guessed regions clears such a number by chance often enough that masking on the guess alone would cost a real column to no evidence at all; asserts against the emitted yml (`not-masked:`) rather than the target's rows, because a wrongly masked column here would still pass every rows-based check |
 | `030-short-declared-length-beside-a-certain-column.sql` | the 2026-09-15 red team round 4, the native-script variant against A2b (T-0239) | **a leak in the rail A2b's own fix built**: `unknownColumnsBesideCertain` masks an unrecognised character column as `free_text` beside a `certain` personal column, but its own declared-length exclusion skipped a `varchar(12)` name column beside a real `email` column in the same table, on the argument that free_text's filler does not fit a short column — untrue of a non-unique column, since the rail already excludes the case (a unique index) where a narrow generator can be refused; fixed by lowering the floor from sixteen characters to two |
-| `031-fk-child-code-column-beside-a-certain-column.sql` | the T-0239 fix-round review | **not a leak, but a half-loaded target**: the lowered floor above newly swept a validated foreign key's character-family child (an ISO-style currency code) into `free_text` beside a `certain` email column, while its parent's identical values stayed unmasked — the two ends of one join disagreeing, which `internal/plan` cannot catch and `internal/load` turns into an exit-8 `VALIDATE` failure after every row has moved; fixed by excluding a validated, non-virtual foreign key's character-family columns, both ends, from the rail's reach |
+| `031-fk-child-code-column-beside-a-certain-column.sql` | the T-0239 fix-round review, corrected by T-0253 | **originally a half-loaded-target risk, not a leak**: the lowered floor above newly swept a validated foreign key's character-family child (an ISO-style currency code) into `free_text` beside a `certain` email column, while its parent's identical values stayed unmasked — the two ends of one join disagreeing, which `internal/plan` cannot catch and `internal/load` turns into an exit-8 `VALIDATE` failure after every row has moved; the fix-round review's own fix excluded a validated, non-virtual foreign key's character-family columns, both ends, from the rail's reach entirely, and the round-5 red team found that exclusion itself leaking on a schema with no ISO code in it (`035`) — now fixed by `fkPairs`, which raises both ends together under the same category, and because the parent is a four-row table under a unique index that `free_text`'s fixed word list cannot fill, `internal/plan`'s existing, unmodified unique-index domain check refuses the run at exit 12 rather than loading it; this file's header moved from both ends unmasked (`ok`) to that refusal |
+| `035-native-script-fk-child-beside-a-certain-column.sql` | the 2026-09-17 round-5 red team, the classifier attacker's FK variant | **a leak `031`'s original fix could not see**: the same native-script names as `030`, made a validated foreign key child of a lookup table holding the same names, whose own table has no `certain` column for any other pass to key on — `031`'s blanket FK exclusion took both ends out of `unknownColumnsBesideCertain`'s reach, and nothing else in `internal/classify` ever reached either one, so both crossed into the target verbatim beside a real, correctly masked `email` column; fixed by `fkPairs`, which raises a column at either end of a validated foreign key together with every column connected to it, under the same category, instead of excluding the edge outright — and because the lookup table here is also a small table under a unique index, `internal/plan`'s existing unique-index domain check refuses the run at exit 12 naming both ends of the pair, exactly as `031` does |
+| `036-chained-fk-native-script-names-three-tables-deep.sql` | the T-0253 review round that followed `035`'s own fix | **a leak `035`'s fix reopened one hop further out**: bounding `fkPairs` to cref's direct partners closed the medium finding that walking the whole component caused, but a raised partner that is itself the child end of a *further* validated foreign key had its own parent reached by nothing — `propagateKeys` only ever pushes a decision down from a masked parent, never up from an unmasked one — so a three-table chain of real names left the topmost table copied verbatim beside two masked ones, and the load would `VALIDATE` a foreign key between a masked child and an unmasked parent; fixed by walking `fkParents`, the child-to-parent half of `fkPartners`, transitively from every raised column, so a chain is brought into agreement as far up as it goes while the downward direction stays bounded to `propagateKeys` |
 | `032-national-id-in-a-varchar-beside-a-masked-phone.sql` | the 2026-09-15 red team round 4, the A9b varchar(9) replay | **the numeric-family fix moved to a character column and the leak came back**: a dense, zero-padded national identifier stored as `varchar(9)`, beside `msisdn` masked as `phone` on its name alone with no value signal, crossed verbatim under exit 0 — nothing in `internal/verify/validators.go`'s character-family national_id entries recognised the shape at all, and the corroboration gate counted the table as holding no personal neighbour because a name match with nothing from the values lands below `TableHasLikelyPersonalColumn`'s `ConfLikely` floor; fixed by a masked-neighbour corroboration signal at `ConfPossible`, a character-family twin of the digits-family entry, and the dense-sequence exemption no longer outranking corroboration |
 | `033-national-id-in-a-bigint-beside-a-name-matched-phone.sql` | the 2026-09-15 red team round 4, the A9b dense bigint replay | **the same corroboration gap, and the dense exemption's own blind spot**: a dense national identifier stored as `bigint`, beside the identical name-matched, value-unconfirmed `msisdn`, crossed verbatim under exit 0 because the same `ConfLikely` floor missed the neighbour and, even once it did not, `digitRange.dense()`'s own exemption fired before corroboration was ever asked — the one combination `020`, `022` and `023` do not test together |
 | `034-dense-business-number-beside-a-tsvector-is-not-corroborated.sql` | the T-0240 review round (2026-09-17), high finding | **a false refusal the T-0240 fix itself introduced**: `TableHasLikelyPersonalColumn` counts a neighbour at `ConfLikely` or above under any category, with no `identifiesAPerson` test, and a `tsvector` is `derived_text` at `ConfCertain` by its type alone — so a search-index column beside an ordinary, non-key, dense business-number column cancelled that column's own sequence exemption on the strength of a neighbour that is not personal data, and the run refused at exit 9 with nothing wrong in it; fixed by `corroboratedForSequence`, read only for the dense-sequence override, which answers with `NameMatchedNationalID` and `TableHasMaskedPersonalColumn` alone and never `TableHasLikelyPersonalColumn` — `requiresCorroboration`'s own three-signal `corroborated` is unchanged, so `032` and `033` still refuse |
+| `037-fk-pair-partner-carries-a-type-conflict.sql` | tracker T-0257, not a torture-schema reduction — see this file's own prose above | **the residual `035`/`036` left open, now a refusal instead of a copy**: a validated foreign key's parent already carries a decision ARCHITECTURE.md §4 forbids overriding (a `citext` `dob` column, name-matched to `person_date`, type-conflicted at `low`), so `fkPairs` refuses to raise either end rather than mask the child alone and leave the parent copied — before `internal/plan/fkpair.go`'s `checkFKPairRefusal` read that signal (`Decision.Refused`, `Decision.RefusedPartner`), both columns loaded copied verbatim under exit 0; now the run refuses at exit 12, naming both columns with `--unmask` for each |
 
 009's header now says `ok`. It did not always: `arrayArrivesAsLiteral` in
 `internal/plan/writeback.go` was written as a stand-in for the element-wise
