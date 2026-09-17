@@ -9,7 +9,7 @@
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 3 | 1 | 92 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 70 | 0 | 29 | 5 | 0 |
+| E9 Later | later | 71 | 0 | 29 | 5 | 0 |
 
 ## Open and in progress
 
@@ -88,6 +88,7 @@
 - T-0247 [open] E9 · internal/pg: data_directory can still decide difference, the discover wiring of the standby rails has no test, and a comment on the role grant is garbled (sonnet)
 - T-0248 [open] E9 · docs/READ_ONLY_ROLE.md exists, with the role snippet ARCHITECTURE.md section 9 points at (sonnet)
 - T-0249 [open] E9 · internal/core populates Run.TargetTables so the loader's extra-tables path is not dead (sonnet)
+- T-0250 [open] E9 · Pin T-0197's nothing_recognised/sub_threshold_signal split with a regression test ()
 
 ## Recently closed
 
