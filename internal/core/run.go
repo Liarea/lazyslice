@@ -293,9 +293,17 @@ type run struct {
 	snapshot pipeline.SnapshotID
 	released bool
 
-	priv   pipeline.RolePrivileges
-	schema *pipeline.Schema
-	cls    *pipeline.Classification
+	priv pipeline.RolePrivileges
+	// replica is discover's one read of Source.Replica (T-0255 fix round,
+	// review): the header warning, the headless refusal and openTarget's
+	// SetSourceReplica all rest on this single answer rather than each
+	// re-reading the source, which could disagree with itself between calls
+	// (a promotion, a dropped connection) and left the gate comparing under a
+	// stale or silently-false standby answer while the header printed the
+	// true one.
+	replica pg.ReplicaStatus
+	schema  *pipeline.Schema
+	cls     *pipeline.Classification
 	// classFP is the classifier's own verdicts without this run's --unmask
 	// opt-outs, which is the half of the review pin a schema fingerprint cannot
 	// stand for (classifierFingerprint, Reviewed.ClassFingerprint).
@@ -779,10 +787,19 @@ func (r *run) discover(ctx context.Context) error {
 	// can genuinely differ there). A source that will not answer is not a
 	// refusal here either, the same swallow-the-error convention SystemID and
 	// ClusterID already use two lines up — only what a "yes" reveals is.
-	if replica, replicaErr := src.Replica(ctx); replicaErr == nil && replica.Standby {
+	//
+	// r.replica keeps this one answer for the rest of the run (T-0255 fix
+	// round, review): openTarget's SetSourceReplica reads it below rather
+	// than calling Source.Replica a second time, so the header line, this
+	// refusal and the gate's data_directory carve-out can never disagree
+	// about whether the source is a standby.
+	if replica, replicaErr := src.Replica(ctx); replicaErr == nil {
+		r.replica = replica
+	}
+	if r.replica.Standby {
 		r.send(event.Discover, event.Warn, CodeSourceStandby, event.Args{
 			event.ArgHost:   sourceRef.Host,
-			event.ArgReason: standbySenderReason(replica),
+			event.ArgReason: standbySenderReason(r.replica),
 		})
 		// A headless run with no --target has nobody to show that warning to
 		// and nothing this cheap to tell the standby's own primary apart from
@@ -882,6 +899,15 @@ func (r *run) openTarget(ctx context.Context) error {
 	if clusterID, clusterErr := r.source.ClusterID(ctx); clusterErr == nil {
 		tgt.SetSourceCluster(clusterID)
 	}
+	// The replica status Gate needs for rule 1's standby carve-outs (T-0255,
+	// round-5 red team: docs/reviews/2026-09-15-redteam/round5-still-leaking.json).
+	// discover already read this once, above, for the header warning and the
+	// headless refusal, and kept the answer on r.replica (T-0255 fix round,
+	// review) instead of discarding it — a second read here could disagree
+	// with the first (a promotion, a pool error between the two calls) and
+	// leave the header printing "standby" while the gate compared as if it
+	// were not, which is the exact leak the carve-out exists to close.
+	tgt.SetSourceReplica(r.replica)
 
 	e, err := tgt.Gate(ctx, r.sourceRef, systemID, r.req.AllowRemoteTarget)
 	if err != nil {
