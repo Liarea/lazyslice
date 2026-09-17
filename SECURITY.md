@@ -70,24 +70,57 @@ issue.
    reference to a production record — an admin URL, a ticket, a log line, a
    payment or support system — can re-identify every row exactly. A keyed remap
    is deferred past v1.
-2. Personal data in a column classified `none` that no rule and no validator
-   recognises.
-3. A leaked value that was truncated, reformatted, or embedded in a longer
+2. **A shape none of the validators recognise, in a column no name rule
+   names.** The classifier and the second net between them parse or guess at
+   about a dozen shapes (email, phone, national ID, IBAN, card number, IP or
+   MAC address, a credential's entropy, a name, an address, ordinary prose, a
+   special-category term). A value outside that list, in a column no name
+   rule matches and whose table holds no other column already decided
+   personal, is copied. This is the general case; the next two are the two
+   specific instances of it that an adversarial red team found worth naming
+   on their own.
+3. **A name — or any other value — in a script the built-in dictionaries do
+   not carry**, in a column also named in that script. The name, address,
+   phone and email name-patterns and the name dictionary are Latin-script
+   only, covering the given/surname stock of roughly twenty languages; a
+   column named — and holding values — in a non-Latin script (Cyrillic, CJK,
+   Arabic, Thai, Devanagari, Amharic, and more) defeats both the name-pattern
+   match on the column and the value match on its contents at once.
+   Extending the rule pack to non-Latin scripts is filed, not shipped
+   (docs/reviews/2026-09-15-redteam/round5.json).
+4. **A bare national identifier with nothing to corroborate it** — for
+   example a nine-digit number with no dashes — in a column whose name
+   matches no rule, when no other column of its table has already been
+   decided personal (masked or not). One exception inside that: a national
+   identifier that is itself a table's own primary key is read as a surrogate
+   key and stays exempt even beside a column that is masked, on the same
+   reasoning as item 1 — see THREAT_MODEL.md T1 for the boundary and the
+   reasoning against it.
+5. **The marker-bound reload window.** A target lazyslice writes to for the
+   first time gets a whole-target check, under the run's lease, for a table
+   that was not part of the plan the gate approved. A *reload* of a target
+   lazyslice has already marked as its own does not repeat that check: a
+   table an application creates in the target strictly after one run
+   finishes and strictly before the next run's first drop is left alone,
+   untouched and unmentioned, rather than refused. See THREAT_MODEL.md T2.
+6. A leaked value that was truncated, reformatted, or embedded in a longer
    string: the residual scan tests canonical equality only.
-4. Values inside `bytea`.
-5. JSON key names, unless a key itself parses as an email address, a phone
+7. Values inside `bytea` that are not printable UTF-8 text — a genuine binary
+   blob such as an image or a PDF. `bytea` holding printable text is read
+   like a text column on both nets.
+8. JSON key names, unless a key itself parses as an email address, a phone
    number or a credit-card number, in which case it is masked through that
    category's own masker (T-0137). An arbitrary identifier used as a key — a
    UUID, a slug, a customer number — is not named by any of the three and
    still survives. Values never survive: every leaf value is masked.
-6. `NULL` and the empty string, which survive and reveal that much.
-7. Masked columns with a small admissible domain, where the substitution is
-   recoverable by frequency. The tool lists these under `small_domain:` rather
-   than hiding them.
-8. Quasi-identifier combinations, and frequency or prefix leaks in unmasked
-   columns.
-9. A masked value that happens to coincide with another row's real value.
-10. Values that were already fake in the source.
+9. `NULL` and the empty string, which survive and reveal that much.
+10. Masked columns with a small admissible domain, where the substitution is
+    recoverable by frequency. The tool lists these under `small_domain:`
+    rather than hiding them.
+11. Quasi-identifier combinations, and frequency or prefix leaks in unmasked
+    columns.
+12. A masked value that happens to coincide with another row's real value.
+13. Values that were already fake in the source.
 
 ## Disclosure
 
