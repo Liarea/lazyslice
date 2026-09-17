@@ -7,9 +7,9 @@
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
-| E5 Hardening | 5 | 2 | 1 | 102 | 0 | 0 |
+| E5 Hardening | 5 | 4 | 0 | 103 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 80 | 0 | 30 | 5 | 0 |
+| E9 Later | later | 80 | 0 | 31 | 5 | 0 |
 
 ## Open and in progress
 
@@ -18,7 +18,6 @@
 - T-0048 [open] E9 · Explicit --key on an uncomparable column type surfaces a raw pgx error instead of a refusal (opus)
 - T-0064 [open] E5 · Dogfood: two sessions against a real project of the maintainer's choosing, logged in docs/DOGFOOD_LOG.md (human)
 - T-0065 [open] E6 · 20-second VHS GIF of the first run on Pagila (sonnet)
-- T-0083 [in_progress] E5 · Target type registration for CopyFrom: no owner since internal/load shipped ()
 - T-0087 [open] E9 · internal/classify's JSON leaf signal never consults the name dictionary, so verify's second net cannot score person_name or free_text over document leaves ()
 - T-0102 [open] E9 · A text column holding a JSON document is invisible to ARCHITECTURE.md 4's JSON rule ()
 - T-0124 [open] E9 · testdata/regressions covers plan.refused.unique_domain no longer ()
@@ -39,7 +38,6 @@
 - T-0164 [open] E9 · uniqueColumn is copied in internal/plan and internal/transform; give it a shared home ()
 - T-0166 [open] E9 · wire dsn param-drop warnings into internal/core and internal/pg's own dsn.Parse call sites ()
 - T-0168 [open] E9 · dsn.Ref.Params misses rung-2 (env/PGSERVICE) settings, so a first run through libpq env alone reruns with no sslmode at rung 0 ()
-- T-0170 [open] E9 · torture regression 013 (json-object-key-email) fails on main ()
 - T-0173 [open] E9 · Stop.Args is never populated by core.wrap, so many transcript error lines render generic while only the final exit line is specific (opus)
 - T-0174 [open] E9 · Wire --debug to print the statement trace (Source.Trace) on an ordinary failure ()
 - T-0175 [open] E9 · Give nasty.sql's stream fixtures a size parameter for perf profiling ()
@@ -97,9 +95,14 @@
 - T-0267 [open] E9 · Workflow scripts carry the checkout's absolute home path in a REPO constant (sonnet)
 - T-0268 [open] E9 · lazyslice doctor prints the stated false negatives, as ARCHITECTURE.md says it does (sonnet)
 - T-0269 [open] E9 · A timestamp column's reason line says its samples look like secrets (sonnet)
+- T-0270 [open] E5 · T4's egress test: the binary runs with only the source and the target reachable, and a packet counter proves it tried nothing else (sonnet)
+- T-0271 [open] E5 · Q2, the root-table question ADR-008 makes the happy path's one question, is asked at a terminal when nothing names the root (sonnet)
+- T-0272 [open] E9 · Per-leaf categories for JSON documents on the Decision, so an email leaf is replaced by a fake email rather than filler (opus)
 
 ## Recently closed
 
+- T-0083 [done] E5 · Target type registration for CopyFrom: no owner since internal/load shipped → done
+- T-0170 [done] E9 · torture regression 013 (json-object-key-email) fails on main → done
 - T-0197 [done] E5 · R2-05/A10 residual: a name in a language names.txt does not carry still reports "no name or value signal" as a clean bill of health → done
 - T-0198 [done] E5 · special_category has no value validator; a digit/name-free special-category sentence still crosses unseen → done
 - T-0212 [done] E5 · renderSafe redacts by default, and prints a transform refusal's reason under the values flag → done
@@ -123,5 +126,3 @@
 - T-0259 [done] E5 · README's flag table is generated and checked, and a release tag refuses a README that does not name it → done
 - T-0260 [done] E5 · README is true for v0.1.0: what it does, a quickstart that was run, first-run flags, exit codes at a glance, and the residuals in step with the threat model; SECURITY.md reconciled → done
 - T-0263 [done] E5 · internal/testutil outlasts Docker's port-table race: a longer bounded wait for the mapped port and one container restart before failing → done
-- T-0178 [done] E9 · TestAStoppedContainerIsOfferedAndStarted binds a fixed host port (127.0.0.1:5433) and collides under parallel container runs → done
-- T-0184 [done] E5 · Should a headless run auto-select a target on the source's own cluster? → done
