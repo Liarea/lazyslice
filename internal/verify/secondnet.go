@@ -14,11 +14,11 @@ import (
 
 // The second net (ARCHITECTURE.md section 6 item 4).
 //
-// All twelve of the classifier's value validators, folded into the fourteen
+// All twelve of the classifier's value validators, folded into the fifteen
 // entries in validators.go (its two network validators, IP and MAC, share one
 // entry here; the financial and national_id ones do not, and national_id
-// answers for three -- see validators.go's own comment, T-0136 and the
-// T-0187 review round), run over the full contents of
+// answers for four -- see validators.go's own comment, T-0136, the T-0187
+// review round and T-0240), run over the full contents of
 // every column of the loaded target that is not fully masked by a category
 // masker: every unmasked, non-opted-out column of a family this package can
 // name and render, and the string leaves of every JSON column, masked or not. A
@@ -211,21 +211,32 @@ type netTally struct {
 	hits    []int64
 }
 
-// digitRange tracks one digits-family column's numeric span, order-
-// independent on purpose (T-0187 second review round, findings 1 and 3):
-// scanSQL's "SELECT column FROM table" (sql.go) carries no ORDER BY, so the
-// order this net sees a column's values in is whatever Postgres's own heap
-// scan gives, not a signal it may read anything into. A generated
-// sequence — a surrogate key's own values (id, id+1, id+2, ...) or an
-// ordinary dense business-number block with no key at all (400100000+i) —
-// packs n values into a numeric range about n wide, however they arrive;
-// n independently assigned identifiers, real SSNs among them, are drawn from
-// a space many orders of magnitude wider than the sample and do not. Reading
-// the values this way, rather than asking internal/classify whether it
-// called the column a surrogate key, is what closes finding 3: a primary key
-// of real SSNs is exactly as dense-or-not as the same values in a plain
-// column, so classify's own miss (nothing in the column's name or values said
-// "personal" to it) cannot suppress this net's answer any more.
+// digitRange tracks one column's numeric span, order-independent on purpose
+// (T-0187 second review round, findings 1 and 3): scanSQL's "SELECT column
+// FROM table" (sql.go) carries no ORDER BY, so the order this net sees a
+// column's values in is whatever Postgres's own heap scan gives, not a
+// signal it may read anything into. A generated sequence — a surrogate key's
+// own values (id, id+1, id+2, ...) or an ordinary dense business-number
+// block with no key at all (400100000+i) — packs n values into a numeric
+// range about n wide, however they arrive; n independently assigned
+// identifiers, real SSNs among them, are drawn from a space many orders of
+// magnitude wider than the sample and do not. Reading the values this way,
+// rather than asking internal/classify whether it called the column a
+// surrogate key, is what closes finding 3: a primary key of real SSNs is
+// exactly as dense-or-not as the same values in a plain column, so classify's
+// own miss (nothing in the column's name or values said "personal" to it)
+// cannot suppress this net's answer any more.
+//
+// Despite the name, it is fed every direct value regardless of family
+// (T-0240, netColumn's own comment on the point): the observation is a fact
+// about the column's own digit shape, not about its Postgres type, and the
+// character-family national_id entry (validators.go) needs the identical
+// answer a digits-family column's own dense sequence already gives — a
+// national identifier issued in a contiguous block reads the same whether it
+// sits in a bigint or in a varchar(9). A genuine character column of
+// ordinary strings breaks the range on its first value (observe's own
+// comment) and dense() answers false for it, the same as a broken
+// digits-family range.
 type digitRange struct {
 	min, max *big.Int
 	n        int64
@@ -277,15 +288,35 @@ func (r *digitRange) dense() bool {
 	return span.Cmp(limit) <= 0
 }
 
-// corroborated is the national_id digits entry's own gate (T-0187 third
-// review round, finding 1): true when this column's pipeline.Decision carries
-// either of the two signals internal/classify already computed and this
-// package may not re-derive -- a rules.yml national_id name-pattern hit on
-// the column itself, or a certain-or-likely personal column elsewhere in the
-// same table (the neighbouring-column rule's own count). A column with
-// neither is read by nothing but its own ratio, which a sparse, fixed-prefix
+// corroborated is the national_id digits-family and character-family
+// entries' own gate (T-0187 third review round, finding 1; T-0240): true
+// when this column's pipeline.Decision carries any of the three signals
+// internal/classify already computed and this package may not re-derive -- a
+// rules.yml national_id name-pattern hit on the column itself, a
+// certain-or-likely personal column elsewhere in the same table (the
+// neighbouring-column rule's own `likely` count), or a masked
+// person-identifying column elsewhere in the same table at ConfPossible or
+// above (the same rule's `maskedPersonal` count). A column with none of the
+// three is read by nothing but its own ratio, which a sparse, fixed-prefix
 // reference-number column clears about as often as a real leaked identifier
 // column does -- see requiresCorroboration's own comment in validators.go.
+//
+// **The third signal is the round-4 red team's own finding, and it is not
+// the second signal's floor lowered.** TableHasLikelyPersonalColumn's own
+// ConfLikely floor missed a column the run had already decided to mask: a
+// name-only match with no samples decides ConfPossible, not ConfLikely
+// (§4's own threshold), so `msisdn numeric`, masked as `phone` on its name
+// alone, beside `taxref bigint` or `taxref varchar(9)` with no name or value
+// signal of its own, counted the table as having no personal neighbour at
+// all -- `taxref` read "no name or value signal" and crossed verbatim in all
+// three of the round's A9b replays (docs/reviews/2026-09-15-redteam/
+// round4-still-leaking.json). A column the run itself is about to mask is
+// evidence about the table whatever confidence line it landed on.
+// Decision.TableHasMaskedPersonalColumn (internal/pipeline/classify.go) is
+// that lower floor, kept as its own field rather than folded into
+// TableHasLikelyPersonalColumn because that field also corroborates
+// internal/classify's own guessed-region phone pass (guessedPhoneColumns,
+// T-0221), which this task's brief did not ask to widen.
 //
 // It reads the decision internal/classify already recorded rather than
 // asking rules.yml or the schema a second question: internal/verify may not
@@ -297,7 +328,59 @@ func (r *digitRange) dense() bool {
 // signal set.
 func (s *state) corroborated(col ref.ColumnRef) bool {
 	d, has := s.decision(col)
-	return has && (d.NameMatchedNationalID || d.TableHasLikelyPersonalColumn)
+	return has && (d.NameMatchedNationalID || d.TableHasLikelyPersonalColumn || d.TableHasMaskedPersonalColumn)
+}
+
+// corroboratedForSequence is corroborated's narrower sibling, read only by
+// the dense-sequence override below (T-0240 review round, high finding). It
+// answers the same "is there evidence beyond this column's own ratio"
+// question with two of corroborated's three signals -- NameMatchedNationalID
+// and TableHasMaskedPersonalColumn -- and never
+// Decision.TableHasLikelyPersonalColumn.
+//
+// That field is neighbouringColumns' own `likely` count
+// (internal/classify/classify.go), and it counts a neighbour at ConfLikely
+// or above under *any* category, with no identifiesAPerson test at all --
+// unlike TableHasMaskedPersonalColumn, whose own gate (maskedPersonalNeighbour)
+// checks identifiesAPerson explicitly. free_text, semi_structured,
+// binary_personal and derived_text are categories a column reaches by its
+// *type* alone (identifiesAPerson's own comment), and a tsvector is
+// derived_text at ConfCertain on every schema that has one. Reading
+// TableHasLikelyPersonalColumn here let a search-index column beside a
+// dense, non-key business number cancel that column's own dense-sequence
+// exemption: a `business_ref bigint` packed into a dense range beside a
+// `search tsvector` column has neverMasked false (it is not a key or an FK
+// child) and corroborated true (via TableHasLikelyPersonalColumn, on the
+// strength of a neighbour that is not personal data at all and never will
+// be, however this table's schema grows) -- so the exemption was cancelled,
+// the ratio was scored, and a column requiresCorroboration exists to protect
+// from exactly this shape of numeric coincidence refused the run instead
+// (T-0240 review round, high finding). corroborated itself is unchanged --
+// requiresCorroboration's own three-signal scoring is the pre-existing
+// behaviour this task's brief did not ask to narrow -- and
+// testdata/regressions/032 and 033 both still refuse under this narrower
+// check: each corroborates through TableHasMaskedPersonalColumn, which this
+// function reads too.
+func (s *state) corroboratedForSequence(col ref.ColumnRef) bool {
+	d, has := s.decision(col)
+	return has && (d.NameMatchedNationalID || d.TableHasMaskedPersonalColumn)
+}
+
+// neverMasked reads Decision.NeverMasked (T-0240 review round, high
+// finding): internal/classify's own key exemption for this column -- a
+// surrogate key, or a validated foreign-key child whose parent stayed
+// unmasked (ARCHITECTURE.md §4; internal/pipeline/classify.go's own comment
+// on the field has the full account). It is the dense-sequence exemption's
+// unconditional half, below: a column classify has already decided *is* a
+// surrogate key's own values, or a mirror of one, is dense by construction
+// -- `order_id`'s values ARE `id`'s, copied verbatim across the foreign key
+// -- and that fact does not depend on, and must not be cancelled by,
+// whatever category an unrelated column elsewhere in the table was decided
+// under. A column with no decision at all is not exempt this way, the same
+// as corroborated's own "has" branch.
+func (s *state) neverMasked(col ref.ColumnRef) bool {
+	d, has := s.decision(col)
+	return has && d.NeverMasked
 }
 
 // netColumn runs every applicable validator over one column's whole contents.
@@ -324,9 +407,19 @@ func (s *state) netColumn(ctx context.Context, col ref.ColumnRef, mode netMode) 
 		for _, text := range direct {
 			own.nonNull++
 			s.count(text, false, mode, own.hits, distinct)
-			if mode.digits {
-				seq.observe(text)
-			}
+			// seq reads every direct value regardless of family, not only a
+			// digits-family column's (T-0240): the character-family twin of
+			// the national_id digits entry (validators.go) is sequenceExempt
+			// too, over a varchar(9) or text column of zero-padded
+			// identifiers, and it needs the identical dense-range answer a
+			// digits-family column already gets. digitRange.observe breaks
+			// the range on the first value that will not parse as a plain
+			// non-negative integer, which an ordinary text column of email
+			// addresses or names does on its very first value -- so this
+			// costs nothing on a column no sequenceExempt entry ever applies
+			// to, and dense() answers false for it the same way it already
+			// does for a broken digits-family range.
+			seq.observe(text)
 		}
 		for _, text := range fromLeaves {
 			leaf.nonNull++
@@ -340,18 +433,58 @@ func (s *state) netColumn(ctx context.Context, col ref.ColumnRef, mode netMode) 
 	if own.nonNull == 0 && leaf.nonNull == 0 {
 		return nil
 	}
-	dense := mode.digits && seq.dense()
+	dense := seq.dense()
 	corroborated := s.corroborated(col)
+	corroboratedForSeq := s.corroboratedForSequence(col)
+	neverMasked := s.neverMasked(col)
 	for i, val := range validators {
 		if !applies(val, mode) {
 			continue
 		}
-		if val.sequenceExempt && dense {
-			// T-0187 second review round, findings 1 and 3: a column whose
-			// own values pack into a dense numeric range is a generated
-			// sequence, key or not, and this validator has no check digit to
-			// tell that apart from a real identifier by ratio alone. See
-			// digitRange's own comment above.
+		if val.sequenceExempt && dense && (neverMasked || !corroboratedForSeq) {
+			// T-0187 second review round, findings 1 and 3, narrowed by
+			// T-0240 and by the two review rounds that followed it: a
+			// column whose own values pack into a dense numeric range is a
+			// generated sequence, key or not, and this validator has no
+			// check digit to tell that apart from a real identifier by
+			// ratio alone -- *when nothing corroborates it, or when
+			// internal/classify has already decided the column IS a
+			// surrogate key or a mirror of one*. The round-4 red team's own
+			// dense A9b replay is what `&& !corroboratedForSeq` closes: a
+			// contiguously issued identifier block -- a payroll or benefits
+			// import -- has exactly this dense shape, so once a masked
+			// personal neighbour or a name match on this column corroborates
+			// it, density alone stops being a reason to skip it and the
+			// ratio is scored anyway, below.
+			//
+			// `neverMasked` is checked first and independently, and it is
+			// not "corroborated, but weaker" -- it is a different question
+			// with the opposite answer for the shape it covers.
+			// `corroboratedForSeq` asks whether something *else* in the
+			// table suggests this column might be personal; `neverMasked`
+			// asks whether internal/classify has already established that
+			// this column's own values are a surrogate key's, or a
+			// foreign-key child's copy of one. The second is not defeated
+			// by the first, because it is not evidence about the same
+			// thing: `order_id`'s values are `id`'s, dense because they
+			// are copied, whatever category an unrelated `email` column
+			// elsewhere in the table was decided under. Reading
+			// `corroboratedForSeq` alone here would let exactly that
+			// unrelated column cancel the exemption for `order_id`
+			// (testdata/regressions/021's own control, which pins this).
+			// See digitRange's own comment above and neverMasked's own,
+			// above.
+			//
+			// `corroboratedForSeq`, not `corroborated`, is deliberate, and
+			// it is corroboratedForSequence's own comment (above) that
+			// explains why: `corroborated`'s TableHasLikelyPersonalColumn
+			// signal counts a neighbour at ConfLikely or above under *any*
+			// category, including derived_text (a tsvector, ConfCertain by
+			// type alone) -- so a search-index column beside a dense,
+			// non-key business number used to cancel that column's own
+			// exemption on the strength of a neighbour that is not, and
+			// never will be, personal data (T-0240 review round, high
+			// finding; testdata/regressions/034's own control).
 			continue
 		}
 		if val.requiresCorroboration && !corroborated {

@@ -980,7 +980,71 @@ replacement values were chosen: confirmed, by direct computation against
 `ValidNationalIDStructured` and `ValidNationalIDChecksumOnly`, to clear none
 of this package's twelve formats.
 
-## T-0221 (2026-09-16, the round-3 red team's kontaktnr/contact finding): a configured phone region, and a corroboration-gated guess
+## A third decision field, for a masked neighbour the second one's floor missed (T-0240, the 2026-09-15 round-4 red team)
+
+`Decision.TableHasMaskedPersonalColumn` joins the two fields above
+(`internal/pipeline/classify.go`'s own comment has the full account): another
+column of the table decided at `ConfPossible` or above, not exempt from
+masking, under a category `identifiesAPerson` names. It is computed in the
+same `neighbouringColumns` loop as `TableHasLikelyPersonalColumn`, by the new
+`maskedPersonalNeighbour` helper, and carried onto every column of the table
+the identical way.
+
+**Why a third field and not a lower floor on the second one.** Three A9b
+replays in the round-4 red team (`docs/reviews/2026-09-15-redteam/
+round4-still-leaking.json`) planted a nine-digit national identifier — bigint
+dense, bigint sparse, and `varchar(9)` dense — beside an `msisdn`
+numeric/text column of real UK-shaped phone numbers. `msisdn` is one of
+`rules.yml`'s own phone abbreviations (`(^|_)(...|msisdn|...)(_|$)`), so it
+is `hasName && nameAccepted` in `decide` on its name alone; with no
+`--phone-region` configured the numbers are not in the international `ZZ`
+form `textsig.ValidPhone` reads, so `best` (the value signal) is nil and
+`decide`'s own default arm for that branch — a name match with nothing from
+the values to raise it further — records `ConfPossible`, not `ConfLikely` or
+`ConfCertain`. `TableHasLikelyPersonalColumn`'s own `ConfLikely` floor never
+saw it, so `internal/verify`'s `corroborated` gate read the table as holding
+no personal column at all, over a column the run had already decided to
+mask. Lowering `TableHasLikelyPersonalColumn`'s own floor to `ConfPossible`
+was considered and rejected: that field is also `guessedPhoneColumns`'s own
+corroboration signal (T-0221, below) for an entirely different, *value-only*
+phone reading (no name hit at all), and widening what corroborates a guess
+with no name evidence behind it was not this task's brief — a name-matched
+column at `ConfPossible` and a value-guessed column with no name signal are
+different claims that happened to share one field only by accident of both
+being written against T-0187's corroboration pattern.
+
+**`internal/verify/validators.go` also gained a character-family twin of the
+digits-family national_id entry, on the same task.** The `varchar(9)`
+replay is not answered by this field alone: nothing on the row-scanning
+side had ever called `ValidNationalIDDigits` over a *character* column,
+structured/checksum-only being the only two text-family national_id entries
+there, and neither matches a bare zero-padded digit run. `internal/verify/
+CLAUDE.md`'s own T-0240 section has the account, including the ordering fix
+this task made to `secondnet.go`'s dense-sequence exemption: a dense,
+contiguously issued identifier block — a payroll or benefits import — has
+exactly the shape the exemption was written to allow through, so the
+exemption must not outrank corroboration once corroboration exists to ask.
+
+**A same-day review round found that rule too wide for an ordinary
+foreign-key child, and `finalise` now carries a fourth field for the same
+reason the three above exist.** `TableHasMaskedPersonalColumn` (and
+`TableHasLikelyPersonalColumn` before it) answer "does something *else* in
+this table look personal", which is the wrong question for a column whose
+own values `internal/classify` has already decided ARE a surrogate key's —
+`order_id`'s are `id`'s, copied verbatim across the foreign key — and an
+unrelated genuine `email` column in the same table should no more cancel
+that than it should invent a national identifier out of nothing.
+`Decision.NeverMasked` (`internal/pipeline/classify.go`) is `work.neverMask`
+carried onto the decision by `finalise`, after `keyChildren` and
+`foreignKeys` have both had their say — the same final value that decides
+`Masked`, never an earlier snapshot — so `internal/verify` can ask "is this
+column exempt as a key" as a question separate from "does this table hold
+other personal data", the same way it already asks the corroboration
+question by three other carried fields rather than re-deriving `rules.yml`.
+`internal/verify/CLAUDE.md`'s own review-round section has the fixture that
+found it (`testdata/regressions/021`, restored to its original shape rather
+than edited a second time) and the two fixtures that still refuse without
+it (`032`, `033`, neither a key or an FK column).
 
 `textsig.ValidPhone` (the single `phone` entry in `baseValidators`) parses
 under `textsig.PhoneRegionHint` ("ZZ") only, which admits a number already

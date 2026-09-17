@@ -84,6 +84,43 @@ non-virtual foreign key's character-family columns, both ends, from
 `unknownColumnsBesideCertain`'s reach, the same way the rail already excludes
 a unique index and an integer or uuid key column.
 
+**032 and 033 are a sixteenth and a seventeenth**, from the round-4 red
+team's three A9b replays against `taxref`/`msisdn`-shaped tables
+(`docs/reviews/2026-09-15-redteam/round4-still-leaking.json`): a
+person-identifying neighbour the run had already decided to mask -- `msisdn`,
+masked as `phone` on its name alone, with no value signal of its own -- was
+never counted as corroboration at all, because
+`Decision.TableHasLikelyPersonalColumn` only counts a neighbour at
+`ConfLikely` or above and a name match with nothing from the values lands one
+line below that; and, for the `varchar(9)` half, nothing on the
+character-family side of `internal/verify/validators.go` had ever called
+`ValidNationalIDDigits`, so the value never reached a validator that could
+recognise it regardless. Fixed by a third decision field
+(`TableHasMaskedPersonalColumn`), a character-family twin of the
+digits-family national_id entry, and the dense-sequence exemption no longer
+outranking corroboration once it exists to ask -- `032`'s and `033`'s own
+headers have the full account, and both hold a *dense* block on purpose,
+since none of `020`, `022` or `023` tests a corroborated column that is also
+dense.
+
+**034 is an eighteenth**, from the review round that followed T-0240's own
+landing rather than from a torture schema: the fix above read
+`Decision.TableHasLikelyPersonalColumn` as one of three signals deciding
+whether corroboration overrides the dense-sequence exemption, and that field
+counts a neighbour at `ConfLikely` or above under *any* category, with no
+`identifiesAPerson` test -- so a `tsvector` column, `derived_text` at
+`ConfCertain` by its type alone on every schema that has one, corroborated
+an ordinary, non-key, dense business-number column into a false refusal at
+exit 9. Fixed by `corroboratedForSequence`, a narrower function read only by
+the dense-sequence override, which answers with `NameMatchedNationalID` and
+`TableHasMaskedPersonalColumn` alone -- `TableHasMaskedPersonalColumn`'s own
+gate does test `identifiesAPerson`, so a tsvector neighbour can never
+corroborate through it. `requiresCorroboration`'s own three-signal
+`corroborated` (the digits and character national_id entries' own gate) is
+untouched, so `032` and `033` -- which corroborate through
+`TableHasMaskedPersonalColumn` -- still refuse; `034`'s own header has the
+full account.
+
 The files are loaded and run by `make torture` (`internal/invariants`'s
 `TestTortureRegressions`, behind the `integration` and `torture` build tags), so
 a regression that comes back fails a build rather than being rediscovered by the
@@ -247,6 +284,9 @@ until T-0221. It is what 025 sets.
 | `026-ten-digit-account-number-is-not-a-guessed-phone.sql` | the T-0221 review round (not a torture-schema reduction — see this file's own prose above) | the false-positive control T-0221's corroboration gate needs: an ordinary ten-digit account number, in a character column with no name or neighbour signal, must stay unmasked when no `--phone-region` is configured, because a short built-in list of guessed regions clears such a number by chance often enough that masking on the guess alone would cost a real column to no evidence at all; asserts against the emitted yml (`not-masked:`) rather than the target's rows, because a wrongly masked column here would still pass every rows-based check |
 | `030-short-declared-length-beside-a-certain-column.sql` | the 2026-09-15 red team round 4, the native-script variant against A2b (T-0239) | **a leak in the rail A2b's own fix built**: `unknownColumnsBesideCertain` masks an unrecognised character column as `free_text` beside a `certain` personal column, but its own declared-length exclusion skipped a `varchar(12)` name column beside a real `email` column in the same table, on the argument that free_text's filler does not fit a short column — untrue of a non-unique column, since the rail already excludes the case (a unique index) where a narrow generator can be refused; fixed by lowering the floor from sixteen characters to two |
 | `031-fk-child-code-column-beside-a-certain-column.sql` | the T-0239 fix-round review | **not a leak, but a half-loaded target**: the lowered floor above newly swept a validated foreign key's character-family child (an ISO-style currency code) into `free_text` beside a `certain` email column, while its parent's identical values stayed unmasked — the two ends of one join disagreeing, which `internal/plan` cannot catch and `internal/load` turns into an exit-8 `VALIDATE` failure after every row has moved; fixed by excluding a validated, non-virtual foreign key's character-family columns, both ends, from the rail's reach |
+| `032-national-id-in-a-varchar-beside-a-masked-phone.sql` | the 2026-09-15 red team round 4, the A9b varchar(9) replay | **the numeric-family fix moved to a character column and the leak came back**: a dense, zero-padded national identifier stored as `varchar(9)`, beside `msisdn` masked as `phone` on its name alone with no value signal, crossed verbatim under exit 0 — nothing in `internal/verify/validators.go`'s character-family national_id entries recognised the shape at all, and the corroboration gate counted the table as holding no personal neighbour because a name match with nothing from the values lands below `TableHasLikelyPersonalColumn`'s `ConfLikely` floor; fixed by a masked-neighbour corroboration signal at `ConfPossible`, a character-family twin of the digits-family entry, and the dense-sequence exemption no longer outranking corroboration |
+| `033-national-id-in-a-bigint-beside-a-name-matched-phone.sql` | the 2026-09-15 red team round 4, the A9b dense bigint replay | **the same corroboration gap, and the dense exemption's own blind spot**: a dense national identifier stored as `bigint`, beside the identical name-matched, value-unconfirmed `msisdn`, crossed verbatim under exit 0 because the same `ConfLikely` floor missed the neighbour and, even once it did not, `digitRange.dense()`'s own exemption fired before corroboration was ever asked — the one combination `020`, `022` and `023` do not test together |
+| `034-dense-business-number-beside-a-tsvector-is-not-corroborated.sql` | the T-0240 review round (2026-09-17), high finding | **a false refusal the T-0240 fix itself introduced**: `TableHasLikelyPersonalColumn` counts a neighbour at `ConfLikely` or above under any category, with no `identifiesAPerson` test, and a `tsvector` is `derived_text` at `ConfCertain` by its type alone — so a search-index column beside an ordinary, non-key, dense business-number column cancelled that column's own sequence exemption on the strength of a neighbour that is not personal data, and the run refused at exit 9 with nothing wrong in it; fixed by `corroboratedForSequence`, read only for the dense-sequence override, which answers with `NameMatchedNationalID` and `TableHasMaskedPersonalColumn` alone and never `TableHasLikelyPersonalColumn` — `requiresCorroboration`'s own three-signal `corroborated` is unchanged, so `032` and `033` still refuse |
 
 009's header now says `ok`. It did not always: `arrayArrivesAsLiteral` in
 `internal/plan/writeback.go` was written as a stand-in for the element-wise

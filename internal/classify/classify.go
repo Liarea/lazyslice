@@ -1418,19 +1418,30 @@ func (st *state) byteaInPersonShapedTable() {
 func (st *state) neighbouringColumns() {
 	for _, t := range st.schema.Tables {
 		likely := 0
+		maskedPersonal := 0
 		for _, col := range t.Columns {
-			if w := st.dec[ref.ColumnRef{Table: t.Ref, Column: col.Name}]; w != nil && w.d.Confidence >= pipeline.ConfLikely {
+			w := st.dec[ref.ColumnRef{Table: t.Ref, Column: col.Name}]
+			if w == nil {
+				continue
+			}
+			if w.d.Confidence >= pipeline.ConfLikely {
 				likely++
 			}
+			if maskedPersonalNeighbour(w) {
+				maskedPersonal++
+			}
 		}
-		// Decision.TableHasLikelyPersonalColumn is carried on every column of
-		// the table, not only the ones this pass goes on to raise (T-0187
-		// third review round, finding 1): internal/verify's second net reads it off
-		// a column this rule never touches -- a numeric column at `none` or
-		// `low` whose own confidence never reaches ConfLow's exact match
-		// below. "Another" excludes the column's own confidence, which is
-		// what a neighbour has to mean; a column already at ConfLikely or
-		// above is masked and never reaches that net regardless.
+		// Decision.TableHasLikelyPersonalColumn and
+		// Decision.TableHasMaskedPersonalColumn are both carried on every
+		// column of the table, not only the ones this pass goes on to raise
+		// (T-0187 third review round, finding 1, and T-0240): internal/
+		// verify's second net reads them off a column this rule never
+		// touches -- a numeric or character column at `none` or `low` whose
+		// own confidence never reaches ConfLow's exact match below.
+		// "Another" excludes the column's own confidence, which is what a
+		// neighbour has to mean; a column already at ConfLikely or above is
+		// masked and never reaches that net regardless, and the same is true
+		// of maskedPersonalNeighbour's own ConfPossible floor.
 		for _, col := range t.Columns {
 			w := st.dec[ref.ColumnRef{Table: t.Ref, Column: col.Name}]
 			if w == nil {
@@ -1441,6 +1452,12 @@ func (st *state) neighbouringColumns() {
 				others--
 			}
 			w.d.TableHasLikelyPersonalColumn = others > 0
+
+			othersMasked := maskedPersonal
+			if maskedPersonalNeighbour(w) {
+				othersMasked--
+			}
+			w.d.TableHasMaskedPersonalColumn = othersMasked > 0
 		}
 		if likely == 0 {
 			continue
@@ -1601,6 +1618,44 @@ func identifiesAPerson(cat pipeline.Category) bool {
 		return false
 	}
 	return false
+}
+
+// maskedPersonalNeighbour is Decision.TableHasMaskedPersonalColumn's own gate
+// (T-0240, the 2026-09-15 round-4 red team's A9b replays): a column counts as
+// a masked person-identifying neighbour once its own decision has reached
+// ConfPossible -- the mask threshold -- under a category that
+// identifiesAPerson, and is not exempt from masking as a surrogate key or an
+// FK column. It is deliberately a lower floor than the `likely` count above
+// (TableHasLikelyPersonalColumn's own ConfLikely), because a name-only match
+// with no samples decides a column at ConfPossible and no higher (§4's own
+// threshold), and a column the run itself is about to mask on its name alone
+// -- `msisdn numeric`, masked as `phone` -- is evidence about the table
+// whatever confidence line it landed on. It reads w.d.Confidence and
+// w.d.Category rather than w.d.Masked, because this pass runs before
+// `finalise` sets that field for every column (the six-pass order in this
+// package's own CLAUDE.md); !w.neverMask is what the mask verdict actually
+// depends on at this point in the run, since a per-column --unmask opt-out
+// (w.unmasked) is not resolved until applyPrior, later still, and carries the
+// same limitation TableHasLikelyPersonalColumn's own count already accepts.
+//
+// **It is evaluated inside neighbouringColumns' own first loop, which is
+// earlier in the six-pass order than several passes that can still raise a
+// column to ConfPossible or above** (T-0240 review round, medium finding):
+// guessedPhoneColumns and unknownColumnsBesideCertain, both called from the
+// end of neighbouringColumns itself (Classify's own ordering comment), and
+// sameColumnName, keyChildren and foreignKeys, which run as separate passes
+// afterwards. A column whose only person-identifying signal is decided by one
+// of those -- a guessed-region phone hit with no name of its own, the
+// free_text catch-all beside a `certain` neighbour, a category shared by
+// column name, or FK propagation from a masked parent -- does not set this
+// field, because the loop that reads w.d.Confidence and w.d.Category here has
+// already run by the time any of them would move it. THREAT_MODEL.md's own
+// T1, T-0240 amendment states the same limitation in its own terms: the
+// residual it closes is narrower, in classification order, than "no other
+// column decided possible or above under a person-identifying category"
+// reads on its own.
+func maskedPersonalNeighbour(w *work) bool {
+	return w.d.Confidence >= pipeline.ConfPossible && !w.neverMask && identifiesAPerson(w.d.Category)
 }
 
 // minUnknownLen is the shortest declared length unknownColumnsBesideCertain
@@ -2101,6 +2156,14 @@ func (st *state) finalise() {
 		w.d.Reason = joinReason(w.frags...)
 		w.d.TypeFP = w.column.Fingerprint
 		w.d.UniqueIndex = st.unique[c]
+		// NeverMasked is w.neverMask's final value, after keyChildren and
+		// foreignKeys have both run (T-0240 review round, high finding):
+		// internal/verify's second net reads it as the unconditional half of
+		// its dense-sequence exemption, so it has to be the same answer
+		// w.neverMask settles on once the exemption can be lifted (a masked
+		// parent) as well as granted or handed back -- never an earlier,
+		// mid-pass snapshot.
+		w.d.NeverMasked = w.neverMask
 		w.d.Masked = w.d.Confidence >= pipeline.ConfPossible && !w.neverMask && !w.unmasked
 		if w.d.Masked && w.d.Category != pipeline.CatNone {
 			w.d.Masker = st.pack.Masker[w.d.Category]

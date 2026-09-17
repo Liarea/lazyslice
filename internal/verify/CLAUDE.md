@@ -94,10 +94,11 @@ statement allowlist this stage needs registered before `Verify` runs, as
 - `reasons.go` — the fixed phrases a `Refusal.Reason` may hold.
 - `residual.go` — §6 items 1 to 3: the scan, the hit, the two probes, the cap.
 - `secondnet.go`, `validators.go` — §6 item 4: the scan and the scoring, and
-  the twelve validators attached to their categories, in thirteen entries here
+  the twelve validators attached to their categories, in fifteen entries here
   (T-0136 split Luhn and IBAN back apart, then split Luhn again by family —
   strong on the character side, ratio on the digits side, its review round's
-  finding 2; T-0187 split national_id the same way, below; only IP and MAC
+  finding 2; T-0187 split national_id the same way, below, and T-0240 split
+  it a fourth; only IP and MAC
   still share one entry). The validators and the
   name dictionary themselves are `internal/textsig`, which `internal/classify`
   imports too (T-0055).
@@ -1020,6 +1021,259 @@ column added for the same reason `023` exists — each `taxref` and
 `citizen_no` had neither signal on its own — and both still refuse on the
 same ratio, dense-range and date logic as before, now that the table gives
 them a `likely` neighbour to read.
+
+## T-0240 (2026-09-17, the round-4 red team's three A9b replays): a masked neighbour corroborates too, and density no longer outranks it
+
+**Three replays, one gap in `corroborated`.** `docs/reviews/2026-09-15-
+redteam/round4-still-leaking.json` planted a nine-digit national identifier
+in a table called `payroll`, beside an `msisdn` column of real UK-shaped
+phone numbers: bigint and dense (`taxref bigint`, a contiguous
+`78051001..78051300` block), bigint and sparse (the same column, four fixed
+values over a 500M range), and `varchar(9)` and dense (the identical block
+moved onto the family the character-family national_id entries actually
+read). All three exited 0 with `taxref: no name or value signal`.
+`msisdn` was masked — it is one of `rules.yml`'s own phone abbreviations
+(`msisdn` is literally in the pattern), so `internal/classify`'s `decide`
+takes it on the name alone; with no `--phone-region` configured the values
+are not in the international `ZZ` form `textsig.ValidPhone` reads, so the
+value signal is nil and `decide`'s name-match-with-nothing-from-the-values
+branch records `ConfPossible`, not `ConfLikely` — and `corroborated` (above)
+still answered false for `taxref`, because `Decision.TableHasLikelyPersonalColumn`
+only counts a neighbour at `ConfLikely` or above, and a name match with no
+value corroboration of its own sits one confidence line below that. A column
+the run itself is about to mask is evidence about the table whatever
+confidence line it landed on,
+and the accepted residual sentence in THREAT_MODEL.md T1's T-0187 amendment
+— "a bare nine-digit identifier ... in a table with no other personal
+column" — does not cover a table that has one, masked or not.
+
+**The fix has three parts, none of them a rewrite of `nationalIDDigitsThreshold`
+or `digitRange.dense()`.**
+
+- **`Decision.TableHasMaskedPersonalColumn`** (`internal/pipeline/
+  classify.go`, computed in `internal/classify/classify.go`'s
+  `neighbouringColumns`) is the same question `TableHasLikelyPersonalColumn`
+  asks, at a lower floor: another column decided at `ConfPossible` or above,
+  not exempt from masking, under a category `identifiesAPerson` names.
+  `corroborated` now reads it as a third signal alongside
+  `NameMatchedNationalID` and `TableHasLikelyPersonalColumn`.
+  `internal/classify/CLAUDE.md`'s own T-0240 section has the reasoning for
+  why this is a third field and not a lowered floor on the second one — in
+  short, that field is also `guessedPhoneColumns`'s own corroboration signal,
+  and widening what corroborates a guessed phone reading was not this task's
+  brief.
+- **A character-family twin of the digits-family national_id entry**
+  (`validators.go`): `{text: true, minRatio: nationalIDDigitsThreshold,
+  sequenceExempt: true, requiresCorroboration: true, ok:
+  textsig.ValidNationalIDDigits}`, the identical entry the digits family
+  already had, offered to `text`/`varchar`/`bpchar`/`citext` too. The
+  `varchar(9)` replay is not answered by the corroboration signal above on
+  its own: nothing on the character-family side had ever called
+  `ValidNationalIDDigits` at all, only `ValidNationalIDStructured` (needs a
+  dash, a letter or NIR's fifteen characters) and `ValidNationalIDChecksumOnly`
+  (six formats, none of them a bare nine-digit run with no separator) — so a
+  zero-padded SSN moved from `bigint` to `varchar(9)` crossed unmasked
+  whatever `corroborated` answered, because the value never reached a
+  validator that recognised it.
+- **The dense-sequence exemption no longer outranks corroboration for a
+  column with no exemption of its own** (`netColumn`, `secondnet.go`):
+  `val.sequenceExempt && dense` gained `&& !corroborated`. The round's own
+  dense replay is exactly the shape `digitRange.dense()` exists to exempt —
+  a contiguous block reads the same whether it is a surrogate key, an
+  ordinary business-number block, or (this round) a payroll import's
+  contiguously issued identifiers — and before this change the exemption
+  fired first and `requiresCorroboration` was never reached at all, whatever
+  `corroborated` would have answered. Once a column has corroboration,
+  density stops being a reason to skip its ratio and the ratio is scored
+  exactly as a sparse column's already was; without corroboration, nothing
+  changes — a dense column with no personal neighbour and no name hit is
+  exempted exactly as it always was (`021`, `023`, below). `digitRange`
+  itself is fed every direct value now, regardless of family (`netColumn`'s
+  own comment), so a character-family column gets the identical dense/sparse
+  answer a digits-family one already did — a genuine text column of
+  ordinary strings breaks the range on its first non-numeric value and
+  `dense()` answers false for it, the same as a broken digits-family range
+  always has. **This bullet is the shape the review round below narrowed —
+  read it alongside `Decision.NeverMasked`'s own carve-out there before
+  reasoning from `!corroborated` alone.**
+
+**Both fixtures corroborate the same way the red team's own replays did, by
+name, and that is not a narrower test than a guessed one — it is the only
+shape that reaches the bug.** `guessedPhoneColumns` (`internal/classify`)
+only ever raises a guessed-region hit *beside an existing
+`TableHasLikelyPersonalColumn`* — it reads that field rather than writing it
+— so a table whose only other personal column is the guessed phone itself
+can never reach `ConfPossible` through that pass at all: either some other
+column is already `ConfLikely` or above, in which case
+`TableHasLikelyPersonalColumn` already corroborates the national_id column
+directly and the new field adds nothing to prove, or nothing is, and the
+guess is left exactly as `base` found it. The one route to a personal column
+sitting at `ConfPossible` and nowhere higher, with nothing else in the table
+above it, is `decide`'s ordinary name-match branch with no value signal of
+its own — `msisdn`'s own case, and the shape both fixtures use.
+
+**The regressions.** Two new fixtures, and 018 through 023 are unaffected —
+every one of them already stores its identifier in a numeric family, so
+the new character-family entry never applies to them, and none of them has a
+masked, sub-`ConfLikely` personal neighbour for the new field to find.
+`032-national-id-in-a-varchar-beside-a-masked-phone.sql` is the round's
+`varchar(9)` replay, reduced: a dense nine-digit block in a `varchar(9)`
+`taxref` column beside an `msisdn text` column of real UK-shaped numbers,
+with no `--phone-region` configured so the value itself never validates as a
+phone and `msisdn` is masked on its name alone at `ConfPossible`,
+`expect: exit 9 verify.refused.second_net` —
+`TableHasMaskedPersonalColumn` corroborates `taxref`, and the new
+character-family entry is what recognises the value at all, over a table
+where `msisdn` is the only other column so `TableHasLikelyPersonalColumn`
+stays false throughout. `033-national-id-in-a-bigint-beside-a-name-matched-
+phone.sql` is the bigint half, over a dense block rather than a sparse one:
+`national_no bigint` packs into a range `digitRange.dense()` would exempt on
+its own, which none of `020`, `022` or `023` tests together with
+corroboration — each of those is either dense with no corroboration (`021`'s
+own control) or corroborated but sparse (`020`, `022`, `023`) — so `033`
+pins the one combination this task's own fix changes: corroboration now
+overrides the dense exemption rather than merely that the digits entry still
+refuses a sparse column, which the existing three already cover.
+`026-ten-digit-account-number-is-not-a-guessed-phone.sql`'s own control is
+unaffected by any of this: `account_no`'s ten-digit values are not eight or
+nine digits and match neither `ValidNationalIDDigits` branch nor its
+`validNationalID` fallback (none of the twelve formats is ten digits with no
+separator), so the new character-family entry scores zero hits on it
+regardless of what `corroborated` or `dense` answer, exactly as the existing
+digits-family entry already does for 020's `taxref` in `021`'s ordinary-column
+control.
+
+## The T-0240 review round (2026-09-17): `corroborated` is not the same question as "this column is a surrogate key"
+
+**A high finding proved the paragraph above wrong on its own fixture.** `021`
+was edited, in the same task, to move `email` one hop away from `order_id` —
+the reviewer restored the file to its original single-table shape (`email`
+back beside `id`/`order_id` in `reg021_probe_notes`) and reran it:
+`go test -tags 'integration torture' -run TestTortureRegressions/021` failed,
+`public.reg021_probe_notes.order_id is not masked and 10 of its values
+validate as national_id`, exit 9 after the target had already been dropped
+and loaded. The bug is real, not the fixture: `corroborated` counts
+`Decision.TableHasLikelyPersonalColumn`, and that field is
+`neighbouringColumns`' pre-existing `likely` count — any column at
+`ConfLikely` or above, under *any* category, not only one `identifiesAPerson`
+names — set long before T-0240 and unrelated to it. `021`'s own `email`
+column is `certain`, genuinely personal, and sits in the very table
+`order_id` does; `!corroborated` cancelled `order_id`'s dense-sequence
+exemption on the strength of it, over a column whose values are `id`'s own,
+copied verbatim across the foreign key by definition. That is exactly the
+shape `021`'s header states as its own point ("a dense business/FK number
+beside a personal column is not a national identifier") and exactly the
+control T-0187 wrote the exemption to protect.
+
+**Narrowing which signal counts was tried first, and it does not fix `021`.**
+Restricting the override to `NameMatchedNationalID` and
+`TableHasMaskedPersonalColumn` — the two signals T-0240's own brief named —
+still fails `021`: its `email` column is not merely "likely", it is
+`certain` and masked, so `maskedPersonalNeighbour` (`classify.go`) counts it
+into `TableHasMaskedPersonalColumn` too, correctly — that field is doing
+exactly its job. **The bug is not which corroboration signal is asked; it is
+that corroboration is the wrong question for this column at all.**
+`corroborated` asks whether *something else* in the table suggests the
+table might hold personal data; `order_id`'s own values are provably a
+surrogate key's, and that fact does not become less true because a real
+`email` column happens to share its table.
+
+**The fix is `Decision.NeverMasked`** (`internal/pipeline/classify.go`,
+computed in `internal/classify/classify.go`'s `finalise`, set from `work
+.neverMask` after `keyChildren` and `foreignKeys` have both run): carried the
+same way the three corroboration fields are, for the same reason —
+`internal/verify` may not import `internal/classify` or re-derive its key
+exemption — it reports that classify has already decided this column *is* a
+surrogate key, or a validated foreign-key child whose parent stayed
+unmasked. `netColumn`'s dense-sequence check reads it as a second, disjoint
+escape: `val.sequenceExempt && dense && (neverMasked || !corroborated)`.
+`neverMasked` is checked independently of `corroborated`, not as a weaker
+version of it — a surrogate key's own dense range is exempt whatever the
+table holds, and an ordinary business or payroll number with no such
+provenance is still judged by `corroborated` exactly as the T-0240 section
+above describes. `testdata/regressions/021` is restored to its original
+single-table shape (the T-0240 addendum that moved `email` into a third
+table is reverted, not merely edited again) and passes on `NeverMasked`
+alone; `032` and `033` still refuse, because neither `taxref` nor
+`national_no` is a key or an FK column — `NeverMasked` is false for both,
+so `corroborated` (via `TableHasMaskedPersonalColumn`) is what refuses them,
+unchanged from the paragraph above.
+
+**A medium finding, addressed in prose rather than in code.**
+`maskedPersonalNeighbour` (`classify.go`) is evaluated inside
+`neighbouringColumns`' own first loop, before `sameColumnName`,
+`keyChildren`, `foreignKeys`, and before `neighbouringColumns`' own later
+arms — `guessedPhoneColumns` and `unknownColumnsBesideCertain` — ever run. A
+table whose only person-identifying column first reaches `ConfPossible` in
+one of those later passes does not set `TableHasMaskedPersonalColumn`, so
+the residual THREAT_MODEL.md's T1, T-0240 amendment states ("no other column
+decided possible or above under a person-identifying category") is narrower,
+in classification order, than that sentence reads on its own.
+`maskedPersonalNeighbour`'s own comment and THREAT_MODEL.md's amendment both
+now say so explicitly, rather than recomputing the field in a second sweep:
+recomputing is a recall-affecting scoring change (root CLAUDE.md's own rule
+on the point, restated in `internal/classify/CLAUDE.md`'s top section) with
+no fixture in this task's brief to measure it against, where stating the
+limitation costs nothing and misleads no one reading either file.
+
+## The review round that followed the T-0240 review round: `corroborated` is still the wrong question for the dense-sequence override
+
+**A high finding proved the fix above only half closed the gap it named.**
+`Decision.NeverMasked` answers the surrogate-key/FK-child half correctly and
+`021` is restored to its original shape and passes on `NeverMasked` alone
+(above). The other half of `val.sequenceExempt && dense && (neverMasked ||
+!corroborated)` was untouched: for a dense column that is **not** a key or an
+FK child of one, the exemption still lived or died on plain `corroborated`,
+the same three-signal function `requiresCorroboration` reads — and
+`corroborated`'s `Decision.TableHasLikelyPersonalColumn` signal (the
+`likely` count `neighbouringColumns` computes, `internal/classify/
+classify.go`) counts a neighbour at `ConfLikely` or above under **any**
+category, with no `identifiesAPerson` test at all. `free_text`,
+`semi_structured`, `binary_personal` and `derived_text` are categories a
+column reaches by its *type* alone — a `tsvector` is `derived_text` at
+`ConfCertain` on every schema that has one — so a search-index column beside
+an ordinary, non-key, dense business-number column made `corroborated`
+answer true on the strength of a neighbour that is not personal data and
+never will be. The reviewer reproduced it directly: a fixture
+`scr900_orders(id bigint PK, business_ref bigint holding 400100000+i, search
+tsvector)` exits 9 as `verify.refused.second_net` on `business_ref` (reason
+`national_id`) after the target is dropped and loaded, and the identical
+fixture passes with the T-0240 task's nine changed files stashed — a
+refusal this change introduced, not one that predates it. No fixture in
+`018` through `033` pins the shape, because none of them carries a dense
+column beside a neighbour that is `ConfLikely`-or-above under a *non*-person
+category.
+
+**The fix is `corroboratedForSequence`** (`secondnet.go`), a function read
+only by the dense-sequence override, never by `requiresCorroboration`'s own
+gate: it answers with `Decision.NameMatchedNationalID` and
+`Decision.TableHasMaskedPersonalColumn` alone, the same two signals the
+T-0240 brief named, and never `TableHasLikelyPersonalColumn`.
+`TableHasMaskedPersonalColumn`'s own gate (`maskedPersonalNeighbour`) does
+test `identifiesAPerson`, and `derived_text` is one of the four categories
+that function excludes by name — so a `tsvector` neighbour can never set it,
+and the false corroboration this finding found has no route left into the
+dense-sequence override. `corroborated` itself (`requiresCorroboration`'s
+own gate) is unchanged: narrowing it to two signals was tried first and
+found not to fix `021` at all — `021`'s own `email` column is `certain`,
+which sets `TableHasMaskedPersonalColumn` too, so the bug there was never
+which signal corroboration read but that corroboration was the wrong
+question for a column `NeverMasked` already answers. Widening
+`corroboratedForSequence`'s narrowing to `corroborated` generally, so that
+`requiresCorroboration`'s sparse-column entries stopped trusting a
+`ConfLikely`-or-above neighbour under a type-derived category too, was
+considered and left alone: no fixture in this task's brief measures that
+question, `023`'s own sparse control carries no such neighbour, and it is a
+second, independent scoring change from the one this finding names.
+
+**`testdata/regressions/034`** is the reviewer's own probe, reduced: a
+single-table fixture with a dense, non-key `business_ref bigint` (`021`'s
+own ten values, verbatim, since `021` already proves the shape clears every
+other validator this net has) beside a `search tsvector` column and nothing
+else, `expect: ok`. `032` and `033` are unaffected — both corroborate
+through `TableHasMaskedPersonalColumn`, which `corroboratedForSequence`
+reads too — and neither carries a `derived_text`-or-other type-only
+neighbour for this finding's own mechanism to reach.
 
 ## Which sequence to read (T-TORTURE)
 
