@@ -269,7 +269,19 @@ type Stop struct {
 	// Message is developer-facing. What a user sees is rendered from
 	// internal/event/catalogue.yml by Code.
 	Message string
-	err     error
+	// unclaimed marks a Stop built by asStop's exhaustive fallback: an error
+	// no stage's typed refusal recognised, whose Message is PanicSummary's
+	// type-only description of it rather than a literal string this package
+	// wrote. Everywhere else Message is either a format string with no error
+	// text spliced in, or a typed refusal's own Error(), value-free by
+	// construction (T-0191, T-0212). cmd/lazyslice's renderSafe (T-0212 fix
+	// round, finding 1) reads this through Unclaimed rather than trusting
+	// every *Stop's Error() the same way, so a future asStop case that copies
+	// a raw error's words into Message without going through PanicSummary is
+	// still caught at the egress and not just at the one call site this was
+	// found at.
+	unclaimed bool
+	err       error
 	// sent records that the Error event for this refusal has already reached
 	// the sink. The discovery ladder sends its own (internal/discover's
 	// Refusal), and Run's report would otherwise print a second line under the
@@ -286,6 +298,12 @@ func (s *Stop) Error() string {
 
 // Unwrap reaches the underlying error, where there was one.
 func (s *Stop) Unwrap() error { return s.err }
+
+// Unclaimed reports whether this Stop is asStop's exhaustive fallback for an
+// error no stage's typed refusal recognised, rather than one built from a
+// literal string or an already-reviewed refusal's Error(). See the doc
+// comment on the unclaimed field.
+func (s *Stop) Unclaimed() bool { return s.unclaimed }
 
 // stop builds a Stop.
 func stop(code event.Code, exit int, format string, a ...any) *Stop {
