@@ -3,12 +3,12 @@ id: T-0252
 title: "The run lease is re-asserted before the first drop and before each table drop; a lost lease refuses the load"
 epic: E5
 phase: 5
-status: open
+status: done
 owner: sonnet
 created: 2026-09-17
-started: ""
-closed: ""
-outcome: ""
+started: 2026-09-17
+closed: 2026-09-17
+outcome: done
 ---
 
 # T-0252 · The run lease is re-asserted before the first drop and before each table drop; a lost lease refuses the load
@@ -25,6 +25,10 @@ Round-5 replay (docs/reviews/2026-09-15-redteam/round5-still-leaking.json, the w
 
 - 2026-09-17 created
 
+- 2026-09-17 started
+
+- 2026-09-17 closed: done
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+went well: Lease.Alive confirms the lease connection still holds the lock in pg_locks and the loader asks before the marker write, the whole-target recheck and every drop; the Opus reviewer caught the first cut checking only after the marker row was written, while three documents claimed the opposite order, and caught a cancelled context surfacing as a phantom lease-lost refusal; the 23505 race now has a code; one fix round, reverify clean, integration test terminates the lease backend between gate and load | went badly: the workflow's verify agent started the gate in the background and returned before it finished, so the task blocked and the orchestrator ran the gate (check, pg, load and core integration, torture) and committed; the verify prompt now forbids background runs | change next time: a comment that claims an ordering (X before Y, so Z cannot happen) is verified against the call order in the same diff, and an integration test for a wrong-target race counts the marker table first

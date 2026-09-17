@@ -7,7 +7,7 @@
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
-| E5 Hardening | 5 | 6 | 1 | 94 | 0 | 0 |
+| E5 Hardening | 5 | 5 | 1 | 95 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
 | E9 Later | later | 72 | 0 | 29 | 5 | 0 |
 
@@ -88,7 +88,6 @@
 - T-0248 [open] E9 · docs/READ_ONLY_ROLE.md exists, with the role snippet ARCHITECTURE.md section 9 points at (sonnet)
 - T-0249 [open] E9 · internal/core populates Run.TargetTables so the loader's extra-tables path is not dead (sonnet)
 - T-0250 [open] E9 · Pin T-0197's nothing_recognised/sub_threshold_signal split with a regression test ()
-- T-0252 [open] E5 · The run lease is re-asserted before the first drop and before each table drop; a lost lease refuses the load (sonnet)
 - T-0253 [open] E5 · The certain-neighbour rail raises both ends of a validated foreign key together, or refuses the pair (sonnet)
 - T-0254 [open] E5 · Special-category vocabulary matches a term glued to the next token by an underscore, and stripping a LIKE metacharacter leaves a separator (sonnet)
 - T-0255 [open] E5 · A standby's data directory is not evidence of a different cluster, and the standby's sender address is compared with the target (sonnet)
@@ -110,6 +109,7 @@
 - T-0241 [done] E5 · A streaming standby as source, with the target on its own primary, is refused: a start-time disagreement without the system identifier is unknown, a standby source is announced, and a headless run with no --target refuses on a standby → done
 - T-0242 [done] E5 · Before the first drop, the whole target is re-checked for emptiness under the run lease, and a table that appeared since the gate refuses the load → done
 - T-0251 [done] E5 · The .gitignore protection of the secret file is verified by asking git, never by matching the file's text → done
+- T-0252 [done] E5 · The run lease is re-asserted before the first drop and before each table drop; a lost lease refuses the load → done
 - T-0178 [done] E9 · TestAStoppedContainerIsOfferedAndStarted binds a fixed host port (127.0.0.1:5433) and collides under parallel container runs → done
 - T-0184 [done] E5 · Should a headless run auto-select a target on the source's own cluster? → done
 - T-0186 [done] E5 · --allow-type-literal is not recorded in lazyslice.yml → done
@@ -120,4 +120,3 @@
 - T-0090 [done] E5 · T-PERF: performance baseline and CI throughput guard → done
 - T-0163 [done] E5 · the plan-time DDL literal rule does not read index predicates or domain CHECKs → done
 - T-0177 [done] E5 · Record real ubuntu-latest bench baseline and flip bench job to blocking → done
-- T-0179 [done] E5 · Bench CI gate compares head against its parent on the same runner; absolute baseline becomes a catastrophic floor → done
