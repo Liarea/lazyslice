@@ -50,6 +50,7 @@ One row per code in the catalogue, in the file's own order. Exit is only meaning
 | `load.refused.target_locked` | load | 4 | {table} in the target could not be locked for dropping: something else is using this database |
 | `load.refused.target_changed` | load | 4 | {table} in the target changed after the gate approved it, before anything was dropped: {reason} |
 | `load.refused.marker_changed` | load | 4 | the lazyslice_meta row that authorised truncating this target is gone or has changed: nothing was dropped ({table}) |
+| `load.refused.lease_lost` | load | 4 | the run lease on this target is no longer held: it may have been terminated, or another run may already hold the target |
 | `target.schema.not_recreatable.function` | plan | 13 | {table}.{column} depends on {reason}, a function lazyslice does not recreate in the target |
 | `target.schema.not_recreatable.collation` | plan | 13 | {table}.{column} uses the collation {reason}, which lazyslice does not recreate in the target |
 | `verify.refused.fk` | verify | 8 | the foreign key {column} on {table} does not hold: {count} rows reference a parent row the target does not have |

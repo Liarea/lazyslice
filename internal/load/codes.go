@@ -88,6 +88,21 @@ const (
 	// changed since. The authorisation is the row, so a row that is not the one
 	// the gate read authorises nothing.
 	CodeRefusedMarkerChanged event.Code = "load.refused.marker_changed"
+
+	// CodeRefusedLeaseLost is exit 4: the run lease this run took before the
+	// gate no longer holds (T-0252,
+	// docs/reviews/2026-09-15-redteam/round5-still-leaking.json). The lease's
+	// connection sits idle in transaction for the whole of a run, and a
+	// server-side reaper, a pooler restart or a dropped connection can end its
+	// session with nothing downstream noticing; from that moment this run is
+	// indistinguishable from one that never held the target at all, and every
+	// verdict it reached before then — the gate's, and the whole-target
+	// recheck's own — is as untrustworthy as if it had never held the lock.
+	// internal/pg's Lease.Alive is what is asked, before the whole-target
+	// recheck and before each table's own lock-and-recheck, and the answer is a
+	// refusal, never a fall-through, exactly as AcquireLease already refuses
+	// when the lock cannot be taken in the first place.
+	CodeRefusedLeaseLost event.Code = "load.refused.lease_lost"
 )
 
 // The exit codes ADR-005 assigns: 4 "target refused", 7 "extract or load",
@@ -180,6 +195,19 @@ func refuseAppeared(tables []ref.TableRef) *Refusal {
 	return &Refusal{
 		Code: CodeRefusedTargetChanged, Exit: exitTarget, Tables: tables,
 		err: fmt.Errorf("the target now holds %d table(s) the gate did not approve", len(tables)),
+	}
+}
+
+// refuseLeaseLost builds T-0252's lease refusal: exit 4, CodeRefusedLeaseLost,
+// naming no table — the loss is about this run's own ownership of the target,
+// not about any one table in it, the same reason refuseAppeared's sibling
+// above names a set instead of a single table for its own whole-target
+// question.
+func refuseLeaseLost() *Refusal {
+	return &Refusal{
+		Code: CodeRefusedLeaseLost, Exit: exitTarget,
+		err: errors.New("the run lease on this target is no longer held: it may have been terminated, " +
+			"or another run may already hold the target"),
 	}
 }
 

@@ -417,6 +417,91 @@ application behaving normally.
 generated from it and was outside this task's paths**, so `make docs-check` fails
 until someone runs `make docs` and commits the result — tracker **T-0148**.
 
+## The run lease is re-asserted, not only taken once (T-0252)
+
+The lock-and-recheck above re-verifies the gate's *verdict*; it says nothing
+about whether this run still *owns* the target it is about to act on. Both
+questions turned out to matter separately: the round-5 red team
+(`docs/reviews/2026-09-15-redteam/round5-still-leaking.json`) terminated the
+backend behind a stalled run's lease — a server-side reaper, a pooler
+restart or a dropped connection do the same, and `internal/pg/CLAUDE.md`'s
+own "The run lease" section states why nothing before this closed it — let a
+second lazyslice run take the target and load into it in full, then let the
+first run resume: it dropped and recreated the second run's tables and
+interleaved with it, surfacing a raw, uncoded `SQLSTATE 23505`.
+
+- **`checkLeaseAlive` calls `Run.Lease.Alive(ctx)` at the top of `Load`,
+  before `recheckWholeTarget` and at the top of `dropOne`** — the three
+  moments this package is about to act on the gate's verdict as though it
+  still holds. A dead lease refuses with `load.refused.lease_lost`, exit 4,
+  before anything is touched: no transaction, no lock, no recheck, and — as
+  of the round-6 review below — no marker write either. `Run.Lease` is
+  `leaseChecker`, a one-method interface (`Alive(ctx) bool`) rather than
+  `*pg.Lease` directly, so `load_test.go` can drive both branches — lost and
+  alive — against a programmable `fakeLease` instead of a real Postgres
+  connection, the same reason `fakeWriter` exists for the recheck itself.
+  `*pg.Lease` satisfies it with no change on that side. `nil` means no lease
+  is known, and gets no check: every test in this package's own suite that
+  predates T-0252 supplies none, and `internal/core`'s `loadRun` is the only
+  filler (`Lease: r.lease`), wired the same way `MarkerBound`/`MarkerRunID`/
+  `MarkerStatus` already are.
+- **The three calls are deliberately redundant with each other, not with the
+  lock-and-recheck.** A lease already dead when `Load` is entered is caught
+  by the first call, before `EnsureMarker`/`StartRun` ever write the marker
+  row; one that dies between there and `drop` starting is caught by the
+  second, before the whole-target sweep ever opens a transaction; one that
+  dies partway through a long drop loop (a 2,000-table target, an
+  autovacuum-contended lock retried three times) is caught by the next
+  table's own call instead. Neither call replaces `recheck`/`recheckMarker`:
+  a lease can be perfectly alive while the *table* has changed since the
+  gate looked, which is what those two are for.
+- **`checkLeaseAlive` reads `ctx.Err()` before it asks `Alive`** (round-6
+  review): `Lease.Alive` swallows every query error, including
+  `context.Canceled` and `context.DeadlineExceeded`, as a plain `false`, so
+  without this an operator's own Ctrl-C during the drop loop surfaced as
+  `load.refused.lease_lost` — "another run may already hold the target" —
+  instead of the interrupted-run exit `internal/core`'s `asStop` maps
+  `context.Canceled` to. A context already done now returns `ctx.Err()`
+  itself, unwrapped, so `asStop` never mistakes it for a `*load.Refusal` and
+  falls through to the cancellation branch instead.
+- **The raw 23505 was a second, independent defect, not a consequence of the
+  lease check — and, until the round-6 review, the lease check did not even
+  reach it.** `pg.EnsureMarker`'s `CREATE TABLE IF NOT EXISTS` (and
+  `pg.StartRun`'s insert behind it) is exactly the statement shape two
+  concurrent sessions can both pass the "if not exists" check on and then
+  collide creating, raising 23505 on `pg_type_typname_nsp_index`. At T-0252
+  landing, both calls ran in `Load` *before* the first `checkLeaseAlive`, so
+  a lease already gone before `Load` was even entered still wrote — and, on
+  the refusal path, `FinishRun` re-wrote — a marker row into a target this
+  run no longer owned, which is the wrong-target race this whole amendment
+  exists to close, reopened one call earlier than every other check in this
+  file. The round-6 review added the third `checkLeaseAlive` call above to
+  close that; what the 23505 wrapping still covers on its own is the
+  narrower window between that call returning alive and the marker
+  statement actually reaching the target — the same point-in-time gap every
+  other `checkLeaseAlive` call leaves open. Before this amendment their
+  errors reached `Load`'s caller unwrapped, which is not one of
+  `internal/core`'s six refusal types, so `asStop` fell to its generic "no
+  stage claimed this" case and exit 1 — the raw crash the red team's replay
+  actually observed. Both are now `refuse(CodeRefusedDDL, exitLoad,
+  ref.TableRef{}, "", err)`, the same wrapping every other DDL statement this
+  package sends already gets; SQLSTATE 23505 prints in `{reason}` exactly as
+  any other DDL failure's does.
+- **Tests.** `TestADropRefusesWhenTheLeaseIsLost`,
+  `TestTheWholeTargetRecheckRefusesWhenTheLeaseIsLost`,
+  `TestADropProceedsWhenTheLeaseIsAlive` and
+  `TestNoLeaseConfiguredSkipsTheCheck` (`load_test.go`) pin `checkLeaseAlive`
+  against `fakeLease`. `TestAMarkerStatementFailureIsRefusedWithACode`
+  (`load_test.go`) drives `Load` with `EnsureMarker`'s and `StartRun`'s own
+  statements each failing with a raw 23505 and asserts the wrapped
+  `*Refusal`. `TestALeaseTerminatedBetweenTheGateAndTheLoadIsRefusedNotRaced`
+  (`lease_integration_test.go`) is the red team's replay made deterministic:
+  a real lease, a real `pg_terminate_backend`, a second run loaded into the
+  target in full before the first is ever asked to resume, and the first
+  run's `Load` asserted refused with `CodeRefusedLeaseLost` rather than
+  racing the second — with the target's rows checked afterward to be exactly
+  the second run's own, untouched.
+
 ## The quarantine drops objects, not only tables (the 2026-09-15 red team's A07)
 
 `DropLoaded` is THREAT_MODEL.md T8's promise that after a content-class verify

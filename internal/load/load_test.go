@@ -376,6 +376,44 @@ func TestTheMarkerRowIsWrittenBeforeTheFirstDrop(t *testing.T) {
 	}
 }
 
+// T-0252 gave EnsureMarker's and StartRun's errors a code instead of letting
+// them reach the caller unwrapped (docs/reviews/2026-09-15-redteam/round5-still-leaking.json):
+// a second lazyslice run racing this one past a defeated lease can lose the
+// "CREATE TABLE IF NOT EXISTS" race and collide inserting the table's own row
+// type, raising 23505. Nothing exercised that wrapping; this drives Load with
+// each of the two marker statements failing in turn and checks the operator
+// gets a *Refusal carrying CodeRefusedDDL, exitLoad and the SQLSTATE, not the
+// raw, uncoded error.
+func TestAMarkerStatementFailureIsRefusedWithACode(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		prefix string
+	}{
+		{"EnsureMarker", "CREATE TABLE IF NOT EXISTS " + pg.MarkerTable},
+		{"StartRun", "INSERT INTO " + pg.MarkerTable},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := &fakeWriter{}
+			w.failExec = func(sql string) error {
+				if strings.HasPrefix(sql, tc.prefix) {
+					return pgErr("23505")
+				}
+				return nil
+			}
+			l := New(Run{ToolVersion: "test"}, nil)
+
+			_, err := l.Load(context.Background(), w, testPlan(), testSchema(), feed())
+			r := refusalFrom(t, err)
+			if r.Code != CodeRefusedDDL || r.Exit != exitLoad {
+				t.Errorf("refusal = %s/exit %d, want %s/exit %d", r.Code, r.Exit, CodeRefusedDDL, exitLoad)
+			}
+			if r.SQLState != "23505" {
+				t.Errorf("the refusal carries SQLSTATE %q, want %q", r.SQLState, "23505")
+			}
+		})
+	}
+}
+
 // §11.1 requires each drop to be printed before it happens, which is why
 // load.New takes a sink at all.
 func TestEachDropIsAnnouncedBeforeItRuns(t *testing.T) {
@@ -1138,4 +1176,88 @@ func TestARecheckOfTheWholeTargetIgnoresAnOccupiedPlanTable(t *testing.T) {
 			"this pass's business", err)
 	}
 	requireNothingDropped(t, w)
+}
+
+// fakeLease is a programmable leaseChecker (T-0252): what checkLeaseAlive asks
+// is stateless — is the lease alive, right now — so a test says up front what
+// the answer is and can count how many times it was asked. A real *pg.Lease is
+// asserted against a real Postgres connection in load_integration_test.go;
+// this is the unit half, the same split fakeWriter's recheckAnswers gives the
+// other two lock-and-recheck questions.
+type fakeLease struct {
+	alive bool
+	calls int
+}
+
+func (f *fakeLease) Alive(context.Context) bool {
+	f.calls++
+	return f.alive
+}
+
+// A dropOne whose lease has evaporated refuses before it asks the target
+// anything at all — no transaction, no lock, no recheck — because a lease
+// that is gone makes every one of those questions moot
+// (docs/reviews/2026-09-15-redteam/round5-still-leaking.json).
+func TestADropRefusesWhenTheLeaseIsLost(t *testing.T) {
+	w := &fakeWriter{answer: recheckAnswers{present: true}.answer}
+	lease := &fakeLease{alive: false}
+	l := loader{run: Run{Lease: lease}, sink: event.Discard}
+
+	r := refusalFrom(t, l.dropOne(t.Context(), w, dropOf(tref("public", "orders"))))
+	if r.Code != CodeRefusedLeaseLost || r.Exit != exitTarget {
+		t.Errorf("refusal = %s/exit %d, want %s/exit %d", r.Code, r.Exit, CodeRefusedLeaseLost, exitTarget)
+	}
+	if lease.calls != 1 {
+		t.Errorf("the lease was asked %d time(s), want exactly 1", lease.calls)
+	}
+	if len(w.txs) != 0 {
+		t.Errorf("the drop opened %d transaction(s) after a lost lease, want 0: a lost lease costs nothing",
+			len(w.txs))
+	}
+}
+
+// The whole-target recheck asks the same question first, before it opens its
+// own transaction either.
+func TestTheWholeTargetRecheckRefusesWhenTheLeaseIsLost(t *testing.T) {
+	w := &fakeWriter{answer: wholeTargetAnswers{tables: []ref.TableRef{tref("public", "orders")}}.answer}
+	lease := &fakeLease{alive: false}
+	l := loader{run: Run{Lease: lease}, sink: event.Discard}
+
+	r := refusalFrom(t, l.drop(t.Context(), w, testSchema()))
+	if r.Code != CodeRefusedLeaseLost || r.Exit != exitTarget {
+		t.Errorf("refusal = %s/exit %d, want %s/exit %d", r.Code, r.Exit, CodeRefusedLeaseLost, exitTarget)
+	}
+	if len(w.txs) != 0 {
+		t.Errorf("drop opened %d transaction(s) after a lost lease, want 0", len(w.txs))
+	}
+}
+
+// A lease that answers alive changes nothing: the drop proceeds exactly as one
+// with no lease configured at all.
+func TestADropProceedsWhenTheLeaseIsAlive(t *testing.T) {
+	w := &fakeWriter{answer: recheckAnswers{present: true, count: 0}.answer}
+	lease := &fakeLease{alive: true}
+	l := loader{run: Run{Lease: lease}, sink: event.Discard}
+
+	if err := l.dropOne(t.Context(), w, dropOf(tref("public", "orders"))); err != nil {
+		t.Fatalf("dropOne refused with the lease alive: %v", err)
+	}
+	if lease.calls != 1 {
+		t.Errorf("the lease was asked %d time(s), want exactly 1", lease.calls)
+	}
+	if !w.txs[0].committed {
+		t.Error("the drop did not commit")
+	}
+}
+
+// A caller that supplies no lease of its own — a direct caller of this
+// package, as load_test.go's other drop tests all are — gets no check, and a
+// drop proceeds exactly as it always did before T-0252.
+func TestNoLeaseConfiguredSkipsTheCheck(t *testing.T) {
+	w := &fakeWriter{answer: recheckAnswers{present: true, count: 0}.answer}
+	l := loader{sink: event.Discard}
+
+	if err := l.dropOne(t.Context(), w, dropOf(tref("public", "orders"))); err != nil {
+		t.Fatalf("dropOne refused with no lease configured: %v", err)
+	}
 }

@@ -83,6 +83,30 @@ type Run struct {
 	// the caller names it here; one this
 	// package is not told about is left alone rather than dropped silently.
 	TargetTables []ref.TableRef
+
+	// Lease is this run's ownership of the target (internal/pg's Lease,
+	// acquired before the gate's first probe). It is asked whether it is still
+	// alive before the whole-target recheck and before each table's own
+	// lock-and-recheck (T-0252, docs/reviews/2026-09-15-redteam/round5-still-leaking.json):
+	// a lease evaporates without anything downstream noticing when its
+	// idle-in-transaction session is ended from outside — a reaper, a pooler
+	// restart, a dropped connection — and from that moment this run must not
+	// touch the target as though the gate's verdict still stands. nil means no
+	// lease is known: a direct caller of this package that holds none of its
+	// own gets no check, because the rule this closes is that a lease, once
+	// held, must still be held, not that every caller must hold one.
+	Lease leaseChecker
+}
+
+// leaseChecker is the one question the loader needs answered about a lease:
+// whether it is still alive, right now. It is an interface, and not
+// *pg.Lease directly, so the loader's own unit suite can drive
+// checkLeaseAlive's refusal against a programmable fake rather than a real
+// Postgres connection — the same reason fakeWriter exists for dropOne's own
+// recheck (load_test.go). *pg.Lease satisfies it without any change on that
+// side.
+type leaseChecker interface {
+	Alive(ctx context.Context) bool
 }
 
 type loader struct {
@@ -133,6 +157,19 @@ func (l loader) Load(
 		return nil, errors.New("load: no schema")
 	}
 
+	// T-0252 follow-up (round-6 review): the lease is re-asserted here, before
+	// EnsureMarker, not only inside drop and dropOne below. Without this check
+	// a run whose lease is already gone still ran CREATE TABLE IF NOT EXISTS
+	// and INSERT against a target another run now owns, before the first
+	// checkLeaseAlive in drop ever ran — mutating a marker row this run had no
+	// right to write, and leaving the refusal path's FinishRun call to mutate
+	// it a second time. The run has held the lease since before the gate
+	// passed, so there is no reason to touch the target at all before
+	// confirming it still does.
+	if err := l.checkLeaseAlive(ctx); err != nil {
+		return nil, err
+	}
+
 	// ARCHITECTURE.md section 11.1's not-recreatable refusal is *not* raised
 	// here. It is raised at plan, which is where section 11.1 says it is raised
 	// -- "before the snapshot is used for keys and before anything in the target
@@ -181,12 +218,23 @@ func (l loader) Load(
 	// between the drop and the last commit leaves the target with a row at
 	// running — which the next run's gate treats exactly as it treats complete,
 	// and truncates (ARCHITECTURE.md section 11.2).
+	// Wrapped as a *Refusal like every other DDL statement this package sends
+	// (T-0252): CREATE TABLE IF NOT EXISTS is not safe against a concurrent
+	// creator of the same name — two sessions can both pass the "if not
+	// exists" check and then collide inserting the table's own row type,
+	// raising 23505 on pg_type_typname_nsp_index — and a second lazyslice run
+	// racing this one past a defeated lease is exactly such a concurrent
+	// creator. Before this, EnsureMarker's and StartRun's errors reached the
+	// caller unwrapped, which is not one of the refusal types asStop claims,
+	// so the operator on the losing end of that race saw "lazyslice failed for
+	// a reason it has no code for; run with --debug" naming the raw SQLSTATE
+	// only under --debug (docs/reviews/2026-09-15-redteam/round5-still-leaking.json).
 	if err = pg.EnsureMarker(ctx, w); err != nil {
-		return nil, err
+		return nil, refuse(CodeRefusedDDL, exitLoad, ref.TableRef{}, "", err)
 	}
 	runID, err := pg.StartRun(ctx, w, l.markerRow(plan, fingerprint))
 	if err != nil {
-		return nil, err
+		return nil, refuse(CodeRefusedDDL, exitLoad, ref.TableRef{}, "", err)
 	}
 
 	res, err := l.load(ctx, w, plan, schema, in)
@@ -357,6 +405,9 @@ func registerTypes(ctx context.Context, w pipeline.Writer, schema *pipeline.Sche
 // finishing. Refusing correctly on every table is worth more than undoing the
 // drops that were already authorised.
 func (l loader) drop(ctx context.Context, w pipeline.Writer, schema *pipeline.Schema) error {
+	if err := l.checkLeaseAlive(ctx); err != nil {
+		return err
+	}
 	if err := l.recheckWholeTarget(ctx, w, schema); err != nil {
 		return err
 	}
@@ -382,6 +433,33 @@ func (l loader) drop(ctx context.Context, w pipeline.Writer, schema *pipeline.Sc
 		}
 	}
 	return nil
+}
+
+// checkLeaseAlive is T-0252's re-assertion of the run's ownership of the
+// target (docs/reviews/2026-09-15-redteam/round5-still-leaking.json). It is
+// called at the top of Load before the marker row is written, before the
+// whole-target recheck and before each table's own lock-and-recheck — the
+// three moments this package is about to act on the gate's verdict as though
+// it still holds — so that a lease defeated between the gate and here is a
+// refusal before this run touches anything, not after. A caller with no
+// lease of its own is not asked; see Run.Lease.
+func (l loader) checkLeaseAlive(ctx context.Context) error {
+	if l.run.Lease == nil {
+		return nil
+	}
+	// A context already done is checked first: Lease.Alive swallows every
+	// query error, including context.Canceled and DeadlineExceeded, as false,
+	// so without this an operator's own Ctrl-C during the drop loop surfaced
+	// as CodeRefusedLeaseLost — "another run may already hold the target" —
+	// rather than the interrupted-run exit the rest of core maps
+	// context.Canceled to (round-6 review of T-0252).
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if l.run.Lease.Alive(ctx) {
+		return nil
+	}
+	return refuseLeaseLost()
 }
 
 // lockAttempts and lockRetryPause bound the retry of a NOWAIT lock.
@@ -429,6 +507,9 @@ func (l loader) dropTable(ctx context.Context, w pipeline.Writer, d ddl.TableDro
 // transaction the DROP commits in, so no moment passes between "still as
 // approved" and "gone".
 func (l loader) dropOne(ctx context.Context, w pipeline.Writer, d ddl.TableDrop) error {
+	if err := l.checkLeaseAlive(ctx); err != nil {
+		return err
+	}
 	tx, err := w.Begin(ctx)
 	if err != nil {
 		return refuse(CodeRefusedDDL, exitLoad, d.Table, "", err)

@@ -776,6 +776,33 @@ and the last thing the run writes.
   `StartRun` still makes one when the caller brought none, which is what a direct
   caller with no lease gets; `internal/core` brings one, so the refusal a second
   run prints and the row this one writes carry the same id.
+- **`Alive` re-asks the question `AcquireLease` answered once, and only that
+  question** (T-0252, `docs/reviews/2026-09-15-redteam/round5-still-leaking.json`).
+  Everything above this bullet is what makes the lease's transaction unable to
+  outlive its own connection; none of it makes the connection itself unable to
+  be closed from *outside* — a server-side idle-session reaper with a shorter
+  fuse than `idle_in_transaction_session_timeout` disarms, a pooler restart, a
+  NAT timeout on a long-lived idle connection, or an operator's own
+  `pg_terminate_backend`. The red team's replay was exactly that: the pid
+  holding the lease terminated from a second session, a second lazyslice run
+  then took the target and loaded into it in full, and the first run resumed
+  and dropped and recreated the very tables the second had just filled,
+  ending in a raw `SQLSTATE 23505` neither run was refused over. `Alive(ctx)`
+  runs `sqlLeaseAlive` — `SELECT EXISTS (... WHERE ... pid = pg_backend_pid()
+  ...)` — on the lease's own connection, so it is the connection answering
+  about itself rather than a second connection asking whether *anyone* holds
+  the key (`leaseHolder`'s question, and a different one). A query that fails
+  outright is read as `false`, not propagated: a terminated backend fails the
+  query, not the boolean, and a connection unable to say whether it holds the
+  lock does not hold it, as far as a caller deciding whether to touch the
+  target is concerned. `internal/load`'s `checkLeaseAlive` is the caller —
+  before the whole-target recheck (T-0242 above) and before each table's own
+  lock-and-recheck (T-0130) — and it is a refusal, `load.refused.lease_lost`,
+  never a fall-through, the same direction the bullet above already takes for
+  a lease that cannot be taken at all. `Alive` is a point-in-time answer with
+  the same residual every lock-and-recheck here already has: a lease
+  terminated in the instant after it returns true is not caught by that call,
+  only by whichever one runs next.
 
 `Eligibility.MarkerRunID` and `.MarkerStatus` are filled by rule 4 for the same
 reason: `internal/load` re-reads that row under the `ACCESS EXCLUSIVE` lock it

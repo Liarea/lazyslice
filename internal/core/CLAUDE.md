@@ -468,6 +468,19 @@ for a refusal that was reaching people as an internal error.
   which is what `internal/load`'s lock-and-recheck re-verifies before each drop.
   `asStop`'s `*load.Refusal` case now fills `{count}` from `Refusal.Rows`, which
   is the row count a changed target is named with.
+  **`loadRun` also carries `r.lease` itself, as `load.Run.Lease` (T-0252,
+  `docs/reviews/2026-09-15-redteam/round5-still-leaking.json`).** The gate's
+  verdict is a decision the loader re-verifies under its own lock; the lease
+  is this run's continuing *ownership* of the target across the several
+  stages between the two, and nothing re-asked whether it still held until
+  this change — `internal/pg/CLAUDE.md`'s own "The run lease" section carries
+  why an idle-in-transaction connection can lose it from outside with nobody
+  noticing. `r.lease` is always non-nil by the time `loadRun` is called: a
+  lease that could not be taken returns from `openTarget` before `move` is
+  ever reached, the same guarantee `MarkerBound`'s three fields already rest
+  on being filled together. `internal/load`'s `checkLeaseAlive` is the
+  reader; see that package's own T-0252 section for the refusal
+  (`load.refused.lease_lost`) and its two call sites.
   `race_integration_test.go` holds four regressions, all built on the same
   instrument — the source held under `ACCESS EXCLUSIVE` by a session of the
   test's own, so the run cannot pass introspect until the test lets it, which is
