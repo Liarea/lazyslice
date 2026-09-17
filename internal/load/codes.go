@@ -5,6 +5,7 @@ package load
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgconn"
 
@@ -114,6 +115,13 @@ type Refusal struct {
 	// is a count and therefore printable (THREAT_MODEL.md T4); it is zero for
 	// every other refusal, whose templates do not reference it.
 	Rows int64
+	// Tables is T-0242's whole-target recheck refusal: every table
+	// pg.ProbeEmptiness found occupied that was not already a member of this
+	// run's own plan (recheckWholeTarget). It is nil for every other refusal,
+	// Table above included — that field names the *one* table a per-table
+	// lock-and-recheck is about, and this one names a set the whole-target
+	// pass found before any table-specific lock was ever taken.
+	Tables []ref.TableRef
 	// err is the underlying error, kept so that a caller which needs the
 	// driver's own words (--show-row-values-in-errors) can still reach them.
 	err error
@@ -121,6 +129,13 @@ type Refusal struct {
 
 func (r *Refusal) Error() string {
 	where := r.Table.String()
+	if len(r.Tables) > 0 {
+		names := make([]string, len(r.Tables))
+		for i, t := range r.Tables {
+			names[i] = t.String()
+		}
+		where = strings.Join(names, ", ")
+	}
 	if r.Object != "" {
 		where += " (" + r.Object + ")"
 	}
@@ -153,6 +168,19 @@ func refuseChanged(code event.Code, table ref.TableRef, rows int64, because stri
 	r := refuse(code, exitTarget, table, "", errors.New(because))
 	r.Rows = rows
 	return r
+}
+
+// refuseAppeared builds T-0242's whole-target recheck refusal: exit 4,
+// CodeRefusedTargetChanged — the same code dropOne's own per-table recheck
+// raises, because both are the gate's rule 5 turning out not to hold any
+// more — naming every table pg.ProbeEmptiness found occupied that this run's
+// own plan did not already know about. tables is never empty; the caller
+// only builds this once it has found something to name.
+func refuseAppeared(tables []ref.TableRef) *Refusal {
+	return &Refusal{
+		Code: CodeRefusedTargetChanged, Exit: exitTarget, Tables: tables,
+		err: fmt.Errorf("the target now holds %d table(s) the gate did not approve", len(tables)),
+	}
 }
 
 // sqlStateLockNotAvailable is 55P03, which is the only thing LOCK TABLE ...

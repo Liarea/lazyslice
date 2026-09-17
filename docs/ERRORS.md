@@ -48,7 +48,7 @@ One row per code in the catalogue, in the file's own order. Exit is only meaning
 | `load.refused.copy` | load | 7 | the rows of {table} did not go in: SQLSTATE {reason}; the table is empty, not half loaded |
 | `load.refused.fk_invalid` | load | 8 | the foreign key {column} on {table} does not validate: the slice is missing rows it references |
 | `load.refused.target_locked` | load | 4 | {table} in the target could not be locked for dropping: something else is using this database |
-| `load.refused.target_changed` | load | 4 | {table} was approved empty and now holds {count} rows: the target changed after it was approved, and nothing was dropped |
+| `load.refused.target_changed` | load | 4 | {table} in the target changed after the gate approved it, before anything was dropped: {reason} |
 | `load.refused.marker_changed` | load | 4 | the lazyslice_meta row that authorised truncating this target is gone or has changed: nothing was dropped ({table}) |
 | `target.schema.not_recreatable.function` | plan | 13 | {table}.{column} depends on {reason}, a function lazyslice does not recreate in the target |
 | `target.schema.not_recreatable.collation` | plan | 13 | {table}.{column} uses the collation {reason}, which lazyslice does not recreate in the target |

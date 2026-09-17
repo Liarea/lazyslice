@@ -357,6 +357,9 @@ func registerTypes(ctx context.Context, w pipeline.Writer, schema *pipeline.Sche
 // finishing. Refusing correctly on every table is worth more than undoing the
 // drops that were already authorised.
 func (l loader) drop(ctx context.Context, w pipeline.Writer, schema *pipeline.Schema) error {
+	if err := l.recheckWholeTarget(ctx, w, schema); err != nil {
+		return err
+	}
 	for _, d := range ddl.DropTables(schema, l.run.TargetTables) {
 		if d.Table.Name == pg.MarkerTable {
 			continue
@@ -464,6 +467,84 @@ func (l loader) dropOne(ctx context.Context, w pipeline.Writer, d ddl.TableDrop)
 	}
 	committed = true
 	return nil
+}
+
+// recheckWholeTarget is the whole-database half of ARCHITECTURE.md section
+// 11.2's lock-and-recheck (T-0242,
+// docs/reviews/2026-09-15-redteam/round4-still-leaking.json). dropOne's own
+// recheck, below, only ever locks and re-verifies a table that is already a
+// member of this run's own plan (ddl.DropTables' output); a table a third
+// party creates in the target while the run is stalled between the gate and
+// this call is never a member of it, so that loop would never lock it, never
+// recheck it and never name it — it would simply be dropped, or, on a bound
+// marker, left standing and silently loaded around. Before the first drop,
+// under the run lease already held, this asks pg.ProbeEmptiness the gate's
+// own rule 5 question about the target's *current* user tables — not the
+// plan's — and refuses naming whatever it finds occupied that the plan does
+// not already know about. A plan table found occupied here is left alone:
+// dropOne's own per-table recheck asks the *right* question about it later
+// (still-empty on an unmarked target, marker-still-bound on a reload), and a
+// database a reload is authorised to leave full must not be refused by this
+// blanket pass for holding the rows it is here to overwrite.
+//
+// A bound marker skips this pass entirely (T-0242 round 5,
+// docs/reviews/2026-09-16-redteam/round5-marker-bound-false-positive.json).
+// On that path the gate never reached rule 5 at all — pg.Target.Gate returns
+// pipeline.Eligible as soon as markerBound is true, before checkEmpty ever
+// runs (internal/pg/target.go) — so there is no "every current user table was
+// approved" verdict here to re-verify, and "known" can only ever be this
+// run's own plan (schema plus Run.TargetTables, which core.Run never fills):
+// the *current source's* tables, not anything the gate looked at. A target a
+// previous run legitimately filled still holds every table that run's source
+// had, and a source that has since dropped or renamed one of them makes that
+// table vanish from today's plan without the target changing at all. Asking
+// this pass to judge it then reads an untouched database as "something
+// appeared" and refuses load.refused.target_changed on a table nobody touched,
+// with no remedy short of hand-dropping it — the finding this comment answers.
+// dropOne's own per-table recheck (recheckMarker, below) is already the right
+// question for the marker-bound path — the row that authorised the truncation
+// is still there — and it runs regardless of this skip.
+func (l loader) recheckWholeTarget(ctx context.Context, w pipeline.Writer, schema *pipeline.Schema) error {
+	if l.run.MarkerBound {
+		return nil
+	}
+	tx, err := w.Begin(ctx)
+	if err != nil {
+		return refuse(CodeRefusedDDL, exitLoad, ref.TableRef{}, "", err)
+	}
+	defer rollback(ctx, tx)
+
+	occupied, err := pg.ProbeEmptiness(ctx, tx)
+	if err != nil {
+		return refuse(CodeRefusedDDL, exitLoad, ref.TableRef{}, "", err)
+	}
+
+	known := planTables(schema, l.run.TargetTables)
+	var appeared []ref.TableRef
+	for _, t := range occupied {
+		if !known[t] {
+			appeared = append(appeared, t)
+		}
+	}
+	if len(appeared) == 0 {
+		return nil
+	}
+	return refuseAppeared(appeared)
+}
+
+// planTables is every table this run's own drop loop will visit — the same
+// set ddl.DropTables(schema, extra) returns, keyed for a membership test.
+// pg.MarkerTable is included exactly as DropTables includes it: it is
+// exempt from pg.ProbeEmptiness's own emptiness question through the
+// bookkeeping exemption both share, so it can never appear in occupied and
+// this set never needs to special-case it either.
+func planTables(schema *pipeline.Schema, extra []ref.TableRef) map[ref.TableRef]bool {
+	drops := ddl.DropTables(schema, extra)
+	known := make(map[ref.TableRef]bool, len(drops))
+	for _, d := range drops {
+		known[d.Table] = true
+	}
+	return known
 }
 
 // recheck re-verifies the gate's authorisation for this table.

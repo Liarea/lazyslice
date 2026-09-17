@@ -40,7 +40,8 @@ type fakeWriter struct {
 	failCopy map[ref.TableRef]error
 	failExec func(sql string) error
 	// answer is how a test says what the target replies to the reads the
-	// lock-and-recheck makes inside a drop's transaction (T-0130). nil keeps the
+	// lock-and-recheck makes inside a drop's transaction (T-0130), or to
+	// T-0242's whole-target recheck that runs before it. nil keeps the
 	// default below: a target that holds no tables at all.
 	answer func(sql string, args []any) (pipeline.Rows, error)
 }
@@ -146,16 +147,23 @@ func (tx *fakeTx) Exec(_ context.Context, sql string, args ...any) error {
 
 // Query is pipeline.Tx's read, which the lock-and-recheck needs (T-0130).
 //
-// With no answer set the fake target holds no tables, so to_regclass answers
-// "not there", the recheck is not reached, and a whole-Load test is about the
-// transaction contract rather than about the recheck. A test that is about the
-// recheck sets fakeWriter.answer (recheckAnswers below) and drives dropOne or
-// dropTable directly; what a *real* target answers under a real lock is asserted
-// in load_integration_test.go and in internal/core's race suite.
+// With no answer set the fake target holds no tables at all: T-0242's
+// whole-target recheck (pg.ProbeEmptiness) lists none, so it finds nothing
+// occupied and never refuses; to_regclass then answers "not there" for
+// dropOne's own per-table recheck, which is not reached either, and a
+// whole-Load test is about the transaction contract rather than about either
+// recheck. A test that is about the per-table recheck sets fakeWriter.answer
+// (recheckAnswers below) and drives dropOne or dropTable directly; a test
+// about the whole-target recheck sets it too (see TestARecheckOfTheWholeTarget
+// below); what a *real* target answers under a real lock is asserted in
+// load_integration_test.go and in internal/core's race suite.
 func (tx *fakeTx) Query(_ context.Context, sql string, args ...any) (pipeline.Rows, error) {
 	tx.local = append(tx.local, sql)
 	if tx.w.answer != nil {
 		return tx.w.answer(sql, args)
+	}
+	if strings.Contains(sql, "FROM pg_class c") {
+		return &fakeRows{none: true}, nil
 	}
 	return &fakeRows{values: []any{false}}, nil
 }
@@ -949,4 +957,185 @@ func TestALockFailureThatIsNotContentionIsALoadFailure(t *testing.T) {
 			requireNothingDropped(t, w)
 		})
 	}
+}
+
+// T-0242's whole-target recheck (docs/reviews/2026-09-15-redteam/round4-still-
+// leaking.json): before the first drop, under the run lease, the loader lists
+// the target's *current* user tables — not only the ones its own plan
+// names — and refuses over any it finds occupied that the plan does not
+// already know about.
+
+// fakeTableRows is a multi-row, three-column answer: pg.ProbeEmptiness's own
+// listing query (schema, name, row-level-security).
+type fakeTableRows struct {
+	rows [][]any
+	at   int
+}
+
+func (r *fakeTableRows) Next() bool {
+	if r.at >= len(r.rows) {
+		return false
+	}
+	r.at++
+	return true
+}
+
+func (r *fakeTableRows) Scan(dest ...any) error {
+	row := r.rows[r.at-1]
+	if len(dest) != len(row) {
+		return errors.New("the fake target was asked for a different number of columns")
+	}
+	for i, d := range dest {
+		switch target := d.(type) {
+		case *string:
+			v, ok := row[i].(string)
+			if !ok {
+				return errors.New("the fake target was asked for a string it does not hold")
+			}
+			*target = v
+		case *bool:
+			v, ok := row[i].(bool)
+			if !ok {
+				return errors.New("the fake target was asked for a bool it does not hold")
+			}
+			*target = v
+		default:
+			return errors.New("the fake target holds no column of that type")
+		}
+	}
+	return nil
+}
+
+func (r *fakeTableRows) Err() error { return nil }
+func (r *fakeTableRows) Close()     {}
+
+// wholeTargetAnswers is a target's reply to T-0242's whole-target recheck:
+// every current user table pg.ProbeEmptiness's listing query would return,
+// and which of them answer its SELECT EXISTS as true.
+type wholeTargetAnswers struct {
+	tables   []ref.TableRef
+	occupied map[ref.TableRef]bool
+}
+
+func (a wholeTargetAnswers) answer(sql string, _ []any) (pipeline.Rows, error) {
+	if strings.Contains(sql, "FROM pg_class c") {
+		rows := make([][]any, len(a.tables))
+		for i, t := range a.tables {
+			rows[i] = []any{t.Schema, t.Name, false}
+		}
+		return &fakeTableRows{rows: rows}, nil
+	}
+	if strings.HasPrefix(sql, "SELECT EXISTS") {
+		for _, t := range a.tables {
+			if strings.Contains(sql, `"`+t.Name+`"`) {
+				return &fakeRows{values: []any{a.occupied[t]}}, nil
+			}
+		}
+	}
+	return nil, errors.New("the fake target was asked something the whole-target recheck does not ask: " + sql)
+}
+
+// A table the plan never named, holding rows, is exactly what dropOne's own
+// per-table recheck cannot see: it only ever visits the plan's own tables.
+// The whole-target recheck lists the target fresh and refuses over it before
+// any table-specific lock is taken at all.
+func TestARecheckOfTheWholeTargetRefusesATableThePlanDoesNotName(t *testing.T) {
+	orders := tref("public", "orders")
+	items := tref("public", "order_items")
+	secrets := tref("public", "prod_secrets")
+
+	w := &fakeWriter{answer: wholeTargetAnswers{
+		tables:   []ref.TableRef{orders, items, secrets},
+		occupied: map[ref.TableRef]bool{secrets: true},
+	}.answer}
+	l := loader{sink: event.Discard}
+
+	r := refusalFrom(t, l.recheckWholeTarget(t.Context(), w, testSchema()))
+	if r.Code != CodeRefusedTargetChanged || r.Exit != exitTarget {
+		t.Errorf("refusal = %s/exit %d, want %s/exit %d", r.Code, r.Exit, CodeRefusedTargetChanged, exitTarget)
+	}
+	if len(r.Tables) != 1 || r.Tables[0] != secrets {
+		t.Errorf("the refusal names %v, want exactly [%s]", r.Tables, secrets)
+	}
+	requireNothingDropped(t, w)
+}
+
+// A bound marker skips the whole-target recheck entirely — it never opens a
+// transaction, never lists the target and never asks a single EXISTS (T-0242
+// round 5, docs/reviews/2026-09-16-redteam/round5-marker-bound-false-positive.json).
+//
+// On that path the gate never reached rule 5 at all: pg.Target.Gate returns
+// Eligible as soon as a bound marker is found, before checkEmpty ever runs, so
+// there is no "every current user table was approved empty" verdict here to
+// re-verify — this pass would only ever be comparing the target's current
+// tables against *today's source schema*, not against anything the gate
+// looked at. A target a previous run legitimately filled still holds every
+// table that run's source had; a source that has since dropped or renamed one
+// of them makes it vanish from today's plan with the target not having
+// changed at all. Before this fix that read as "appeared since the gate" and
+// refused load.refused.target_changed on a table nobody touched — reproduced
+// here with an occupied table (legacy_users) that is in neither the plan nor
+// the fake's answer at all, which would have made recheckWholeTarget error
+// asking about a table the fake was never told to answer for, had it been
+// reached.
+func TestARecheckOfTheWholeTargetSkipsEntirelyOnAMarkerBoundRun(t *testing.T) {
+	w := &fakeWriter{answer: wholeTargetAnswers{
+		tables:   []ref.TableRef{tref("public", "orders"), tref("public", "order_items")},
+		occupied: map[ref.TableRef]bool{tref("public", "legacy_users"): true},
+	}.answer}
+	l := loader{run: Run{MarkerBound: true}, sink: event.Discard}
+
+	if err := l.recheckWholeTarget(t.Context(), w, testSchema()); err != nil {
+		t.Errorf("recheckWholeTarget = %v, want nil: a bound marker's gate never asked rule 5 about anything, "+
+			"so this pass has no verdict to re-verify", err)
+	}
+	if len(w.txs) != 0 {
+		t.Errorf("recheckWholeTarget opened %d transaction(s) on a marker-bound run, want 0: it must not "+
+			"probe the target at all on this path", len(w.txs))
+	}
+}
+
+// Nothing appeared: the sweep finds every current table accounted for by the
+// plan (or empty) and the load proceeds.
+func TestARecheckOfTheWholeTargetPassesWhenNothingAppeared(t *testing.T) {
+	orders := tref("public", "orders")
+	items := tref("public", "order_items")
+
+	w := &fakeWriter{answer: wholeTargetAnswers{
+		tables: []ref.TableRef{orders, items},
+	}.answer}
+	l := loader{sink: event.Discard}
+
+	if err := l.recheckWholeTarget(t.Context(), w, testSchema()); err != nil {
+		t.Errorf("recheckWholeTarget = %v, want nil", err)
+	}
+	if tx := w.txs[len(w.txs)-1]; !tx.rolled || tx.committed {
+		t.Errorf("the whole-target recheck's own transaction wrote nothing and should roll back, not commit (rolled=%v committed=%v)",
+			tx.rolled, tx.committed)
+	}
+}
+
+// A table the plan already knows about is left alone by this pass even when
+// the sweep finds it occupied — it is not "somebody else's" the way a table
+// the plan never named is (TestARecheckOfTheWholeTargetRefusesATableThePlanDoesNotName,
+// above): a plan table is full by design on a reload, and dropOne's own
+// per-table recheck (recheck, below in load.go) is what asks the *right*
+// question about it later, under its own lock. Asking that question here
+// too, before any table-specific lock is taken, would refuse every ordinary
+// reload on the very rows it exists to overwrite.
+func TestARecheckOfTheWholeTargetIgnoresAnOccupiedPlanTable(t *testing.T) {
+	orders := tref("public", "orders")
+	items := tref("public", "order_items")
+
+	w := &fakeWriter{answer: wholeTargetAnswers{
+		tables:   []ref.TableRef{orders, items},
+		occupied: map[ref.TableRef]bool{orders: true},
+	}.answer}
+	l := loader{sink: event.Discard}
+
+	if err := l.recheckWholeTarget(t.Context(), w, testSchema()); err != nil {
+		t.Errorf("recheckWholeTarget = %v, want nil: orders is in the plan, so being occupied is not "+
+			"this pass's business", err)
+	}
+	requireNothingDropped(t, w)
 }
