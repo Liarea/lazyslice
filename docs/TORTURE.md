@@ -623,6 +623,62 @@ unconditional either way — it closes both round-3 canaries through the
 ordinary strongHit path (below "Before"), which is why neither canary
 regression (027, 028) needed re-cutting.
 
+## T-0239: the A2b rail's declared-length floor, re-measured
+
+The round-4 red team's native-script variant defeated `unknownColumnsBesideCertain`'s
+own declared-length exclusion — `varchar(12)` was under the rail's old floor of
+sixteen characters, so a name column that length beside a real `email` column
+copied verbatim (THREAT_MODEL.md T1's A2b amendment, above, carries the full
+account). The fix lowers `internal/classify/classify.go`'s `minUnknownLen`
+from sixteen to two, so every character column from two characters up that
+this rail would otherwise raise now is, unless one of the four remaining
+exclusions applies.
+
+**None of the ten schemas moved.** Re-running `make torture` after the change
+passes all ten at the unchanged twenty-seven flags (nineteen `--unmask`, seven
+`--skip-table`, one `--key`) `TestTortureCatalogueMatchesTheFixtures` already
+pins — a lower floor could only ever mask *more* of a column this rail was
+already built for, never force a new refusal, because the rail's own unique-
+index exclusion is what stands between a narrow column and §5's domain rule,
+and that exclusion is unchanged. Four of the ten (discourse, metabase, odoo,
+plausible) declare at least one character column under sixteen characters and
+still pass unchanged; the other six declare none at all under that width, so
+the change reaches nothing in them either way.
+
+**The three PII truth sets below are unaffected, provably rather than by
+re-measurement.** `unknownColumnsBesideCertain` only ever reaches a character
+column (`text`/`varchar`/`bpchar`/`citext`), and django, rails-activestorage
+and supabase-auth — the three schemas with a hand-scored truth set in "PII
+truth sets" below — declare **no** `varchar(n)` or `char(n)` column under
+sixteen characters at all (`grep -Eio 'varchar\([0-9]+\)|character
+varying\([0-9]+\)|char\([0-9]+\)'` over each `schema.sql`, filtered under 16,
+is empty for all three): every character column in the three is either
+unbounded `text` or declared sixteen or wider, so nothing in them ever fell
+inside the floor this task moved. Their precision and recall figures below
+stand as measured.
+
+**Fix-round addendum.** The lowered floor above reached one shape it should
+not have: a validated foreign key's character-family column, at either end,
+beside a `certain` column in the same table — an ISO-style currency code
+referenced by a same-width FK child was masked on one side of the join and
+left verbatim on the other, which is not a leak but a new way to half-load a
+target (THREAT_MODEL.md's own fix-round amendment carries the full account).
+`unknownColumnsBesideCertain` now excludes such a column too
+(`indexFKColumns`, `internal/classify/classify.go`), so the sentence above —
+"unless one of the four remaining exclusions applies" — is stale: it is five
+now, never-masked, type-conflicting, unique index, two-letter codes, and a
+validated foreign key's character columns.
+`testdata/regressions/031-fk-child-code-column-beside-a-certain-column.sql`
+pins the reproduction under `make torture` (not re-run for this addendum —
+Docker-gated and outside this fix round's own checks, `make check`). By the
+same argument as the paragraph above, the new exclusion is expected to move
+none of the ten schemas' flag counts: it only ever narrows what this one rail
+alone can mask, never widens it, so any FK-linked column it now leaves alone
+either was never reached by this rail in the first place or is still reached,
+correctly, by some other pass (a name hit, a value validator, or FK
+propagation from an already-masked parent). That expectation is unmeasured
+and stated as one.
+
 ## Found and not fixed
 
 One, with a tracker task. It was eight when this file was written, and seven of

@@ -63,7 +63,26 @@ both DDL-literal passes but not `internal/verify/validators.go`'s row-scanning
 second net, so the identical sentence crossed unseen when it sat in a ROW
 value rather than in a CHECK (tracker T-0231, `expect: exit 9
 verify.refused.second_net`, since the column here carries no DDL literal at
-all to refuse on).
+all to refuse on). **030 is a fourteenth**, from the round-4 red team's
+native-script variant against the A2b rail itself
+(`docs/reviews/2026-09-15-redteam/round4-still-leaking.json`): the rail's own
+declared-length exclusion, `minUnknownLen`, skipped a `varchar(12)` column
+beside a `certain` email column in the same table, on the argument that
+free_text's filler does not fit a short column -- which is not true of a
+non-unique column (the rail already excludes a unique one, where the domain
+rule can refuse a narrow generator); T-0239 lowered the floor from sixteen
+characters to two, the shortest length that cannot hold even the rail's own
+two-letter-code exception. **031 is a fifteenth**, from the T-0239 fix-round
+review rather than from a torture schema: the lowered floor newly reached a
+validated foreign key's character-family child (an ISO-style currency code)
+beside a `certain` email column, masking the child to `free_text` while its
+parent stayed unmasked -- the two ends of one join left in disagreement,
+which internal/plan's equality and write-back checks both judge by type and
+so cannot catch, and which internal/load turns into a half-loaded target at
+`VALIDATE` (T-0132's own failure mode). Fixed by excluding a validated,
+non-virtual foreign key's character-family columns, both ends, from
+`unknownColumnsBesideCertain`'s reach, the same way the rail already excludes
+a unique index and an integer or uuid key column.
 
 The files are loaded and run by `make torture` (`internal/invariants`'s
 `TestTortureRegressions`, behind the `integration` and `torture` build tags), so
@@ -226,6 +245,8 @@ until T-0221. It is what 025 sets.
 | `024-multilingual-name-in-an-unrecognised-column.sql` | the 2026-09-15 red team round 2, R2-05/A10, and T-0188 | a person's full name in a language `internal/textsig/names.txt` did not carry, in a column called `label` no rule matches, in a table with no other personal column — reported "no name or value signal" and crossed verbatim; fixed by sourcing given/family-name stock for twenty languages from Wikidata (CC0), documented in `THIRD_PARTY_NOTICES.md`. Ten rows, one per newly-sourced language (German, French, Spanish, Portuguese, Turkish, Hindi romanised, Arabic romanised, Japanese romanised, Korean romanised, Chinese pinyin), each verified false against a pre-T-0188 checkout and true after. A10's own Khmer/Lao/Amharic names stay an open residual — tracker T-0197 — because Wikidata's CC0 coverage for them is three, twelve and thirteen items total, nowhere near usable |
 | `025-national-format-phone-region-kontaktnr.sql` | the 2026-09-15 red team round 3, attack:1:r3 | **a leak with no obfuscation needed for half of it**: a real UK phone number, dictated in words in one column and written plainly with spaces and brackets in another (`kontaktnr`, a name no rule pack pattern matches), crossed verbatim under exit 0 because every phone validator parsed under a fixed international-only region hint; fixed by `--phone-region REGION` (T-0221), which parses a second candidate under the configured region on the same strong footing the international entry has, on both nets |
 | `026-ten-digit-account-number-is-not-a-guessed-phone.sql` | the T-0221 review round (not a torture-schema reduction — see this file's own prose above) | the false-positive control T-0221's corroboration gate needs: an ordinary ten-digit account number, in a character column with no name or neighbour signal, must stay unmasked when no `--phone-region` is configured, because a short built-in list of guessed regions clears such a number by chance often enough that masking on the guess alone would cost a real column to no evidence at all; asserts against the emitted yml (`not-masked:`) rather than the target's rows, because a wrongly masked column here would still pass every rows-based check |
+| `030-short-declared-length-beside-a-certain-column.sql` | the 2026-09-15 red team round 4, the native-script variant against A2b (T-0239) | **a leak in the rail A2b's own fix built**: `unknownColumnsBesideCertain` masks an unrecognised character column as `free_text` beside a `certain` personal column, but its own declared-length exclusion skipped a `varchar(12)` name column beside a real `email` column in the same table, on the argument that free_text's filler does not fit a short column — untrue of a non-unique column, since the rail already excludes the case (a unique index) where a narrow generator can be refused; fixed by lowering the floor from sixteen characters to two |
+| `031-fk-child-code-column-beside-a-certain-column.sql` | the T-0239 fix-round review | **not a leak, but a half-loaded target**: the lowered floor above newly swept a validated foreign key's character-family child (an ISO-style currency code) into `free_text` beside a `certain` email column, while its parent's identical values stayed unmasked — the two ends of one join disagreeing, which `internal/plan` cannot catch and `internal/load` turns into an exit-8 `VALIDATE` failure after every row has moved; fixed by excluding a validated, non-virtual foreign key's character-family columns, both ends, from the rail's reach |
 
 009's header now says `ok`. It did not always: `arrayArrivesAsLiteral` in
 `internal/plan/writeback.go` was written as a stand-in for the element-wise

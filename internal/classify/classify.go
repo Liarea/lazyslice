@@ -104,6 +104,10 @@ type state struct {
 	// pkOrUnique is every column that can be the referenced side of an edge,
 	// which is the condition ARCHITECTURE.md §4 puts on FK propagation.
 	pkOrUnique map[ref.ColumnRef]bool
+	// fkColumns is every column at either end of a validated, non-virtual
+	// foreign key: read by unknownColumnsBesideCertain's own join-safety
+	// exclusion, below.
+	fkColumns map[ref.ColumnRef]bool
 	// region is --phone-region / the yml's phone_region, or "" when neither
 	// is set. It is resolved once, here, and read by buildValidators (which
 	// this state's own validators list is built from) and by decide (to name
@@ -142,10 +146,12 @@ func (classifier) Classify(schema *pipeline.Schema, s pipeline.Sampler, prior *p
 		dec:        map[ref.ColumnRef]*work{},
 		unique:     map[ref.ColumnRef]bool{},
 		pkOrUnique: map[ref.ColumnRef]bool{},
+		fkColumns:  map[ref.ColumnRef]bool{},
 		region:     region,
 		validators: buildValidators(region),
 	}
 	st.indexKeys()
+	st.indexFKColumns()
 	st.base()
 	st.byteaInPersonShapedTable()
 	// T-0221's own pass (guessedPhoneColumns) runs inside neighbouringColumns,
@@ -248,6 +254,37 @@ func (st *state) indexKeys() {
 			for _, name := range cols {
 				st.pkOrUnique[ref.ColumnRef{Table: t.Ref, Column: name}] = true
 			}
+		}
+	}
+}
+
+// indexFKColumns records every column at either end of a validated,
+// non-virtual foreign key edge -- the ones `internal/load` recreates and
+// enforces after every row has been committed (NOT VALID, then VALIDATE), so
+// a decision that leaves the two ends disagreeing is not a masking gap but a
+// half-loaded target at load time (`reconcileKeyChildren`'s own comment makes
+// the identical argument for the integer/uuid key case). It is read by
+// unknownColumnsBesideCertain's own join-safety exclusion, below: a rail with
+// no evidence about a column of its own must not be what puts the two ends of
+// a join out of step, and this package has no pass that would otherwise catch
+// it -- `keyChildren` only reconciles a key-family (integer/bigint/uuid)
+// child (`isKeyFamily`), and `propagateKeys` only ever propagates a masked
+// **parent**'s decision forward, never a child's back to an unmasked parent.
+//
+// An unvalidated constraint is a hint over rows Postgres never checked and a
+// virtual one is a line in the yml, so a child of either can already hold a
+// value its "parent" does not -- the same distinction `reconcileKeyChildren`
+// draws for the same reason.
+func (st *state) indexFKColumns() {
+	for _, fk := range st.schema.FKs {
+		if !fk.Validated || fk.Virtual {
+			continue
+		}
+		for _, name := range fk.ParentCols {
+			st.fkColumns[ref.ColumnRef{Table: fk.Parent, Column: name}] = true
+		}
+		for _, name := range fk.ChildCols {
+			st.fkColumns[ref.ColumnRef{Table: fk.Child, Column: name}] = true
 		}
 	}
 }
@@ -1463,9 +1500,54 @@ func (st *state) neighbouringColumns() {
 //     domain of two characters and reads as an unknown text column to every
 //     signal in §4; masking one is a plan refusal for the same reason, and it
 //     is not personal data.
-//   - A declared length under minUnknownLen. `char(4)`, `varchar(8)` and the
-//     rest are status codes, currency codes and short keys, and free_text's
-//     filler does not fit in them.
+//   - A column at either end of a validated foreign key (`indexFKColumns`,
+//     T-0239's fix-round review). This rule has no evidence about the column
+//     at all, and this package's own propagation only ever runs parent to
+//     child (`propagateKeys`) or reconciles the integer/uuid key case
+//     (`keyChildren`) — neither reaches a character-family child this rule
+//     alone masked while its parent's identical values stayed unmasked, which
+//     is not a masking gap but the two ends of one join left in disagreement:
+//     `internal/plan`'s equality and write-back checks both judge type, not
+//     cross-table agreement, so neither catches it, and `internal/load` adds
+//     the edge NOT VALID and VALIDATEs after every row is committed, so the
+//     run dies with the target already half loaded
+//     (`testdata/regressions/031-fk-child-code-column-beside-a-certain-column.sql`).
+//     A genuinely personal FK-linked column is still reached by every other
+//     pass — a name hit, a value validator, or propagation once one end is
+//     masked on real evidence — so this exclusion costs nothing this rule
+//     alone was ever the only route to.
+//
+// A sixth exclusion — a declared length under sixteen characters — used to
+// stand here too, and the 2026-09-15 round-4 red team's native-script variant
+// (T-0239) found it wrong. The comment that shipped with it claimed
+// "free_text's filler does not fit" in a short column; `mask.freeTextMasker`
+// does not agree with its own former defence — its filler is drawn to *fit*
+// whatever `Constraints.MaxLen` says down to a single byte, and the domain
+// rule above already excludes the one case where a narrow column is refused
+// rather than masked (a unique index, where §5's `d_required` might exceed
+// what a narrow domain can offer). What a short declared length is not is
+// evidence the column is impersonal: a given name, a surname, a postcode, a
+// national ID and a phone number all fit in `varchar(12)`, and an attacker —
+// or an ordinary schema author — picks the length, not this package. So the
+// floor is now `minUnknownLen`, two characters: nothing shorter can hold even
+// a two-letter code, and everything from there to any width is raised, the
+// same as it always was above sixteen. **This is a floor of two, not three**
+// — it excludes only a declared length of one, which cannot hold even a
+// two-letter code, and it is not a backstop for the two-letter-code shape
+// itself: the two-letter-code exclusion just above is a check over the
+// column's *values* (`w.twoLetterCodes`, set only once `decide`'s own
+// `minSamples`, three, is met), so a genuine ISO code column sampled fewer
+// than three times has no value-level check to fall back on and is masked by
+// this rail like any other unrecognised column — correctly, on this
+// project's own "when in doubt, mask it" rule (CLAUDE.md), not by accident of
+// a floor that happens to still exclude it. If a generator ever cannot write
+// into a column this rail raises, `internal/plan`'s write-back check
+// (`checkWriteBack`, `mask.Writable`) is what refuses the run at exit 12
+// naming the column, with `--skip-table` and `--unmask` — the same backstop a
+// unique column already relies on above, and the reason there is no narrower
+// "does this fit" gate written here: that question belongs to the generator
+// and the planner, not to a guess made from `pg_attribute.atttypmod` before
+// any masker has been asked.
 //
 // It is not the whole answer to A2b, and the attack itself says so: its own
 // table had no `certain` column, so nothing here reaches it. What reaches
@@ -1522,9 +1604,13 @@ func identifiesAPerson(cat pipeline.Category) bool {
 }
 
 // minUnknownLen is the shortest declared length unknownColumnsBesideCertain
-// will mask. Below it a character column is a code and not a person's data, and
-// free_text's filler does not fit in it either.
-const minUnknownLen = 16
+// will mask. Below it (a declared length of one) a character column cannot
+// hold even a two-letter code, let alone a name, a postcode, a national ID or
+// a phone number — T-0239 lowered this from sixteen, which excluded exactly
+// the shape the round-4 red team's native-script variant used to defeat this
+// rail: see unknownColumnsBesideCertain's own comment for why sixteen was
+// wrong and why this is not the same claim as "free_text does not fit".
+const minUnknownLen = 2
 
 // raisableUnknown is unknownColumnsBesideCertain's gate, kept apart from
 // raisable because the two ask different questions: raisable is about a
@@ -1540,6 +1626,21 @@ func (st *state) raisableUnknown(cref ref.ColumnRef, w *work) bool {
 		return false
 	}
 	if st.unique[cref] {
+		return false
+	}
+	// T-0239's fix-round review: a validated foreign key's character-family
+	// column, at either end, is excluded the same way a unique index and an
+	// integer or uuid key column already are. This rail has no evidence about
+	// the column at all -- it fires on the absence of a signal -- so it must
+	// not be what makes the two ends of a join disagree: keyChildren only
+	// reconciles the integer/uuid case and propagateKeys only ever propagates
+	// a masked parent forward, never a masked child back, so a character
+	// column this rail alone masked would leave its FK partner unmasked with
+	// nothing else in this package to catch it (see indexFKColumns). A
+	// genuinely personal FK-linked column is still reached by every other
+	// pass: a name hit, a value validator, or FK propagation once one end is
+	// masked on real evidence.
+	if st.fkColumns[cref] {
 		return false
 	}
 	if n, ok := declaredLength(w.column); ok && n < minUnknownLen {
