@@ -7,9 +7,9 @@
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
-| E5 Hardening | 5 | 6 | 1 | 98 | 0 | 0 |
+| E5 Hardening | 5 | 4 | 1 | 100 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 74 | 0 | 30 | 5 | 0 |
+| E9 Later | later | 75 | 0 | 30 | 5 | 0 |
 
 ## Open and in progress
 
@@ -89,12 +89,11 @@
 - T-0249 [open] E9 · internal/core populates Run.TargetTables so the loader's extra-tables path is not dead (sonnet)
 - T-0250 [open] E9 · Pin T-0197's nothing_recognised/sub_threshold_signal split with a regression test ()
 - T-0256 [open] E9 · The absence-of-evidence sentence covers every family the validators ran over, and pluralises its count (sonnet)
-- T-0258 [open] E5 · internal/plan's fk-pair refusal can fire on a pair a later classify pass already reconciles ()
 - T-0259 [open] E5 · README's flag table is generated and checked, and a release tag refuses a README that does not name it (sonnet)
 - T-0260 [open] E5 · README is true for v0.1.0: what it does, a quickstart that was run, first-run flags, exit codes at a glance, and the residuals in step with the threat model; SECURITY.md reconciled (sonnet)
 - T-0261 [open] E9 · internal/core/CLAUDE.md's T-0241 section is stale after T-0255 ()
 - T-0262 [open] E9 · The special-category rule pins the LIKE spelling at plan level, and its normalisation comment matches the code (sonnet)
-- T-0263 [open] E5 · internal/testutil outlasts Docker's port-table race: a longer bounded wait for the mapped port and one container restart before failing (sonnet)
+- T-0264 [open] E9 · internal/testutil's restart helper: capture the original container by value, report which container to clean up on every return, and normalise a typed-nil replacement (sonnet)
 
 ## Recently closed
 
@@ -117,9 +116,9 @@
 - T-0254 [done] E5 · Special-category vocabulary matches a term glued to the next token by an underscore, and stripping a LIKE metacharacter leaves a separator → done
 - T-0255 [done] E5 · A standby's data directory is not evidence of a different cluster, and the standby's sender address is compared with the target → done
 - T-0257 [done] E9 · internal/plan has no exit-12 refusal for an FK pair unknownColumnsBesideCertain cannot raise → done
+- T-0258 [done] E5 · internal/plan's fk-pair refusal can fire on a pair a later classify pass already reconciles → done
+- T-0263 [done] E5 · internal/testutil outlasts Docker's port-table race: a longer bounded wait for the mapped port and one container restart before failing → done
 - T-0178 [done] E9 · TestAStoppedContainerIsOfferedAndStarted binds a fixed host port (127.0.0.1:5433) and collides under parallel container runs → done
 - T-0184 [done] E5 · Should a headless run auto-select a target on the source's own cluster? → done
 - T-0186 [done] E5 · --allow-type-literal is not recorded in lazyslice.yml → done
 - T-0192 [done] E5 · The secret file is protected on its resolved path: symlinked parent directories and hard links refuse; password_command is screened before it is written to the yml → done
-- T-0213 [done] E5 · Wire --password-command to actually run, or refuse it as unimplemented → done
-- T-0221 [done] E5 · Phone numbers in national format, and phone numbers spelled out in words, are recognised: a configured phone region, and corroboration when none is configured → done

@@ -3,12 +3,12 @@ id: T-0263
 title: "internal/testutil outlasts Docker's port-table race: a longer bounded wait for the mapped port and one container restart before failing"
 epic: E5
 phase: 5
-status: open
+status: done
 owner: sonnet
 created: 2026-09-17
 started: ""
-closed: ""
-outcome: ""
+closed: 2026-09-17
+outcome: done
 ---
 
 # T-0263 · internal/testutil outlasts Docker's port-table race: a longer bounded wait for the mapped port and one container restart before failing
@@ -25,6 +25,8 @@ The documented T-0052 race (a container reports ready before Docker's port table
 
 - 2026-09-17 created
 
+- 2026-09-17 closed: done
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+went well: the helper now waits 120 s for the mapped port, restarts the container once through the reaper-retry path, and gives the fresh container a shorter 30 s budget; three consecutive make torture runs passed at 127-131 s, and a mutation of the fast-path guard proved the new no-restart test bites | went badly: the first submission skipped the integration and torture runs its own brief named as the proof, so the review's high finding was about missing evidence and the fix round had to produce it from scratch | change next time: when a task's proof names a gate, the developer runs it last and pastes it; a report without it is sent back before review rather than reviewed (commit 59425d8)
