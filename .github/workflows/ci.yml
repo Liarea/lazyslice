@@ -147,7 +147,13 @@ jobs:
           fi
 
           for archive in dist/lazyslice_*_darwin_arm64.tar.gz dist/lazyslice_*_linux_amd64.tar.gz; do
-            if ! tar tzf "$archive" | grep -qx 'LICENSE'; then
+            # The listing is captured first, not piped: under `pipefail`,
+            # `tar tzf | grep -q` fails whenever grep finds LICENSE and exits
+            # before tar has finished writing ("tar: stdout: write error"),
+            # and the step then reports a licence that is there as missing
+            # (run 35262652634, 2026-09-17).
+            listing=$(tar tzf "$archive")
+            if ! grep -qx 'LICENSE' <<<"$listing"; then
               echo "release-config: $archive contains no LICENSE. archives.files REPLACES goreleaser's"
               echo "defaults, so LICENSE has to be named there; Apache-2.0 section 4(a) requires every"
               echo "recipient of the work to get a copy of the licence, and a tag is immutable."
