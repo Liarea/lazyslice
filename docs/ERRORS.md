@@ -103,6 +103,9 @@ One row per code in the catalogue, in the file's own order. Exit is only meaning
 | `secret.file.written` | transform | - | wrote a new masking key to {path} |
 | `secret.file.unprotected` | transform | - | not a git repository — {path} is not protected by .gitignore |
 | `secret.key.ephemeral` | transform | - | cannot write .gitignore — masking key is ephemeral; set LAZYSLICE_SECRET or --secret-file outside the repository |
+| `secret.gitignore.negated` | transform | - | {path} is added to .gitignore, but a later rule un-ignores it ({reason}) — masking key is ephemeral; remove or narrow that rule, or set LAZYSLICE_SECRET or --secret-file outside the repository |
+| `secret.gitignore.unverifiable` | transform | - | {path} is added to .gitignore, but git is not on PATH to verify it is actually ignored — masking key is ephemeral; install git, or set LAZYSLICE_SECRET or --secret-file outside the repository |
+| `secret.gitignore.not_ignored` | transform | - | {path} is added to .gitignore, but git does not consider it ignored — masking key is ephemeral; check .gitignore by hand, or set LAZYSLICE_SECRET or --secret-file outside the repository |
 | `secret.git.absent` | transform | - | git not found — could not verify {path} is untracked |
 | `secret.file.tracked` | transform | 2 | {path} is tracked by git: {statement} |
 | `secret.refused.no_key` | transform | 5 | no masking key: {path} could not be read or written |

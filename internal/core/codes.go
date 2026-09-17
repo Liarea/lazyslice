@@ -171,6 +171,25 @@ const (
 	CodeGitignoreAdded    event.Code = "secret.gitignore.added"
 	CodeGitAbsent         event.Code = "secret.git.absent"
 
+	// CodeSecretGitignoreNegated, CodeSecretGitignoreUnverifiable and
+	// CodeSecretGitignoreNotIgnored are the 2026-09-17 round 6 review of
+	// T-0251: CodeSecretEphemeral's "cannot write .gitignore" is true only
+	// when .gitignore itself could not be read or appended to
+	// (repo.State.GitignoreAppendable false). .gitignore can be written to
+	// successfully and the secret still not be protected — a later rule
+	// un-ignoring the entry just added (repo.State.GitignoreNegatedBy names
+	// it as "<source>:<lineno>"), or git being absent from PATH so the entry
+	// could never be checked against git at all — and printing the
+	// unwritable-file message for either case sends the operator to fix a
+	// .gitignore that already holds the right line. A fourth shape —
+	// .gitignore written, git on PATH and able to check, and the path still
+	// not ignored with no negating rule to blame — gets its own code too
+	// rather than folding into one of the other two and naming a cause that
+	// is not the true one.
+	CodeSecretGitignoreNegated      event.Code = "secret.gitignore.negated"
+	CodeSecretGitignoreUnverifiable event.Code = "secret.gitignore.unverifiable"
+	CodeSecretGitignoreNotIgnored   event.Code = "secret.gitignore.not_ignored"
+
 	// CodeSecretSymlink and CodeSecretPermissive are the 2026-09-15 red team's
 	// two findings against ARCHITECTURE.md §9 "The repository" and
 	// THREAT_MODEL.md T6.

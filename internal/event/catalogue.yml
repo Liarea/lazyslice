@@ -981,6 +981,32 @@
   message: "cannot write .gitignore — masking key is ephemeral; set LAZYSLICE_SECRET or --secret-file outside the repository"
   args: [path]
 
+# T-0251 round 6: secret.key.ephemeral's message above is only true when
+# .gitignore itself could not be written to at all. .gitignore can be written
+# to successfully and still not protect {path} — a later rule un-ignoring it
+# (secret.gitignore.negated, which names that rule), or git being absent from
+# PATH so the entry just added could never be checked
+# (secret.gitignore.unverifiable) — and telling the operator ".gitignore
+# cannot be written" in either case sends them to look at a file that already
+# holds the right line.
+- code: secret.gitignore.negated
+  kind: warn
+  stage: transform
+  message: "{path} is added to .gitignore, but a later rule un-ignores it ({reason}) — masking key is ephemeral; remove or narrow that rule, or set LAZYSLICE_SECRET or --secret-file outside the repository"
+  args: [path, reason]
+
+- code: secret.gitignore.unverifiable
+  kind: warn
+  stage: transform
+  message: "{path} is added to .gitignore, but git is not on PATH to verify it is actually ignored — masking key is ephemeral; install git, or set LAZYSLICE_SECRET or --secret-file outside the repository"
+  args: [path]
+
+- code: secret.gitignore.not_ignored
+  kind: warn
+  stage: transform
+  message: "{path} is added to .gitignore, but git does not consider it ignored — masking key is ephemeral; check .gitignore by hand, or set LAZYSLICE_SECRET or --secret-file outside the repository"
+  args: [path]
+
 - code: secret.git.absent
   kind: warn
   stage: transform

@@ -204,6 +204,165 @@ func TestTrackedSecretIsFoundThroughARelativePath(t *testing.T) {
 	}
 }
 
+// T-0251, the round 5 red team's still-leaking entry: a .gitignore that lists
+// the secret and then negates it reads as "present" to a text search, and git
+// itself reports the negation as the matching rule. Only a verified,
+// non-negated match may set MayWriteSecret true.
+func TestNegatedGitignoreEntryDoesNotProtect(t *testing.T) {
+	root := gitRepo(t)
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"),
+		[]byte("lazyslice.secret\n!lazyslice.secret\n"), 0o600); err != nil {
+		t.Fatalf("writing .gitignore: %v", err)
+	}
+	secret := filepath.Join(root, "lazyslice.secret")
+
+	st, err := Protect(secret, nil)
+	if err != nil {
+		t.Fatalf("Protect: %v", err)
+	}
+	if !st.GitFound {
+		t.Fatal("git is on PATH and Protect says it is not")
+	}
+	if st.GitignoreWritable {
+		t.Error("GitignoreWritable = true, want false: the negation is the matching rule")
+	}
+	if st.MayWriteSecret() {
+		t.Error("MayWriteSecret() = true, want false: git would commit this file")
+	}
+	// lazyslice.secret is already present, in both forms, so appendMissing's
+	// text search alone would have stopped right here and called the file
+	// protected: only snapshots/ (unrelated to this negation) was missing.
+	if slices.Contains(st.Added, secretEntry) {
+		t.Errorf("Added = %v, want it not to add %q: it already reads as present", st.Added, secretEntry)
+	}
+}
+
+// T-0251 round 6: negatedRule's colon-split misparsed <source> whenever it
+// was itself an absolute path containing a colon — which git prints whenever
+// the matching rule comes from core.excludesFile rather than an in-repo
+// .gitignore, and which is the *only* shape a Windows source ever takes
+// ("C:/Users/u/.gitignore_global"). parseCheckIgnoreZ replaces that split
+// with `-z --stdin`'s NUL-separated fields, which need no such parsing.
+func TestParseCheckIgnoreZNegation(t *testing.T) {
+	tests := []struct {
+		name       string
+		output     string
+		wantIgnore bool
+		wantNegBy  string
+	}{
+		{
+			name:       "plain in-repo source, not negated",
+			output:     ".gitignore\x002\x00/lazyslice.secret\x00/repo/lazyslice.secret\x00",
+			wantIgnore: true,
+		},
+		{
+			name:       "plain in-repo source, negated",
+			output:     ".gitignore\x002\x00!lazyslice.secret\x00/repo/lazyslice.secret\x00",
+			wantIgnore: false,
+			wantNegBy:  ".gitignore:2",
+		},
+		{
+			name: "absolute source with a colon (core.excludesFile), negated",
+			output: "/private/tmp/gitignoretest/glo:bal/ignore\x001\x00!lazyslice.secret\x00" +
+				"/private/tmp/gitignoretest/lazyslice.secret\x00",
+			wantIgnore: false,
+			wantNegBy:  "/private/tmp/gitignoretest/glo:bal/ignore:1",
+		},
+		{
+			name:       "windows-shaped source with a drive letter colon, negated",
+			output:     "C:/Users/u/.gitignore_global\x003\x00!lazyslice.secret\x00C:/repo/lazyslice.secret\x00",
+			wantIgnore: false,
+			wantNegBy:  "C:/Users/u/.gitignore_global:3",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ignored, negatedBy, err := parseCheckIgnoreZ(tt.output)
+			if err != nil {
+				t.Fatalf("parseCheckIgnoreZ: %v", err)
+			}
+			if ignored != tt.wantIgnore {
+				t.Errorf("ignored = %v, want %v", ignored, tt.wantIgnore)
+			}
+			if negatedBy != tt.wantNegBy {
+				t.Errorf("negatedBy = %q, want %q", negatedBy, tt.wantNegBy)
+			}
+		})
+	}
+}
+
+// TestNegatedGitignoreEntryWithColonSource reproduces T-0251 round 6 through
+// Protect end to end: a .gitignore nested in a directory whose name contains
+// a colon negates the secret entry, and — because a nested .gitignore beats
+// the repository root's in git's own precedence — that negation, not the
+// entry Protect appended at the root, is the rule that decides the outcome.
+// Its <source> is therefore "sub:dir/.gitignore", exactly the shape that
+// negatedRule's colon-split used to cut in half and silently read as
+// "not negated" (secret.file.tracked never fired, the header claimed the key
+// was protected, and it was committed anyway).
+func TestNegatedGitignoreEntryWithColonSource(t *testing.T) {
+	root := gitRepo(t)
+	// A writable root .gitignore, so appendMissing has something to add the
+	// unanchored `lazyslice.secret` entry to — the one that would otherwise
+	// protect the file at any depth, including inside sub:dir below.
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), nil, 0o600); err != nil {
+		t.Fatalf("writing root .gitignore: %v", err)
+	}
+	sub := filepath.Join(root, "sub:dir")
+	if err := os.MkdirAll(sub, 0o750); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, ".gitignore"), []byte("!lazyslice.secret\n"), 0o600); err != nil {
+		t.Fatalf("writing nested .gitignore: %v", err)
+	}
+	secret := filepath.Join(sub, "lazyslice.secret")
+
+	st, err := Protect(secret, nil)
+	if err != nil {
+		t.Fatalf("Protect: %v", err)
+	}
+	if !st.GitFound {
+		t.Fatal("git is on PATH and Protect says it is not")
+	}
+	if st.GitignoreWritable {
+		t.Error("GitignoreWritable = true, want false: sub:dir/.gitignore negates the entry Protect appended at the root")
+	}
+	if st.MayWriteSecret() {
+		t.Error("MayWriteSecret() = true, want false: git would commit this file")
+	}
+	wantNegBy := filepath.Join("sub:dir", ".gitignore") + ":1"
+	if st.GitignoreNegatedBy != wantNegBy {
+		t.Errorf("GitignoreNegatedBy = %q, want %q", st.GitignoreNegatedBy, wantNegBy)
+	}
+}
+
+// With git absent from PATH the entry can be verified by nobody, so the same
+// fallback the "absent or unwritable .gitignore" case uses applies here too,
+// even though .gitignore holds the (unverified) entry.
+func TestGitAbsentFallsBackToEphemeral(t *testing.T) {
+	root := gitRepo(t)
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"),
+		[]byte("lazyslice.secret\n"), 0o600); err != nil {
+		t.Fatalf("writing .gitignore: %v", err)
+	}
+	secret := filepath.Join(root, "lazyslice.secret")
+
+	t.Setenv("PATH", "")
+	st, err := Protect(secret, nil)
+	if err != nil {
+		t.Fatalf("Protect: %v", err)
+	}
+	if st.GitFound {
+		t.Fatal("PATH was cleared and Protect still found git")
+	}
+	if st.GitignoreWritable {
+		t.Error("GitignoreWritable = true, want false: it cannot be verified with no git on PATH")
+	}
+	if st.MayWriteSecret() {
+		t.Error("MayWriteSecret() = true, want false: an unverified entry must fall back to the ephemeral key")
+	}
+}
+
 func TestRootFindsTheRepository(t *testing.T) {
 	root := gitRepo(t)
 	deep := filepath.Join(root, "a", "b")
