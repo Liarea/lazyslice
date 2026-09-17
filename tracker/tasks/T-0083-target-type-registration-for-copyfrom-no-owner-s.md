@@ -3,12 +3,12 @@ id: T-0083
 title: "Target type registration for CopyFrom: no owner since internal/load shipped"
 epic: E5
 phase: 5
-status: in_progress
+status: done
 owner: ""
 created: 2026-09-08
 started: 2026-09-08
-closed: ""
-outcome: ""
+closed: 2026-09-17
+outcome: done
 ---
 
 # T-0083 · Target type registration for CopyFrom: no owner since internal/load shipped
@@ -29,6 +29,8 @@ ARCHITECTURE.md 11.1 and ADR-005 say load registers the source's user types on e
 
 - 2026-09-08 started
 
+- 2026-09-17 closed: done
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+went well: load registers the source's enum, domain, composite and user-defined array types on every target connection through Writer.RegisterTypes before the first CopyFrom (commit 1ae4a9e, recorded in ARCHITECTURE.md 11.1 and both package CLAUDE.md files) | went badly: the task landed on 2026-09-09 and was never closed, so the board showed phase-5 work in progress for eight days until the gate-5 audit on 2026-09-17 caught it | change next time: a by-hand landing closes its task in the same sitting as the commit
