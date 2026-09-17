@@ -64,6 +64,18 @@ type work struct {
 	// line that says both "preserved verbatim" and "propagated through foreign
 	// key" describes two different columns.
 	keyFrag int
+	// noSignalFrag is the index in frags of decide()'s "nothing_recognised" or
+	// "sub_threshold_signal" fragment, or -1. Both say a character column's
+	// samples were looked at and (not) found wanting, before guessedPhoneHit's
+	// own region guess is folded in (T-0221) or raised by guessedPhoneColumns
+	// (T-0197 review finding 2): a column guessedPhoneColumns goes on to mask
+	// as phone had its samples re-described by that pass's own "samples"
+	// fragment, so the earlier claim that nothing was recognised, or only a
+	// sub-threshold amount was, is blanked exactly as keyFrag's exemption line
+	// is when a later pass changes the column's story -- otherwise the reason
+	// line asserts both "nothing recognised in N samples" and "N/N samples
+	// parse as phone numbers" about the same column in the same breath.
+	noSignalFrag int
 	// propagationRefused records that a masked parent's category was one this
 	// column's type family refuses, so that the sweep writes that fragment once.
 	propagationRefused bool
@@ -672,6 +684,14 @@ type signals struct {
 	strongHit *valueSignal
 	refused   *valueSignal
 	total     int
+	// anyMatched is true the moment any validator matches at least one
+	// sample, independent of minSamples, weakThreshold or silencedByType --
+	// it is the only field in this struct answering "did anything recognise
+	// anything at all", which decide()'s default branch needs to tell a
+	// column nothing looked like anything (T-0197's "nothing recognised")
+	// from a column something *did* match, just not enough of it, or too few
+	// samples, to decide on (T-0197 review finding 1).
+	anyMatched bool
 }
 
 // base gives every column its name, type and value decision.
@@ -683,12 +703,13 @@ func (st *state) base() {
 			st.order = append(st.order, cref)
 			ct := typeOf(st.schema, col)
 			w := &work{
-				d:       pipeline.Decision{Col: cref, Category: pipeline.CatNone, Confidence: pipeline.ConfNone, Source: pipeline.ByClassifier},
-				keyFrag: -1,
-				family:  ct.Family,
-				array:   ct.Array,
-				table:   t.Ref,
-				column:  col,
+				d:            pipeline.Decision{Col: cref, Category: pipeline.CatNone, Confidence: pipeline.ConfNone, Source: pipeline.ByClassifier},
+				keyFrag:      -1,
+				noSignalFrag: -1,
+				family:       ct.Family,
+				array:        ct.Array,
+				table:        t.Ref,
+				column:       col,
 			}
 			st.dec[cref] = w
 			values := st.samples(cref, ct)
@@ -850,6 +871,9 @@ func bestSignal(dict *textsig.Dict, values []string, p *compiledPack, family str
 			}
 		}
 		ratio := float64(matched) / float64(sig.total)
+		if matched > 0 {
+			sig.anyMatched = true
+		}
 		hit := &valueSignal{cat: v.cat, phrase: v.phrase, matched: matched, total: sig.total}
 		if silencedByType(p, v.cat, family) {
 			// The values look like a category this column cannot hold. It is
@@ -1205,6 +1229,33 @@ func (st *state) decide(w *work, col pipeline.Column, ct columnType, values []st
 		if sig.total >= minSamples && allTwoLetterCodes(values) {
 			w.twoLetterCodes = true
 			w.frags = append(w.frags, render("two_letter_codes"), render("no_name_signal"))
+			break
+		}
+		// T-0197: a character column the validators actually looked inside
+		// and found nothing in is evidence of absence, not evidence of
+		// nothing -- "no name or value signal" reads as a clean bill of
+		// health, which is exactly wrong for the unbounded class of names
+		// and values no rule pack or dictionary can ever finish covering
+		// (see this file's multilingual-dictionary note above). A column
+		// nothing could be sampled from, or one outside the family the
+		// validators run over, keeps the old phrase: there was nothing here
+		// to look inside in the first place.
+		//
+		// "nothing recognised" is only honest when nothing did: sig.anyMatched
+		// folds in every validator hit this branch's own guards discarded --
+		// a strong hit below minSamples (a two-sample column can't reach
+		// proven), a strong hit below validatorThreshold that missed
+		// strongHit's own proven gate, a weak hit below weakThreshold, and a
+		// silenced hit that never reached validatorThreshold -- so a column
+		// with any of those still gets a phrase that admits something was
+		// seen (T-0197 review finding 1).
+		if sig.total > 0 && isCharacterFamily(ct.Family) {
+			w.noSignalFrag = len(w.frags)
+			if sig.anyMatched {
+				w.frags = append(w.frags, render("sub_threshold_signal", sig.total))
+			} else {
+				w.frags = append(w.frags, render("nothing_recognised", sig.total))
+			}
 			break
 		}
 		w.frags = append(w.frags, render("no_signal"))
@@ -1786,6 +1837,17 @@ func (st *state) guessedPhoneColumns() {
 		hit := w.guessedPhone
 		w.d.Category = pipeline.CatPhone
 		w.d.Confidence = pipeline.ConfPossible
+		// T-0197 review finding 2: this pass raises a column decide() already
+		// described as "nothing recognised" or "sub-threshold" -- that claim
+		// was true when decide() wrote it (guessedPhoneHit is computed after
+		// decide runs, in base()) but is false now that the column is being
+		// masked on a 5/5 (or better) region-guessed hit. Blank it exactly as
+		// keyFrag's exemption line is blanked when a later pass changes a
+		// column's story, so the reason line does not assert both claims.
+		if w.noSignalFrag >= 0 {
+			w.frags[w.noSignalFrag] = ""
+			w.noSignalFrag = -1
+		}
 		w.frags = append(w.frags,
 			render("samples", hit.matched, hit.total, hit.phrase),
 			render("phone_region_guessed"))

@@ -141,6 +141,21 @@ var fragments = []*fragment{
 		pattern: `no name or value signal`,
 	},
 	{
+		name:    "nothing_recognised",
+		format:  "nothing recognised in %d samples, not proof the column is impersonal",
+		pattern: `nothing recognised in ` + reCount + ` samples, not proof the column is impersonal`,
+	},
+	{
+		// sub_threshold_signal is nothing_recognised's honest twin (T-0197
+		// review finding 1): rendered instead of it when a validator matched
+		// at least one sample but too few of them, or too few samples
+		// overall, to decide the column -- so the line never claims nothing
+		// was seen when something was.
+		name:    "sub_threshold_signal",
+		format:  "a validator matched below the threshold needed to decide in %d samples, not proof the column is impersonal",
+		pattern: `a validator matched below the threshold needed to decide in ` + reCount + ` samples, not proof the column is impersonal`,
+	},
+	{
 		name:    "no_name_signal",
 		format:  "no name signal",
 		pattern: `no name signal`,
