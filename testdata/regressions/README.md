@@ -48,7 +48,22 @@ literal` fixed a different refusal with no escape at all. **026 is not a
 reduction of a torture-schema failure and says so in its own header**, on
 010's own precedent: it is the false-positive control the fix's own
 corroboration requirement needs, written directly against the finished
-behaviour rather than reduced from a run that failed.
+behaviour rather than reduced from a run that failed. **027 and 028 are an
+eleventh and a twelfth**, from the round-3 red team's own two special-category
+canaries (`docs/reviews/2026-09-15-redteam/round3-still-leaking.json`, finding
+15) rather than from one of the ten: `pipeline.CatSpecial` had no value
+validator anywhere, so a health or religion sentence short of a digit and a
+dictionary name pair crossed a CHECK constraint's own text under exit 0,
+whether the column carrying it was masked (027, exit 13, T-0198's broadened
+"whatever it parses as" rule) or not (028, exit 12, the pre-existing unmasked
+path -- newly reachable here only because `textsig.SpecialCategoryVocabulary`
+now names the category at all). **029 is a thirteenth**, from the review round
+that followed T-0198's own landing: the same vocabulary validator had joined
+both DDL-literal passes but not `internal/verify/validators.go`'s row-scanning
+second net, so the identical sentence crossed unseen when it sat in a ROW
+value rather than in a CHECK (tracker T-0231, `expect: exit 9
+verify.refused.second_net`, since the column here carries no DDL literal at
+all to refuse on).
 
 The files are loaded and run by `make torture` (`internal/invariants`'s
 `TestTortureRegressions`, behind the `integration` and `torture` build tags), so

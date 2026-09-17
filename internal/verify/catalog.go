@@ -5,6 +5,7 @@ package verify
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/Liarea/lazyslice/internal/pipeline"
@@ -167,23 +168,306 @@ func (s *state) catalog(ctx context.Context) error {
 			continue
 		}
 		checked++
+		hit := ""
 		for _, lit := range lits {
-			hit := strongCatalogHit(lit)
-			if hit == "" {
-				continue
+			if h := strongCatalogHit(lit); h != "" {
+				hit = "a literal in the " + o.kind + " parses as " + h
+				break
 			}
-			s.fail(&Refusal{
-				Code: CodeRefusedCatalogLiteral, Exit: exitResidual, Check: checkCatalog,
-				Table: o.table, Column: o.object, Count: 1,
-				Reason: "a literal in the " + o.kind + " parses as " + hit,
-			})
-			break
 		}
+		// T-0198's broadened rule, scoped to a DEFAULT or a generated
+		// expression only (the T-0198 fix round's own re-measurement of
+		// finding 1, mirroring internal/plan/ddlliteral.go's own fixedExpression
+		// -- see its comment for the two real schemas, odoo's res_partner_
+		// check_name and res_partner_mobile_partial_gin_idx, that found why a
+		// CHECK or an index cannot safely carry this net at all: either object
+		// class can name several columns, or can hold a literal that is a
+		// transformation argument rather than a value about the one masked
+		// column it does name, and this pass's only escape (--unmask) can
+		// then require unmasking a column that has nothing to do with the
+		// literal being refused -- a real person's name in one schema, a real
+		// phone number in the other. unrewritableKind excludes the enum/
+		// domain object classes too, which belong to a type rather than to a
+		// column and have their own --allow-type-literal escape
+		// (allowedTypeLiteral, above), never the per-column --unmask this
+		// rule defers to.
+		if hit == "" && unrewritableKind(o.kind) && s.maskedNamedColumn(o) {
+			enumLabels, _ := s.enumColumnLabels(o)
+			for _, lit := range lits {
+				if unrewritableLiteral(o.expr, lit) && !enumLabelLiteral(enumLabels, lit) {
+					hit = "masked column, unrewritable literal in its own constraint"
+					break
+				}
+			}
+		}
+		if hit == "" {
+			continue
+		}
+		s.fail(&Refusal{
+			Code: CodeRefusedCatalogLiteral, Exit: exitResidual, Check: checkCatalog,
+			Table: o.table, Column: o.object, Count: 1,
+			Reason: hit,
+		})
 	}
 	if !s.failed(checkCatalog) {
 		s.pass(checkCatalog, CodeCatalogPassed, checked)
 	}
 	return nil
+}
+
+// unrewritableKind reports the object classes T-0198's broadened rule covers:
+// a DEFAULT or a generated expression, both single-column by construction,
+// once catalogExempt's own arm for a masked, rewritten DEFAULT has already
+// been asked (that check runs first in catalogExempt, so a kindDefault or
+// kindGenerated object reaching here is exactly the residual case this rule
+// wants as a second look). kindConstraint, kindIndexPredicate and
+// kindIndexExpression are deliberately excluded (the T-0198 fix round's own
+// re-measurement of finding 1) -- see the call site's own comment for why a
+// CHECK or an index cannot safely carry this net; each still refuses on a
+// strongCatalogHit exactly as it always has. The enum and domain object
+// classes are excluded for an unrelated reason: they belong to a *type* and
+// their escape is --allow-type-literal, not the per-column --unmask this
+// rule defers to, and maskedNamedColumn could not answer a meaningful
+// question about them anyway.
+func unrewritableKind(kind string) bool {
+	switch kind {
+	case kindDefault, kindGenerated:
+		return true
+	default:
+		return false
+	}
+}
+
+// maskedNamedColumn reports whether o's own text names *exactly one* column
+// this run masked and did not opt out of with --unmask -- the "unless the
+// existing named opt-out names the column" half of T-0198's rule. A column
+// opted out has d.Masked false (ADR-004's tighten-only rule), so the
+// !optedOut(d) guard is belt and braces rather than the load-bearing half;
+// it is kept so that this function reads the same two questions
+// plan/ddlliteral.go's masked/unmasked branch already asks, rather than
+// trusting d.Masked alone to have already answered the opt-out question.
+//
+// **Exactly one, not "any", since the T-0198 fix round's own re-measurement
+// of finding 1** (internal/plan/ddlliteral.go's fixedExpression carries the
+// full account and the two real schemas that found it: odoo's
+// res_partner_check_name and supabase-auth's own oauth2 constraint). A
+// `CHECK` or an index naming two or more masked columns has no single answer
+// to which one a given literal is about, so the --unmask escape this rule
+// implies is real only when there is one column to name; below that bound
+// the object still refuses on a strongCatalogHit exactly as it always has,
+// unaffected by this change.
+func (s *state) maskedNamedColumn(o catalogObject) bool {
+	tab, ok := s.tables[o.table]
+	if !ok || tab == nil {
+		return false
+	}
+	// kindDefault and kindGenerated name the column directly in o.object
+	// (catalogDefaultsSQL selects a.attname); their own text -- the DEFAULT
+	// expression, the generated expression -- has no reason to mention the
+	// column's own name at all ("DEFAULT 'active'" names no column), so
+	// namedColumns would find nothing there -- one name, by construction, so
+	// the ambiguity this function now guards against cannot arise on that
+	// path. kindConstraint, kindIndexPredicate and kindIndexExpression name a
+	// constraint or an index, and it is their expr that has to be scanned for
+	// which of the table's columns it mentions.
+	names := []string{o.object}
+	if o.kind != kindDefault && o.kind != kindGenerated {
+		names = namedColumns(o.expr, tab.Columns)
+	}
+	matches := 0
+	for _, name := range names {
+		d, has := s.decision(ref.ColumnRef{Table: o.table, Column: name})
+		if has && d.Masked && !optedOut(d) {
+			matches++
+		}
+	}
+	return matches == 1
+}
+
+// namedColumns is internal/plan/ddlliteral.go's function of the same name,
+// duplicated for the reason every other entry in this file's own validator
+// note already is (a stage package may not import another,
+// internal/CLAUDE.md). pg_get_constraintdef and pg_get_expr's own texts —
+// unlike pg_get_indexdef, which internal/plan reads for the same purpose —
+// never open with a `CREATE ... ON schema.table` clause, so there is no
+// table-name collision to trim away here and this copy is the plain token
+// match.
+func namedColumns(expr string, cols []pipeline.Column) []string {
+	var out []string
+	for _, col := range cols {
+		quoted := `"` + strings.ReplaceAll(col.Name, `"`, `""`) + `"`
+		if strings.Contains(expr, quoted) || containsWord(expr, col.Name) {
+			out = append(out, col.Name)
+		}
+	}
+	return out
+}
+
+// containsWord is internal/plan/ddlliteral.go's function of the same name.
+func containsWord(def, name string) bool {
+	if name == "" {
+		return false
+	}
+	for at := 0; ; {
+		i := strings.Index(def[at:], name)
+		if i < 0 {
+			return false
+		}
+		i += at
+		before := i == 0 || !identByte(def[i-1])
+		end := i + len(name)
+		after := end >= len(def) || !identByte(def[end])
+		if before && after {
+			return true
+		}
+		at = i + 1
+	}
+}
+
+func identByte(c byte) bool {
+	return c == '_' || c == '$' || c >= 0x80 ||
+		(c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+}
+
+// reClosedValueList and inClosedValueList are internal/plan/ddlliteral.go's
+// of the same names -- see that file's own comment for the reasoning. mask's
+// reIn/reAny are unexported, and internal/verify may import neither mask nor
+// internal/plan (internal/CLAUDE.md), so the shape is duplicated a third
+// time (mask, internal/plan, here) the way every other closed-form check in
+// this file's own comment already records as a duplicate.
+var reClosedValueList = regexp.MustCompile(`(?is)(?:\bNOT\s+)?\bIN\s*\([^()]*\)|=\s*ANY\s*\(\s*ARRAY\s*\[[^\]]*\]\s*\)`)
+
+func inClosedValueList(def string, lit pipeline.Literal) bool {
+	for _, span := range reClosedValueList.FindAllStringIndex(def, -1) {
+		if lit.Start >= span[0] && lit.End <= span[1] {
+			return true
+		}
+	}
+	return false
+}
+
+// unrewritableLiteral is internal/plan/ddlliteral.go's function of the same
+// name and the same rule: a Pattern operand's reduced text is a fragment of
+// a shape rather than a value (testdata/nasty.sql's own CHECK ("EmailAddress"
+// LIKE '%@%.%') reduces to "@", which must not refuse), an empty (or
+// whitespace-only) plain literal was never worth refusing on, an empty
+// collection literal ('{}' or '[]') is ARCHITECTURE.md §5's own rule for a
+// masked column's DEFAULT — nothing in it to be a person's, the identical
+// argument internal/invariants/i2_masking_test.go's preservedEmpty makes on
+// the row side — a literal inside a closed value list is an ordinary
+// status/tier/plan enum the masker already honours, never personal data, and
+// a literal immediately cast to a non-text type (pipeline.CastToNonText,
+// T-0198 fix round finding 3) is a sentinel the deparser proved can never be
+// free text — `COALESCE(user_id, '-1'::integer)`, the shape odoo's and
+// discourse's own torture schemas both carry.
+func unrewritableLiteral(def string, lit pipeline.Literal) bool {
+	if lit.Pattern {
+		return false
+	}
+	text := strings.TrimSpace(lit.Text)
+	if text == "" || text == "{}" || text == "[]" {
+		return false
+	}
+	if pipeline.CastToNonText(def, lit) {
+		return false
+	}
+	return !inClosedValueList(def, lit)
+}
+
+// enumColumnLabels is internal/plan/ddlliteral.go's enumDefaultLabels,
+// restated for an object this pass already has rather than a
+// pipeline.Column it is handed directly: a kindDefault or kindGenerated
+// object's own name (o.object) is the column, so its declared type is looked
+// up on s.tables and resolved against s.schema.Enums by both spellings, the
+// same qualified-then-bare lookup internal/transform's own enumLabels uses.
+// Every other kind names a constraint or an index rather than a single
+// column, so there is no one type to resolve and this returns false for all
+// of them -- testdata/nasty.sql's own trap 24 (`marital_status ... DEFAULT
+// 'undisclosed'`) is a DEFAULT, not a CHECK, and this pass only reaches a
+// masked column's *unrewritten* DEFAULT here in the first place
+// (catalogExempt's own arm covers a rewritten one).
+//
+// The bare-name fallback exempts only when the bare name is unambiguous
+// (T-0198 fix round, finding 5, mirroring internal/plan/ddlliteral.go's own
+// enumDefaultLabels): it used to return the first bare-name match a Go map
+// iteration produced, so whether a masked enum-typed column's DEFAULT was
+// exempted as "one of the column's own labels" was nondeterministic run to
+// run the moment two schemas each declared an enum of the same bare name
+// (`app.status`, `audit.status`), and could exempt a literal read from the
+// wrong schema's label list entirely. Counting every match and returning one
+// only when there is exactly one is deterministic regardless of iteration
+// order and refuses to guess on ambiguity, which is the fail-closed reading:
+// no exemption here still leaves strongCatalogHit and the closed-list and
+// cast exemptions to answer, and only ever widens what refuses.
+func (s *state) enumColumnLabels(o catalogObject) ([]string, bool) {
+	if o.kind != kindDefault && o.kind != kindGenerated {
+		return nil, false
+	}
+	tab, ok := s.tables[o.table]
+	if !ok || tab == nil {
+		return nil, false
+	}
+	for _, c := range tab.Columns {
+		if c.Name != o.object {
+			continue
+		}
+		if labels, ok := s.schema.Enums[unquoteEnumType(c.TypeName)]; ok {
+			return labels, true
+		}
+		bare := bareEnumType(c.TypeName)
+		var match []string
+		matches := 0
+		for key, labels := range s.schema.Enums {
+			if bareEnumType(key) != bare {
+				continue
+			}
+			matches++
+			match = labels
+		}
+		if matches != 1 {
+			return nil, false
+		}
+		return match, true
+	}
+	return nil, false
+}
+
+// enumLabelLiteral is internal/plan/ddlliteral.go's function of the same
+// name: lit's text is one of an enum-typed column's own labels, a closed
+// domain by the column's TYPE rather than by a CHECK's IN (...) syntax.
+func enumLabelLiteral(labels []string, lit pipeline.Literal) bool {
+	for _, l := range labels {
+		if l == lit.Text {
+			return true
+		}
+	}
+	return false
+}
+
+// unquoteEnumType and bareEnumType are mask.UnquoteType and mask.BareTypeName,
+// restated byte for byte: internal/verify may not import mask
+// (internal/CLAUDE.md's import graph has no edge from a stage package to
+// it), so the two string reductions enumColumnLabels needs are duplicated
+// here rather than pulling in the module for two functions.
+func unquoteEnumType(name string) string { return strings.ReplaceAll(name, `"`, "") }
+
+func bareEnumType(name string) string {
+	inQuote := false
+	cut := -1
+	for i, r := range name {
+		switch r {
+		case '"':
+			inQuote = !inQuote
+		case '.':
+			if !inQuote {
+				cut = i
+			}
+		}
+	}
+	if cut < 0 {
+		return unquoteEnumType(name)
+	}
+	return unquoteEnumType(name[cut+1:])
 }
 
 // catalogObjects reads pg_attrdef, pg_constraint, pg_index, pg_enum and
@@ -499,6 +783,8 @@ func strongCatalogHit(lit pipeline.Literal) string {
 		return string(pipeline.CatAddress)
 	case textsig.Dictionary().ProseName(s):
 		return string(pipeline.CatFreeText)
+	case textsig.SpecialCategoryVocabulary(s):
+		return string(pipeline.CatSpecial)
 	}
 	return ""
 }

@@ -23,6 +23,17 @@ T-TORTURE could not reach. Four of those five have since been fixed as well
 (T-0100, T-0103, T-0104, T-0105) and are described where their fixes are; the
 one still open is T-0102.
 
+**This is the settled count, and `make torture` reports it.** T-0198's own
+section below records a landing that briefly moved it — metabase gained two
+new `--unmask` flags, and four more schemas newly refused outright, pending
+curation this file once left unfinished — and the fix round that followed,
+which found curating the rest was either unnecessary or, twice, genuinely
+unsafe, and narrowed the rule instead of curating through it. The count did
+not move in the end: metabase's own two new flags turned out not to be
+needed either once the rule was narrowed, so twenty-seven flags, nineteen
+`--unmask`, is both where this section starts and where "the fix round"
+below leaves it.
+
 It was forty-five flags — thirty-seven `--unmask` — when this file was first
 written. Eighteen of those `--unmask` flags were one defect, T-0098, and the
 `credential_unique` masker (`mask/gen_credential.go`) removed the need for every
@@ -390,6 +401,227 @@ defects this exercise found *and* got fixed:
   and ARCHITECTURE.md §5's determinism scope states the consequence: the
   fingerprint now moves with `--take`, `--depth`, the root and `--skip-table`,
   which is the conservative direction.
+
+## T-0198: the special-category literal rule's measured cost
+
+THREAT_MODEL.md T1's 2026-09-16 amendment carries the rule this section
+measures: a masked column's own `CHECK`, generated expression, index
+predicate or non-rewritable `DEFAULT` is refused on any literal none of the
+eleven DDL-literal validators recognises, not only on a strong hit. The
+tracker task's own decision (T-0198's log, 2026-09-16) asked for `make
+torture` before and after, and for every schema the wider rule newly refuses
+to be named here with the flag it needs, or a note that the flag is not yet
+curated.
+
+**This section is the history of that measurement, and it ends in a
+different place than the landing it started by measuring: "the fix round"
+below is the current state, and the four schemas the rest of this section
+still marks "not yet curated" were never curated at all — the wider rule
+stopped reaching the object classes that made curating them either
+impractical or, twice, genuinely unsafe.** The measurement is kept in full
+because it is what decided that, not because any of it is still owed.
+
+**Before.** All ten schemas were at the baseline this file already
+documents: nine clean with twenty-seven flags, mastodon refusing by design.
+
+**After, first landing (no exemption for an empty collection literal).**
+Seven of the ten newly refused, every one of them on `DEFAULT '{}'::jsonb`,
+`DEFAULT '{}'::text[]` or `DEFAULT '[]'::jsonb` — the shape a `semi_structured`
+or array-typed masked column's default takes in almost every schema that uses
+one at all (`auth.custom_oauth_providers.scopes`, `public.oban_jobs.args`,
+`public."OrganizationOnboarding".invitedMembers`,
+`public.admin_dashboard_sections.settings`, and more beneath each once the
+first is cleared). An empty collection holds nothing to be a person's — the
+identical argument ARCHITECTURE.md §5 already makes for a masked column's
+*row* value of `'{}'`/`'[]'` (`internal/invariants/i2_masking_test.go`'s
+`preservedEmpty`), restated here for a `DEFAULT` rather than invented to pass
+this measurement — so `unrewritableLiteral` in both
+`internal/plan/ddlliteral.go` and `internal/verify/catalog.go` now excludes
+it, the same way it already excludes a closed value list and a Pattern
+operand.
+
+**After, with that exemption.** Five of the ten still newly refuse:
+supabase-auth, metabase, gitlab, odoo, discourse. calcom and plausible are
+clean again — both were empty-collection-default cases and nothing else.
+Metabase was fixed with two new flags, landed in `tortureSchemas` at the
+time; the other four were not, and were named here rather than left for the
+next person to rediscover. **Metabase's own two flags did not survive "the
+fix round" below** — they closed an expression-index refusal, and once the
+wider rule stopped reaching indexes at all metabase needed nothing beyond
+the two flags it already had before this task.
+
+- **metabase** (fixed at the time; not needed after "the fix round").
+  `public.audit_log.idx_audit_log_entity_qualified_id` and
+  `public.view_log.idx_view_log_entity_qualified_id` are an expression
+  index whose `CASE` spells `'card_'`/`'Dataset'` — a type discriminator, not
+  either table's own content. `view_log.model` is masked at all only because
+  `generate.sql`'s generic filler writes `"view_log.model-1"` and the like
+  into it, which `textsig.LooksSecret` reads as a credential (16+
+  characters, two character classes) — a fixture artefact, not evidence
+  about real Metabase data — and `audit_log.model`, which `generate.sql`
+  never fills, inherits the same decision through classify's
+  same-column-name rule. Two `--unmask` flags were landed in
+  `tortureSchemas` to close it; both are gone again, not because the
+  discriminator stopped being masked but because an expression index no
+  longer carries the wider net that refused on it.
+- **gitlab**. At least six more objects beyond the first: an expression
+  index (`index_issues_on_description_trigram_non_latin`) whose predicate is
+  a `SIMILAR TO` deparsed through `similar_escape(...)` — fixed separately,
+  below, since the literal genuinely was a Unicode character-class shape and
+  not a value; `index_members_on_user_id_created_at`
+  (`members.source_type = 'GroupMember'`, another discriminator, masked via
+  the same filler-reads-as-a-secret shape metabase's `model` had);
+  `check_namespace_details_state_metadata_is_hash` and four sibling
+  `namespace_settings` checks, all `jsonb_typeof(col) = 'object'::text` —
+  the function's own three-or-so-word return vocabulary, not a person's, on
+  a `semi_structured` column masked whole regardless of what this literal
+  says; `index_groups_on_path_and_id` (`namespaces.path`, masked only via
+  same-column-name propagation from `organizations.path`, already unmasked
+  for an unrelated reason); `index_notes_for_cherry_picked_merge_requests`
+  (`notes.noteable_type = 'MergeRequest'`, a Rails polymorphic-association
+  discriminator). GitLab's schema is the largest of the ten by a wide
+  margin, and this shape — a `_type` or `_id` discriminator compared to a
+  fixed string in a partial index or a `CHECK`, beside a column this run
+  masks for an unrelated reason — recurs; curating every instance is
+  follow-up work, not something this landing forces through by narrowing
+  the rule a third time. **Not curated in the end — see "the fix round"
+  below: every one of these is a `CHECK` or an index, and the wider rule
+  stopped reaching either object class.**
+- **odoo**. `public.ir_filters.ir_filters_name_model_uid_unique_action_index`:
+  `COALESCE(user_id, '-1'::integer)`, `COALESCE(action_id, '-1'::integer)` —
+  the sentinel literal `-1`, quoted then cast, is not personal data by any
+  reading. **Closed by the cast-to-non-text exemption below, not by
+  curation** — and odoo turned out to need more than this one object before
+  curation could finish it at all; see "the fix round".
+- **discourse**. `public.categories.unique_index_categories_on_name`:
+  `COALESCE(parent_category_id, '-1'::integer)`, the identical sentinel
+  shape odoo's does. **Closed by the same cast-to-non-text exemption.**
+  (`admin_dashboard_sections.settings`, the object named in an earlier draft
+  of this measurement, is one of the seven the empty-collection exemption
+  already closed.)
+- **supabase-auth**.
+  `auth.custom_oauth_providers.custom_oauth_providers_oauth2_requires_endpoints`:
+  `CHECK (provider_type <> 'oauth2'::text OR authorization_url IS NOT NULL
+  AND token_url IS NOT NULL AND userinfo_url IS NOT NULL)`. The literal
+  `'oauth2'` is `provider_type`'s own discriminator value and `provider_type`
+  itself is unmasked; the constraint is judged "on a masked column" only
+  because it also names `authorization_url`/`userinfo_url` (`online_id`) and
+  `token_url` (`credential`) — the pre-existing, unnarrowed scoping rule that
+  a `CHECK` naming several columns is judged whole once any one of them is
+  masked (`fixedExpression`'s `onMasked`, unchanged by this task). **Not
+  curated in the end** — three masked columns named by one constraint is
+  exactly the ambiguity "the fix round" below found unsafe to curate through
+  in general (odoo's own two cases), and this object is a `CHECK`, so the
+  wider rule no longer reaches it at all.
+
+**A genuine second parsing gap, fixed rather than worked around.**
+`pipeline.Literal.Pattern` never recognised `similar_escape('pattern',
+escape)`, which is exactly what `pg_get_expr`/`pg_get_constraintdef` deparse
+every `SIMILAR TO` into — so gitlab's trigram index predicate, a Unicode
+codepoint-range character class and not a value, was scored as an ordinary
+literal by every validator this task's rule and every validator before it
+both ran. `afterPatternOperator` (`internal/pipeline/ddlliteral.go`) now
+also marks a literal `Pattern` when it is the first argument of a
+`similar_escape(` call, the deparser's own spelling of `SIMILAR TO`/`NOT
+SIMILAR TO`, on the same footing the `~`/`!~`/`LIKE` branches already have.
+This is not scoped to T-0198's own literals — it corrects what `strongHit`
+and `strongCatalogHit` were already asking of such a literal, which is why
+it is a fix and not an exemption.
+
+**What was deliberately not done.** A third and a fourth structural
+exemption — for a `jsonb_typeof(...)` comparison, for a bare-integer
+`COALESCE` sentinel, for a polymorphic `_type` discriminator — would close
+several of the remaining cases outright, and each is individually
+defensible on the same "this shape cannot be a person's" argument the
+empty-collection exemption already makes. They were not landed at the time
+this measurement was taken. The empty-collection exemption restates a rule
+ARCHITECTURE.md §5 already states elsewhere in this codebase; these would
+each have been invented for the first time in direct response to a
+measurement, which is the one thing the tracker task's own decision ruled
+out ("land the rule behind the existing opt-out and say so in concerns
+instead of weakening it"). One of the two structural exemptions that *did*
+land afterwards — a literal cast to a non-text type, which closes both of
+odoo's and discourse's `COALESCE(..., '-1'::integer)` sentinels outright — is
+exactly this same kind of shape argument, and is not "weakening the rule a
+third time" for the reason the empty-collection exemption already is not:
+neither is invented to make a measurement pass, both restate that a
+particular *shape* of literal cannot be a person's regardless of the column
+it sits beside. What is below is not a third structural exemption on top of
+that one; it is the finding that curating the rest by hand, the way this
+section originally asked for, ran into two real schemas where the `--unmask`
+escape itself could not be made to answer honestly — see "the fix round".
+
+## The fix round (2026-09-16): why curation stopped, and what replaced it
+
+The four schemas above stayed "not yet curated" for longer than a single
+follow-up task, because finishing them the way this section asked for —
+one `--unmask` per newly-refused object, the same way metabase's two were
+closed above — ran into two real schemas where no `--unmask` could close the
+refusal honestly. Both are odoo, and both are named here because a reduced
+regression fixture cannot reproduce what made them dangerous: the reason is
+that a real schema's own columns collide with the discriminators beside them
+in a way a synthetic table built to test one rule does not.
+
+- **`public.res_partner.res_partner_check_name`**:
+  `CHECK ((type = 'contact' AND name IS NOT NULL) OR type <> 'contact')`.
+  `res_partner` is Odoo's CRM contacts table, and `name` is not a technical
+  label there — it is the actual person's or company's name the table exists
+  to hold, correctly masked as `person_name`. The constraint's own literal,
+  `'contact'`, is about `type`, a discriminator column unmasked or masked for
+  an unrelated reason; it is never about `name`. But `fixedExpression`'s
+  scoping judges the object whole once *any* named column is masked, so the
+  only escape the rule could offer for this literal was `--unmask
+  public.res_partner.name=REASON` — which does not say "this literal about
+  `type` is not personal data", it says "this column, which manifestly is
+  personal data, is not", and an operator who typed it would ship every
+  contact's real name into the target.
+- **`public.res_partner.res_partner_mobile_partial_gin_idx`**: a GIN trigram
+  index over `regexp_replace(mobile::text, '[\s\\./\(\)\-]', '', 'g')` —
+  `mobile` is a real phone number column, correctly masked, and the
+  expression normalises it for fuzzy search. Its two non-empty literals are a
+  punctuation character class and a `regexp_replace` flag, neither a value
+  about the phone number at all. `mobile` is the *only* masked column the
+  index names, so this is not even the multi-column ambiguity the first case
+  is — the rule's escape was `--unmask public.res_partner.mobile=REASON`,
+  the phone number itself, offered as the fix for two literals that were
+  never about it.
+
+Both are a `CHECK` and an index, and both crossed no bright line the first
+landing's own exemptions (a closed value list, an empty collection, a
+Pattern operand, a cast to a non-text type) could have been widened to
+catch, because neither literal is any particular *shape* — one is an
+arbitrary function argument, the other an arbitrary punctuation class — and
+the object being refused is not one column but a `CHECK` or an index that
+can name several. That is the property the fix does turn on: **the wider net
+now runs only for a `DEFAULT` and for a generated expression, and stopped
+running for a `CHECK`, an exclusion constraint or an index of any kind**
+(`internal/plan/ddlliteral.go`'s `fixedExpression`, called with `broadNet`
+false for a constraint or an index and true only for a generated expression;
+`internal/verify/catalog.go`'s `unrewritableKind` answers `kindDefault`/
+`kindGenerated` only). A `DEFAULT` and a generated expression belong to
+exactly one column by construction — `internal/plan`'s `named` is always
+`[]string{col.Name}` there — so the ambiguity both odoo cases turn on cannot
+arise on that path, and a `CHECK` or an index still refuses on a strongHit
+exactly as §11.1's original rule always has; only the newer, escape-free
+net that refused on a literal no validator recognised at all is gone from
+those two object classes.
+
+**Re-measured against this scope, `make torture` needs none of the four
+schemas' curation this section spent three paragraphs asking for — and
+metabase's own two landed flags turned out to be unnecessary too.** Every
+refusal gitlab, odoo, discourse and supabase-auth hit under the wider rule —
+the `jsonb_typeof` checks, the polymorphic `_type` discriminators, the
+`COALESCE(..., '-1'::integer)` sentinels, the oauth2 constraint naming three
+masked columns at once — was a `CHECK` or an index, never a `DEFAULT`; so was
+metabase's own expression index. None of them needed curating because none
+of them refuses under this scope. The suite is back to the exact twenty-seven
+flags this file opens with — the same nineteen `--unmask` and nothing more —
+and gitlab and supabase-auth in particular needed no touching at all despite
+being two of the four schemas this section spent longest asking someone to
+curate. `special_category`'s own value validator is unaffected and
+unconditional either way — it closes both round-3 canaries through the
+ordinary strongHit path (below "Before"), which is why neither canary
+regression (027, 028) needed re-cutting.
 
 ## Found and not fixed
 

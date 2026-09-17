@@ -413,4 +413,22 @@ var validators = []validator{
 	{category: pipeline.CatFreeText, name: "free_text", text: true, dict: true, ok: func(s string) bool {
 		return textsig.Dictionary().ProseName(s)
 	}},
+	// special_category joined at T-0231: T-0198 gave pipeline.CatSpecial a
+	// value validator (textsig.SpecialCategoryVocabulary) and wired it into
+	// both DDL-literal passes (internal/plan/ddlliteral.go's
+	// strongValidators, internal/verify/catalog.go's strongCatalogHit), but
+	// this file -- the row-scanning second net, ARCHITECTURE.md section 6
+	// item 4 -- carried no entry for it, so a digit/name-free
+	// special-category sentence in an unmasked column's ROW value still
+	// crossed this net unseen: internal/classify masks the category on the
+	// column's *name* alone (section 4, "special categories mask on name
+	// alone"), which is exactly the miss THREAT_MODEL.md T1 names this net
+	// as the control for. It is a vocabulary match, not a checksum or a
+	// dictionary shape, so it is scored at the ordinary ratio rather than as
+	// strong (one hit in an otherwise-ordinary column is not a certain
+	// diagnosis the way one valid email address is certainly an email
+	// address) and never as dict (a term list is not the name dictionary,
+	// and this validator is precise enough over a document's leaves the way
+	// address and credential already are — see applies, secondnet.go).
+	{category: pipeline.CatSpecial, name: "special_category", text: true, ok: textsig.SpecialCategoryVocabulary},
 }

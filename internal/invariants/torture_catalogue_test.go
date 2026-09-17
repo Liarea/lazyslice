@@ -177,6 +177,18 @@ var tortureSchemas = []tortureSchema{
 		dir:  "metabase",
 		root: "public.core_user",
 		take: 100,
+		// Two more flags joined here under T-0198 (docs/TORTURE.md's own
+		// note): audit_log and view_log both carry
+		// `idx_<table>_entity_qualified_id`, an expression index whose CASE
+		// spells 'card_'/'Dataset' -- neither column's own content, a type
+		// discriminator on `model`. generate.sql fills view_log but not
+		// audit_log, and view_log's generic filler writes
+		// "view_log.model-1" and the like into `model`, which
+		// textsig.LooksSecret reads as a credential (16+ characters, two
+		// character classes) -- a fixture artefact, not evidence about real
+		// Metabase data -- and classify's same-column-name rule then carries
+		// that decision onto audit_log.model too, which generate.sql never
+		// fills at all.
 		flags: []string{
 			"--skip-table", "public.model_index_value",
 			"--skip-table", "public.table_privileges",

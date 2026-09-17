@@ -180,6 +180,64 @@ func StripPatternMeta(s string) string {
 	return b.String()
 }
 
+// nonTextCastTypes is the type names CastToNonText answers true for (T-0198
+// fix round, finding 3): a literal immediately cast to one of these can never
+// hold free text, whatever category a name or a shape signal would otherwise
+// guess at. Deliberately narrow and deliberately the bare, unschemaed spelling
+// pg_get_expr and pg_get_constraintdef write -- a text-compatible cast
+// (::text, ::varchar, ::citext, ::json, ...) is not on it, and neither is a
+// composite, domain or array type this scanner has no catalog to resolve;
+// "double" stands in for `double precision`, because the cast is two words
+// and this function only ever reads the first identifier-shaped token after
+// `::`.
+var nonTextCastTypes = map[string]bool{
+	"int": true, "int2": true, "int4": true, "int8": true,
+	"smallint": true, "integer": true, "bigint": true,
+	"numeric": true, "decimal": true,
+	"real": true, "float4": true, "float8": true, "double": true,
+	"boolean": true, "bool": true,
+}
+
+// CastToNonText reports whether the literal at l is immediately followed, in
+// expr, by an explicit `::type` cast to one of nonTextCastTypes.
+//
+// pg_get_expr and pg_get_constraintdef always quote a scalar constant and
+// cast it directly afterwards, with no space the deparser ever omits:
+// `COALESCE(user_id, '-1'::integer)` is odoo's own shape
+// (public.ir_filters), and discourse's `COALESCE(parent_category_id,
+// '-1'::integer)` is the identical one on a different column -- a sentinel
+// this scanner had been reading as a plain string literal, because
+// pg_get_expr writes the integer constant -1 quoted before casting it, and
+// unrewritableLiteral (internal/plan/ddlliteral.go, internal/verify/
+// catalog.go) then saw a non-empty, non-pattern, non-closed-list literal and
+// refused a masked column's index on it under T-0198's broadened rule. A
+// literal cast to integer, bigint, numeric or boolean immediately afterwards
+// is not a value a person could be in, on the identical "shape, not
+// category" footing the empty-collection and closed-value-list exemptions
+// already stand on in both callers.
+func CastToNonText(expr string, l Literal) bool {
+	i := l.End
+	for i < len(expr) && isSpaceByte(expr[i]) {
+		i++
+	}
+	if i+1 >= len(expr) || expr[i] != ':' || expr[i+1] != ':' {
+		return false
+	}
+	i += 2
+	for i < len(expr) && isSpaceByte(expr[i]) {
+		i++
+	}
+	j := i
+	for j < len(expr) && isNameByte(expr[j]) {
+		j++
+	}
+	name := expr[i:j]
+	if k := strings.LastIndexByte(name, '.'); k >= 0 {
+		name = name[k+1:]
+	}
+	return nonTextCastTypes[strings.ToLower(name)]
+}
+
 // scanLiterals walks the expression once and calls f for each string constant.
 func scanLiterals(expr string, f func(Literal)) {
 	for i := 0; i < len(expr); {
@@ -351,8 +409,26 @@ func quotedIdent(expr string, start int) int {
 //
 // It looks back over whitespace and then at one token: an operator made of
 // ~, ! and * carrying a tilde, or the word LIKE or ILIKE, or the word TO
-// preceded by SIMILAR. A NOT before LIKE does not matter -- what is being asked
+// preceded by SIMILAR, or the literal sitting as the first argument of a call
+// to similar_escape(. A NOT before LIKE does not matter -- what is being asked
 // is whether the literal is a pattern, not whether the predicate is negated.
+//
+// similar_escape is deparser output, never something a hand-written CHECK or
+// index predicate calls directly: pg_get_expr and pg_get_constraintdef render
+// every SIMILAR TO (and NOT SIMILAR TO) as `col OPERATOR(pg_catalog.~)
+// similar_escape('pattern', escape)`, not as the SIMILAR TO keyword form the
+// operator branch above already reads (T-0198, found on gitlab's
+// `index_issues_on_description_trigram_non_latin`: a partial index predicate
+// carrying `title !~ similar_escape('[<a Unicode codepoint range>]*'::text,
+// NULL::text)`, a character-class shape and not a value, went undetected as a
+// pattern and refused a masked column's index outright under T-0198's
+// broadened rule). The escape argument is not a pattern in the same sense --
+// it is one literal character or NULL -- but this scanner only ever sees
+// similar_escape's *first* argument here, because the escape argument is
+// never the literal this function is asked about at its own call site
+// (RewriteLiterals still declines every Pattern literal from rewriting
+// regardless, so treating both arguments the same would cost nothing even if
+// it were reached).
 func afterPatternOperator(expr string, start int) bool {
 	i := start
 	for i > 0 && isSpaceByte(expr[i-1]) {
@@ -360,6 +436,19 @@ func afterPatternOperator(expr string, start int) bool {
 	}
 	if i == 0 {
 		return false
+	}
+	if expr[i-1] == '(' {
+		j := i - 1
+		for j > 0 && isSpaceByte(expr[j-1]) {
+			j--
+		}
+		k := j
+		for k > 0 && isNameByte(expr[k-1]) {
+			k--
+		}
+		if strings.EqualFold(expr[k:j], "similar_escape") {
+			return true
+		}
 	}
 	if isOperatorByte(expr[i-1]) {
 		j := i

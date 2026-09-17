@@ -1255,3 +1255,48 @@ international form only is what keeps this net answering the question §6
 item 4 asks — does the loaded target hold a value of this shape — rather
 than repeating a guess this package has no way to corroborate against a row
 scan the way `internal/classify` can against a column's neighbours.
+
+## `special_category` joins both catalog-pass lists, then the second net too (T-0198, T-0231)
+
+`strongCatalogHit` (`catalog.go`) gained `textsig.SpecialCategoryVocabulary`
+as an eleventh entry alongside `internal/plan`'s identical addition (T-0198,
+2026-09-16): `pipeline.CatSpecial` had no value validator anywhere before
+this, so a health, religion, sexual-orientation, ethnicity, trade-union or
+political-opinion sentence in the target's catalog was caught only by
+accident — a stray digit tripping `addressLiteralShape`, a name pair
+tripping `Dict.ProseName`. **The row-scanning second net (`validators.go`)
+was left out of that landing, and a digit/name-free special-category
+sentence in an unmasked column's *row* value — not its DDL — still crossed
+this net unseen until T-0231 closed it**: one more entry,
+`{category: pipeline.CatSpecial, name: "special_category", text: true, ok:
+textsig.SpecialCategoryVocabulary}`, on the ordinary (non-strong, non-dict)
+ratio footing address and credential already use — a vocabulary match is
+neither a checksum-grade parse (so not `strong`) nor the name dictionary (so
+not `dict`, and it therefore does run over a document's leaves the way
+address and credential already do, unlike `person_name`/`free_text`).
+`testdata/regressions/029-special-category-sentence-in-an-unmasked-row-
+value.sql` is the row-side canary 027/028 never pinned: the identical
+`SpecialCategoryVocabulary` term, in a two-row column below `minValues`, so
+the T-0058 "any hit below minValues fails" floor is what actually refuses it
+— no ratio to weigh a single hit against at that size.
+
+**The broadened T-0198 rule `catalog.go`'s own `unrewritableKind` gated is
+narrower than it first landed, and the reason is `internal/plan`'s to state
+in full (`internal/plan/CLAUDE.md`'s own T-0198 section).** In short: it
+used to cover `kindConstraint`, `kindIndexPredicate` and
+`kindIndexExpression` alongside `kindDefault`/`kindGenerated`, and a
+`CHECK` or an index naming several masked columns has no way to say which
+one a given literal is about — two real schemas (odoo's
+`res_partner_check_name` and `res_partner_mobile_partial_gin_idx`) found
+that the only escape the rule could then offer was `--unmask` on a column
+that was manifestly personal data and had nothing to do with the literal
+being refused. `unrewritableKind` now answers `kindDefault`/`kindGenerated`
+only, and `maskedNamedColumn` requires *exactly one* masked column match
+rather than merely "any" — belt and braces alongside the narrower
+`unrewritableKind`, since a `kindDefault`/`kindGenerated` object's `names`
+list is always one column by construction and the ambiguity cannot arise on
+that path regardless. `unrewritableLiteral` (this file's own copy) also
+gained the cast-to-non-text exemption `internal/plan`'s did, in the same fix
+round: a literal immediately cast to `integer`/`bigint`/`numeric`/`boolean`
+(`pipeline.CastToNonText`) is exempt, the identical "shape, not category"
+argument the empty-collection exemption already makes.
