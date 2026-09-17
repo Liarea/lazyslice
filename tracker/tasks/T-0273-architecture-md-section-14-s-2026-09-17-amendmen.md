@@ -3,12 +3,12 @@ id: T-0273
 title: "ARCHITECTURE.md section 14's 2026-09-17 amendment still says the egress test 'had not shipped at all'"
 epic: E9
 phase: ""
-status: open
+status: done
 owner: ""
 created: 2026-09-17
 started: ""
-closed: ""
-outcome: ""
+closed: 2026-09-17
+outcome: done
 ---
 
 # T-0273 · ARCHITECTURE.md section 14's 2026-09-17 amendment still says the egress test 'had not shipped at all'
@@ -25,6 +25,8 @@ ARCHITECTURE.md section 14's 2026-09-17 amendment (the gate-5 audit) says 'the n
 
 - 2026-09-17 created
 
+- 2026-09-17 closed: done
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+went well: ARCHITECTURE.md section 14's amendment now says both audit findings landed and where (make egress and the egress CI job; Q2 in internal/core), and README's Building block lists make egress | went badly: nothing; the developer filed it correctly because the file was outside its paths | change next time: nothing (commit 4fce950)
