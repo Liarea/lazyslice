@@ -3,12 +3,12 @@ id: T-0221
 title: "Phone numbers in national format, and phone numbers spelled out in words, are recognised: a configured phone region, and corroboration when none is configured"
 epic: E5
 phase: 5
-status: open
+status: done
 owner: sonnet
 created: 2026-09-16
-started: ""
-closed: ""
-outcome: ""
+started: 2026-09-16
+closed: 2026-09-16
+outcome: done
 ---
 
 # T-0221 · Phone numbers in national format, and phone numbers spelled out in words, are recognised: a configured phone region, and corroboration when none is configured
@@ -25,6 +25,10 @@ Round-3 replay (docs/reviews/2026-09-15-redteam/round3-still-leaking.json, the A
 
 - 2026-09-16 created
 
+- 2026-09-16 started
+
+- 2026-09-16 closed: done
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+went well: the corroboration gate transferred from T-0187's national-id precedent to the phone signal, and running the ten-schema torture suite early caught a collision where the guessed-region pass masked an integer column before the national-id check saw it; the Opus reviewer caught an unvalidated --phone-region silently masking nothing and a configured region switching off the fallback for every other country, both fixed with a usage error and a kept fallback; two fix rounds, verify green with torture | went badly: the workflow's commit step was blocked by the safety classifier for the second time, the run went on to the next task on a dirty tree, and the computer restarted mid-way, so the orchestrator separated the two tasks' hunks in the shared docs by hand and committed the verified state as a0cda99; the fifteen-region guess list has no cited source; the name-rule corroboration arm was unreachable and was removed | change next time: the commit step writes outside .git and stages by path, and a task whose commit did not happen is blocked, not merged (landed in the same session); a brief that adds a region list names its source

@@ -7,9 +7,9 @@
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
-| E5 Hardening | 5 | 7 | 1 | 82 | 0 | 0 |
+| E5 Hardening | 5 | 6 | 1 | 83 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 53 | 0 | 27 | 4 | 0 |
+| E9 Later | later | 58 | 0 | 27 | 4 | 0 |
 
 ## Open and in progress
 
@@ -72,9 +72,13 @@
 - T-0218 [open] E9 · ADR-004's 'no unsafe mode' clause lists the types: block among the ways a committed file may reduce enforcement (sonnet)
 - T-0219 [open] E9 · --allow-type-literal is recorded only for a type that actually carried a literal a strong validator hit (sonnet)
 - T-0220 [open] E9 · internal/discover/password.go: the deadline check reads the derived context, the URL branch of injectPassword swallows a parse error, and the stop reason repeats the prefix (sonnet)
-- T-0221 [open] E5 · Phone numbers in national format, and phone numbers spelled out in words, are recognised: a configured phone region, and corroboration when none is configured (sonnet)
 - T-0222 [open] E5 · Cluster identity degrades field by field, and two unknown identities are treated as possibly the same cluster (sonnet)
 - T-0223 [open] E5 · mask.Apply never returns a masker's error verbatim: the module wraps it without the value (sonnet)
+- T-0224 [open] E9 · ARCHITECTURE.md/THREAT_MODEL.md/internal/pg/CLAUDE.md claim EXECUTE on pg_control_system is not granted to PUBLIC, which is false on stock postgres:16 ()
+- T-0225 [open] E9 · internal/classify: phoneGuessRaisable applies the same exclusions as raisableUnknown (sonnet)
+- T-0226 [open] E9 · internal/classify: matchesAnyGuessRegion computes the candidates once, not once per region (sonnet)
+- T-0227 [open] E9 · A phone_region read from a hand-edited lazyslice.yml is validated the way the flag is (sonnet)
+- T-0228 [open] E9 · ARCHITECTURE.md's --phone-region flag row and the phone_region_guessed reason fragment describe the removed name-rule corroboration arm (sonnet)
 
 ## Recently closed
 
@@ -83,6 +87,7 @@
 - T-0186 [done] E5 · --allow-type-literal is not recorded in lazyslice.yml → done
 - T-0192 [done] E5 · The secret file is protected on its resolved path: symlinked parent directories and hard links refuse; password_command is screened before it is written to the yml → done
 - T-0213 [done] E5 · Wire --password-command to actually run, or refuse it as unimplemented → done
+- T-0221 [done] E5 · Phone numbers in national format, and phone numbers spelled out in words, are recognised: a configured phone region, and corroboration when none is configured → done
 - T-0028 [done] E3 · Create GitHub repository Liarea/lazyslice and homebrew-tap, push main, add HOMEBREW_TAP_TOKEN secret → done
 - T-0090 [done] E5 · T-PERF: performance baseline and CI throughput guard → done
 - T-0163 [done] E5 · the plan-time DDL literal rule does not read index predicates or domain CHECKs → done
@@ -102,4 +107,3 @@
 - T-0118 [done] E5 · internal/transform: mask an array whose sample arrives as a text literal element-wise → done
 - T-0119 [done] E5 · A table-scoped name rule, for refresh_tokens.parent and its kind → done
 - T-0127 [done] E5 · internal/plan: drop the arrayArrivesAsLiteral stand-in now that transform masks a literal array element-wise → done
-- T-0129 [done] E5 · internal/verify: an array column that arrives as a text literal is not residual-scanned element-wise → done
