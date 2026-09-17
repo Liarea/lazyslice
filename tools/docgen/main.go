@@ -1,14 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
-// Command docgen regenerates docs/FLAGS.md, docs/KEYBINDINGS.md and
-// docs/ERRORS.md from the tree's own registered surfaces, so the three
-// documents can never say something the code does not: the registered cobra
-// flag set of cmd/lazyslice (grouped as --help groups it), internal/tui's
-// Bindings() table, and internal/event's Catalogue().
+// Command docgen regenerates docs/FLAGS.md, docs/KEYBINDINGS.md,
+// docs/ERRORS.md and the first-run flag table in README.md from the tree's
+// own registered surfaces, so none of the four can say something the code
+// does not: the registered cobra flag set of cmd/lazyslice (grouped as
+// --help groups it), internal/tui's Bindings() table, and internal/event's
+// Catalogue().
 //
-// `make docs` runs it with the repository's docs/ directory as -out. CI's
-// docs-drift job runs it a second way, into a temporary directory, diffs the
-// two, and fails the build on any difference from what is committed
+// `make docs` runs it with the repository's docs/ directory as -out, which
+// rewrites README.md in place (readme.go reads and writes the same file: the
+// tree's own README.md is both the template for everything outside the two
+// markers and the target). CI's docs-check job runs it a second way, into a
+// temporary directory with -readme pointed at a scratch copy, diffs both
+// against what is committed, and fails the build on any difference
 // (ADR-002's enforcement mechanism 2; docs/CLAUDE.md "generated files are
 // never hand-edited").
 package main
@@ -30,6 +34,11 @@ func main() {
 
 func run() error {
 	out := flag.String("out", "docs", "directory to write FLAGS.md, KEYBINDINGS.md and ERRORS.md into")
+	readmeOut := flag.String("readme", "", "path to write the regenerated README.md into "+
+		"(default: README.md at the repository root, i.e. rewrite it in place, but only when -out "+
+		"is also the repository root; if -out points elsewhere, the default follows it to "+
+		"<out>/README.md so a redirected run can never touch the tree's own README.md by accident); "+
+		"the template for everything outside the markers is always read from the repository root's own README.md")
 	flag.Parse()
 
 	root, err := repoRoot()
@@ -43,6 +52,22 @@ func run() error {
 	}
 	if mkErr := os.MkdirAll(outDir, 0o755); mkErr != nil {
 		return fmt.Errorf("creating %s: %w", outDir, mkErr)
+	}
+
+	readmePath := *readmeOut
+	if readmePath == "" {
+		// -out redirected elsewhere means "leave the working tree alone":
+		// follow it rather than defaulting back to the repo root's README.md.
+		if outDir == root {
+			readmePath = filepath.Join(root, "README.md")
+		} else {
+			readmePath = filepath.Join(outDir, "README.md")
+		}
+	} else if !filepath.IsAbs(readmePath) {
+		readmePath = filepath.Join(root, readmePath)
+	}
+	if mkErr := os.MkdirAll(filepath.Dir(readmePath), 0o755); mkErr != nil {
+		return fmt.Errorf("creating %s: %w", filepath.Dir(readmePath), mkErr)
 	}
 
 	flagsMD, err := generateFlags(root)
@@ -69,7 +94,16 @@ func run() error {
 		return wrErr
 	}
 
-	fmt.Printf("docgen: wrote FLAGS.md, KEYBINDINGS.md, ERRORS.md into %s\n", outDir)
+	readmeMD, err := generateReadme(root)
+	if err != nil {
+		return fmt.Errorf("README.md: %w", err)
+	}
+	if wrErr := writeFile(readmePath, readmeMD); wrErr != nil {
+		return wrErr
+	}
+
+	fmt.Printf("docgen: wrote FLAGS.md, KEYBINDINGS.md, ERRORS.md into %s, and the first-run flag table into %s\n",
+		outDir, readmePath)
 	return nil
 }
 

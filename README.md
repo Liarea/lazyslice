@@ -39,6 +39,29 @@ before anything else:
 > reference to a production record — an admin URL, a ticket, a log line, a
 > payment or support system — can re-identify every row exactly.
 
+## Flags
+
+<!-- docgen:flags:start -->
+
+The flags a first run meets. The full set, one row per registered flag grouped by stage, is [docs/FLAGS.md](docs/FLAGS.md).
+
+| Flag | Type | Default | Description |
+|---|---|---|---|
+| `--source` | string | - | Names the source; a non-Postgres scheme or unsupported major exits 2 |
+| `--target` | string | - | Names the target; never bypasses the gate |
+| `--root` | string | - | Root table (default: computed from the foreign-key graph) |
+| `--yes` | bool | - | Headless: ask nothing; questions with no safe default become hard failures naming their flag |
+| `--create-target` | bool | - | Start postgres:<source major> as lazyslice-target-<project> instead of asking |
+| `--unmask` | stringArray | - | Per-column opt-out, as TABLE.COL=REASON; the bare form is exit 2; repeatable |
+| `--skip-table` | stringArray | - | Drop a child-only table to schema-only; repeatable |
+| `--phone-region` | string | - | ISO 3166-1 alpha-2 region libphonenumber recognises (e.g. GB; anything else is exit 2) a national-format phone column is read under, alongside the guessed regions every run already tries; recorded as phone_region and shown in the reasons output |
+| `--secret-file` | string | "./lazyslice.secret" | Masking key file; LAZYSLICE_SECRET overrides it |
+| `--require-key` | bool | - | Exit 5 instead of using an ephemeral key |
+| `--plan` | bool | - | Stop after printing the plan; touch nothing |
+| `--json` | bool | - | NDJSON events on stdout |
+
+<!-- docgen:flags:end -->
+
 ## Building
 
 ```sh

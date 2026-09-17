@@ -437,15 +437,18 @@ spdx:
 	fi
 	@echo "==> spdx: every Go file carries the licence identifier"
 
-## docs: regenerate docs/FLAGS.md, docs/KEYBINDINGS.md and docs/ERRORS.md
+## docs: regenerate docs/FLAGS.md, docs/KEYBINDINGS.md, docs/ERRORS.md and
+## README.md's first-run flag table
 ##
 ## tools/docgen reads the registered cobra flag set of cmd/lazyslice (via
 ## `go run ./cmd/lazyslice --help`, grouped as --help groups it), internal/tui's
 ## Bindings() table, and internal/event's Catalogue() — never hand-edit the
-## three files this writes (docs/CLAUDE.md).
+## three files this writes into docs/ (docs/CLAUDE.md), or the table it
+## writes into README.md between the `<!-- docgen:flags:start -->` and
+## `<!-- docgen:flags:end -->` markers.
 docs:
-	go run ./tools/docgen -out docs
-	@echo "==> docs: wrote docs/FLAGS.md, docs/KEYBINDINGS.md, docs/ERRORS.md"
+	go run ./tools/docgen -out docs -readme README.md
+	@echo "==> docs: wrote docs/FLAGS.md, docs/KEYBINDINGS.md, docs/ERRORS.md and README.md's flag table"
 
 ## docs-check: fail when the committed docs differ from a fresh `make docs`
 ##
@@ -454,11 +457,15 @@ docs:
 ## unified diff plus the exact regeneration command on drift — the developer
 ## who hits this job is a contributor on their first run, and
 ## docs/adr/008-first-run.md §8 asks for lazydocker's behaviour here rather
-## than lazygit's bare `git diff --quiet`.
+## than lazygit's bare `git diff --quiet`. README.md's flag table is checked
+## the same way: -readme points the regenerated README.md at a scratch copy
+## in the same temporary directory instead of the tree's own README.md, so
+## docgen still reads the committed README.md as its template but the
+## comparison is a diff, never a write to the working tree.
 docs-check:
 	@tmp=$$(mktemp -d); \
 	trap 'rm -rf "$$tmp"' EXIT; \
-	go run ./tools/docgen -out "$$tmp" >/dev/null; \
+	go run ./tools/docgen -out "$$tmp" -readme "$$tmp/README.md" >/dev/null; \
 	status=0; \
 	for f in FLAGS.md KEYBINDINGS.md ERRORS.md; do \
 		if ! diff -u "docs/$$f" "$$tmp/$$f" >/dev/null 2>&1; then \
@@ -468,12 +475,18 @@ docs-check:
 			status=1; \
 		fi; \
 	done; \
+	if ! diff -u "README.md" "$$tmp/README.md" >/dev/null 2>&1; then \
+		echo "docs-check: README.md's flag table (between the docgen:flags markers) is out of date:"; \
+		diff -u "README.md" "$$tmp/README.md" || true; \
+		echo; \
+		status=1; \
+	fi; \
 	if [ "$$status" -ne 0 ]; then \
-		echo "docs-check: docs/FLAGS.md, docs/KEYBINDINGS.md and docs/ERRORS.md must match tools/docgen."; \
+		echo "docs-check: docs/FLAGS.md, docs/KEYBINDINGS.md, docs/ERRORS.md and README.md's flag table must match tools/docgen."; \
 		echo "docs-check: run 'make docs' and commit the result."; \
 		exit 1; \
 	fi; \
-	echo "==> docs-check: docs/FLAGS.md, docs/KEYBINDINGS.md and docs/ERRORS.md match tools/docgen"
+	echo "==> docs-check: docs/FLAGS.md, docs/KEYBINDINGS.md, docs/ERRORS.md and README.md's flag table match tools/docgen"
 
 ## vulncheck: govulncheck over both modules (THREAT_MODEL.md T10)
 vulncheck:
