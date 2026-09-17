@@ -3,12 +3,12 @@ id: T-0232
 title: "Curate --unmask flags for gitlab, odoo, discourse and supabase-auth under T-0198's broadened DDL-literal rule"
 epic: E9
 phase: ""
-status: open
+status: cancelled
 owner: ""
 created: 2026-09-16
 started: ""
-closed: ""
-outcome: ""
+closed: 2026-09-17
+outcome: cancelled
 ---
 
 # T-0232 · Curate --unmask flags for gitlab, odoo, discourse and supabase-auth under T-0198's broadened DDL-literal rule
@@ -25,6 +25,8 @@ T-0198 (docs/TORTURE.md's own new section) landed a masked column's own CHECK/ge
 
 - 2026-09-16 created
 
+- 2026-09-17 cancelled: moot: T-0198's fix round narrowed the rule so gitlab, odoo, discourse and supabase-auth no longer refuse; make torture is green without new flags
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+Cancelled. Reason: moot: T-0198's fix round narrowed the rule so gitlab, odoo, discourse and supabase-auth no longer refuse; make torture is green without new flags

@@ -3,12 +3,12 @@ id: T-0230
 title: "T-0229's goal mischaracterises the R2-13 regression; correct it before acting on it"
 epic: E9
 phase: ""
-status: open
+status: done
 owner: ""
 created: 2026-09-16
-started: ""
-closed: ""
-outcome: ""
+started: 2026-09-17
+closed: 2026-09-17
+outcome: done
 ---
 
 # T-0230 · T-0229's goal mischaracterises the R2-13 regression; correct it before acting on it
@@ -25,6 +25,10 @@ T-0229 (internal/transform/codes.go: add mask.ErrMaskerFailed to maskReason's kn
 
 - 2026-09-16 created
 
+- 2026-09-17 started
+
+- 2026-09-17 closed: done
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+went well: the correction was acted on by the orchestrator; T-0229 keeps only the specificity improvement | went badly: a filing about a filing | change next time: a tracker edit command
