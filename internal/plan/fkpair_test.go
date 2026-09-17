@@ -204,6 +204,151 @@ func TestFKPairRefusalIsClearedWhenBothEndsAreUnmasked(t *testing.T) {
 	})
 }
 
+// reconciledPairClassification is the metabase shape T-0258 narrows the
+// refusal for: fkPairs refused the pair the way blockedPairClassification
+// does (both Refused/RefusedPartner set, neither Masked at that point in the
+// pipeline), but a later, separate classify pass -- propagateKeys or
+// sameColumnName -- went on to carry the identical category onto both ends
+// anyway, the way core_session.id's credential decision reaches
+// login_history.session_id through FK propagation regardless of what fkPairs
+// decided (docs/TORTURE.md's own T-0257 section). Refused stays set --
+// nothing clears it -- but Masked and Category now agree on both ends.
+func reconciledPairClassification(members, lookup ref.TableRef) *pipeline.Classification {
+	cls := blockedPairClassification(members, lookup)
+	memberTag := ref.ColumnRef{Table: members, Column: "tag"}
+	lookupTag := ref.ColumnRef{Table: lookup, Column: "tag"}
+	dm := cls.Decisions[memberTag]
+	dm.Masked = true
+	dm.Category = pipeline.CatFreeText
+	cls.Decisions[memberTag] = dm
+	dl := cls.Decisions[lookupTag]
+	dl.Masked = true
+	dl.Category = pipeline.CatFreeText
+	cls.Decisions[lookupTag] = dl
+	return cls
+}
+
+// TestFKPairRefusalIsSkippedWhenALaterPassReconcilesThePair is T-0258: a
+// refusal fkPairs recorded before a later, separate pass (propagateKeys,
+// sameColumnName) brought both ends into agreement anyway -- masked, under
+// the same final category -- buys nothing, the metabase
+// core_session.id/login_history.session_id shape docs/TORTURE.md's T-0257
+// section names. Narrowing checkFKPairRefusal to skip that one shape must
+// not touch the type-conflict and two-letter-code shapes, which
+// TestFKPairIsRefusedAtPlan and TestFKPairRefusalIsClearedWhenBothEndsAreUnmasked
+// above still hold: their partner never gets masked at all, so
+// reconciledByALaterPass reports false for them.
+func TestFKPairRefusalIsSkippedWhenALaterPassReconcilesThePair(t *testing.T) {
+	t.Parallel()
+	members, lookup, schema := fkPairTables()
+	cls := reconciledPairClassification(members, lookup)
+
+	p := fkPairRun(members, lookup, schema, cls)
+	if err := p.checkFKPairRefusal(); err != nil {
+		t.Fatalf("checkFKPairRefusal refused a pair a later pass already reconciled: %v", err)
+	}
+}
+
+// TestFKPairRefusalStillFiresWhenOnlyOneEndIsMasked is the reconciliation
+// check's own control: one end masked and the other still not is not the
+// reconciled shape -- the partner never got raised at all, the type-conflict
+// and two-letter-code shape -- so the refusal must still fire.
+func TestFKPairRefusalStillFiresWhenOnlyOneEndIsMasked(t *testing.T) {
+	t.Parallel()
+	members, lookup, schema := fkPairTables()
+	cls := blockedPairClassification(members, lookup)
+	memberTag := ref.ColumnRef{Table: members, Column: "tag"}
+	dm := cls.Decisions[memberTag]
+	dm.Masked = true
+	dm.Category = pipeline.CatFreeText
+	cls.Decisions[memberTag] = dm
+
+	p := fkPairRun(members, lookup, schema, cls)
+	if err := p.checkFKPairRefusal(); err == nil {
+		t.Fatal("checkFKPairRefusal returned nil: only one end masked is not a reconciled pair")
+	}
+}
+
+// TestFKPairRefusalStillFiresWhenCategoriesDiffer is the reconciliation
+// check's other control: both ends masked, but under different categories,
+// is not the shape a downstream group would unify -- the refusal must still
+// fire.
+func TestFKPairRefusalStillFiresWhenCategoriesDiffer(t *testing.T) {
+	t.Parallel()
+	members, lookup, schema := fkPairTables()
+	cls := reconciledPairClassification(members, lookup)
+	lookupTag := ref.ColumnRef{Table: lookup, Column: "tag"}
+	dl := cls.Decisions[lookupTag]
+	dl.Category = pipeline.CatCredential
+	cls.Decisions[lookupTag] = dl
+
+	p := fkPairRun(members, lookup, schema, cls)
+	if err := p.checkFKPairRefusal(); err == nil {
+		t.Fatal("checkFKPairRefusal returned nil: differing categories is not a reconciled pair")
+	}
+}
+
+// TestFKPairRefusalStillFiresWhenOneEndIsOperatorUnmaskedAndTheOtherMasked is
+// the metabase shape itself, not the reduction: an operator's own --unmask on
+// one end (Source == pipeline.ByFlagUnmask, Decision.Masked == false, for a
+// reason unrelated to the pair) alongside propagateKeys carrying the
+// identical category onto the other end, which genuinely gets masked
+// (Decision.Masked == true). An earlier version of reconciledByALaterPass
+// treated this as resolved and skipped the refusal; that is exactly the
+// shape internal/classify's own markNeverMasked comment describes as broken
+// -- a masked child whose validated-FK parent is copied verbatim, loaded with
+// the edge NOT VALID, and failed by internal/verify/fk.go's orphan count at
+// exit 8 (I1, THREAT_MODEL.md T8) -- so the refusal must still fire here and
+// the operator must --unmask both ends to take the escape
+// (docs/TORTURE.md's own T-0257 and T-0258 sections have the corrected
+// account; the metabase fixture never demonstrated the failure only because
+// login_history.session_id is NULL in every fixture row).
+func TestFKPairRefusalStillFiresWhenOneEndIsOperatorUnmaskedAndTheOtherMasked(t *testing.T) {
+	t.Parallel()
+	members, lookup, schema := fkPairTables()
+	cls := blockedPairClassification(members, lookup)
+	memberTag := ref.ColumnRef{Table: members, Column: "tag"}
+	lookupTag := ref.ColumnRef{Table: lookup, Column: "tag"}
+	dm := cls.Decisions[memberTag]
+	dm.Category = pipeline.CatCredential
+	dm.Masked = false
+	dm.Source = pipeline.ByFlagUnmask
+	cls.Decisions[memberTag] = dm
+	dl := cls.Decisions[lookupTag]
+	dl.Category = pipeline.CatCredential
+	dl.Masked = true
+	cls.Decisions[lookupTag] = dl
+
+	p := fkPairRun(members, lookup, schema, cls)
+	if err := p.checkFKPairRefusal(); err == nil {
+		t.Fatal("checkFKPairRefusal returned nil: one end operator-unmasked and the other masked verbatim-copies the unmasked end's value across a validated FK and must still refuse")
+	}
+}
+
+// TestFKPairRefusalStillFiresWhenNeitherEndIsResolved is
+// reconciledByALaterPass's own control on the "resolved" half: two ends
+// sharing a category is not enough on its own if neither end ever actually
+// masked or was explicitly unmasked by the operator -- that is fkPairs' own
+// blocked-pair shape with nothing having moved since, and must still refuse.
+func TestFKPairRefusalStillFiresWhenNeitherEndIsResolved(t *testing.T) {
+	t.Parallel()
+	members, lookup, schema := fkPairTables()
+	cls := blockedPairClassification(members, lookup)
+	memberTag := ref.ColumnRef{Table: members, Column: "tag"}
+	lookupTag := ref.ColumnRef{Table: lookup, Column: "tag"}
+	dm := cls.Decisions[memberTag]
+	dm.Category = pipeline.CatCredential
+	cls.Decisions[memberTag] = dm
+	dl := cls.Decisions[lookupTag]
+	dl.Category = pipeline.CatCredential
+	cls.Decisions[lookupTag] = dl
+
+	p := fkPairRun(members, lookup, schema, cls)
+	if err := p.checkFKPairRefusal(); err == nil {
+		t.Fatal("checkFKPairRefusal returned nil: a shared category with neither end masked nor operator-unmasked is not resolved")
+	}
+}
+
 // TestFKPairWithNoRefusalIsNotRefusedAtPlan is the control: an ordinary
 // classification, with neither column's Refused set, must not trip this
 // check. Without it, a check that refused every table with a foreign key

@@ -31,12 +31,24 @@ which found curating the rest was either unnecessary or, twice, genuinely
 unsafe, and narrowed the rule instead of curating through it. The count did
 not move there in the end: metabase's own two new flags turned out not to be
 needed either once the rule was narrowed, so twenty-seven flags, nineteen
-`--unmask`, is where that section starts and where "the fix round" below
-leaves it. **The T-0257 section, the last one below, is what moves it to the
-count at the top of this file**: `internal/plan` gained the exit-12 refusal
-`internal/classify`'s own `Decision.Refused` had gone unread since T-0253, and
-wiring it up cost metabase one more `--unmask` — twenty-eight flags, twenty
-`--unmask`, is the count `make torture` reports today.
+`--unmask`, is where that section starts. **The T-0257 section below moved it
+to twenty-eight flags, twenty `--unmask`**: `internal/plan` gained the
+exit-12 refusal `internal/classify`'s own `Decision.Refused` had gone unread
+since T-0253, and wiring it up cost metabase one more `--unmask` over a pair
+the classifier's own later passes were always going to reconcile anyway.
+**The T-0258 section, the last one below, moved it back to twenty-seven and
+then, on review, back up again to twenty-eight — where it stays.** The first
+cut of T-0258's narrowing treated a decision as "resolved" once it was
+genuinely masked *or* left unmasked on the operator's own say-so, which
+brought the count back to twenty-seven — but that cut also admitted the one
+shape the fk-pair refusal exists to catch: a masked column whose validated-FK
+partner is a different column, left with its production value copied
+verbatim because an *unrelated* `--unmask` happens to sit on it. A review
+round found that shape is exactly metabase's own
+`core_session.id`/`login_history.session_id` pair, corrected the narrowing to
+require both ends genuinely `Decision.Masked`, and metabase's second
+`--unmask` is back — **twenty-eight flags, twenty `--unmask`, seven
+`--skip-table`, one `--key`, is the count `make torture` reports today.**
 
 It was forty-five flags — thirty-seven `--unmask` — when this file was first
 written. Eighteen of those `--unmask` flags were one defect, T-0098, and the
@@ -783,6 +795,116 @@ that narrows `checkFKPairRefusal` to skip a pair once both ends are already
 `Masked` under the same final `Category` would remove this one flag without
 weakening what the refusal is for. Filed as **T-0258** rather than done here,
 to stay inside this task's own paths.
+
+## T-0258: the fk-pair refusal narrowed to skip a pair a later pass already reconciles
+
+T-0257's own section above named the fix rather than taking it: `internal/plan`'s
+`checkFKPairRefusal` reads `Decision.Refused`, which `fkPairs` sets at the point
+in the pipeline where it runs and never clears — so it refuses a pair even when
+a later, separate classify pass (`propagateKeys`, `sameColumnName`) goes on to
+bring both ends into agreement anyway, the exact shape `metabase.core_session.id`/
+`public.login_history.session_id` is. `checkFKPairRefusal` (`internal/plan/fkpair.go`)
+now reads the classification's **final** state — the same map `checkWriteBack`
+already reads, after every classify pass has run — and skips the refusal once
+it finds `reconciledByALaterPass` true of both ends: the identical, non-`none`
+`Category`, with each end either genuinely `Masked` or left unmasked on the
+operator's own say-so (`Decision.Source`, the same distinction
+`unmaskedByOperator` already draws for the "both explicitly unmasked" escape
+just above it).
+
+**Measuring the metabase pair itself found the first, simpler cut wrong.**
+The task's own log entry describes the fix as "skip the refusal when both are
+`Masked` and share the same final `Category`", and that was the first thing
+tried — `reconciledByALaterPass(d, partner) = d.Masked && partner.Masked &&
+d.Category == partner.Category && d.Category != CatNone`. Run against the
+real fixture rather than a hand-built classification, it left the pair
+refused: `core_session.id` already carries its own `--unmask` from before
+T-0257, for the unrelated reason recorded on the flag itself ("an opaque
+session id, regenerated on every login") — and that flag sets
+`Decision.Source = pipeline.ByFlagUnmask` and `Decision.Masked = false` on
+`core_session.id`, independently of anything `fkPairs` or `propagateKeys`
+decided. `propagateKeys` still carries `credential` onto `session_id`
+regardless, and `session_id` has no `--unmask` of its own, so it ends up
+genuinely `Masked == true` under that category. The two ends therefore share
+a `Category` but disagree on literal `Decision.Masked` — one true, one false
+— and the literal reading of the log entry left this exact case, the one the
+task measures against, still refusing. The fix is `resolved(d)`:
+`d.Masked || unmaskedByOperator(d)`, applied to both ends rather than
+`Masked` alone — a column an operator has explicitly, separately said is fine
+to leave with its production value is a resolved end for this rail's purposes
+exactly as a genuinely masked one is; `fkPairs`' own refusal predates that
+flag and has nothing to do with it.
+
+**What the narrowing does not touch.** A pair `fkPairs` refuses for a type
+conflict (the partner's own name-matched category disagrees) or on measured
+two-letter-code evidence (the partner is a lookup, not personal data) never
+reaches a non-`none` `Category` on the blocked partner at all —
+`fkPartnerRaisable` stops it there, and `propagateKeys`' own `type_conflict`
+branch leaves the child's `Category` untouched — so `reconciledByALaterPass`
+reports false on the `Category` check alone and the refusal still fires
+exactly as T-0257 built it, whichever cut of "resolved" is used.
+`TestFKPairIsRefusedAtPlan` and `TestFKPairRefusalIsClearedWhenBothEndsAreUnmasked`
+(`internal/plan/fkpair_test.go`) are unchanged and still pass. Four new tests
+hold the narrower shape: `TestFKPairRefusalStillFiresWhenOnlyOneEndIsMasked`
+and `TestFKPairRefusalStillFiresWhenCategoriesDiffer` pin the category side;
+`TestFKPairRefusalStillFiresWhenNeitherEndIsResolved` pins that a shared
+category with neither end masked nor operator-unmasked still refuses — the
+plain "nothing has moved" shape `fkPairs` itself produces. The plan-level
+test for the reconciled pair is
+`TestFKPairRefusalIsSkippedWhenALaterPassReconcilesThePair` (both ends
+genuinely `Masked`, the simple case). The metabase shape itself, reduced —
+one end `Source == pipeline.ByFlagUnmask`, `Masked == false`; the other
+genuinely `Masked == true`; identical `Category` on both — was originally
+held by a test of the same shape asserting the refusal was skipped; the
+review round below renamed it
+`TestFKPairRefusalStillFiresWhenOneEndIsOperatorUnmaskedAndTheOtherMasked`
+and inverted the assertion, since that shape is exactly what the corrected
+rule still refuses.
+
+**Re-measured, metabase's second `--unmask` was gone and the suite settled at
+twenty-seven — until a review round found the measurement was hiding an I1
+gap rather than closing one, and put it back.** The paragraph above shipped
+first with `reconciledByALaterPass(d, partner) = d.Category != CatNone &&
+d.Category == partner.Category && resolved(d) && resolved(partner)`, where
+`resolved(d) = d.Masked || unmaskedByOperator(d)`. That reading accepts a
+pair where ONE end is genuinely masked and the other end is left unmasked —
+not because a later pass reconciled anything, but because an *unrelated*
+`--unmask` happens to sit on it, for a reason that has nothing to do with the
+pair at all. `core_session.id`'s flag is exactly that: "an opaque session id,
+regenerated on every login" says nothing about `session_id`'s side of the
+join, and `session_id` is masked to `credential` regardless. Nothing else
+catches the resulting shape — `equality.go`'s `maskedMembers` only groups
+columns whose decision is `Masked`, so the unmasked `core_session.id` is
+never in the group, and `keyChildren`'s exemption needs `isKeyFamily`, which
+a `character varying` key does not satisfy — so a masked FK child whose
+parent's identical values are copied verbatim reaches the target with
+nothing having refused it: the load adds the edge `NOT VALID` and
+`internal/verify/fk.go`'s own orphan count fails the run at **exit 8** for a
+key the plan could have refused instead, at exit 12, before the first row
+moved (I1, THREAT_MODEL.md T8; `internal/classify`'s own `markNeverMasked`
+comment names this exact shape as broken).
+
+The metabase fixture's own clean I1 pass never demonstrated the failure, and
+that is a property of the fixture rather than of the shape: `login_history`
+is nullable (`ON DELETE SET NULL`) and
+`testdata/torture/_common/fill.sql`/`generate.sql`'s own `login_history`
+UPDATE never touches `session_id`, so the column is NULL in every row the
+fixture writes and `TestI1ForeignKeysResolve`'s anti-join has nothing to find
+regardless of what the plan allowed through. `reconciledByALaterPass` now
+requires `d.Masked && partner.Masked` on both ends, with no
+`unmaskedByOperator` alternative — the literal reading the task's own log
+entry for T-0258 asked for in the first place — and `session_id` needs its
+`--unmask` back: `public.login_history.session_id=an opaque session id, the
+same value as the session it belongs to`, restored in
+`internal/invariants/torture_catalogue_test.go`'s metabase entry. The settled
+count at the top of this file stays at **twenty-eight — twenty `--unmask`,
+seven `--skip-table`, one `--key`**, where the T-0257 section above already
+left it; this review round is a correction to the narrowing, not a second
+move.
+
+`ROADMAP.md`'s gate-5 line already names twenty-eight from T-0257's own
+landing and needs no further correction; that file is outside this task's
+paths regardless.
 
 ## Found and not fixed
 

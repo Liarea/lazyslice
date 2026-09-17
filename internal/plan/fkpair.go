@@ -62,10 +62,69 @@ func (p *run) checkFKPairRefusal() error {
 				// the escape below is what taking it looks like.
 				continue
 			}
+			if reconciledByALaterPass(d, partner) {
+				// fkPairs refused at the point in the pipeline where it runs,
+				// but a later, separate pass -- propagateKeys or
+				// sameColumnName -- went on to bring both ends into
+				// agreement anyway (T-0258, docs/TORTURE.md's own T-0257
+				// section). p.cls.Decisions holds classify's final answer,
+				// after every pass has run, so this reads the same map
+				// checkWriteBack does -- nothing here is a snapshot of an
+				// earlier stage.
+				continue
+			}
 			return p.refuseFKPair(t.Ref, col.Name, d)
 		}
 	}
 	return nil
+}
+
+// reconciledByALaterPass reports whether both ends of a pair fkPairs refused
+// were nonetheless brought into agreement by a later classify pass: the same
+// non-none category on both, and both ends genuinely Decision.Masked (T-0258,
+// narrowed further in review). When that holds, the two ends load
+// consistently -- the identical masked output on both, determinism over one
+// category and one key -- and the refusal buys nothing an operator can act on.
+//
+// This is deliberately the literal reading the task's own log entry asked
+// for, not the wider one an earlier version of this function took. That
+// wider version also accepted a decision left unmasked on the operator's own
+// say-so (unmaskedByOperator) as a "resolved" end, so it reported true for a
+// pair where ONE end is masked and the other end's identical production
+// value is copied verbatim across the validated foreign key -- the metabase
+// core_session.id (operator-unmasked)/login_history.session_id (masked
+// credential) shape is exactly that, and it is precisely the shape
+// internal/classify's own markNeverMasked comment describes as broken: the
+// child is masked, the parent is copied verbatim, the load adds the edge NOT
+// VALID and internal/verify/fk.go counts the orphans and fails the run at
+// exit 8 (I1, THREAT_MODEL.md T8). Before T-0258 that shape was refused at
+// plan, exit 12, before the first key was fetched, and the printed escape
+// (--unmask both ends) also restored FK consistency; the wider cut let the
+// run proceed with no rail catching it at all -- equality.go's maskedMembers
+// only groups columns whose decision is Masked, so an unmasked parent is not
+// in the group, and keyChildren's exemption needs isKeyFamily, which a text
+// key does not satisfy. That the metabase fixture never demonstrated the
+// failure is a property of the fixture, not of the rule: session_id is
+// nullable (FK ON DELETE SET NULL) and the fixture's generator only ever
+// writes NULL into it, so I1's dangling-row check passes vacuously over an
+// FK pair this shape would otherwise leave unvalidatable.
+//
+// Requiring literal Decision.Masked on both ends therefore leaves the
+// metabase pair refused, costing the operator the second --unmask flag
+// docs/TORTURE.md's T-0257 section originally measured (restored by this
+// review round; T-0258's own "re-measured" paragraph is corrected to match).
+// That is the correct trade: a refusal an operator can lift by naming both
+// columns, against a rail that admits the one shape it exists to catch.
+//
+// It does not weaken the refusal for the pair this rail exists to catch: a
+// type conflict or a measured two-letter-code lookup never reaches a
+// non-none category on the blocked partner at all (fkPartnerRaisable stops it
+// at Category == CatNone, and propagateKeys' own type_conflict branch leaves
+// the child's Category untouched), so this reports false and refuseFKPair
+// still fires.
+func reconciledByALaterPass(d, partner pipeline.Decision) bool {
+	return d.Category != pipeline.CatNone && d.Category == partner.Category &&
+		d.Masked && partner.Masked
 }
 
 // unmaskedByOperator reports whether a decision was left unmasked because the

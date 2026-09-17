@@ -189,30 +189,35 @@ var tortureSchemas = []tortureSchema{
 		// Metabase data -- and classify's same-column-name rule then carries
 		// that decision onto audit_log.model too, which generate.sql never
 		// fills at all.
-		// public.login_history.session_id joined the flags under T-0257:
-		// internal/plan's new checkFKPairRefusal (fkpair.go) reads
-		// Decision.Refused, which internal/classify already sets on both
-		// ends of a validated foreign key whose partner cannot be raised
-		// the same way. core_session.id's own value signal decides it
-		// credential (200/200 samples look like secrets) before
+		// public.login_history.session_id needs its own --unmask again
+		// (T-0258's own review round, docs/TORTURE.md's own T-0257 and
+		// T-0258 sections). internal/plan's checkFKPairRefusal (fkpair.go)
+		// reads Decision.Refused, which internal/classify sets on both ends
+		// of a validated foreign key whose partner cannot be raised the same
+		// way -- core_session.id's own value signal decides it credential
+		// (200/200 samples look like secrets) before
 		// unknownColumnsBesideCertain ever runs, so when session_id (no
 		// samples of its own, beside login_history's certain ip_address)
 		// tries to raise itself alongside its parent, fkPairs finds the
-		// parent already carrying a decision and refuses the pair --
-		// even though FK propagation (a later, separate pass) goes on to
-		// carry core_session.id's credential category onto session_id
-		// regardless, which is what actually happens to it. The refusal
-		// fires on the classify-time snapshot and does not know the later
-		// pass will agree; docs/TORTURE.md's own T-0257 section has the
-		// full account, including that this looks like a case the check
-		// could in principle narrow -- filed rather than fixed here, to
-		// stay inside this task's paths.
+		// parent already carrying a decision and records a refusal on both
+		// -- but FK propagation (a later, separate pass) then carries
+		// core_session.id's credential category onto session_id regardless,
+		// while core_session.id itself stays Decision.Masked == false, left
+		// that way by its own, unrelated --unmask flag below (Source ==
+		// ByFlagUnmask). checkFKPairRefusal's reconciliation check requires
+		// both ends of the pair to be genuinely Decision.Masked, not merely
+		// "resolved" by an operator's say-so on one end and a real mask on
+		// the other: that mixed shape is a masked child whose validated-FK
+		// parent is copied verbatim, exactly what internal/classify's own
+		// markNeverMasked comment describes as unvalidatable at load (I1,
+		// THREAT_MODEL.md T8) -- so the refusal still fires here and the
+		// operator has to --unmask both ends.
 		flags: []string{
 			"--skip-table", "public.model_index_value",
 			"--skip-table", "public.table_privileges",
 			"--unmask", "public.core_session.id=an opaque session id, regenerated on every login",
-			"--unmask", "public.permissions_group.name=a permissions group's name, not a person's",
 			"--unmask", "public.login_history.session_id=an opaque session id, the same value as the session it belongs to",
+			"--unmask", "public.permissions_group.name=a permissions group's name, not a person's",
 		},
 		mustHoldRows: []string{"public.login_history", "public.report_card", "public.metabase_database", "public.core_session"},
 		mustBeSubset: []string{"public.login_history", "public.report_card"},
