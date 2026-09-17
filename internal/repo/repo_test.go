@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -301,6 +302,12 @@ func TestParseCheckIgnoreZNegation(t *testing.T) {
 // "not negated" (secret.file.tracked never fired, the header claimed the key
 // was protected, and it was committed anyway).
 func TestNegatedGitignoreEntryWithColonSource(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("a colon is not a legal character in a windows directory name, so the source path this test pins cannot exist there")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("a colon is not a legal character in a windows directory name, so the source path this test pins cannot exist there")
+	}
 	root := gitRepo(t)
 	// A writable root .gitignore, so appendMissing has something to add the
 	// unanchored `lazyslice.secret` entry to — the one that would otherwise
