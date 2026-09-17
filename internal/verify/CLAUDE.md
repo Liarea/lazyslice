@@ -1224,3 +1224,34 @@ cannot establish that the database artefact holds no sensitive literal.
   `TestTheCatalogPassFindsALiteralNoRowScanCanSee`: a pricing-tier enum label
   is not a hit, and a genuine address in the same object class still is —
   the `addressLiteralShape` guard, above.
+
+## T-0221 (2026-09-16): the phone entry reads a configured region, and only that
+
+The phone entry in `validators.go` still calls `textsig.ValidPhone` (the
+international-only, `PhoneRegionHint` "ZZ" reading) as its `ok`; the region
+widening lives in `secondnet.go`'s `count`, now a method on `*state` rather
+than a free function so it can read `s.opts.PhoneRegion`. When a value fails
+`val.ok` and the entry is `pipeline.CatPhone` and `Options.PhoneRegion != ""`,
+`count` also asks `textsig.ValidPhoneRegion(text, s.opts.PhoneRegion)`, on the
+entry's own `strong`, any-hit-fails footing — no new entry, no new threshold.
+`Options.PhoneRegion` is `internal/core`'s resolved value (the
+`--phone-region` flag if given, else the committed yml's `phone_region`),
+the same one `internal/classify` classified the row with.
+
+**It is deliberately never `internal/classify`'s own guessed-region list.**
+That package tries a short, fixed set of common regions when no region is
+configured, and masks a hit only with corroboration — a column's name
+matching the phone pattern, or a proven personal neighbour in the same table
+(`internal/classify/CLAUDE.md`'s own T-0221 section has the full account,
+including the collision the first landing had with this package's own
+national_id digits entry before the guess was scoped to character families
+only). Reading that same guessed list here, over an already-loaded target,
+would be the row-path corroboration argument won with the opposite hand: a
+column this net refuses is a refusal an operator has to act on, with
+`--unmask` the only way past it, so a ten-digit account column that happened
+to clear one of fifteen guessed regions would cost a correct run its green
+tick on no real evidence. Staying on the configured region and the
+international form only is what keeps this net answering the question §6
+item 4 asks — does the loaded target hold a value of this shape — rather
+than repeating a guess this package has no way to corroborate against a row
+scan the way `internal/classify` can against a column's neighbours.

@@ -666,3 +666,19 @@ for a refusal that was reaching people as an internal error.
   record, and line 88 states fingerprint expiry for columns only, both now
   understating what the tool does since the yml `types:` block landed — is
   filed as **T-0216** rather than fixed in place, per root CLAUDE.md's rule.
+
+## Decisions made for T-0221 (2026-09-16, `--phone-region`)
+
+- **`r.phoneRegion` is resolved once, in `classifyPrior`, on the same "flags,
+  last, so they win" rule `planRequest` already states for `--allow-type-
+  literal`**: `r.req.PhoneRegion` when the flag was given, else the committed
+  yml's own `Config.PhoneRegion`, else `""`. `classifyPrior` used to
+  short-circuit to `r.prior` unchanged whenever `--unmask` carried no flags;
+  it now also copies and overrides `PhoneRegion` when the flag is set, so a
+  region an operator names reaches the classifier for *this* run and the
+  yml's own value still carries forward with no flag on the next one.
+  `internal/emit` (`Options.PhoneRegion`) and `internal/verify`
+  (`Options.PhoneRegion`) both read `r.phoneRegion` rather than `r.req`
+  directly, so a re-run with no flag classifies and verifies under the same
+  region the committed file already recorded — not the request's own
+  (unset) field.

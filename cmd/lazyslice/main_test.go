@@ -351,6 +351,8 @@ func TestExitCodes(t *testing.T) {
 		{"--cap with no table", []string{"--cap", "=10"}, ExitUsage},
 		{"--depth 0", []string{"--depth", "0"}, ExitUsage},
 		{"--memory-budget nonsense", []string{"--memory-budget", "lots"}, ExitUsage},
+		{"--phone-region UK", []string{"--phone-region", "UK"}, ExitUsage},
+		{"--phone-region typo", []string{"--phone-region", "GX"}, ExitUsage},
 	}
 
 	for _, c := range cases {
@@ -645,6 +647,53 @@ func TestCapShapes(t *testing.T) {
 				if req.TableCaps[table] != n {
 					t.Errorf("TableCaps[%q] = %d, want %d", table, req.TableCaps[table], n)
 				}
+			}
+		})
+	}
+}
+
+// --phone-region is validated at the flag surface (T-0221 review round,
+// finding 1): an unrecognised value used to reach the classifier and the
+// second net unchecked, where it parsed zero phone numbers and silently
+// disabled the region-aware controls the flag exists to add. finish now
+// normalises to upper case and refuses anything
+// textsig.SupportedPhoneRegion does not recognise, the way a misspelled
+// --memory-budget already is.
+func TestCheckPhoneRegion(t *testing.T) {
+	cases := []struct {
+		name    string
+		in      string
+		wantErr bool
+		want    string
+	}{
+		{name: "unset", in: "", want: ""},
+		{name: "already upper case", in: "GB", want: "GB"},
+		{name: "lower case normalises", in: "gb", want: "GB"},
+		{name: "padded with whitespace", in: " GB ", want: "GB"},
+		{name: "the common non-ISO synonym", in: "UK", wantErr: true},
+		{name: "a typo", in: "GX", wantErr: true},
+		{name: "not a region at all", in: "notaregion", wantErr: true},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			req := core.NewRequest()
+			req.PhoneRegion = c.in
+			err := finish(nil, &req, &rawFlags{})
+			if c.wantErr {
+				if err == nil {
+					t.Fatalf("finish(--phone-region %q) = nil, want a usage error", c.in)
+				}
+				if !strings.Contains(err.Error(), "usage") {
+					t.Errorf("finish(--phone-region %q) = %v, want it to wrap errUsage", c.in, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("finish(--phone-region %q) = %v, want nil", c.in, err)
+			}
+			if req.PhoneRegion != c.want {
+				t.Errorf("PhoneRegion = %q, want %q", req.PhoneRegion, c.want)
 			}
 		})
 	}

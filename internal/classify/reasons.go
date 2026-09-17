@@ -42,6 +42,16 @@ const (
 	phraseProse      = "hold prose with dictionary names"
 	phraseJSONLeaf   = "hold personal data at a JSON leaf"
 	phraseByteaText  = "hold printable text that parses as personal data"
+	// phraseE164Region is buildValidators' region-aware phone entry (T-0221):
+	// a value that parses only under the configured --phone-region/
+	// phone_region, not under phraseE164's fixed "ZZ" (international-only)
+	// hint. decide's own regionAssumed appends a second fragment naming the
+	// region itself.
+	phraseE164Region = "valid national-format phone numbers"
+	// phraseGuessedPhone is guessedPhoneHit's own (T-0221): a value that
+	// parses under one of phoneGuessRegions, with no region configured. It
+	// never decides a column by itself -- see guessedPhoneColumns.
+	phraseGuessedPhone = "parse as phone numbers under a guessed region"
 )
 
 // validatorPhrases is every phrase the fragment set will accept.
@@ -60,6 +70,8 @@ var validatorPhrases = []string{
 	phraseProse,
 	phraseJSONLeaf,
 	phraseByteaText,
+	phraseE164Region,
+	phraseGuessedPhone,
 }
 
 // The placeholder classes. Each is a character set, not a wildcard: a category
@@ -317,6 +329,26 @@ var fragments = []*fragment{
 		name:    "strong_hit_free_text",
 		format:  "a strong validator hit below the category threshold: masked as free_text, --unmask to keep it unmasked",
 		pattern: `a strong validator hit below the category threshold: masked as free_text, --unmask to keep it unmasked`,
+	},
+	{
+		// T-0221: names the region a national-format phone hit was read
+		// under, so the operator can see the assumption rather than infer it
+		// from the flag they may not have typed on this run (a committed
+		// phone_region: carries forward with no flag needed). regionAssumed
+		// in classify.go is what decides whether this is appended.
+		name:    "phone_region_configured",
+		format:  "phone region assumed: %s",
+		pattern: `phone region assumed: ` + reIdent,
+	},
+	{
+		// T-0221's other half: a guessed-region phone hit that
+		// guessedPhoneColumns decided to trust, because the column's own name
+		// already matches rules.yml's phone pattern or a neighbouring column
+		// in the same table is proven personal (the T-0187 pattern
+		// requiresCorroboration uses on internal/verify's side).
+		name:    "phone_region_guessed",
+		format:  "no --phone-region configured, masked on a guessed-region hit corroborated by name or a personal neighbour",
+		pattern: `no --phone-region configured, masked on a guessed-region hit corroborated by name or a personal neighbour`,
 	},
 }
 

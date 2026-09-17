@@ -347,6 +347,15 @@ var validators = []validator{
 		minRatio: nationalIDDigitsThreshold, sequenceExempt: true, requiresCorroboration: true,
 		ok: textsig.ValidNationalIDDigits,
 	},
+	// ok stays textsig.ValidPhone, the international-only ("ZZ") reading:
+	// count (secondnet.go) is where the region-aware widening lives, because
+	// this entry's ok is a plain func(string) bool with no room for a
+	// per-run region and the second net's own Options carries one now
+	// (T-0221). When Options.PhoneRegion is set, count also asks
+	// textsig.ValidPhoneRegion under it, on this entry's same strong,
+	// any-hit-fails footing -- never internal/classify's own guessed-region
+	// list, which stays corroboration-gated on that side only (Options.
+	// PhoneRegion's own comment has the reason).
 	{category: pipeline.CatPhone, name: "phone", text: true, strong: true, ok: textsig.ValidPhone},
 	{category: pipeline.CatNetworkID, name: "network_id", text: true, strong: true, ok: func(s string) bool {
 		return textsig.ValidIP(s) || textsig.ValidMAC(s)

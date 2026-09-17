@@ -39,6 +39,16 @@ reduces it against ten of the twenty languages it sourced, verified false
 before the task's change and true after — A10's own Khmer/Lao/Amharic
 instance is not one of the ten, and stays open (tracker T-0197) rather than
 closed here, because the dictionary cannot be widened far enough to reach it.
+**025 is a tenth**, from the round-3 red team's own kontaktnr/contact
+finding: a real, correctly formatted UK phone number, dictated in one column
+and written plainly in another, crossed under exit 0 because every phone
+validator on the row path parsed under a fixed international-only region
+hint; T-0221's `--phone-region` fixes the row path the way `--allow-type-
+literal` fixed a different refusal with no escape at all. **026 is not a
+reduction of a torture-schema failure and says so in its own header**, on
+010's own precedent: it is the false-positive control the fix's own
+corroboration requirement needs, written directly against the finished
+behaviour rather than reduced from a run that failed.
 
 The files are loaded and run by `make torture` (`internal/invariants`'s
 `TestTortureRegressions`, behind the `integration` and `torture` build tags), so
@@ -138,6 +148,39 @@ several crossing unmasked — has to compare elements and not the array's
 rendered literal, which the whole-array form the check used to read could
 never reflect.
 
+A fifth, added by **T-0221**, is `not-masked:` and reads the *emitted yml*
+rather than the target's rows:
+
+```
+-- not-masked: public.t.col   the yml must record no masker: and no unmask:
+--                            for the column -- internal/classify decided
+--                            none
+```
+
+Each column it names is read back out of the run's own `lazyslice.yml`
+(`assertTortureColumnNotMasked`) and must carry neither a `masker:` nor an
+`unmask:` entry. It exists for the same reason `not-copied:` does, in the
+opposite direction: `expect: ok` alone cannot tell "left alone" from "masked,
+but the masker's own output happened not to trip anything a rows-based check
+would catch" — `phone`'s masker accepts the same text and numeric families a
+false-positive guessed-region hit would reach, so a wrongly masked column can
+still pass every check that only reads rows. It is what 026 asserts, for the
+corroboration gate a guessed-region phone hit needs before it may decide
+anything (T-0221; see `internal/classify/CLAUDE.md`'s own note on the point).
+
+`--phone-region` is the sixth optional header, and it is not a check but an
+extra flag:
+
+```
+-- phone-region: GB   passed to the run as --phone-region GB
+```
+
+It exists because a defect can be specific to the region-aware phone reading
+rather than to the classifier's ordinary name or value signals, and the
+harness's fixed argument list (`--source`, `--target`, `--root`, `--take`,
+`--secret-file`, `--config`, `--yes`) had no room for a flag beyond those
+until T-0221. It is what 025 sets.
+
 ## Files
 
 | File | From | Defect |
@@ -166,6 +209,8 @@ never reflect.
 | `022-national-id-in-a-surrogate-key-column.sql` | the review round that followed the T-0187 round | **the cost of 021's first-draft fix**: gating the key exemption on internal/classify's own surrogate-key decision meant a primary key of real, non-dense SSNs — a shape classify's own signals find nothing in — was exempted along with the ordinary keys 021 pins, and crossed into the target verbatim; the values-based fix in 021 refuses it because the column is not dense, whatever classify decided about it being a key. Carries a corroborating `email` column since 023 (below) |
 | `023-sparse-fixed-prefix-reference-block-is-not-national-id.sql` | the review round that followed 022's | **the cost of 021's fix, the other side of the ratio**: a sparse column with a fixed leading prefix is neither dense (021's own exemption) nor a date (021's own exclusion), so an ordinary account-number or invoice-number column still cleared the ratio at essentially 1.0 and refused a run holding no personal data at all; fixed by requiring corroboration — a rules.yml national_id name-pattern hit on the column, or a certain-or-likely personal column in the same table — before the ratio is asked at all, which is also why 020 and 022 each gained a corroborating column of their own |
 | `024-multilingual-name-in-an-unrecognised-column.sql` | the 2026-09-15 red team round 2, R2-05/A10, and T-0188 | a person's full name in a language `internal/textsig/names.txt` did not carry, in a column called `label` no rule matches, in a table with no other personal column — reported "no name or value signal" and crossed verbatim; fixed by sourcing given/family-name stock for twenty languages from Wikidata (CC0), documented in `THIRD_PARTY_NOTICES.md`. Ten rows, one per newly-sourced language (German, French, Spanish, Portuguese, Turkish, Hindi romanised, Arabic romanised, Japanese romanised, Korean romanised, Chinese pinyin), each verified false against a pre-T-0188 checkout and true after. A10's own Khmer/Lao/Amharic names stay an open residual — tracker T-0197 — because Wikidata's CC0 coverage for them is three, twelve and thirteen items total, nowhere near usable |
+| `025-national-format-phone-region-kontaktnr.sql` | the 2026-09-15 red team round 3, attack:1:r3 | **a leak with no obfuscation needed for half of it**: a real UK phone number, dictated in words in one column and written plainly with spaces and brackets in another (`kontaktnr`, a name no rule pack pattern matches), crossed verbatim under exit 0 because every phone validator parsed under a fixed international-only region hint; fixed by `--phone-region REGION` (T-0221), which parses a second candidate under the configured region on the same strong footing the international entry has, on both nets |
+| `026-ten-digit-account-number-is-not-a-guessed-phone.sql` | the T-0221 review round (not a torture-schema reduction — see this file's own prose above) | the false-positive control T-0221's corroboration gate needs: an ordinary ten-digit account number, in a character column with no name or neighbour signal, must stay unmasked when no `--phone-region` is configured, because a short built-in list of guessed regions clears such a number by chance often enough that masking on the guess alone would cost a real column to no evidence at all; asserts against the emitted yml (`not-masked:`) rather than the target's rows, because a wrongly masked column here would still pass every rows-based check |
 
 009's header now says `ok`. It did not always: `arrayArrivesAsLiteral` in
 `internal/plan/writeback.go` was written as a stand-in for the element-wise

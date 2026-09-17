@@ -142,3 +142,14 @@ the file; let a re-read narrow a prior decision instead of only tightening it.
   both to decide whether a prior entry has expired and to stamp a fresh one
   when a flag is given, and the result travels to `Emit` already attached to
   each `pipeline.TypeAllow`, not as a separate map.
+
+## T-0221 (2026-09-16): `phone_region:` under `classify:`
+
+`Options.PhoneRegion` and `Config.PhoneRegion` are a plain pass-through, on
+`PasswordCommand`'s own footing rather than `Unmask`'s or `Types`'s: there is
+no per-column or per-type merge to decide, only a resolved string
+`internal/core` already computed (the flag if given, else the committed
+file's own value). `Emit` copies it straight onto `cfg.PhoneRegion`;
+`document.go` writes and reads it under `classify.phone_region`, beside
+`classify.extra_patterns`, because it is the classifier's own input and not a
+plan or an endpoint value.

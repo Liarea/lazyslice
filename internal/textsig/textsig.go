@@ -84,12 +84,59 @@ func validEmail(s string) bool {
 // number it spells (candidates.go).
 func ValidPhone(s string) bool { return anyCandidate(s, validPhone) }
 
-func validPhone(s string) bool {
+func validPhone(s string) bool { return validPhoneRegion(s, PhoneRegionHint) }
+
+// ValidPhoneRegion is ValidPhone under a caller-supplied libphonenumber
+// region instead of the fixed PhoneRegionHint ("ZZ", international only).
+//
+// An empty region behaves exactly like ValidPhone: PhoneRegionHint is
+// substituted, so a caller need not special-case "no region configured"
+// itself. A value already written in international form (a leading "+")
+// parses the same way whatever region is passed -- libphonenumber reads the
+// country code from the number itself -- so this only ever *widens* what
+// parses over ValidPhone: a national-format number such as "07911 123456" or
+// "020 7946 0958" needs a region to be read at all, which PhoneRegionHint can
+// never supply (T-0221, the 2026-09-15 red team round 3's kontaktnr/contact
+// finding: docs/reviews/2026-09-15-redteam/round3-still-leaking.json).
+//
+// It reads every spelling Candidates yields, exactly as ValidPhone does, so a
+// number dictated in words under the given region is the number it spells
+// (candidates.go).
+//
+// Which region to trust, and what a hit under it means, is the caller's
+// question and not this package's own rule (internal/textsig/CLAUDE.md): a
+// region an operator configured is different evidence from one a caller only
+// guesses, and internal/classify and internal/verify are where that
+// distinction is drawn, never here.
+func ValidPhoneRegion(s, region string) bool {
+	if region == "" {
+		region = PhoneRegionHint
+	}
+	return anyCandidate(s, func(c string) bool { return validPhoneRegion(c, region) })
+}
+
+// SupportedPhoneRegion reports whether region is exactly one of the region
+// codes libphonenumber's own table serves: upper case, two ASCII letters, no
+// synonym table of its own -- "gb" and "UK" both answer false, only "GB"
+// answers true for the United Kingdom. It answers a different question from
+// ValidPhoneRegion above: whether the *region string* is one libphonenumber
+// recognises at all, never whether a *number* parses under it. A caller that
+// skips this and hands ValidPhoneRegion a region it does not recognise gets a
+// silent "never parses" rather than a caller-visible refusal, which is what
+// this function exists to give internal/core's --phone-region validation
+// (T-0221 review round, finding 1: an unrecognised region used to reach the
+// classifier and the second net unchecked and silently disable controls
+// rather than refuse the flag).
+func SupportedPhoneRegion(region string) bool {
+	return phonenumbers.GetSupportedRegions()[region]
+}
+
+func validPhoneRegion(s, region string) bool {
 	s = strings.TrimSpace(s)
 	if s == "" || len(s) > 40 {
 		return false
 	}
-	num, err := phonenumbers.Parse(s, PhoneRegionHint)
+	num, err := phonenumbers.Parse(s, region)
 	if err != nil {
 		return false
 	}

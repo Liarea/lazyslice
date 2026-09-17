@@ -323,14 +323,14 @@ func (s *state) netColumn(ctx context.Context, col ref.ColumnRef, mode netMode) 
 		direct, fromLeaves := s.netStrings(v, mode)
 		for _, text := range direct {
 			own.nonNull++
-			count(text, false, mode, own.hits, distinct)
+			s.count(text, false, mode, own.hits, distinct)
 			if mode.digits {
 				seq.observe(text)
 			}
 		}
 		for _, text := range fromLeaves {
 			leaf.nonNull++
-			count(text, true, mode, leaf.hits, nil)
+			s.count(text, true, mode, leaf.hits, nil)
 		}
 		return nil
 	})
@@ -672,12 +672,21 @@ func isDocumentShape(doc any) bool {
 // document cannot move the denominator the column's own values are judged by.
 // distinct is nil on the leaf pass for the same reason — nothing there ever
 // reaches a dictionary-backed validator to record a digest for.
-func count(text string, fromLeaf bool, mode netMode, hits []int64, distinct []map[[sha256.Size]byte]struct{}) {
+func (s *state) count(text string, fromLeaf bool, mode netMode, hits []int64, distinct []map[[sha256.Size]byte]struct{}) {
 	for i, val := range validators {
 		if !applies(val, mode) || (fromLeaf && val.dict) {
 			continue
 		}
-		if !val.ok(text) {
+		hit := val.ok(text)
+		if !hit && val.category == pipeline.CatPhone && s.opts.PhoneRegion != "" {
+			// T-0221: the configured region only, on the same strong footing
+			// as val.ok's own international-only reading -- never the guessed
+			// list internal/classify's row path uses, which is corroboration-
+			// gated there for a reason that does not survive being asked of an
+			// already-loaded target (Options.PhoneRegion's own comment).
+			hit = textsig.ValidPhoneRegion(text, s.opts.PhoneRegion)
+		}
+		if !hit {
 			continue
 		}
 		hits[i]++

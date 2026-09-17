@@ -252,7 +252,7 @@ func assertTortureNoLiteralSurvives(ctx context.Context, t *testing.T, source, t
 
 // regressionHeader parses the five required keys and the four optional keys
 // testdata/regressions/README.md defines.
-var regressionHeader = regexp.MustCompile(`(?m)^--\s+(root|take|expect|found|why|unique-masked|equal-masked|masked-default|not-copied):\s+(.*?)\s*$`)
+var regressionHeader = regexp.MustCompile(`(?m)^--\s+(root|take|expect|found|why|unique-masked|equal-masked|masked-default|not-copied|not-masked|phone-region):\s+(.*?)\s*$`)
 
 // TestTortureRegressions runs every file in testdata/regressions/ and asserts it
 // still behaves the way its header says.
@@ -320,6 +320,9 @@ func TestTortureRegressions(t *testing.T) {
 				"--config", db.configPath(),
 				"--yes",
 			}
+			if r.phoneRegion != "" {
+				args = append(args, "--phone-region", r.phoneRegion)
+			}
 			res := runTool(ctx, t, db.dir, args...)
 			if res.exit != r.exit {
 				t.Fatalf("%s exited %d, want %d (%s):\n  %s", name, res.exit, r.exit, r.why, res)
@@ -342,6 +345,9 @@ func TestTortureRegressions(t *testing.T) {
 			}
 			for _, col := range r.notCopied {
 				assertTortureColumnNotCopied(ctx, t, connect(ctx, t, db.source), connect(ctx, t, db.target), col)
+			}
+			for _, col := range r.notMasked {
+				assertTortureColumnNotMasked(t, db.configPath(), col)
 			}
 			// Every regression that is expected to succeed is also expected not
 			// to leak. Some of these defects never changed an exit code at all:
@@ -387,7 +393,24 @@ type regression struct {
 	// the target directly rather than trusting expect: ok alone. Empty for
 	// every file that does not carry the key.
 	notCopied []string
-	image     string
+	// notMasked are the `not-masked:` key's schema.table.column entries
+	// (T-0221): the emitted yml must record no `masker:` and no `unmask:` for
+	// the column, i.e. the classifier decided none. It is the negative
+	// mirror of not-copied: that one proves a value the run should have
+	// masked did not survive; this one proves a value the run correctly left
+	// alone was not masked anyway on no real evidence -- `expect: ok` alone
+	// cannot tell "left alone" from "masked, but the masker happened not to
+	// change anything a --not-copied check would catch", since phone's own
+	// masker accepts the same numeric families a false-positive guess would
+	// have reached.
+	notMasked []string
+	// phoneRegion is the optional `phone-region:` key (T-0221): a value here
+	// is passed to the run as --phone-region, for a regression whose defect
+	// is specific to the region-aware phone reading rather than to the
+	// classifier's ordinary name/value signals. Empty for every file that
+	// does not carry the key, which is every file before this one.
+	phoneRegion string
+	image       string
 }
 
 // equalPair is one `equal-masked: CHILD = PARENT` claim. Every non-NULL value
@@ -423,7 +446,7 @@ func parseRegression(t *testing.T, path string) regression {
 	if err != nil {
 		t.Fatalf("torture: %s: take: %v", filepath.Base(path), err)
 	}
-	r := regression{root: fields["root"], take: take, why: fields["why"]}
+	r := regression{root: fields["root"], take: take, why: fields["why"], phoneRegion: fields["phone-region"]}
 
 	// The one optional key: a comma-separated list of schema.table.column.
 	for _, spec := range strings.Split(fields["unique-masked"], ",") {
@@ -487,6 +510,21 @@ func parseRegression(t *testing.T, path string) regression {
 				filepath.Base(path), spec)
 		}
 		r.notCopied = append(r.notCopied, spec)
+	}
+
+	// The fifth optional key: a comma-separated list of schema.table.column,
+	// each a column the emitted yml must record as unmasked -- no masker:,
+	// no unmask: (T-0221).
+	for _, spec := range strings.Split(fields["not-masked"], ",") {
+		spec = strings.TrimSpace(spec)
+		if spec == "" {
+			continue
+		}
+		if len(strings.Split(spec, ".")) != 3 {
+			t.Fatalf("torture: %s: not-masked: %q is not schema.table.column",
+				filepath.Base(path), spec)
+		}
+		r.notMasked = append(r.notMasked, spec)
 	}
 
 	// pgvector is not needed by any regression today; the field exists so that
@@ -730,6 +768,42 @@ func assertTortureColumnNotCopied(ctx context.Context, t *testing.T, source, tar
 			}
 		}
 	}
+}
+
+// assertTortureColumnNotMasked is not-masked's own check (T-0221): the
+// emitted yml must record no masker: and no unmask: for the column --
+// internal/classify decided none. It is not-copied's negative mirror: that
+// one proves a value the run should have masked did not survive anywhere in
+// the target; this one proves a value the run correctly left alone was not
+// masked at all, which `expect: ok` on its own cannot tell apart from "masked,
+// but the masker's own output happened not to trip a not-copied check" --
+// phone's masker accepts the same numeric and text families a false-positive
+// guessed-region hit would have reached, so a wrongly masked column here can
+// still pass every other check this suite has.
+func assertTortureColumnNotMasked(t *testing.T, path, spec string) {
+	t.Helper()
+
+	want, ok := parseColumnRef(spec)
+	if !ok {
+		t.Fatalf("torture: not-masked: %q is not schema.table.column", spec)
+	}
+	cfg := readEmittedConfig(t, path)
+	for name, col := range cfg.Columns {
+		ref, ok := parseColumnRef(name)
+		if !ok || ref != want {
+			continue
+		}
+		if col.Masker != "" {
+			t.Errorf("torture: not-masked: %s: the emitted %s records masker: %s, want none -- a "+
+				"guessed-region phone hit was masked with no corroboration", spec, path, col.Masker)
+		}
+		if col.Unmask != nil {
+			t.Errorf("torture: not-masked: %s: the emitted %s records an unmask: block, want none",
+				spec, path)
+		}
+		return
+	}
+	t.Fatalf("torture: not-masked: %s has no entry in the emitted %s", spec, path)
 }
 
 // ---------- the catalogue's own guards ----------

@@ -106,6 +106,11 @@ type endpointDoc struct {
 type classifyDoc struct {
 	// ExtraPatterns may add a category or raise a confidence; never lower.
 	ExtraPatterns []patternDoc `yaml:"extra_patterns"`
+	// PhoneRegion is --phone-region / the resolved value this run used
+	// (T-0221), carried forward so a re-run needs no flag -- the same
+	// pattern Root/Keys/Skipped already follow. Empty when none was ever
+	// configured.
+	PhoneRegion string `yaml:"phone_region"`
 }
 
 type patternDoc struct {
@@ -202,6 +207,7 @@ func toDocument(c *pipeline.Config) document {
 			Confidence: confidenceName(p.Confidence),
 		})
 	}
+	d.Classify.PhoneRegion = c.PhoneRegion
 	for col, cc := range c.Columns {
 		d.Columns[quoteColumn(col)] = columnDoc{
 			Category:   string(cc.Category),
@@ -322,6 +328,7 @@ func (d document) config() (*pipeline.Config, error) {
 			Confidence: conf,
 		})
 	}
+	c.PhoneRegion = d.Classify.PhoneRegion
 	for name, cd := range d.Columns {
 		col, err := parseColumn(name)
 		if err != nil {

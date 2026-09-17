@@ -979,3 +979,176 @@ own header and `internal/verify/CLAUDE.md`'s matching note explain how the
 replacement values were chosen: confirmed, by direct computation against
 `ValidNationalIDStructured` and `ValidNationalIDChecksumOnly`, to clear none
 of this package's twelve formats.
+
+## T-0221 (2026-09-16, the round-3 red team's kontaktnr/contact finding): a configured phone region, and a corroboration-gated guess
+
+`textsig.ValidPhone` (the single `phone` entry in `baseValidators`) parses
+under `textsig.PhoneRegionHint` ("ZZ") only, which admits a number already
+written in international form and nothing else. A national-format number —
+`07911 123456`, `020 7946 0958` — scored zero however many rows agreed,
+whatever the column was named, and whatever it was dictated in words rather
+than digits: `docs/reviews/2026-09-15-redteam/round3-still-leaking.json`'s
+attack:1:r3 put exactly that shape, with no obfuscation at all for the
+`kontaktnr` half, into a table whose name no `rules.yml` pattern matches, and
+300 rows crossed under exit 0 reporting "no name or value signal".
+
+**With a region configured, the row path parses a second candidate under it,
+on the same strong footing.** `--phone-region REGION` / the yml's own
+`classify.phone_region` (`pipeline.Config.PhoneRegion`) is resolved once, in
+`Classify`, into `state.region`. `buildValidators(region)` returns
+`baseValidators` unchanged when `region == ""`; otherwise it splices a second
+phone entry — `ok: func(_, s) bool { return textsig.ValidPhoneRegion(s,
+region) }`, `strong: true` — immediately after the international-only one, so
+the two sit together in the precedence order §4 states rather than at the
+end of the list. `state.validators` (built once per `Classify` call, since
+the entry closes over a per-run value) replaces every direct read of the old
+package `var validators`; `bestSignal`, `byteaTextSignal` and
+`compositeSignal` all take it as a parameter now (`vs []validatorEntry`)
+instead of reading a global. An operator-named region is trusted evidence on
+the same footing the international-only entry already has: the entry is
+`strong`, decided through the same generic ratio loop, no corroboration
+gate. `decide`'s `regionAssumed` appends a `phone_region_configured` reason
+fragment naming the region whenever `sig.strong` or `sig.strongHit` is this
+entry, so the reasons output states the assumption rather than leaving the
+operator to infer it from a flag they may not have typed on this run — the
+yml's own `phone_region:` carries the value forward, on the same
+"flags, last, so they win" rule `internal/core`'s `--allow-type-literal`
+merge already follows.
+
+**Alongside whatever region is configured, a short, fixed list of regions is
+also tried, and a hit decides nothing without corroboration.**
+`phoneGuessRegions` (fifteen large calling-code populations) is not offered to
+`bestSignal`'s ratio loop at all — trying it unconditionally would mask a
+column the moment some region's numbering plan fit by chance, the same
+false-positive shape `internal/verify/validators.go`'s `requiresCorroboration`
+note measures for a sparse, fixed-prefix `national_id` digits column (T-0187's
+third review round). Instead, `base` computes `guessedPhoneHit` (an OR across
+the list,
+≥`validatorThreshold`) separately, stores it on `work.guessedPhone`, and a new
+pass — `guessedPhoneColumns`, called from inside `neighbouringColumns` after
+the loop that fills `Decision.TableHasLikelyPersonalColumn` for every column
+and before its `unknownColumnsBesideCertain` arm (which would otherwise sweep
+the same unsignalled character column into `free_text` first) — masks it only
+when `Decision.TableHasLikelyPersonalColumn` is true: the identical neighbour
+signal `internal/verify`'s national_id digits entry already reads for its own
+corroboration gate, the "T-0187 pattern" this task's brief names. Without it,
+`guessedPhone` is computed and simply never acted on — the column is left
+exactly as every earlier pass decided.
+
+A first landing also tried to corroborate off the column's own name matching
+`rules.yml`'s phone pattern (`work.nameMatchedPhone`, set in `decide` beside
+`NameMatchedNationalID`), but a review round proved that arm could never
+fire and it was removed rather than kept undocumented-dead: `guessedPhone`
+is only ever set while the column's confidence is still below
+`ConfPossible`, and on the character families this whole feature runs over,
+`rules.yml`'s phone pattern accepts every one of them (`text`/`varchar`/
+`bpchar`/`citext`) — so a name match always takes `decide`'s ordinary
+`hasName && nameAccepted` branch to `ConfPossible` or above before
+`guessedPhoneColumns` could ever see the column with `guessedPhone` set.
+`TestNameMatchedPhoneColumnMasksOnNameAlone` pins the branch that actually
+masks such a column instead.
+
+**The guessed-region pass runs over a character family only, and that
+restriction is not incidental — it is what keeps this feature from
+colliding with `internal/verify`'s own national_id digits entry.** The first
+landing gated `guessedPhoneHit` on `!silencedByType(..., CatPhone, family)`
+alone, which `rules.yml`'s `phone` category satisfies for
+`bigint`/`integer`/`numeric` too (the same families `phone`'s masker already
+writes into) — and `make torture` caught the collision this introduced
+before any fixture was written for it:
+`testdata/regressions/020-ssn-stored-as-bigint.sql`'s own `taxref bigint`,
+corroborated by the file's own `email` neighbour for the same coincidental
+reason its header already explains for `national_id`'s checksum-only
+formats, cleared one of the fifteen guessed regions on all five values and
+was masked `phone` before `internal/verify`'s digits-family `national_id`
+entry ever saw the unmasked column — a real mask, of the wrong category,
+that turned the file's pinned `exit 9 verify.refused.second_net` into a
+quiet `ok`. The gate is now `isCharacterFamily(ct.Family)`
+(`text`/`varchar`/`bpchar`/`citext`) in addition to the type-conflict check:
+a digits-family column is left exactly as it was for `internal/verify`'s own
+entry to decide, which is what `020` still asserts and what
+`testdata/regressions/026-ten-digit-account-number-is-not-a-guessed-phone.sql`
+(the false-positive control, an ordinary ten-digit account column with no
+name or neighbour signal) had to be written as `text` rather than `bigint`
+to test honestly — a `bigint` column would have raced the identical
+coincidence a second time.
+
+**What this still misses, named rather than hidden.** A plain national-format
+phone number, with no configured region, in a column whose name matches
+nothing and whose table holds no other `likely`-or-above column, still
+crosses unmasked — `kontaktnr` alone in a single-column table would. That is
+narrower than the miss this task closes (an operator now has a flag that
+closes it completely, and the yml carries the answer forward once used), and
+it is the same shape of residual gap the multilingual-dictionary amendment
+already accepts for a name in a language nobody wrote a pattern for: the
+class is closed by an operator's word or a corroborating neighbour, never by
+a guess alone.
+
+**Owed elsewhere.** `internal/verify/validators.go`'s own phone entry gained
+the identical region reading (its `count`, T-0221) — never the guessed list,
+which stays here only — and its own comment records the asymmetry.
+THREAT_MODEL.md T1 carries this amendment in its own terms; ARCHITECTURE.md
+§4 and §8's flag table were both in this task's paths and are corrected
+directly rather than filed.
+
+## The T-0221 review round (2026-09-16): an either/or that widened nothing, and an unvalidated flag that silently narrowed everything
+
+Two high findings, both about the same premise: a configured region was
+treated as *the* answer for phone numbers rather than as *one more* piece of
+trusted evidence.
+
+**A configured `--phone-region` used to turn the guessed-region fallback off
+entirely** (`base`, above): the first landing of this section's pass gated
+`guessedPhoneHit`'s computation on `st.region == ""`, so naming a region did
+not add a fifteenth trusted region to the fifteen already guessed at — it
+*replaced* all fifteen with the one named. A varchar(15) column of US-format
+numbers beside a `certain` email neighbour was `masked=true cat=phone` with
+no flag and `masked=false cat=none`, "no name or value signal", the moment
+`--phone-region GB` was named: exactly backwards for the common case this
+flag exists for, a multi-country database, where naming the operator's own
+region is a reason to trust *that* region without corroboration and never a
+reason to stop looking at the other fourteen. The gate is gone: `base` now
+computes `guessedPhoneHit` whenever nothing else has already decided the
+column, whatever `--phone-region` holds, so the configured region is folded
+into the same footing as every other trusted-without-corroboration read
+(`buildValidators`'s spliced entry) while the guessed, corroboration-gated
+fallback keeps covering everything else.
+
+**`--phone-region` reached this package and `internal/verify` with no check
+that libphonenumber could read it at all.** `textsig.ValidPhoneRegion` parses
+under an exact, upper-case, libphonenumber-recognised code, so `"gb"`, `"UK"`
+and any typo all parse zero phone numbers — silently, with no distinction
+from a real region that genuinely has no match in a given sample. Before this
+fix, that meant a single-character typo on the flag took a column that would
+have masked correctly with **no flag at all** down to unmasked, under exit 0,
+because the old `st.region == ""` gate above read only "is this string
+non-empty", never "is this string usable" — a single-character typo turned
+off the fifteen-region fallback exactly as a real region name would have. The
+belt-and-braces half of the fix is the same code change as the paragraph
+above: with the gate gone, an unusable `--phone-region` value can no longer
+disable the fallback, because nothing in `base` reads `st.region` to decide
+whether to compute `guessedPhoneHit` any more. The primary fix is
+**`cmd/lazyslice`'s own flag-surface validation** (`checkPhoneRegion`,
+`main.go`): `--phone-region` is normalised to upper case and checked against
+`phonenumbers.GetSupportedRegions()` via the new
+`textsig.SupportedPhoneRegion`, exit 2 on anything it does not recognise, the
+way a misspelled `--memory-budget` already is — before this package or
+`internal/verify` ever sees the value. `internal/textsig/CLAUDE.md` records
+`SupportedPhoneRegion` on that package's side.
+
+**Test coverage.** Neither half of this section's own behaviour was pinned by
+a test that runs in `make check` before this round: `TestGuessedRegionPhone
+Corroboration` exercised only the `TableHasLikelyPersonalColumn` arm of
+`guessedPhoneColumns`, and the configured-region row path (`buildValidators`,
+the strong entry, the "phone region assumed" reason) was covered only by
+`testdata/regressions/025` under `make torture` (Docker-gated). Two tests
+close the gap: `TestConfiguredPhoneRegionMasksNationalFormatColumn` classifies
+a national-format column with `prior.PhoneRegion` set directly and asserts
+both the mask and the `"phone region assumed: GB"` reason fragment, with no
+database and no `make torture` run needed; `TestNameMatchedPhoneColumnMasksOnNameAlone`
+(renamed from `TestGuessedRegionPhoneCorroborationByNameAlone` by the review
+round that found the `nameMatchedPhone` arm unreachable) pins `decide`'s
+ordinary name-match branch on a column whose name matches `rules.yml`'s
+phone pattern, holding guessed-region-shaped values, in a table with no
+personal neighbour at all — asserting it is still masked as phone, on the
+name alone, with no corroboration from `guessedPhoneColumns` needed.

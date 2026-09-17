@@ -324,6 +324,169 @@ func TestNeighbouringColumnRule(t *testing.T) {
 	}
 }
 
+// TestGuessedRegionPhoneCorroboration is T-0221's own gate: with no
+// --phone-region configured, a character column whose values clear one of
+// phoneGuessRegions is masked as phone only beside a proven personal
+// neighbour, and is left alone with none. The values are real ones
+// (verified by direct computation against textsig.ValidPhoneRegion, the way
+// testdata/regressions/026's own header explains) and not phone-shaped by
+// construction, on purpose: this is exactly the "any region agrees" claim
+// the corroboration gate exists to distrust on its own.
+func TestGuessedRegionPhoneCorroboration(t *testing.T) {
+	t.Parallel()
+	guessed := []any{"9231278675", "7543856411", "5101878760", "5526624009", "9743547657"}
+
+	corroborated := ref.TableRef{Schema: "public", Name: "corroborated_orders"}
+	uncorroborated := ref.TableRef{Schema: "public", Name: "uncorroborated_orders"}
+	schema := &pipeline.Schema{
+		Tables: []pipeline.Table{
+			tt("public", "corroborated_orders", nil,
+				tc("hotline_ref", "text"), // no name rule matches this
+				tc("email", "text"),       // certain: the neighbour signal
+			),
+			tt("public", "uncorroborated_orders", nil,
+				// A different column name from corroborated_orders' on
+				// purpose: sameColumnName (pass 4) shares one category
+				// across every column sharing a name anywhere in the
+				// schema, which would otherwise smuggle the first table's
+				// corroborated decision onto this one and prove nothing
+				// about the gate this test exists to check.
+				tc("order_ref", "text"), // identical values, no neighbour at all
+			),
+		},
+	}
+	samples := mapSampler{
+		ref.ColumnRef{Table: corroborated, Column: "hotline_ref"}: guessed,
+		ref.ColumnRef{Table: uncorroborated, Column: "order_ref"}: guessed,
+		ref.ColumnRef{Table: corroborated, Column: "email"}: anyOf(
+			"a@fixture.test", "b@fixture.test", "c@fixture.test", "d@fixture.test"),
+	}
+	cls, err := New().Classify(schema, samples, nil)
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+
+	withNeighbour := cls.Decisions[ref.ColumnRef{Table: corroborated, Column: "hotline_ref"}]
+	if !withNeighbour.Masked || withNeighbour.Category != pipeline.CatPhone {
+		t.Errorf("corroborated_orders.hotline_ref = %+v, want masked as phone beside its email neighbour",
+			withNeighbour)
+	}
+	if bad, ok := ParseReason(withNeighbour.Reason); !ok {
+		t.Errorf("corroborated_orders.hotline_ref reason %q holds a fragment no template produced: %q",
+			withNeighbour.Reason, bad)
+	}
+	if !strings.Contains(withNeighbour.Reason, "guessed-region") {
+		t.Errorf("corroborated_orders.hotline_ref reason = %q, want the guessed-region corroboration named",
+			withNeighbour.Reason)
+	}
+
+	withoutNeighbour := cls.Decisions[ref.ColumnRef{Table: uncorroborated, Column: "order_ref"}]
+	if withoutNeighbour.Masked {
+		t.Errorf("uncorroborated_orders.order_ref = %+v, want left unmasked: no name and no neighbour "+
+			"corroborate the guessed-region hit", withoutNeighbour)
+	}
+}
+
+// TestConfiguredPhoneRegionMasksNationalFormatColumn is the T-0221 review
+// round's finding 3, first half: the configured-region row path
+// (buildValidators' spliced-in strong entry, and decide's own
+// "phone region assumed" reason fragment) was pinned only by
+// testdata/regressions/025 under `make torture`, which is Docker-gated and
+// does not run in `make check` -- nothing in this package's own suite ever
+// classified a column with prior.PhoneRegion set at all, so a stub
+// buildValidators that returned baseValidators unchanged would still pass
+// `go test ./internal/classify/...`.
+//
+// The column name ("kontaktnr") and the values are testdata/regressions/025's
+// own, real UK numbers written plainly with spaces and brackets, chosen
+// there because rules.yml's phone pattern does not match the name: the mask
+// has to come from the configured-region value entry alone, with no name
+// signal and no personal neighbour to lean on.
+func TestConfiguredPhoneRegionMasksNationalFormatColumn(t *testing.T) {
+	t.Parallel()
+	tbl := ref.TableRef{Schema: "public", Name: "reg025_tickets"}
+	schema := &pipeline.Schema{
+		Tables: []pipeline.Table{
+			tt("public", "reg025_tickets", nil,
+				tc("kontaktnr", "text"),
+			),
+		},
+	}
+	samples := mapSampler{
+		ref.ColumnRef{Table: tbl, Column: "kontaktnr"}: anyOf(
+			"07911 123456", "020 7946 0958", "(0161) 496 0123", "07911 123456"),
+	}
+	prior := &pipeline.Config{PhoneRegion: "GB"}
+	cls, err := New().Classify(schema, samples, prior)
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+
+	d := cls.Decisions[ref.ColumnRef{Table: tbl, Column: "kontaktnr"}]
+	if !d.Masked || d.Category != pipeline.CatPhone {
+		t.Fatalf("reg025_tickets.kontaktnr = %+v, want masked as phone under the configured region", d)
+	}
+	if bad, ok := ParseReason(d.Reason); !ok {
+		t.Errorf("reg025_tickets.kontaktnr reason %q holds a fragment no template produced: %q", d.Reason, bad)
+	}
+	if !strings.Contains(d.Reason, "phone region assumed: GB") {
+		t.Errorf("reg025_tickets.kontaktnr reason = %q, want the configured region named", d.Reason)
+	}
+}
+
+// TestNameMatchedPhoneColumnMasksOnNameAlone is the T-0221 review round's
+// finding 3, second half, corrected: the review proved that
+// guessedPhoneColumns' gate never had a reachable name-match arm at all --
+// this suite's original TestGuessedRegionPhoneCorroborationByNameAlone
+// passed, but only because decide's ordinary hasName && nameAccepted branch
+// (not guessedPhoneColumns' corroboration) already masks a phone-pattern
+// name at ConfPossible with no value signal required, and rules.yml's phone
+// entry accepts every character family the guessed-region feature runs on,
+// so a name match always reaches that branch before guessedPhoneColumns
+// (which only ever sees a column still below ConfPossible) can see it.
+// work.nameMatchedPhone and the gate's "!w.nameMatchedPhone &&" condition
+// were therefore dead code and have been removed; guessedPhoneColumns'
+// only corroboration is now Decision.TableHasLikelyPersonalColumn, exercised
+// by TestGuessedRegionPhoneCorroboration above.
+//
+// This test is kept, renamed, to pin the branch that does mask this column:
+// the table holds one column and nothing else, so there is no personal
+// neighbour, and the only signal is the column's own name matching
+// rules.yml's phone pattern ("mobile"). The values are the same
+// guessed-region shapes TestGuessedRegionPhoneCorroboration already
+// verified (by direct computation against textsig.ValidPhoneRegion) clear
+// one of phoneGuessRegions, though decide's name-match branch does not need
+// them to: it masks on the name alone.
+func TestNameMatchedPhoneColumnMasksOnNameAlone(t *testing.T) {
+	t.Parallel()
+	guessed := []any{"9231278675", "7543856411", "5101878760", "5526624009", "9743547657"}
+
+	tbl := ref.TableRef{Schema: "public", Name: "reg_contacts_by_name"}
+	schema := &pipeline.Schema{
+		Tables: []pipeline.Table{
+			tt("public", "reg_contacts_by_name", nil,
+				tc("mobile", "text"), // matches rules.yml's phone pattern; no other column
+			),
+		},
+	}
+	samples := mapSampler{
+		ref.ColumnRef{Table: tbl, Column: "mobile"}: guessed,
+	}
+	cls, err := New().Classify(schema, samples, nil)
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+
+	d := cls.Decisions[ref.ColumnRef{Table: tbl, Column: "mobile"}]
+	if !d.Masked || d.Category != pipeline.CatPhone {
+		t.Errorf("reg_contacts_by_name.mobile = %+v, want masked as phone on the name match alone, "+
+			"with no personal neighbour in the table", d)
+	}
+	if bad, ok := ParseReason(d.Reason); !ok {
+		t.Errorf("reg_contacts_by_name.mobile reason %q holds a fragment no template produced: %q", d.Reason, bad)
+	}
+}
+
 // TestConfigCannotLowerConfidence is ADR-004's tighten-only rule and
 // THREAT_MODEL.md T3's control: the yml supplies opt-outs and raises, never a
 // way to reduce a category or a confidence.
@@ -450,6 +613,24 @@ func TestReasonGrammarRejectsProse(t *testing.T) {
 	} {
 		if _, ok := ParseReason(s); ok {
 			t.Errorf("ParseReason(%q) accepted a string no template produced", s)
+		}
+	}
+}
+
+// TestReasonGrammarCoversPhoneRegion pins T-0221's two new fragments directly,
+// because neither is ever produced by the fixtures priorsUnderTest classifies
+// (none sets Config.PhoneRegion or holds a value that clears a guessed
+// region), so TestReasonGrammar above never exercises regionAssumed's or
+// guessedPhoneColumns' own render call — only the regression suite
+// (testdata/regressions/025 and 026, under make torture) does, end to end.
+func TestReasonGrammarCoversPhoneRegion(t *testing.T) {
+	t.Parallel()
+	for _, s := range []string{
+		render("phone_region_configured", "GB"),
+		render("phone_region_guessed"),
+	} {
+		if bad, ok := ParseReason(s); !ok {
+			t.Errorf("reason %q does not parse against its own template (%q)", s, bad)
 		}
 	}
 }

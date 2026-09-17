@@ -131,6 +131,13 @@ type Request struct {
 	// classify
 	Unmask       map[string]string // --unmask TABLE.COL=REASON, repeatable
 	StrictSchema bool              // --strict-schema
+	// PhoneRegion is --phone-region REGION (T-0221): the libphonenumber
+	// region a national-format phone column is read under, folded into the
+	// classify prior in classifyPrior and carried forward to internal/emit
+	// and internal/verify from there. Empty means none was passed on this
+	// run; classifyPrior still resolves the committed yml's own
+	// phone_region in that case (Config.PhoneRegion's own comment).
+	PhoneRegion string
 
 	// transform
 	SecretFile string // --secret-file

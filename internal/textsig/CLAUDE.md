@@ -307,3 +307,46 @@ set; add a category, a confidence or a threshold to this package.
   the row path T-0187 wired it into (`internal/classify`'s validators list,
   `internal/verify`'s second net). THREAT_MODEL.md is not in T-0187's paths —
   **tracker T-0193** carries the edit.
+
+## T-0221 (2026-09-16): `ValidPhoneRegion`, a second phone reading beside the fixed one
+
+`ValidPhone` is unchanged and still reads `PhoneRegionHint` ("ZZ") — the
+international-only reading, admitting a number only when it is already
+written with a country code. `ValidPhoneRegion(s, region string) bool` is a
+sibling, not a replacement: it reads every spelling `Candidates` yields
+exactly as `ValidPhone` does (so a number dictated in words under the given
+region is the number it spells, `spelledDigits` included), and an empty
+`region` falls back to `PhoneRegionHint` so a caller need not special-case
+"none configured" itself. It exists because `docs/reviews/2026-09-15-
+redteam/round3-still-leaking.json`'s kontaktnr/contact finding is a plain
+domestic phone number — `07911 123456`, dictated or not — and a
+national-format reading needs a region to parse under at all, which the fixed
+hint can never supply.
+
+**Which region to try, whether a caller trusts one hit or asks for
+corroboration first, and what the reasons output says about it, are
+`internal/classify`'s and `internal/verify`'s questions and not this
+package's** — the same rule `PhoneRegionHint`'s own comment already states
+for the single fixed hint, extended to a caller-supplied one: this function
+takes a region and answers about one value, nothing about a column, a name
+pattern or a neighbouring column. `internal/classify/CLAUDE.md`'s T-0221
+section has the two callers' own corroboration rules.
+
+**`SupportedPhoneRegion(region string) bool` is a different question about
+the same input, added in the review round that followed T-0221's first
+landing.** `ValidPhoneRegion` answers "does this number parse under this
+region", and an unrecognised region answers that question `false` for every
+number — silently, with no way to tell a real region with no matches in a
+sample apart from a region libphonenumber cannot even parse under at all.
+That silence let a single-character typo on `--phone-region` (`"gb"`, or the
+common but non-ISO `"UK"` — libphonenumber's own code for the United Kingdom
+is `"GB"`) reach `internal/classify` and `internal/verify` unchecked, where
+it silently disabled every control the flag exists to add (the finding is
+recorded in `internal/classify/CLAUDE.md`'s own review-round section).
+`SupportedPhoneRegion` answers the question a caller needs asked *before*
+trusting a region string at all: is this exactly one of the codes
+`phonenumbers.GetSupportedRegions()` serves, matched as that table is keyed —
+upper case, no synonym resolution, so `"gb"` and `"UK"` both answer `false`
+and only `"GB"` answers `true`. `cmd/lazyslice`'s `checkPhoneRegion` is its
+one caller: `--phone-region` is normalised to upper case and refused at the
+flag surface, exit 2, before a region string ever reaches either net.

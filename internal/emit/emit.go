@@ -83,6 +83,11 @@ type Options struct {
 	// PasswordCommand is --password-command, recorded under `password_command`
 	// as a command string and never its output (ARCHITECTURE.md section 8).
 	PasswordCommand string
+	// PhoneRegion is --phone-region / the resolved value this run classified
+	// with (T-0221), recorded under `classify.phone_region` so a re-run needs
+	// no flag, the same pattern Unmask above and Types below follow for their
+	// own opt-outs.
+	PhoneRegion string
 	// NotRecreated is Schema.NotRecreated as a count per object kind, section
 	// 10's `not_recreated:` block. It comes in through the constructor because
 	// Emit is given the plan and not the schema, and a count of the views a run
@@ -125,6 +130,7 @@ func (e emitter) Emit(
 		SourceRef:         source.Ref,
 		SourceLabel:       source.Label,
 		PasswordCommand:   e.opts.PasswordCommand,
+		PhoneRegion:       e.opts.PhoneRegion,
 		Target:            target.Provenance,
 		TargetRef:         target.Ref,
 		TargetLabel:       target.Label,

@@ -38,6 +38,14 @@ type Config struct {
 	TargetLabel     string
 	Root            TableRef
 	Take            int
+	// PhoneRegion is --phone-region / the yml's own phone_region: the
+	// libphonenumber region (an ISO 3166-1 alpha-2 code such as "GB") a
+	// national-format phone column is read under, on top of the
+	// international-only reading every run already has (T-0221). Empty means
+	// none configured, which is when internal/classify's own short,
+	// corroboration-gated guess takes over instead of this field deciding
+	// anything (internal/classify/CLAUDE.md, "T-0221").
+	PhoneRegion string
 	// Where is empty when the predicate held a literal; see WhereFingerprint.
 	Where string
 	// WhereFingerprint is sha256(where)[:16] when Where was withheld. A later run
