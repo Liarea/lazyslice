@@ -270,26 +270,64 @@ func (e *DomainError) Error() string {
 		e.Category, e.ID, e.Domain, e.Rows, e.Required)
 }
 
-// isModuleError reports whether err is one of this module's own value-free
-// errors — a sentinel from the var block above, or a *NoRoomError /
-// *DomainError wrapping one — rather than a generator's free-form message.
-// maskCell uses it to decide what ErrMaskerFailed exists to hide: a
-// generator's own text, never this module's documented, value-free refusals
-// (T-0223 round-4 replay R3-1). Wrapping those unconditionally made
-// errors.Is(err, ErrNoRoom) false for every generator's most common refusal —
-// a column too short for a masked value — which is also the one
-// internal/transform/codes.go's maskReason names by hand for its exit-code
-// text.
-func isModuleError(err error) bool {
-	if errors.Is(err, ErrNoRoom) || errors.Is(err, ErrUnknownMasker) ||
-		errors.Is(err, ErrNoCategory) || errors.Is(err, ErrRowCountUnknown) ||
-		errors.Is(err, ErrPassthrough) || errors.Is(err, ErrMaskerPanic) ||
-		errors.Is(err, ErrMaskerFailed) {
-		return true
-	}
+// maskerErrorSentinels lists this module's sentinel errors in the order
+// wrapMaskerError checks them, so a masker's error that wraps more than one
+// keeps naming the first — the same order isModuleError used to check them
+// in before T-0238.
+var maskerErrorSentinels = []error{
+	ErrNoRoom, ErrUnknownMasker, ErrNoCategory, ErrRowCountUnknown,
+	ErrPassthrough, ErrMaskerPanic, ErrMaskerFailed,
+}
+
+// wrapMaskerError turns whatever a generator's Mask returned into one of this
+// module's own error objects. maskCell never returns err itself, whatever it
+// is: a masker controls its message freely, and it also controls every field
+// of a *NoRoomError or *DomainError it constructs or wraps — including the
+// string fields, which is what let a masker declare
+// fmt.Errorf("cannot fit %q: %w", in.Text, mask.ErrNoRoom) and have the round-3
+// fix's isModuleError wave the whole object, canary and all, straight through
+// the module boundary because it recognised ErrNoRoom inside it (T-0223
+// round-4 replay R3-1, new variant against T-0223 itself). So a match no
+// longer returns the masker's object: it returns a fresh error naming the
+// matched sentinel (%w), the category, the masker id and the returned value's
+// *type* — never its text — and, for a *NoRoomError or *DomainError, a
+// same-typed error this call rebuilds itself, from cat/id (maskCell's own,
+// trusted arguments) and, for NoRoomError, the TypeTag and MaxLen off the
+// Constraints maskCell was already given — never off the fields the masker's
+// error carried, which a masker is free to set to anything, canary included.
+// No field of a masker's error is trusted, numeric or not: DomainError's
+// four fields are recomputed from c alone — Domain is ColumnDomain(c), never
+// Admissible(id, c), because Admissible calls back into the registered
+// masker's own Domain method, and that masker is the same object whose Mask
+// just ran on this cell. A masker that stashes the cell's value in Mask and
+// hands it back from Domain on the very next call would otherwise smuggle it
+// out through this error path with a real, registered id and no forged
+// field at all (T-0238 round 2).
+func wrapMaskerError(cat Category, id ID, c Constraints, err error) error {
 	var noRoom *NoRoomError
+	if errors.As(err, &noRoom) {
+		return &NoRoomError{Category: cat, ID: id, TypeTag: c.TypeTag, MaxLen: c.MaxLen}
+	}
 	var domain *DomainError
-	return errors.As(err, &noRoom) || errors.As(err, &domain)
+	if errors.As(err, &domain) {
+		d := ColumnDomain(c)
+		return &DomainError{
+			Category: cat,
+			ID:       id,
+			Domain:   d,
+			Required: Required(c.Rows),
+			Rows:     c.Rows,
+			MaxRows:  MaxRows(d),
+		}
+	}
+	for _, sentinel := range maskerErrorSentinels {
+		if errors.Is(err, sentinel) {
+			return fmt.Errorf("%w: category %s: masker %s returned %s",
+				sentinel, cat, id, panicKind(err))
+		}
+	}
+	return fmt.Errorf("%w: category %s: masker %s returned %s",
+		ErrMaskerFailed, cat, id, panicKind(err))
 }
 
 // Result is one masked cell.
@@ -344,14 +382,15 @@ func Apply(k Key, cat Category, id ID, in Value, c Constraints) (Result, error) 
 // maskCell calls the generator behind the guards the module owes a caller
 // that cannot see inside it: a recover, so a panicking masker becomes an error
 // naming the masker and nothing else; the same treatment for a *generator's*
-// own error — one that is not already one of this module's sentinels or typed
-// errors — so its free-form message, which can quote the value it failed on,
-// never crosses this module's public boundary (T-0223); and the
+// own returned error, whatever it is — its free-form message, and every field
+// of a *NoRoomError or *DomainError it built or wrapped, never crosses this
+// module's public boundary (T-0223; T-0238 closed the escape hatch a masker
+// got by declaring one of this module's own sentinels); and the
 // post-condition, so a masker that tracks its input is a refusal rather than
 // a cell the caller records as masked (THREAT_MODEL.md T7, T12). This
-// module's own errors — ErrNoRoom foremost — pass through unwrapped
-// (isModuleError, T-0223 round-4 replay R3-1), so errors.Is/As still reaches
-// them.
+// module's own sentinels and typed errors still answer errors.Is/As —
+// wrapMaskerError rebuilds them from maskCell's own trusted arguments rather
+// than returning the masker's object.
 //
 // Both guards are in one place because the post-condition calls the generator a
 // second time, with a sentinel input, and that call is the generator's code too
@@ -365,11 +404,7 @@ func maskCell(m Masker, cat Category, id ID, h [32]byte, in Value, canon Value, 
 	}()
 	out, err = m.Mask(h, in, c)
 	if err != nil {
-		if isModuleError(err) {
-			return Value{}, err
-		}
-		return Value{}, fmt.Errorf("%w: category %s: masker %s returned %s",
-			ErrMaskerFailed, cat, id, panicKind(err))
+		return Value{}, wrapMaskerError(cat, id, c, err)
 	}
 	if !looksLikeItsInput(out, in, canon) {
 		return out, nil
