@@ -9,7 +9,7 @@
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 4 | 1 | 100 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 75 | 0 | 30 | 5 | 0 |
+| E9 Later | later | 76 | 0 | 30 | 5 | 0 |
 
 ## Open and in progress
 
@@ -94,6 +94,7 @@
 - T-0261 [open] E9 · internal/core/CLAUDE.md's T-0241 section is stale after T-0255 ()
 - T-0262 [open] E9 · The special-category rule pins the LIKE spelling at plan level, and its normalisation comment matches the code (sonnet)
 - T-0264 [open] E9 · internal/testutil's restart helper: capture the original container by value, report which container to clean up on every return, and normalise a typed-nil replacement (sonnet)
+- T-0265 [open] E9 · verify's per-check pass lines never reach the terminal or --json ()
 
 ## Recently closed
 
