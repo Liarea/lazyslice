@@ -3,12 +3,12 @@ id: T-0260
 title: "README is true for v0.1.0: what it does, a quickstart that was run, first-run flags, exit codes at a glance, and the residuals in step with the threat model; SECURITY.md reconciled"
 epic: E5
 phase: 5
-status: open
+status: done
 owner: sonnet
 created: 2026-09-17
 started: ""
-closed: ""
-outcome: ""
+closed: 2026-09-17
+outcome: done
 ---
 
 # T-0260 · README is true for v0.1.0: what it does, a quickstart that was run, first-run flags, exit codes at a glance, and the residuals in step with the threat model; SECURITY.md reconciled
@@ -25,6 +25,8 @@ The maintainer, 2026-09-17, and docs/reviews/2026-09-09 ('a readable README is n
 
 - 2026-09-17 created
 
+- 2026-09-17 closed: done
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+went well: README went from 55 stale lines to a front page that says what the tool does, shows a quickstart that was actually run against two containers, carries the generated first-run flags, the exit codes and the five accepted residuals in step with THREAT_MODEL.md; review caught two psql tables that had been retyped rather than pasted, and the fix round re-ran the quickstart and pasted real output | went badly: the quickstart called a bare lazyslice the install section never put on PATH, the marker query had no ordering for a table that keeps one row per run, and SECURITY.md still said doctor prints the limitations, which no code does; all three found at the orchestrator's end-to-end read, which is what that read is for | change next time: a README task's proof includes following it top to bottom in a clean shell (commit ffd65b1; T-0265 and T-0268 filed)
