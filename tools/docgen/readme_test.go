@@ -120,3 +120,19 @@ func TestRenderFirstRunTableMissingFlag(t *testing.T) {
 		t.Fatal("renderFirstRunTable(): got no error, want one (source is not in groups)")
 	}
 }
+
+// TestMdEscapeTextKeepsAPlaceholderVisible pins the T-0259 review finding: a
+// prose cell holding <source major> reached README.md raw, where GitHub reads
+// it as an HTML tag and drops it from the rendered table. A code-span cell
+// still goes through mdEscape alone, because an entity inside backticks
+// renders literally.
+func TestMdEscapeTextKeepsAPlaceholderVisible(t *testing.T) {
+	got := mdEscapeText("Start postgres:<source major> as a|b\nnext")
+	want := "Start postgres:&lt;source major&gt; as a\\|b next"
+	if got != want {
+		t.Fatalf("mdEscapeText = %q, want %q", got, want)
+	}
+	if strings.Contains(mdEscape("<x>"), "&lt;") {
+		t.Fatalf("mdEscape must leave angle brackets alone for code-span cells")
+	}
+}

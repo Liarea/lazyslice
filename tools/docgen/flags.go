@@ -133,7 +133,7 @@ func generateFlags(repoRoot string) (string, error) {
 			if def == "" {
 				def = "-"
 			}
-			fmt.Fprintf(&b, "| %s | %s | %s | %s |\n", name, typ, def, mdEscape(r.help))
+			fmt.Fprintf(&b, "| %s | %s | %s | %s |\n", name, typ, def, mdEscapeText(r.help))
 		}
 		b.WriteString("\n")
 	}

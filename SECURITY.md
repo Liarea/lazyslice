@@ -60,8 +60,9 @@ than described it.
 
 ### What is a known limitation, not a vulnerability
 
-These are documented in ARCHITECTURE.md and printed by `lazyslice doctor`. They
-are the honest edges of the design, and reporting one tells us nothing new —
+These are documented in [THREAT_MODEL.md](THREAT_MODEL.md), and the first five
+are on the README's front page. They are the honest edges of the design, and
+reporting one tells us nothing new —
 though an argument that one of them should be fixed is very welcome as a public
 issue.
 
@@ -91,10 +92,12 @@ issue.
 4. **A bare national identifier with nothing to corroborate it** — for
    example a nine-digit number with no dashes — in a column whose name
    matches no rule, when no other column of its table has already been
-   decided personal (masked or not). One exception inside that: a national
-   identifier that is itself a table's own primary key is read as a surrogate
-   key and stays exempt even beside a column that is masked, on the same
-   reasoning as item 1 — see THREAT_MODEL.md T1 for the boundary and the
+   decided personal (masked or not). One exception inside that: a
+   contiguously issued block of national identifiers that is itself a table's
+   own primary key reads as a surrogate key and stays exempt even beside a
+   column that is masked, on the same reasoning as item 1. A key of scattered
+   identifiers is scored like any other column, and one whose name matches a
+   rule is refused at plan — see THREAT_MODEL.md T1 for the boundary and the
    reasoning against it.
 5. **The marker-bound reload window.** A target lazyslice writes to for the
    first time gets a whole-target check, under the run's lease, for a table

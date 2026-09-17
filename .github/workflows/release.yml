@@ -77,7 +77,7 @@ jobs:
       - name: refuse a tag whose README Status section does not name it
         run: |
           set -euo pipefail
-          tag="${{ github.ref_name }}"
+          tag="${GITHUB_REF_NAME}"
           status_line=$(grep -m1 '^## Status' README.md || true)
           if [ -z "$status_line" ]; then
             echo "release: README.md has no '## Status' section."
@@ -130,9 +130,9 @@ jobs:
       # subjects. --release-notes makes goreleaser use the file verbatim.
       - name: release notes from the commits since the previous tag
         run: |
-          prev=$(git describe --tags --abbrev=0 "${{ github.ref_name }}^" 2>/dev/null || git rev-list --max-parents=0 HEAD)
-          python3 tools/relnotes/relnotes.py "$prev" "${{ github.ref_name }}" > /tmp/relnotes.md
-          echo "release notes: from $prev to ${{ github.ref_name }}, $(wc -l < /tmp/relnotes.md) lines"
+          prev=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || git rev-list --max-parents=0 HEAD)
+          python3 tools/relnotes/relnotes.py "$prev" "${GITHUB_REF_NAME}" > /tmp/relnotes.md
+          echo "release notes: from $prev to ${GITHUB_REF_NAME}, $(wc -l < /tmp/relnotes.md) lines"
       - uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
@@ -186,11 +186,11 @@ jobs:
             [.[] | select(.type == "Homebrew Cask")
                  | .extra.BrewCaskConfig.skip_upload] | join(",")' dist/artifacts.json)
           if [ -z "$skipped" ]; then
-            echo "release: goreleaser generated no Homebrew cask at all for ${{ github.ref_name }}."
+            echo "release: goreleaser generated no Homebrew cask at all for ${GITHUB_REF_NAME}."
             exit 1
           fi
           if [ "$skipped" != "auto" ] && [ "$skipped" != "false" ]; then
-            echo "release: ${{ github.ref_name }} is not a prerelease tag, and the Homebrew cask was not"
+            echo "release: ${GITHUB_REF_NAME} is not a prerelease tag, and the Homebrew cask was not"
             echo "published: goreleaser recorded skip_upload=\"$skipped\". That renders \"true\" when"
             echo "HOMEBREW_TAP_TOKEN is empty (.goreleaser.yaml), and the cask pipe then logs a line and"
             echo "exits 0 — the binaries are up and the tap has nothing new in it. Set the repository"
