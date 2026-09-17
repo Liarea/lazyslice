@@ -5,7 +5,9 @@ description: File, start, log, block, move, cancel and close tracker tasks with 
 
 # Tracker operations
 
-Everything under `tracker/` is written only by `tools/tracker.py`. Never edit a task or epic file by hand, and never regenerate `tracker/BOARD.md` by other means; the script rewrites it on every command.
+GitHub is the source of truth for a task that is open, in progress or blocked (T-0196): it lives as an issue on Liarea/lazyslice and a card on Project 3, and `tools/tracker.py` is the only thing that writes it, over the `gh` CLI. `tracker/tasks/` is a read-only archive — only a closed or cancelled task has a file there, written once at the moment it closes, and never edited again by hand or by the tool. Never edit an archived file, and never regenerate `tracker/BOARD.md` by other means; `tools/tracker.py` rewrites it, from GitHub plus the archive, on every mutating command. A task is no longer a file an agent can read — use `show`, below, in place of reading `tracker/tasks/T-NNNN-*.md`.
+
+A mutating command needs `gh` installed and authenticated (`gh auth login`; the board also needs `gh auth refresh -s project`) and refuses, changing nothing, if it is not — one sentence naming which. `list` and `show` fall back to the archive plus the last `tracker/BOARD.md` instead, and say they did.
 
 ## Commands
 
@@ -18,8 +20,11 @@ python3 tools/tracker.py move T-0187 --epic E5 --phase 5
 python3 tools/tracker.py cancel T-0187 --reason "..."
 python3 tools/tracker.py close T-0187 --outcome done --postmortem "went well: ... | went badly: ... | change next time: ..."
 python3 tools/tracker.py list [--status open|blocked|done|cancelled] [--epic E5]
+python3 tools/tracker.py show T-0187
 python3 tools/tracker.py validate
 ```
+
+`start`, `log`, `block`, `move`, `close` and `cancel` print the issue's URL (or, for `close`/`cancel`, the archive file path they just wrote) rather than a tracker-file path — there usually is no file until a task closes. `log`'s note becomes an issue comment; `close`'s and `cancel`'s post-mortem or reason becomes the comment that closes the issue.
 
 `new` prints the id it assigned; read it back before referencing it anywhere. Ids are assigned in creation order and a running developer may file a task between two of yours (this happened on 2026-09-14: three ids shifted), so never predict an id.
 

@@ -31,15 +31,18 @@ Do not create git commits unless your task says to. The orchestrator commits.
 - CONCEPT.md, docs/OPERATING_MODEL.md, docs/BUILD_PLAN.md: what, how, and in what order.
 - research/: phase 1 documents.
 - docs/adr/: architecture decision records. docs/prompting/: per-model prompt cheat sheets.
-- tracker/: epics, tasks, BOARD.md. Written only via tools/tracker.py by the orchestrator.
+- tracker/: `tasks/` is a read-only archive of closed and cancelled history; an open, in-progress or blocked task lives on GitHub Issues and Project 3, not as a file (T-0196). `epics/` and `BOARD.md` still live here, the latter regenerated from GitHub plus the archive. Written only via tools/tracker.py by the orchestrator.
 - .claude/workflows/: one resumable workflow per phase.
 
 ## Tracker and commits
 
 Two skills carry the recurring chores: `lazyslice-tracker` (`.claude/skills/lazyslice-tracker/SKILL.md`: filing, starting, logging, moving, closing with a post-mortem; how to word a goal) and `lazyslice-commit` (`.claude/skills/lazyslice-commit/SKILL.md`: the headline-plus-bullets commit format release notes are generated from, and path-scoped staging while a workflow runs). Read the skill before doing either.
 
+`tools/tracker.py` keeps every pre-T-0196 subcommand and stdout contract, now running over the `gh` CLI for anything open, in progress or blocked; `show T-NNNN` replaces reading `tracker/tasks/T-NNNN-*.md` for open work. A mutating command needs `gh` installed and authenticated (`gh auth login`, `gh auth refresh -s project`) and refuses, unchanged, if it is not.
+
 ```
 python3 tools/tracker.py list
+python3 tools/tracker.py show T-0001
 python3 tools/tracker.py new --epic E5 --phase 5 --title "..." --owner sonnet --goal "..."
 python3 tools/tracker.py close T-0001 --outcome done --postmortem "went well: ... | went badly: ... | change next time: ..."
 make relnotes FROM=v0.1.0 TO=HEAD

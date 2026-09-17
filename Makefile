@@ -38,7 +38,7 @@ LDFLAGS := -s -w \
 	-X main.commit=$(COMMIT) \
 	-X main.date=$(DATE)
 
-.PHONY: all build test lint integration egress torture vet-tagged forbidden unsafe-flags spdx fmt check tools clean help docs docs-check vulncheck bench relnotes bench-compare
+.PHONY: all build test lint integration egress torture vet-tagged forbidden unsafe-flags spdx fmt check tools clean help docs docs-check vulncheck bench relnotes bench-compare tools-test
 
 ## build: compile the binary into bin/
 build:
@@ -540,15 +540,27 @@ fmt:
 	gofmt -w -s $$(git ls-files '*.go')
 	@set -e; for m in $(MODULES); do ( cd $$m && go mod tidy ); done
 
+## tools-test: unit tests for tools/tracker.py, the GitHub-backed tracker
+## (T-0196)
+##
+## Every test replaces tracker.gh with a fake that records calls and answers
+## from an in-memory model built from real `gh` JSON shapes; none of them
+## touch the network or Liarea/lazyslice. Discovery is scoped to tools/ and to
+## the test_*.py naming `tools/test_tracker.py` uses, so this stays a Python
+## target and never picks up a stray file elsewhere in the tree.
+tools-test:
+	python3 -m unittest discover -s tools -p 'test_*.py' -v
+
 ## check: lint, the forbidden-name grep, the unsafe-flags check, the docs-drift
-## check, then test. release.yml runs this target — and only this target —
-## before a tag publishes, so anything CLAUDE.md's hardest rule depends on has
-## to be a prerequisite here, not only a ci.yml job: a tag is not required to
-## point at a commit ci.yml ever ran. vulncheck stays out on purpose, because
-## it is a network call and this target is also the local default; run it
-## separately (`make vulncheck`) or add it to release.yml if the release path
-## should block on it too.
-check: lint forbidden unsafe-flags docs-check vet-tagged test
+## check, tools-test, then test. release.yml runs this target — and only this
+## target — before a tag publishes, so anything CLAUDE.md's hardest rule
+## depends on has to be a prerequisite here, not only a ci.yml job: a tag is
+## not required to point at a commit ci.yml ever ran. vulncheck stays out on
+## purpose, because it is a network call and this target is also the local
+## default; run it separately (`make vulncheck`) or add it to release.yml if
+## the release path should block on it too. tools-test needs no network
+## either — it is a fake gh — so it belongs here and not with vulncheck.
+check: lint forbidden unsafe-flags docs-check vet-tagged tools-test test
 
 ## tools: install the pinned build tools into bin/tools
 tools:
