@@ -20,3 +20,4 @@ coverage.out
 /docgen
 /tools/docgen/docgen
 /lazyslice
+__pycache__/

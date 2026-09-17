@@ -29,6 +29,10 @@ The pipeline stages are: **discover, introspect, classify, plan, extract,
 transform, load, verify, emit** (ADR-005). They are wired together in exactly
 one place, `internal/core`.
 
+## Tracking
+
+Open, in-progress and blocked work lives as GitHub Issues on this repository (Project 3, "lazyslice"), not as files — `tracker/tasks/` holds only closed and cancelled history, written once when a task closes and never edited again. `python3 tools/tracker.py show T-NNNN` reads a task, open or closed; `python3 tools/tracker.py list` lists everything. The tool is the only writer either side, and it is run by the orchestrator.
+
 ## Decisions
 
 Decisions live in [docs/adr/](docs/adr/). An ADR is proposed until its phase
