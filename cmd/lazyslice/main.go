@@ -753,10 +753,30 @@ func runTUI(ctx context.Context, req core.Request, stdout io.Writer) error {
 //
 // The screens can change what the run asks for; they cannot change which
 // databases it writes, which schema it was approved over or how its columns
-// were classified. Everything on the request except the pin came from the
-// screens, so the pin is added and nothing else is touched — a second pass that
-// dropped it would be exactly the unpinned run core.Preview exists to prevent,
-// and it would look identical in scrollback.
+// were classified. Everything on the request except the pin and the root
+// below came from the screens, so nothing else is touched — a second pass that
+// dropped the pin would be exactly the unpinned run core.Preview exists to
+// prevent, and it would look identical in scrollback.
+//
+// The root is carried forward from the preview pass by req.Reviewed alone:
+// core.Reviewed.Root is ADR-008 §6 Q2's answer (or --root's, or the committed
+// yml's) from the pass that already ran, and internal/core's rootQuestion and
+// planRequest both read it directly off Request.Reviewed when the screens
+// left Request.Root empty. Without it, core.Run's own Q2 would ask the
+// operator the same question again on the second pass: a second blocking
+// question in a run ADR-008 promises only one for, and — two passes being two
+// schema reads — one that could in principle answer differently from the plan
+// just reviewed on the screens (T-0271 review, finding 5).
+//
+// This function does not also copy reviewed.Root onto req.Root the way an
+// earlier version did: Request.Root is text the operator actually typed
+// (--root, or the plan screen's own field), and reviewed.Root is a resolved
+// ref.TableRef — rendering it back into that string field and letting
+// planRequest re-parse it split a schema or table name containing a dot on
+// the wrong dot, reopening one process boundary later the exact round-trip
+// bug finding 4 fixed for Q2's own answer within a single pass (T-0271
+// review, finding 5's own fix). A --root the operator did type is left
+// exactly as the screens returned it, on Request.Root, same as before.
 func pinned(req core.Request, reviewed *core.Reviewed) core.Request {
 	req.Reviewed = reviewed
 	return req

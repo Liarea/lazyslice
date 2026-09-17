@@ -97,6 +97,7 @@ $ lazyslice --source postgres://ls:pw@127.0.0.1:55701/shop?sslmode=disable \
   public.products.price_cents: no name or value signal
   public.products.sku: nothing recognised in 20 samples, not proof the column is impersonal
   public.products.title: 20/20 samples mixed digits and words; no name signal
+  root public.customers — named by --root — --root
   public.customers: 50 rows, child_ok; root
   public.orders: 149 rows, child_ok; child of public.customers via public.orders.customer_id
   public.products: 20 rows, parent_only; parent of public.order_items via public.order_items.product_id
@@ -121,6 +122,12 @@ excerpt drops — they are honest, but they are not about personal data, and
 credential" is the classifier trying a signal that Postgres's own type system
 already rules out (ADR-010's recall boundary), not a decision that means
 anything for a `timestamptz` column.
+
+`root public.customers — named by --root — --root` is the one line `--root`
+answers outright: without it (and with no root already recorded in
+`lazyslice.yml`), this run would have stopped at a terminal to ask
+`root table? [customers]` first — ADR-008's one blocking question — and
+printed the same decision line either way once it had an answer.
 
 ## Masked values differ from the source
 

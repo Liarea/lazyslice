@@ -93,6 +93,7 @@ $ lazyslice --source postgres://ls:pw@127.0.0.1:55701/shop?sslmode=disable \
   public.customers.full_name: name matches person_name; 200/200 samples mixed digits and words
   public.customers.id: no name or value signal; surrogate key: preserved verbatim
   public.customers.phone: name matches phone
+  root public.customers — named by --root — --root
   public.customers: 50 rows, child_ok; root
   public.orders: 149 rows, child_ok; child of public.customers via public.orders.customer_id
   public.products: 20 rows, parent_only; parent of public.order_items via public.order_items.product_id
@@ -115,6 +116,14 @@ first question anyone pointing it at a database has to ask before anything
 else happens: which database is about to be read, and which one is about to
 be dropped and rewritten. Get either wrong and the run refuses instead of
 guessing — see the last example below.
+
+`--root customers` above answers the one question a run at a terminal would
+otherwise ask: a run without `--root` (and with no root already recorded in
+`lazyslice.yml`) prints `root table? [customers]` and waits for Enter, a
+table name, or `?` for the ranked candidates — defaulting to the table with
+the most incoming and fewest outgoing foreign keys, which is `customers`
+here anyway. With `--yes` or no terminal to ask, it takes that default
+without printing the question at all.
 
 Every column lazyslice thought looked like personal data says why:
 `customers.email`, `.full_name` and `.phone` are masked by name; `customers.id`

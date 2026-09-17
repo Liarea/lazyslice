@@ -38,21 +38,70 @@ var preferredRootNames = map[string]bool{
 	"organisations": true, "tenants": true, "companies": true, "clients": true,
 }
 
-// rootScore is one candidate and the components of its score, which is what the
-// reason line prints.
-type rootScore struct {
-	table     ref.TableRef
-	inbound   int
-	outbound  int
-	rows      int64
-	preferred bool
+// RootCandidate is one table's score for §3.1's default root, and for ADR-008
+// Q2's "?" listing and its own answer.
+//
+// It is exported, with RankRoots below, so that Q2 (internal/core) and
+// defaultRoot read the identical ranking rather than two copies of §3.1 that
+// could drift apart — the question and the planner must not be able to
+// disagree about which table is top.
+type RootCandidate struct {
+	Table     ref.TableRef
+	Inbound   int
+	Outbound  int
+	Rows      int64
+	Preferred bool
 }
 
-func (s rootScore) score() int { return s.inbound - s.outbound }
+// Score is §3.1's score(t) = inbound(t) - outbound(t).
+func (c RootCandidate) Score() int { return c.Inbound - c.Outbound }
 
-// defaultRoot picks the root when --root is absent. It returns the table and
-// the reason line §3.1 prints beside it.
-func defaultRoot(tables []pipeline.Table, fks []pipeline.ForeignKey) (ref.TableRef, string, bool) {
+// Reason is the score-components line printed beside a candidate: what
+// defaultRoot's own reason string is built from for the top pick, and what
+// Q2's "?" prints for each of the ranked top five (ADR-008 §3.1, §7).
+func (c RootCandidate) Reason() string {
+	return strconv.Itoa(c.Inbound) + " inbound - " + strconv.Itoa(c.Outbound) + " outbound FKs"
+}
+
+// CollapseForRanking returns the tables and foreign keys build() plans over:
+// every partition leaf (Table.Parent != nil) dropped, and every foreign key
+// whose child or parent is not one of the tables kept.
+//
+// It exists so that Q2 (internal/core's rootQuestion) and the planner's own
+// chooseRoot rank — and validate a typed or flagged answer against —
+// identical input. Exporting RankRoots alone did not do that: ranking the
+// *raw* introspected schema can put a partition leaf at the top (it carries
+// the table's own row count and FK count, and build() attributes both to the
+// root instead), which is a table chooseRoot's own p.inScope then refuses by
+// name. build() itself is unchanged; this is the filtering half of it,
+// factored out so both callers share one statement of the rule rather than
+// two that could drift (a review of T-0271 found exactly that drift).
+func CollapseForRanking(tables []pipeline.Table, fks []pipeline.ForeignKey) ([]pipeline.Table, []pipeline.ForeignKey) {
+	kept := make([]pipeline.Table, 0, len(tables))
+	inScope := make(map[ref.TableRef]bool, len(tables))
+	for _, t := range tables {
+		if t.Parent != nil {
+			continue
+		}
+		inScope[t.Ref] = true
+		kept = append(kept, t)
+	}
+	var keptFKs []pipeline.ForeignKey
+	for _, fk := range fks {
+		if !inScope[fk.Child] || !inScope[fk.Parent] {
+			continue
+		}
+		keptFKs = append(keptFKs, fk)
+	}
+	return kept, keptFKs
+}
+
+// RankRoots ranks every table by §3.1's rule: lookup-shaped tables discarded
+// (unless the whole schema is lookup-shaped, in which case every table is
+// kept rather than naming no root at all), highest score first, ties broken
+// by a name a person would call their customer table, then by row count
+// descending, then by name. The result is never empty unless tables is.
+func RankRoots(tables []pipeline.Table, fks []pipeline.ForeignKey) []RootCandidate {
 	inbound := map[ref.TableRef]int{}
 	outbound := map[ref.TableRef]int{}
 	inboundFrom := map[ref.TableRef]map[ref.TableRef]bool{}
@@ -65,50 +114,56 @@ func defaultRoot(tables []pipeline.Table, fks []pipeline.ForeignKey) (ref.TableR
 		inboundFrom[fk.Parent][fk.Child] = true
 	}
 
-	var all, kept []rootScore
+	var all, kept []RootCandidate
 	for _, t := range tables {
-		s := rootScore{
-			table:     t.Ref,
-			inbound:   inbound[t.Ref],
-			outbound:  outbound[t.Ref],
-			rows:      t.ApproxRows,
-			preferred: preferredRootNames[t.Ref.Name],
+		c := RootCandidate{
+			Table:     t.Ref,
+			Inbound:   inbound[t.Ref],
+			Outbound:  outbound[t.Ref],
+			Rows:      t.ApproxRows,
+			Preferred: preferredRootNames[t.Ref.Name],
 		}
-		all = append(all, s)
+		all = append(all, c)
 		if lookupShaped(t, len(inboundFrom[t.Ref])) {
 			continue
 		}
-		kept = append(kept, s)
+		kept = append(kept, c)
 	}
 	// Every table being lookup-shaped is a schema of nothing but lookups; the
 	// best of them still beats refusing to name a root at all.
 	if len(kept) == 0 {
 		kept = all
 	}
-	if len(kept) == 0 {
-		return ref.TableRef{}, "", false
-	}
 
 	sort.SliceStable(kept, func(a, b int) bool {
 		x, y := kept[a], kept[b]
-		if x.score() != y.score() {
-			return x.score() > y.score()
+		if x.Score() != y.Score() {
+			return x.Score() > y.Score()
 		}
-		if x.preferred != y.preferred {
-			return x.preferred
+		if x.Preferred != y.Preferred {
+			return x.Preferred
 		}
-		if x.rows != y.rows {
-			return x.rows > y.rows
+		if x.Rows != y.Rows {
+			return x.Rows > y.Rows
 		}
-		return tableRefLess(x.table, y.table)
+		return tableRefLess(x.Table, y.Table)
 	})
+	return kept
+}
 
+// defaultRoot picks the root when --root is absent. It returns the table and
+// the reason line §3.1 prints beside it.
+func defaultRoot(tables []pipeline.Table, fks []pipeline.ForeignKey) (ref.TableRef, string, bool) {
+	kept := RankRoots(tables, fks)
+	if len(kept) == 0 {
+		return ref.TableRef{}, "", false
+	}
 	best := kept[0]
-	reason := strconv.Itoa(best.inbound) + " inbound - " + strconv.Itoa(best.outbound) + " outbound FKs"
-	if best.preferred && len(kept) > 1 && kept[1].score() == best.score() {
+	reason := best.Reason()
+	if best.Preferred && len(kept) > 1 && kept[1].Score() == best.Score() {
 		reason += "; name preference"
 	}
-	return best.table, reason, true
+	return best.Table, reason, true
 }
 
 // lookupShaped is §3.1's discard rule: small and referenced from at most two

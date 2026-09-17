@@ -204,6 +204,9 @@ func (r *run) reviewed() *Reviewed {
 	if r.schema != nil {
 		out.SchemaFingerprint = r.schema.Fingerprint
 	}
+	if r.plan != nil {
+		out.Root = r.plan.Root
+	}
 	return out
 }
 
@@ -275,7 +278,25 @@ type run struct {
 	// step asks before escalating Eligibility.SameCluster on a ladder-chosen
 	// target (T-0184, ADR-013 review finding 3); it is false, and unused,
 	// whenever both endpoints were named and the ladder never ran.
-	headless   bool
+	headless bool
+	// askedQ1 is discover.Result.Asked (resolveEndpoints): true when the
+	// ladder actually put Q1 or Q1' to the controlling terminal this run,
+	// whatever the answer. rootQuestion (ADR-008 §6's Q2) reads it so the run
+	// asks at most one blocking question: it is false, correctly, for every
+	// mode that never calls discover.Resolve at all (resolveEndpoints's own
+	// early return for anything but ModeRun) — those modes never asked Q1 or
+	// Q1' because no ladder walk with a target-shaped decision ever ran.
+	askedQ1 bool
+	// qRoot is Q2's own answer when it is a genuine override — named at the
+	// prompt, whether typed directly or after a "?" — kept as a resolved
+	// ref.TableRef rather than fed back through r.req.Root as a re-rendered
+	// "schema.name" string: ref.TableRef.String() does not quote, so a table
+	// or schema name containing a dot round-tripped through it and a second,
+	// disagreeing parse in planRequest could split it on the wrong dot
+	// (T-0271 review). planRequest prefers it over r.req.Root, the same way
+	// it already prefers r.prior.Root. nil whenever Q2 took the default,
+	// asked nothing, or was never reached.
+	qRoot      *ref.TableRef
 	target     *pg.Target
 	targetPool *pgxpool.Pool
 	// lease is this run's ownership of the target: a dedicated target
@@ -459,6 +480,14 @@ func (r *run) execute(ctx context.Context) (*pipeline.Report, error) {
 	if r.req.Mode == ModeClassify {
 		return nil, nil
 	}
+	// ADR-008's Q2, the root table question: every mode still running at this
+	// point goes on to plan (ModeIntrospect, ModeDoctor and ModeClassify have
+	// already returned above), which is one of rootQuestion's own
+	// preconditions. It runs after introspect (r.schema exists) and before the
+	// plan asks internal/plan's own defaultRoot for the same answer silently.
+	if err := r.rootQuestion(); err != nil {
+		return nil, err
+	}
 	// The masking key, resolved ahead of the plan stage (T-0161): §11.1 arm 1
 	// masks a masked column's DEFAULT at plan, in internal/plan/ddlliteral.go,
 	// and needs the key there rather than at move, a stage later.
@@ -612,6 +641,11 @@ func (r *run) resolveEndpoints(ctx context.Context) error {
 	r.req.Source, r.sourceProv, r.sourceLabel = res.Source, res.SourceProvenance, res.SourceLabel
 	r.req.Target, r.targetProv, r.targetLabel = res.Target, res.TargetProvenance, res.TargetLabel
 	r.targetNamed = res.TargetNamed
+	// ADR-008's one-question rule, for rootQuestion (Q2): res.Asked is true
+	// only when Q1 or Q1' actually reached the controlling terminal, so a
+	// headless Q1/Q1' that took its default with nobody to ask still leaves
+	// Q2 free to ask its own.
+	r.askedQ1 = res.Asked
 	// Kept for openTarget's gate step (T-0184, ADR-013 review finding 3):
 	// discover.Headless(opts) over the same Options the ladder was resolved
 	// with, rather than a second discover.Options literal built later —
@@ -1762,6 +1796,27 @@ func (r *run) planRequest() (pipeline.PlanRequest, error) {
 		if err != nil {
 			return req, wrap(plan.CodeNoRoot, exitUsage, err, "--root %s", r.req.Root)
 		}
+		req.Root = &t
+	case r.qRoot != nil:
+		// Q2's own answer (root.go), already resolved and already checked
+		// against the same scope chooseRoot enforces: no second parse of it,
+		// and in particular no re-rendering through ref.TableRef.String()'s
+		// unquoted "schema.name", which is what fed a quoted identifier
+		// containing a dot back into this function's own resolveTable call
+		// wrongly split before this field existed (T-0271 review).
+		t := *r.qRoot
+		req.Root = &t
+	case r.req.Reviewed != nil && r.req.Reviewed.Root != (ref.TableRef{}):
+		// The root the preview pass already planned from and showed the
+		// operator (core.Reviewed.Root), carried here the same way r.qRoot is
+		// above and for the identical reason: it is a resolved ref.TableRef,
+		// not a string cmd/lazyslice's pinned() re-rendered onto Request.Root
+		// for a second, disagreeing parse to misread (T-0271 review, finding
+		// 5's own fix). Checked ahead of r.prior.Root because a --tui second
+		// pass's Reviewed is what the operator actually reviewed on the
+		// screens, which the run's own committed yml — read independently on
+		// each pass — is not guaranteed to still agree with.
+		t := r.req.Reviewed.Root
 		req.Root = &t
 	case r.prior != nil && r.prior.Root != (ref.TableRef{}):
 		t := r.prior.Root

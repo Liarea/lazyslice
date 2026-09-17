@@ -38,12 +38,21 @@ import (
 //
 // Q1 and Q1' are mutually exclusive, which is what keeps the run to one
 // blocking question.
-func noTarget(ctx context.Context, o Options, cands []found, source *found, dock dockerEndpoint, sink event.Sink) (*found, error) {
+//
+// The second return is Result.Asked: true only when Q1 or Q1' actually put a
+// question to the controlling terminal, whatever the answer. Every branch
+// that never reaches a terminal — --create-target (a flag is an answer, not a
+// question), no usable Docker endpoint, a headless Q1 or Q1' that took its
+// default with nobody to ask — reports false, which is what lets Q2
+// (internal/core, ADR-008 §6) tell "the one question was already spent" apart
+// from "nobody was there to spend it on".
+func noTarget(ctx context.Context, o Options, cands []found, source *found, dock dockerEndpoint, sink event.Sink) (*found, bool, error) {
 	if o.CreateTarget && !dock.usable() {
-		return nil, refuseDockerNotLocal(dock, sink)
+		return nil, false, refuseDockerNotLocal(dock, sink)
 	}
 	if o.CreateTarget {
-		return provisionTarget(ctx, o, source, dock, sink)
+		f, err := provisionTarget(ctx, o, source, dock, sink)
+		return f, false, err
 	}
 	if !dock.usable() {
 		// Neither question can be honoured here, and a question whose yes
@@ -51,7 +60,7 @@ func noTarget(ctx context.Context, o Options, cands []found, source *found, dock
 		// --create-target, because --create-target on this endpoint is the
 		// refusal above and telling an operator to run into it is not a next
 		// step.
-		return nil, refuseNoTarget(sink, "--target")
+		return nil, false, refuseNoTarget(sink, "--target")
 	}
 	if stopped := onlyStopped(cands, source); stopped != nil {
 		return startStopped(ctx, o, stopped, dock, sink)
@@ -65,39 +74,43 @@ func noTarget(ctx context.Context, o Options, cands []found, source *found, dock
 // identical question, because the container Q1 creates is one lazyslice names,
 // owns and exists to write into. Headless — no controlling terminal, or --yes —
 // it is the hard failure the table gives it: exit 4 naming --create-target.
-func askQ1(ctx context.Context, o Options, source *found, dock dockerEndpoint, sink event.Sink) (*found, error) {
+func askQ1(ctx context.Context, o Options, source *found, dock dockerEndpoint, sink event.Sink) (*found, bool, error) {
 	// Whether there is anyone to ask is settled before anything is computed to
 	// ask them: a headless run takes Q1's hard failure without dialling the
 	// source for a major it will not use and without claiming a port it will
-	// not publish.
+	// not publish. Nobody to ask is also nothing asked (Result.Asked stays
+	// false): the headless failure below is the same stop the answer "no"
+	// would produce, and it must not tell Q2 that this run's one question was
+	// spent when nobody was at a terminal to spend it.
 	p, done, ok := prompterFor(o)
 	if !ok {
-		return nil, refuseNoTarget(sink, "--create-target")
+		return nil, false, refuseNoTarget(sink, "--create-target")
 	}
 	defer done()
 
 	major, err := sourceMajor(ctx, o, source, sink)
 	if err != nil {
-		return nil, err
+		return nil, true, err
 	}
 	port, err := provision.FreePort()
 	if err != nil {
-		return nil, err
+		return nil, true, err
 	}
 	name := provision.Name(projectName(o.Workdir))
 
 	answer, err := p.Confirm("no local postgres found to load into. start one? postgres:"+
 		strconv.Itoa(major)+" as "+name+" on port "+strconv.Itoa(port)+" [Y/n]", true)
 	if err != nil || !answer {
-		return nil, refuseNoTarget(sink, "--create-target")
+		return nil, true, refuseNoTarget(sink, "--create-target")
 	}
-	return provisionWith(ctx, o, dock, sink, provision.Request{
+	f, err := provisionWith(ctx, o, dock, sink, provision.Request{
 		Project:  projectName(o.Workdir),
 		Workdir:  o.Workdir,
 		Major:    major,
 		Port:     port,
 		Progress: progressOf(o),
 	})
+	return f, true, err
 }
 
 // provisionTarget is --create-target: the same work as Q1's yes, with no
@@ -142,18 +155,20 @@ func provisionWith(ctx context.Context, o Options, dock dockerEndpoint, sink eve
 // same stop the same state produces headlessly for Q1: exit 4 naming
 // --create-target, since one blocking question has already been asked and Q1
 // cannot be the follow-up.
-func startStopped(ctx context.Context, o Options, stopped *found, dock dockerEndpoint, sink event.Sink) (*found, error) {
+func startStopped(ctx context.Context, o Options, stopped *found, dock dockerEndpoint, sink event.Sink) (*found, bool, error) {
+	asked := false
 	if p, done, ok := prompterFor(o); ok {
+		asked = true
 		answer, err := p.Confirm("target "+stopped.cand.Label+" is stopped — start it? [Y/n]", true)
 		done()
 		if err == nil && !answer {
-			return nil, refuseNoTarget(sink, "--create-target")
+			return nil, asked, refuseNoTarget(sink, "--create-target")
 		}
 	}
 
 	p, err := provisionerFor(o, dock)
 	if err != nil {
-		return nil, err
+		return nil, asked, err
 	}
 	res, err := p.Start(ctx, stopped.containerID, provision.Request{
 		Project:  projectName(o.Workdir),
@@ -161,9 +176,9 @@ func startStopped(ctx context.Context, o Options, stopped *found, dock dockerEnd
 		Progress: progressOf(o),
 	})
 	if err != nil {
-		return nil, provisionRefusal(err, sink)
+		return nil, asked, provisionRefusal(err, sink)
 	}
-	return adopted(ctx, o, res, sink), nil
+	return adopted(ctx, o, res, sink), asked, nil
 }
 
 // adopted turns a provision.Result into the ladder's own candidate and prints
@@ -235,7 +250,7 @@ func sourceMajor(ctx context.Context, o Options, source *found, sink event.Sink)
 // done releases the terminal and is safe to call once; it is never nil when ok
 // is true.
 func prompterFor(o Options) (p Prompter, done func(), ok bool) {
-	if o.Yes {
+	if o.Yes || o.NoControllingTerminal {
 		return nil, nil, false
 	}
 	if o.Prompter != nil {
@@ -270,6 +285,14 @@ func isHeadless(o Options) bool {
 // review finding 3), and internal/core has no controlling-terminal test of
 // its own to duplicate it with.
 func Headless(o Options) bool { return isHeadless(o) }
+
+// OpenPrompter is prompterFor, exported so that internal/core's Q2 (ADR-008
+// §6) reads the controlling terminal through the same seam Q1 and Q1' use
+// rather than a second one: a Prompter, a release func safe to call once, and
+// whether there was anybody to ask. Q1, Q1' and isHeadless keep calling the
+// unexported prompterFor directly; this is the one door opened for a caller
+// outside the package, the same reason Headless exists beside isHeadless.
+func OpenPrompter(o Options) (Prompter, func(), bool) { return prompterFor(o) }
 
 // provisionerFor builds the write-capable Docker client, on the endpoint rung 3
 // already resolved and already established is local and reachable.

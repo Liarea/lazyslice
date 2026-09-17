@@ -27,6 +27,7 @@ import (
 	"github.com/Liarea/lazyslice/internal/core"
 	"github.com/Liarea/lazyslice/internal/event"
 	"github.com/Liarea/lazyslice/internal/pipeline"
+	"github.com/Liarea/lazyslice/internal/ref"
 	"github.com/Liarea/lazyslice/internal/tui"
 )
 
@@ -1256,6 +1257,58 @@ func TestTheSecondPassCarriesTheReviewPin(t *testing.T) {
 	after.Reviewed = nil
 	if !reflect.DeepEqual(after, before) {
 		t.Errorf("pinned changed the request the screens returned:\n got %+v\nwant %+v", after, before)
+	}
+}
+
+// TestPinnedCarriesTheReviewedRoot is the T-0271 review's finding 5: a --tui
+// run with no --root must ask ADR-008 §6's Q2 at most once, on the preview
+// pass, and the second pass must run the same root that pass decided rather
+// than asking again with r.req.Root back to empty.
+//
+// pinned itself no longer copies reviewed.Root onto req.Root (finding 5's own
+// review round, below): Request.Root stays exactly what the screens returned,
+// and internal/core's rootQuestion and planRequest read Request.Reviewed.Root
+// directly. Rendering the reviewed root into that string field and letting
+// planRequest re-parse it is what split a table or schema name containing a
+// dot on the wrong dot one process boundary later, after the operator had
+// already reviewed and approved the plan on the screens.
+func TestPinnedCarriesTheReviewedRoot(t *testing.T) {
+	before := core.NewRequest()
+	before.Mode = core.ModeRun
+	reviewed := &core.Reviewed{
+		SchemaFingerprint: "ddl-1", ClassFingerprint: "cls-1",
+		Root: ref.TableRef{Schema: "public", Name: "customers"},
+	}
+
+	after := pinned(before, reviewed)
+	if after.Root != "" {
+		t.Errorf("pinned's Root = %q, want empty: the reviewed root travels on Request.Reviewed, "+
+			"not a re-rendered string on Request.Root", after.Root)
+	}
+	if after.Reviewed != reviewed {
+		t.Fatalf("pinned's Reviewed = %v, want the preview pass's own reviewed root carried forward", after.Reviewed)
+	}
+	if after.Reviewed.Root != reviewed.Root {
+		t.Errorf("pinned's Reviewed.Root = %v, want %v so core.Run's Q2 does not ask a second time",
+			after.Reviewed.Root, reviewed.Root)
+	}
+}
+
+// TestPinnedLeavesAnOperatorChosenRootAlone is the other side: a --root the
+// operator typed, or set on the plan screen, is never overwritten by the
+// preview pass's own answer — the screens' own edit wins.
+func TestPinnedLeavesAnOperatorChosenRootAlone(t *testing.T) {
+	before := core.NewRequest()
+	before.Mode = core.ModeRun
+	before.Root = "public.orders"
+	reviewed := &core.Reviewed{
+		SchemaFingerprint: "ddl-1", ClassFingerprint: "cls-1",
+		Root: ref.TableRef{Schema: "public", Name: "customers"},
+	}
+
+	after := pinned(before, reviewed)
+	if after.Root != "public.orders" {
+		t.Errorf("pinned's Root = %q, want the operator's own public.orders left untouched", after.Root)
 	}
 }
 

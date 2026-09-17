@@ -32,6 +32,17 @@ type Prompter interface {
 	// other than an empty line, y/yes or n/no (case-insensitively) re-prompts
 	// once and then takes def (ADR-008 §7).
 	Confirm(question string, def bool) (bool, error)
+	// Ask writes question and reads one line of free-form text, trimmed. An
+	// empty line (a bare Enter) returns def unchanged — ADR-008 §7's "the
+	// bracketed letter is the default and the only thing a bare Enter
+	// selects", read for a question whose default is a name rather than a
+	// yes or no (ADR-008 §6's Q2, "root table? [customers]"). It does not
+	// validate, retry, or interpret the answer beyond that: what a non-empty
+	// answer means — a table name, "?" — is entirely the caller's question to
+	// ask, the same division Confirm already draws for a yes/no one. The
+	// terminal going away mid-question is reported the same way Confirm
+	// reports it: def and ErrNoTerminal, the headless answer arriving late.
+	Ask(question string, def string) (string, error)
 	// Close releases the controlling terminal.
 	Close() error
 }
@@ -84,6 +95,24 @@ func (p *prompt) Confirm(question string, def bool) (bool, error) {
 			// is understood is a question that hangs a run (ADR-008 §7).
 			continue
 		}
+	}
+	return def, nil
+}
+
+// Ask implements Prompter.
+func (p *prompt) Ask(question string, def string) (string, error) {
+	if _, err := fmt.Fprint(p.out, question+" "); err != nil {
+		return def, err
+	}
+	line, err := p.in.ReadString('\n')
+	if err != nil && line == "" {
+		// The terminal went away mid-question, exactly Confirm's own case: the
+		// headless state arriving late takes the headless answer rather than
+		// looping on an EOF that will not change.
+		return def, ErrNoTerminal
+	}
+	if answer := strings.TrimSpace(line); answer != "" {
+		return answer, nil
 	}
 	return def, nil
 }

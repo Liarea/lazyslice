@@ -307,19 +307,21 @@ func (p *run) build() {
 			continue
 		}
 		p.byRef[t.Ref] = t
-		p.tables = append(p.tables, *t)
 	}
+
+	// CollapseForRanking (root.go) is the one statement of "which tables and
+	// edges this plan sees at all" — a partition leaf dropped, and a foreign
+	// key with either endpoint dropped along with it — shared with Q2
+	// (internal/core's rootQuestion), so the question and this plan cannot
+	// rank a different set of tables (T-0271 review).
+	fks := append([]pipeline.ForeignKey(nil), p.schema.FKs...)
+	sort.Slice(fks, func(a, b int) bool { return fks[a].Name < fks[b].Name })
+	p.tables, p.fks = CollapseForRanking(p.schema.Tables, fks)
 	sort.Slice(p.tables, func(a, b int) bool { return tableRefLess(p.tables[a].Ref, p.tables[b].Ref) })
 
 	p.outgoing = map[ref.TableRef][]pipeline.ForeignKey{}
 	p.incoming = map[ref.TableRef][]pipeline.ForeignKey{}
-	fks := append([]pipeline.ForeignKey(nil), p.schema.FKs...)
-	sort.Slice(fks, func(a, b int) bool { return fks[a].Name < fks[b].Name })
-	for _, fk := range fks {
-		if p.byRef[fk.Child] == nil || p.byRef[fk.Parent] == nil {
-			continue
-		}
-		p.fks = append(p.fks, fk)
+	for _, fk := range p.fks {
 		p.outgoing[fk.Child] = append(p.outgoing[fk.Child], fk)
 		p.incoming[fk.Parent] = append(p.incoming[fk.Parent], fk)
 	}

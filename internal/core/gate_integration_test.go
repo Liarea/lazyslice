@@ -145,6 +145,7 @@ func TestAGateRefusalEndsTheRunInsteadOfTryingTheRunnerUp(t *testing.T) {
 type stubPrompter struct{}
 
 func (stubPrompter) Confirm(_ string, def bool) (bool, error) { return def, nil }
+func (stubPrompter) Ask(_ string, def string) (string, error) { return def, nil }
 func (stubPrompter) Close() error                             { return nil }
 
 // count is how many times a code reached the sink.
