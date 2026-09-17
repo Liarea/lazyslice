@@ -45,6 +45,12 @@ error)`.
 - Unreadable tables are resolved via `RolePrivileges.Unreadable` before any
   key is fetched (§3.6); a parent the role cannot read is exit 12, never
   silently dropped.
+- A `Decision.Refused` is a refusal, not a hint: `checkFKPairRefusal`
+  (`fkpair.go`, T-0253, T-0257) reads it beside `checkWriteBack`, before any
+  key is fetched, and stops the run at exit 12 naming both columns of the
+  pair unless the operator has explicitly `--unmask`ed both of them
+  (`internal/classify/CLAUDE.md`'s own "A validated foreign key's columns are
+  raised together, or not at all" has the full account).
 
 **Test.** `go test ./internal/plan/...` for the cases no fixture can carry (the
 exit-13 refusal, and the exit-12 write-back refusal in `writeback_test.go`),

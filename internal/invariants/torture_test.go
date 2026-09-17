@@ -884,6 +884,13 @@ func TestTortureCatalogueMatchesTheFixtures(t *testing.T) {
 	// and the eighteen --unmask flags that existed only because no such
 	// generator did were removed and the suite re-run: supabase-auth 6,
 	// gitlab 8, mastodon 2, calcom 1, discourse 1.
+	//
+	// It was 19/7/1 until T-0257. internal/plan's new checkFKPairRefusal
+	// (fkpair.go) reads Decision.Refused, which internal/classify has set
+	// since T-0253 whenever a validated foreign key's partner cannot be
+	// raised the same way; metabase's public.core_session.id/
+	// public.login_history.session_id pair needed a second --unmask to
+	// clear it (docs/TORTURE.md's own T-0257 section has the full account).
 	byKind := map[string]int{}
 	for _, s := range tortureSchemas {
 		for _, f := range s.flags {
@@ -892,7 +899,7 @@ func TestTortureCatalogueMatchesTheFixtures(t *testing.T) {
 			}
 		}
 	}
-	for kind, want := range map[string]int{"--unmask": 19, "--skip-table": 7, "--key": 1} {
+	for kind, want := range map[string]int{"--unmask": 20, "--skip-table": 7, "--key": 1} {
 		if byKind[kind] != want {
 			t.Errorf("torture: the catalogue holds %d %s flags and docs/TORTURE.md says %d; "+
 				"re-measure the split there and on ROADMAP.md's gate-5 line (T-0106) rather than "+

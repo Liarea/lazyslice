@@ -116,10 +116,18 @@ type state struct {
 	// pkOrUnique is every column that can be the referenced side of an edge,
 	// which is the condition ARCHITECTURE.md §4 puts on FK propagation.
 	pkOrUnique map[ref.ColumnRef]bool
-	// fkColumns is every column at either end of a validated, non-virtual
-	// foreign key: read by unknownColumnsBesideCertain's own join-safety
-	// exclusion, below.
-	fkColumns map[ref.ColumnRef]bool
+	// fkPartners maps every column at either end of a validated, non-virtual
+	// foreign key edge to the column(s) at its other end: read by
+	// unknownColumnsBesideCertain's own join-safety pairing, below (T-0253).
+	// A column with no entry here is not part of any such edge.
+	fkPartners map[ref.ColumnRef][]ref.ColumnRef
+	// fkParents is fkPartners' directional half: a validated, non-virtual
+	// foreign key's child column maps to the parent column(s) it references,
+	// and a parent has no entry here. fkPairs' upward walk (T-0253's second
+	// review round) reads this to find the parent of a column it has just
+	// raised, a direction `propagateKeys` (below) never covers — it only ever
+	// pushes a decision from a masked parent down to its children.
+	fkParents map[ref.ColumnRef][]ref.ColumnRef
 	// region is --phone-region / the yml's phone_region, or "" when neither
 	// is set. It is resolved once, here, and read by buildValidators (which
 	// this state's own validators list is built from) and by decide (to name
@@ -158,7 +166,8 @@ func (classifier) Classify(schema *pipeline.Schema, s pipeline.Sampler, prior *p
 		dec:        map[ref.ColumnRef]*work{},
 		unique:     map[ref.ColumnRef]bool{},
 		pkOrUnique: map[ref.ColumnRef]bool{},
-		fkColumns:  map[ref.ColumnRef]bool{},
+		fkPartners: map[ref.ColumnRef][]ref.ColumnRef{},
+		fkParents:  map[ref.ColumnRef][]ref.ColumnRef{},
 		region:     region,
 		validators: buildValidators(region),
 	}
@@ -270,33 +279,45 @@ func (st *state) indexKeys() {
 	}
 }
 
-// indexFKColumns records every column at either end of a validated,
-// non-virtual foreign key edge -- the ones `internal/load` recreates and
-// enforces after every row has been committed (NOT VALID, then VALIDATE), so
-// a decision that leaves the two ends disagreeing is not a masking gap but a
-// half-loaded target at load time (`reconcileKeyChildren`'s own comment makes
-// the identical argument for the integer/uuid key case). It is read by
-// unknownColumnsBesideCertain's own join-safety exclusion, below: a rail with
-// no evidence about a column of its own must not be what puts the two ends of
-// a join out of step, and this package has no pass that would otherwise catch
-// it -- `keyChildren` only reconciles a key-family (integer/bigint/uuid)
-// child (`isKeyFamily`), and `propagateKeys` only ever propagates a masked
-// **parent**'s decision forward, never a child's back to an unmasked parent.
+// indexFKColumns pairs every column at either end of a validated, non-virtual
+// foreign key edge with the column at its other end -- the ones
+// `internal/load` recreates and enforces after every row has been committed
+// (NOT VALID, then VALIDATE), so a decision that leaves the two ends
+// disagreeing is not a masking gap but a half-loaded target at load time
+// (`reconcileKeyChildren`'s own comment makes the identical argument for the
+// integer/uuid key case). It is read by unknownColumnsBesideCertain's own
+// join-safety pairing, below (T-0253): a rail with no evidence about a
+// column of its own must not be what puts the two ends of a join out of
+// step, and this package has no other pass that would catch it doing so --
+// `keyChildren` only reconciles a key-family (integer/bigint/uuid) child
+// (`isKeyFamily`), and `propagateKeys` only ever propagates a masked
+// **parent**'s decision forward, never a child's back to an unmasked parent,
+// which is exactly the direction a rail that fires on the child end needs.
 //
 // An unvalidated constraint is a hint over rows Postgres never checked and a
 // virtual one is a line in the yml, so a child of either can already hold a
 // value its "parent" does not -- the same distinction `reconcileKeyChildren`
 // draws for the same reason.
+//
+// The pairing is position-matched across a composite key, the same way
+// `propagateKeys` walks one: `fkPartners[parent[i]]` holds `child[i]` and
+// `fkPartners[child[i]]` holds `parent[i]`, never the whole column list
+// against itself. `fkParents[child[i]]` holds the same `parent[i]` alone —
+// the directional half `fkPairs`' upward walk needs, below.
 func (st *state) indexFKColumns() {
 	for _, fk := range st.schema.FKs {
 		if !fk.Validated || fk.Virtual {
 			continue
 		}
-		for _, name := range fk.ParentCols {
-			st.fkColumns[ref.ColumnRef{Table: fk.Parent, Column: name}] = true
-		}
-		for _, name := range fk.ChildCols {
-			st.fkColumns[ref.ColumnRef{Table: fk.Child, Column: name}] = true
+		for i, childName := range fk.ChildCols {
+			if i >= len(fk.ParentCols) {
+				break
+			}
+			parent := ref.ColumnRef{Table: fk.Parent, Column: fk.ParentCols[i]}
+			child := ref.ColumnRef{Table: fk.Child, Column: childName}
+			st.fkPartners[parent] = append(st.fkPartners[parent], child)
+			st.fkPartners[child] = append(st.fkPartners[child], parent)
+			st.fkParents[child] = append(st.fkParents[child], parent)
 		}
 	}
 }
@@ -1560,30 +1581,87 @@ func (st *state) neighbouringColumns() {
 //   - A never-masked column (a generated column, a surrogate key, a FK
 //     column) and a type-conflicting decision: the same exclusions raisable
 //     applies to the arm above, for the same reasons.
+//
 //   - A column under a unique index. free_text's generator would then have to
 //     emit d_required = n²/2ε distinct values (ARCHITECTURE.md §5), and
 //     internal/plan refuses at exit 12 when it cannot — over a column this
 //     rule masked on no evidence at all.
+//
 //   - A column of two-letter codes. An ISO country or language column has a
 //     domain of two characters and reads as an unknown text column to every
 //     signal in §4; masking one is a plan refusal for the same reason, and it
 //     is not personal data.
-//   - A column at either end of a validated foreign key (`indexFKColumns`,
-//     T-0239's fix-round review). This rule has no evidence about the column
-//     at all, and this package's own propagation only ever runs parent to
-//     child (`propagateKeys`) or reconciles the integer/uuid key case
-//     (`keyChildren`) — neither reaches a character-family child this rule
-//     alone masked while its parent's identical values stayed unmasked, which
-//     is not a masking gap but the two ends of one join left in disagreement:
-//     `internal/plan`'s equality and write-back checks both judge type, not
-//     cross-table agreement, so neither catches it, and `internal/load` adds
-//     the edge NOT VALID and VALIDATEs after every row is committed, so the
-//     run dies with the target already half loaded
-//     (`testdata/regressions/031-fk-child-code-column-beside-a-certain-column.sql`).
-//     A genuinely personal FK-linked column is still reached by every other
-//     pass — a name hit, a value validator, or propagation once one end is
-//     masked on real evidence — so this exclusion costs nothing this rule
-//     alone was ever the only route to.
+//
+//   - A column at either end of a validated foreign key used to be excluded
+//     outright here (`indexFKColumns`, T-0239's fix-round review), on the
+//     claim that "a genuinely personal FK-linked column is still reached by
+//     every other pass — a name hit, a value validator, or propagation once
+//     one end is masked on real evidence." **The 2026-09-17 round-5 red team
+//     disproved that claim**
+//     (`docs/reviews/2026-09-15-redteam/round5-still-leaking.json`, the
+//     classifier attacker's FK variant): a validated foreign key's
+//     character-family child can carry the exact shape this rail exists for —
+//     a native-script name, no name rule, no value hit — beside a `certain`
+//     email neighbour, with a parent that has no `certain` column of its own
+//     for any other pass to key on, and nothing in this package ever reaches
+//     the child either: `keyChildren` only reconciles the integer/uuid key
+//     case (`isKeyFamily`), and `propagateKeys` only ever propagates a masked
+//     **parent** forward, never a masked child back. The exclusion copied real
+//     personal data verbatim on both ends under exit 0 (THREAT_MODEL.md T1) —
+//     worse than the half-loaded target (T-0132's failure mode, exit 8) it
+//     was written to avoid, which is a refusal that costs a rerun rather than
+//     a leak that costs nothing at all.
+//
+//     `fkPairs` (below) replaces the exclusion: a column this rail would
+//     otherwise raise alone, at either end of a validated foreign key, is
+//     raised together with every column paired to it (`indexFKColumns`), so
+//     the join stays in agreement and the same values are not copied on one
+//     side and replaced with free_text on the other — the same argument
+//     `propagateKeys` already makes for a parent-first decision, run in the
+//     direction that pass cannot reach. Where a partner cannot be raised the
+//     same way — it already carries a decision of its own that
+//     ARCHITECTURE.md §4 does not let this rail override, or a value shape
+//     (`twoLetterCodes`) that says the column is a code lookup and not
+//     personal data — neither end is raised: raising one alone would still
+//     copy the pair, which is the one outcome this rule must never produce.
+//     `testdata/regressions/031-fk-child-code-column-beside-a-certain-column.sql`
+//     now pins the safe direction reached by raising both ends together
+//     rather than by masking neither; the round-5 attack's own schema is
+//     `testdata/regressions/035-native-script-fk-child-beside-a-certain-column.sql`.
+//     A validated foreign key's partner that is itself under a unique index
+//     is not excluded from the pairing the way the rail's own column is
+//     (just above): it is a partner *because* the certain neighbour supplies
+//     the evidence the standalone exclusion says it has none of, and
+//     `internal/plan`'s own unique-index domain check — unchanged — is what
+//     admits or refuses the masked result on its own existing terms once
+//     both ends carry a decision. Measured against both regressions above, a
+//     small lookup table refuses: `free_text`'s generator draws from a fixed
+//     word list, so a narrow unique column's domain is nowhere near
+//     ARCHITECTURE.md §5's `d_required` at any but a handful of rows, and
+//     `internal/plan` refuses at exit 12 naming both ends of the pair
+//     together with `--unmask` for each — the same message T-0132's
+//     equality-group mechanism already prints, unmodified.
+//
+//     **T-0253's review round found two more things to say.** First,
+//     `fkPairs` originally walked the whole connected component `fkPartners`
+//     reaches, not only `cref`'s own direct partners — a partner two hops
+//     away, in a table with nothing to do with the `certain` neighbour that
+//     justified raising `cref` at all, could veto the pairing on its own
+//     shape (a two-letter code, a type conflict) and leave `cref` itself
+//     copied verbatim, the very leak this rail exists to close. `fkPairs` now
+//     walks only `cref`'s direct partners; a masked parent still reaches
+//     every other table that references it, because `propagateKeys` (below,
+//     a separate pass that runs after this one in `Classify`'s ordering)
+//     already does that unconditionally, per ARCHITECTURE.md §4's own
+//     propagation sentence, and does not veto the parent's own masking when
+//     one further-out child cannot accept the category — it records
+//     `type_conflict` on that one child and moves on. Second, when a direct
+//     partner cannot be raised, neither end is raised, exactly as before, but
+//     both ends now carry `Decision.Refused` naming the other
+//     (`internal/pipeline/classify.go`), the signal `internal/plan` reads
+//     (`checkFKPairRefusal`, `internal/plan/fkpair.go`, tracker T-0257) to
+//     turn this into the exit-12 refusal the paragraph above already
+//     describes, in place of the pre-T-0253 copy under exit 0.
 //
 // A sixth exclusion — a declared length under sixteen characters — used to
 // stand here too, and the 2026-09-15 round-4 red team's native-script variant
@@ -1639,12 +1717,172 @@ func (st *state) unknownColumnsBesideCertain() {
 			if !st.raisableUnknown(cref, w) {
 				continue
 			}
+			partners, blocked, ok := st.fkPairs(cref)
+			if !ok {
+				// T-0253: cref is at either end of a validated foreign key
+				// and its direct partner cannot be raised the same way
+				// (fkPairs' own comment has the reasons). Raising cref alone
+				// would copy the pair exactly as the blanket exclusion this
+				// replaces did, so neither end is touched here — but both now
+				// carry Decision.Refused naming the other, which
+				// internal/plan reads to refuse the run at exit 12 instead of
+				// copying the pair under exit 0 (tracker T-0257;
+				// internal/plan/fkpair.go; internal/pipeline/classify.go's
+				// own comment on the field).
+				reason := render("fk_pair_refused", quoteColumn(blocked))
+				w.d.Refused = reason
+				w.d.RefusedPartner = blocked
+				w.frags = append(w.frags, reason)
+				if bw := st.dec[blocked]; bw != nil {
+					bReason := render("fk_pair_refused", quoteColumn(cref))
+					bw.d.Refused = bReason
+					bw.d.RefusedPartner = cref
+					bw.frags = append(bw.frags, bReason)
+				}
+				continue
+			}
 			w.d.Category = pipeline.CatFreeText
 			w.d.Confidence = pipeline.ConfPossible
 			w.d.Source = pipeline.ByNeighbour
 			w.frags = append(w.frags, render("neighbour_unknown", quoteTable(t.Ref), certain))
+			for _, p := range partners {
+				w.frags = append(w.frags, render("fk_pair", quoteColumn(p)))
+				pw := st.dec[p]
+				pw.d.Category = pipeline.CatFreeText
+				pw.d.Confidence = pipeline.ConfPossible
+				pw.d.Source = pipeline.ByNeighbour
+				pw.frags = append(pw.frags, render("fk_pair", quoteColumn(cref)))
+			}
 		}
 	}
+}
+
+// fkPairs is unknownColumnsBesideCertain's join-safety pairing (T-0253; see
+// that function's own comment on the exclusion it replaces). cref has
+// already passed raisableUnknown on its own signals; this asks whether every
+// column *directly* paired to it across a validated foreign key
+// (`st.fkPartners[cref]`) can be raised the same way, so that masking cref
+// never leaves its partner's identical values unmasked on the other side of
+// the join.
+//
+// It returns every column that has to be raised alongside cref and true when
+// all of them qualify — the caller raises cref and all of them together — or
+// nil, the first disqualifying column, and false when at least one does not,
+// in which case the caller raises nothing: a partner this rail cannot bring
+// into agreement must not be worked around by masking only the column that
+// happens to have a certain neighbour of its own, because that copies the
+// pair exactly as leaving both alone did.
+//
+// A column with no partner at all (not part of any validated foreign key)
+// returns an empty set and true, which is unknownColumnsBesideCertain's
+// ordinary single-column raise.
+//
+// It stops at cref's *direct* partners in the downward direction — a parent
+// raised here reaches every other child through `propagateKeys` (below), a
+// separate pass that runs after this one in `Classify`'s ordering and already
+// propagates a masked parent to *every* column referencing it, unconditionally,
+// per ARCHITECTURE.md §4 — but it walks upward without that bound (T-0253's
+// second review round, high finding). `propagateKeys` only ever pushes a
+// decision from a masked parent down to its children; nothing else in this
+// package ever raises an unmasked parent because one of *its* children just
+// got masked. So when a raised partner is itself the child end of a further
+// validated foreign key, that further parent is never reached by anything —
+// the same asymmetry T-0253 exists to fix in the first place, one hop
+// further out: `name_root.slug_root <- name_mid.slug_mid <- members.slug_leaf`
+// (regression 036) raised `members.slug_leaf` and `name_mid.slug_mid`
+// together and left `name_root.slug_root`, holding the identical values,
+// copied verbatim (THREAT_MODEL.md T1), and also left the load with a masked
+// child and an unmasked parent across the `name_mid.slug_mid ->
+// name_root.slug_root` edge (the T-0132 half-loaded-target shape, T8). So
+// this walks `fkParents` — the child-to-parent half of `fkPartners`
+// — transitively from cref and from every column it has already collected,
+// gathering and gating each further parent the same way `fkPartnerRaisable`
+// gates a direct one, until nothing new is found. A disqualified ancestor,
+// however many hops up, still refuses the whole set: masking the columns
+// below it and leaving it copied is exactly the leak above.
+//
+// The bound that survives from the review before this one is the *downward*
+// direction only: this never walks from a raised column to a further child
+// of *its own* (only to its own parents), because that is the direction
+// `propagateKeys`'s unconditional, per-column sweep already covers, and
+// walking it here would resurrect the medium finding that bounded this
+// function to direct partners in the first place — an unrelated column many
+// hops down, in a table with no relationship to the `certain` neighbour that
+// justified raising cref at all, vetoing cref's own masking.
+// testdata/regressions/031 and 035 (both a single direct edge, no chain) are
+// unaffected; regression 036 pins the chain.
+func (st *state) fkPairs(cref ref.ColumnRef) (partners []ref.ColumnRef, blocked ref.ColumnRef, ok bool) {
+	seen := map[ref.ColumnRef]bool{cref: true}
+	visit := func(c ref.ColumnRef) bool {
+		if seen[c] {
+			// A redundant duplicate FK declaration between the same two
+			// columns, a composite key visiting the same partner twice, or a
+			// column reached both as a direct partner and as an ancestor of
+			// another one — nothing to add the second time.
+			return true
+		}
+		seen[c] = true
+		if !st.fkPartnerRaisable(c) {
+			blocked = c
+			return false
+		}
+		partners = append(partners, c)
+		return true
+	}
+
+	for _, p := range st.fkPartners[cref] {
+		if !visit(p) {
+			return nil, blocked, false
+		}
+	}
+
+	queue := append([]ref.ColumnRef{cref}, partners...)
+	for len(queue) > 0 {
+		c := queue[0]
+		queue = queue[1:]
+		for _, parent := range st.fkParents[c] {
+			if seen[parent] {
+				continue
+			}
+			if !visit(parent) {
+				return nil, blocked, false
+			}
+			queue = append(queue, parent)
+		}
+	}
+
+	return partners, ref.ColumnRef{}, true
+}
+
+// fkPartnerRaisable is fkPairs' own gate on one partner. It asks the same
+// question raisableUnknown asks of cref itself, with one deliberate
+// difference: a partner under a unique index is not excluded here (see
+// unknownColumnsBesideCertain's own comment on why) — `internal/plan`'s
+// unique-index domain check, unchanged, is what judges that once the column
+// carries a decision.
+//
+// A partner that already carries any decision of its own — a name hit, a
+// value signal, a type conflict recorded at `low` — is refused rather than
+// overridden: ARCHITECTURE.md §4 never lets a raising pass move a
+// type-conflicting decision, and a category this rail did not choose is not
+// this rail's to replace. `twoLetterCodes` is refused for a different
+// reason: it is real, measured evidence that the column's whole domain is a
+// short code, which is not personal data whatever its neighbour holds.
+func (st *state) fkPartnerRaisable(pref ref.ColumnRef) bool {
+	pw := st.dec[pref]
+	if pw == nil || pw.neverMask || pw.typeConflict || pw.twoLetterCodes {
+		return false
+	}
+	if pw.d.Category != pipeline.CatNone || pw.d.Confidence != pipeline.ConfNone {
+		return false
+	}
+	if !isCharacterFamily(pw.family) {
+		return false
+	}
+	if n, ok := declaredLength(pw.column); ok && n < minUnknownLen {
+		return false
+	}
+	return true
 }
 
 // identifiesAPerson is the set of categories that make a table person-shaped
@@ -1734,21 +1972,12 @@ func (st *state) raisableUnknown(cref ref.ColumnRef, w *work) bool {
 	if st.unique[cref] {
 		return false
 	}
-	// T-0239's fix-round review: a validated foreign key's character-family
-	// column, at either end, is excluded the same way a unique index and an
-	// integer or uuid key column already are. This rail has no evidence about
-	// the column at all -- it fires on the absence of a signal -- so it must
-	// not be what makes the two ends of a join disagree: keyChildren only
-	// reconciles the integer/uuid case and propagateKeys only ever propagates
-	// a masked parent forward, never a masked child back, so a character
-	// column this rail alone masked would leave its FK partner unmasked with
-	// nothing else in this package to catch it (see indexFKColumns). A
-	// genuinely personal FK-linked column is still reached by every other
-	// pass: a name hit, a value validator, or FK propagation once one end is
-	// masked on real evidence.
-	if st.fkColumns[cref] {
-		return false
-	}
+	// T-0253: a validated foreign key no longer excludes cref outright here.
+	// unknownColumnsBesideCertain's own fkPairs is what a column at either
+	// end of one is checked against, after this gate — raised together with
+	// every column paired to it, or not raised at all (see that function's
+	// comment, and the exclusion list above it, for why a blanket exclusion
+	// leaked instead).
 	if n, ok := declaredLength(w.column); ok && n < minUnknownLen {
 		return false
 	}

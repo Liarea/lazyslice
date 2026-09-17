@@ -312,6 +312,25 @@
   message: "{table}.{column} is in a group of columns joined by foreign keys that must mask alike, and no masker fits all of them: {reason}"
   args: [table, column, count, reason]
 
+# internal/classify's fkPairs (T-0253) refuses to raise a column beside a
+# certain personal column when its validated foreign-key partner cannot be
+# raised the same way -- it already carries a decision ARCHITECTURE.md §4
+# forbids overriding, or measured two-letter-code evidence the column is a
+# code lookup -- rather than raise one end and leave the other's identical
+# values copied. This is the refusal that turns that signal
+# (Decision.Refused, Decision.RefusedPartner) into an exit before either end
+# loads unmasked (tracker T-0257, internal/plan/fkpair.go). {reason} carries
+# the partner column, why it could not be raised, and both --unmask escapes,
+# because event.ArgKey has no key for a foreign-key partner -- the same
+# borrowing plan.refused.equality_group above makes.
+
+- code: plan.refused.fk_pair
+  kind: error
+  stage: plan
+  exit: 12
+  message: "{table}.{column} is one end of a validated foreign key that cannot be masked without leaving the other end's identical values unmasked: {reason}"
+  args: [table, column, reason]
+
 # {reason} carries the parent table of the edge. event.ArgKey has no key for the
 # other end of a foreign key (internal/event/event.go), and this message has to
 # name both ends and the columns to be actionable, so it borrows {reason}. Owed
