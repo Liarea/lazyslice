@@ -93,7 +93,7 @@ $ lazyslice --source postgres://ls:pw@127.0.0.1:55701/shop?sslmode=disable \
   public.customers.full_name: name matches person_name; 200/200 samples mixed digits and words
   public.customers.id: no name or value signal; surrogate key: preserved verbatim
   public.customers.phone: name matches phone
-  root public.customers — named by --root — --root
+  root public.customers (named by --root) — --root
   public.customers: 50 rows, child_ok; root
   public.orders: 149 rows, child_ok; child of public.customers via public.orders.customer_id
   public.products: 20 rows, parent_only; parent of public.order_items via public.order_items.product_id
@@ -312,6 +312,7 @@ residuals are accepted rather than hidden:
 make check        # lint and unit tests; this is what CI runs
 make build        # bin/lazyslice
 make integration  # container-backed tests; needs a Docker endpoint
+make egress       # runs the binary with only its two databases reachable and counts every other packet
 ```
 
 The masker is a nested Go module, `github.com/Liarea/lazyslice/mask`, so it can
