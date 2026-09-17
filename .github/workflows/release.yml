@@ -67,6 +67,31 @@ jobs:
         with:
           fetch-depth: 0
 
+      # T-0259: the README drifted 81 commits behind the tool with nothing
+      # failing, so a tag is refused the same way an out-of-date docs/FLAGS.md
+      # is refused by `make docs-check` — except here the check is not "does
+      # it match the generator", it is "does the Status section admit this is
+      # the version being released", which a generator cannot answer on its
+      # own: naming v0.1.0 is a judgement call about the pipeline's state, not
+      # a fact tools/docgen can read out of the command tree.
+      - name: refuse a tag whose README Status section does not name it
+        run: |
+          set -euo pipefail
+          tag="${{ github.ref_name }}"
+          status_line=$(grep -m1 '^## Status' README.md || true)
+          if [ -z "$status_line" ]; then
+            echo "release: README.md has no '## Status' section."
+            exit 1
+          fi
+          escaped_tag=$(printf '%s' "$tag" | sed -e 's/[.[\*^$]/\\&/g')
+          if ! grep -qE "(^|[^A-Za-z0-9._-])${escaped_tag}([^A-Za-z0-9._-]|\$)" <<<"$status_line"; then
+            echo "release: README.md's Status section does not name $tag:"
+            echo "  $status_line"
+            echo "Update README.md's '## Status' line to name $tag before tagging."
+            exit 1
+          fi
+          echo "release: README.md's Status section names $tag ($status_line)"
+
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod

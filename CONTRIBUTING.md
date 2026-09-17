@@ -39,6 +39,20 @@ that supersedes it, with the reversal condition that would send it back.
 `ARCHITECTURE.md` is the reference the code is built against. Where it and an
 ADR disagree, the ADR wins and ARCHITECTURE.md is corrected.
 
+## Generated docs
+
+`docs/FLAGS.md`, `docs/ERRORS.md`, `docs/KEYBINDINGS.md`, and the first-run
+flag table in [README.md](README.md) between the `<!-- docgen:flags:start
+-->` and `<!-- docgen:flags:end -->` markers, are written by `tools/docgen`
+from the tree's own registered surfaces — the command tree's flags, the event
+catalogue, the TUI's binding table — never by hand. `make docs` regenerates
+all four; `make docs-check`, which `make check` runs, fails the build when any
+of them differs from what `tools/docgen` would write. If a pull request
+changes a flag, an exit code, or a keybinding, run `make docs` and commit the
+result in the same change. A release tag is refused separately, by
+`.github/workflows/release.yml`, unless README's `## Status` line names the
+version being tagged.
+
 ## The rules that are not up for discussion
 
 These come from CONCEPT.md and THREAT_MODEL.md, and a pull request that breaks
