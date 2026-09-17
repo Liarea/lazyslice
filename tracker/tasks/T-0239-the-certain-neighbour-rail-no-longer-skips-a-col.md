@@ -3,12 +3,12 @@ id: T-0239
 title: "The certain-neighbour rail no longer skips a column declared shorter than sixteen characters: it masks under a generator that fits or refuses"
 epic: E5
 phase: 5
-status: open
+status: done
 owner: sonnet
 created: 2026-09-17
-started: ""
-closed: ""
-outcome: ""
+started: 2026-09-17
+closed: 2026-09-17
+outcome: done
 ---
 
 # T-0239 · The certain-neighbour rail no longer skips a column declared shorter than sixteen characters: it masks under a generator that fits or refuses
@@ -25,6 +25,10 @@ Round-4 replay (docs/reviews/2026-09-15-redteam/round4-still-leaking.json, the n
 
 - 2026-09-17 created
 
+- 2026-09-17 started
+
+- 2026-09-17 closed: done
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+went well: the sixteen-character floor dropped to two with no new refusal machinery because the free-text generator fits any declared length, and torture measured no schema moving; the Opus reviewer caught the lowered floor sweeping foreign-key child code columns into free_text while their parents stayed unmasked, fixed with an FK exclusion; the reverify caught that exclusion having no non-Docker test, added with a negative-control check | went badly: two fix rounds; the docs claim that a lower floor can never force a new refusal is unsound because a narrow new member of an equality group can still refuse through the group masker (filed); internal/classify/CLAUDE.md's A2b account is stale (T-0243, filed by the developer) | change next time: a task that widens a rail names the exclusions it must keep as acceptance lines

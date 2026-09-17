@@ -3,12 +3,12 @@ id: T-0241
 title: "A streaming standby as source, with the target on its own primary, is refused: a start-time disagreement without the system identifier is unknown, a standby source is announced, and a headless run with no --target refuses on a standby"
 epic: E5
 phase: 5
-status: open
+status: done
 owner: sonnet
 created: 2026-09-17
-started: ""
-closed: ""
-outcome: ""
+started: 2026-09-17
+closed: 2026-09-17
+outcome: done
 ---
 
 # T-0241 · A streaming standby as source, with the target on its own primary, is refused: a start-time disagreement without the system identifier is unknown, a standby source is announced, and a headless run with no --target refuses on a standby
@@ -25,6 +25,10 @@ Round-4 replay (docs/reviews/2026-09-15-redteam/round4-still-leaking.json, the r
 
 - 2026-09-17 created
 
+- 2026-09-17 started
+
+- 2026-09-17 closed: done
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+went well: a standby source is announced with its sender where readable, a headless run with no target refuses on a standby, a start-time disagreement without the system identifier is unknown rather than a confident difference, and the recommended role gains the pg_control_system grant; one fix round, reverify clean | went badly: no live primary-and-standby test exists because internal/testutil cannot stand one up, so the standby path is pinned by pure-function tests only and the threat model records the gap; ARCHITECTURE section 9 references docs/READ_ONLY_ROLE.md, which does not exist (filed); three lows filed | change next time: a wrong-target task whose reproduction needs replication lands the testutil helper first or states the gap in its acceptance
