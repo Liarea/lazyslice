@@ -297,6 +297,29 @@ jobs:
           fi
           exit "$status"
 
+  # THREAT_MODEL.md T4, tracker T-0270: the binary "opens exactly three kinds
+  # of connection — the source, the target, and the Docker socket" and has
+  # "no telemetry, update check, model call or registry". tools/egress/run.sh
+  # (via `make egress`) is the test that proves the network half of that: it
+  # runs the binary inside a container that holds NET_ADMIN, under an
+  # iptables OUTPUT policy that accepts loopback, established traffic and the
+  # source and target Postgres addresses on 5432 and counts-then-rejects
+  # everything else, then proves its own counter counts with a negative
+  # control. Blocking, on the same triggers as `integration` above, for the
+  # same reason: a rail this load-bearing is worth a pull request failing on.
+  egress:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: docker is available and can grant NET_ADMIN
+        run: docker version
+      - name: egress (THREAT_MODEL.md T4)
+        run: make egress
+
   # T-0140: docs/reviews/2026-09-09/REVIEW.md, "Release reality" — this
   # workflow ran `make integration` but never `make torture`, so a green `ci`
   # run did not mean the ten real schemas of testdata/torture/ still passed.

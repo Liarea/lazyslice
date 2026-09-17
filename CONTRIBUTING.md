@@ -9,6 +9,7 @@ Where the two disagree, CLAUDE.md wins and this file is wrong.
 ```sh
 make check        # lint, the forbidden-name grep, and unit tests, both modules
 make integration  # container-backed tests; needs a Docker endpoint
+make egress       # THREAT_MODEL.md T4's egress test; needs a Docker endpoint that can grant a container NET_ADMIN
 ```
 
 Paste the output. **"Should work" is not a status.** A pull request that says a

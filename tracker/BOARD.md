@@ -9,7 +9,7 @@
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 4 | 0 | 103 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 80 | 0 | 31 | 5 | 0 |
+| E9 Later | later | 81 | 0 | 31 | 5 | 0 |
 
 ## Open and in progress
 
@@ -98,6 +98,7 @@
 - T-0270 [open] E5 · T4's egress test: the binary runs with only the source and the target reachable, and a packet counter proves it tried nothing else (sonnet)
 - T-0271 [open] E5 · Q2, the root-table question ADR-008 makes the happy path's one question, is asked at a terminal when nothing names the root (sonnet)
 - T-0272 [open] E9 · Per-leaf categories for JSON documents on the Decision, so an email leaf is replaced by a fake email rather than filler (opus)
+- T-0273 [open] E9 · ARCHITECTURE.md section 14's 2026-09-17 amendment still says the egress test 'had not shipped at all' ()
 
 ## Recently closed
 

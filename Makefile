@@ -38,7 +38,7 @@ LDFLAGS := -s -w \
 	-X main.commit=$(COMMIT) \
 	-X main.date=$(DATE)
 
-.PHONY: all build test lint integration torture vet-tagged forbidden unsafe-flags spdx fmt check tools clean help docs docs-check vulncheck bench relnotes bench-compare
+.PHONY: all build test lint integration egress torture vet-tagged forbidden unsafe-flags spdx fmt check tools clean help docs docs-check vulncheck bench relnotes bench-compare
 
 ## build: compile the binary into bin/
 build:
@@ -66,6 +66,30 @@ GOTESTFLAGS ?=
 
 integration:
 	go test -tags integration -count=1 -timeout 30m $(GOTESTFLAGS) ./...
+
+## egress: T4's network-egress test — lazyslice inside a NET_ADMIN container
+## can reach only the source and the target Postgres, proved by a packet
+## counter, with a negative control proving the counter itself counts
+## (THREAT_MODEL.md T4, tracker T-0270)
+##
+## tools/egress/run.sh does the whole thing: cross-builds the binary for
+## linux (CGO_ENABLED=0), starts a source and a target postgres:16 on a
+## Docker network, builds a three-line alpine+iptables image at test time,
+## and runs the binary inside a container on that network holding NET_ADMIN
+## under an OUTPUT policy that accepts loopback, established traffic and the
+## two database addresses on 5432 and counts-then-rejects everything else. A
+## run that dialled anything else — DNS, an update check, telemetry — moves
+## that counter off zero and fails the test; a deliberate connection to a
+## third address afterward proves the counter itself counts, so a policy
+## that rejects nothing cannot pass by accident.
+##
+## Needs a Docker endpoint that can grant NET_ADMIN to a container — Docker
+## Desktop on macOS and GitHub's ubuntu-latest runners both do. It is not
+## part of `check`, for the same reason `integration` and `torture` are not:
+## it starts containers against a Docker daemon a plain `go test` does not
+## have.
+egress:
+	bash tools/egress/run.sh
 
 ## bench: BenchmarkExtractThroughput (internal/extract), compared against the
 ## recorded baseline
