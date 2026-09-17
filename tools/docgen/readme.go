@@ -108,7 +108,7 @@ func renderFirstRunTable(groups []flagGroup) (string, error) {
 		if def == "" {
 			def = "-"
 		}
-		fmt.Fprintf(&b, "| %s | %s | %s | %s |\n", name, typ, def, mdEscape(row.help))
+		fmt.Fprintf(&b, "| %s | %s | %s | %s |\n", name, typ, def, mdEscapeText(row.help))
 	}
 	return b.String(), nil
 }

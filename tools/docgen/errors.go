@@ -50,7 +50,7 @@ func generateErrors() (string, error) {
 		if r.Kind == "error" {
 			exit = strconv.Itoa(r.Exit)
 		}
-		fmt.Fprintf(&b, "| `%s` | %s | %s | %s |\n", r.Code, r.Stage, exit, mdEscape(r.Message))
+		fmt.Fprintf(&b, "| `%s` | %s | %s | %s |\n", r.Code, r.Stage, exit, mdEscapeText(r.Message))
 	}
 	return b.String(), nil
 }

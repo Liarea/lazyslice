@@ -465,7 +465,10 @@ docs:
 docs-check:
 	@tmp=$$(mktemp -d); \
 	trap 'rm -rf "$$tmp"' EXIT; \
-	go run ./tools/docgen -out "$$tmp" -readme "$$tmp/README.md" >/dev/null; \
+	if ! go run ./tools/docgen -out "$$tmp" -readme "$$tmp/README.md" >/dev/null; then \
+		echo "docs-check: tools/docgen failed; fix the generator or README.md's docgen markers (this is not documentation drift, and 'make docs' will not cure it)"; \
+		exit 1; \
+	fi; \
 	status=0; \
 	for f in FLAGS.md KEYBINDINGS.md ERRORS.md; do \
 		if ! diff -u "docs/$$f" "$$tmp/$$f" >/dev/null 2>&1; then \

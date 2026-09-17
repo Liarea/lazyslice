@@ -49,7 +49,8 @@ From source, today — this is the only way to get it before `v0.1.0`:
 ```sh
 git clone https://github.com/Liarea/lazyslice
 cd lazyslice
-make build   # bin/lazyslice
+make build                     # bin/lazyslice
+export PATH="$PWD/bin:$PATH"   # the examples below call it as lazyslice
 ```
 
 From the tap, once `v0.1.0` is tagged:
@@ -154,6 +155,10 @@ $ psql postgres://ls:pw@127.0.0.1:55702/shop_dev -c "select status from lazyslic
  complete
 ```
 
+The marker table keeps one row per run, so on a target that has been loaded
+more than once ask for the latest, which is the row lazyslice itself reads:
+`select status from lazyslice_meta order by started_at desc limit 1`.
+
 A run against the same target a second time reloads it — truncate and rebuild,
 not append — because the row above marks the target as lazyslice's own:
 
@@ -194,7 +199,7 @@ The flags a first run meets. The full set, one row per registered flag grouped b
 | `--target` | string | - | Names the target; never bypasses the gate |
 | `--root` | string | - | Root table (default: computed from the foreign-key graph) |
 | `--yes` | bool | - | Headless: ask nothing; questions with no safe default become hard failures naming their flag |
-| `--create-target` | bool | - | Start postgres:<source major> as lazyslice-target-<project> instead of asking |
+| `--create-target` | bool | - | Start postgres:&lt;source major&gt; as lazyslice-target-&lt;project&gt; instead of asking |
 | `--unmask` | stringArray | - | Per-column opt-out, as TABLE.COL=REASON; the bare form is exit 2; repeatable |
 | `--skip-table` | stringArray | - | Drop a child-only table to schema-only; repeatable |
 | `--phone-region` | string | - | ISO 3166-1 alpha-2 region libphonenumber recognises (e.g. GB; anything else is exit 2) a national-format phone column is read under, alongside the guessed regions every run already tries; recorded as phone_region and shown in the reasons output |
@@ -252,7 +257,8 @@ An exit `0` means the checks above passed, not that the snapshot is
 anonymous. lazyslice pseudonymises; it does not anonymise. The full list of
 stated false negatives, with the reasoning behind each, is in
 [SECURITY.md](SECURITY.md) and, in more detail, [THREAT_MODEL.md](THREAT_MODEL.md).
-After five rounds of an adversarial red team
+After five rounds of an adversarial red team and a sixth that replayed
+everything still open with no new variants
 ([docs/reviews/2026-09-15-redteam/](docs/reviews/2026-09-15-redteam/)), five
 residuals are accepted rather than hidden:
 
@@ -263,9 +269,11 @@ residuals are accepted rather than hidden:
 2. **A bare national identifier with nothing to corroborate it** — for
    example a nine-digit number with no dashes — in a column whose name
    matches no rule and whose table holds no other column already decided
-   personal, masked or not. One exception inside that: a national identifier
-   that is itself a table's own primary key is read as a surrogate key and
-   kept, even beside a column that is masked.
+   personal, masked or not. One exception inside that: a contiguously
+   issued block of national identifiers that is itself a table's own primary
+   key reads as a surrogate key and is kept, even beside a column that is
+   masked. A key of scattered identifiers is scored like any other column,
+   and one whose name matches a rule (`ssn`, `tax_id`) is refused at plan.
 3. **A name, or any other value, in a script the built-in dictionaries do
    not carry**, in a column also named in that script. The name, address,
    phone and email name-patterns and the name dictionary are Latin-script

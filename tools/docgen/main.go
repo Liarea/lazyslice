@@ -157,3 +157,15 @@ func mdEscape(s string) string {
 	s = strings.ReplaceAll(s, "\n", " ")
 	return s
 }
+
+// mdEscapeText is mdEscape for a prose cell, one that is not wrapped in a code
+// span. It also escapes angle brackets: a placeholder such as <source major>
+// is a well-formed HTML tag name, and GitHub's Markdown pipeline drops it from
+// the rendered table instead of printing it (T-0259 review). A code-span cell
+// keeps mdEscape, because an entity inside backticks renders literally.
+func mdEscapeText(s string) string {
+	s = mdEscape(s)
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
+	return s
+}

@@ -97,7 +97,7 @@ One row per code in the catalogue, in the file's own order. Exit is only meaning
 | `plan.estimate` | plan | - | {count} rows, {reason}; the snapshot is held about {seconds}s, assuming 20,000 rows/s |
 | `plan.polymorphic.detected` | plan | - | polymorphic pair detected, not followed: no constraint — {reason} |
 | `plan.polymorphic.unmapped` | plan | - | {reason} |
-| `plan.polymorphic.inferred` | plan | - | {column}: inferred {table} -> {reason}, followed as a virtual parent edge |
+| `plan.polymorphic.inferred` | plan | - | {column}: inferred {table} -&gt; {reason}, followed as a virtual parent edge |
 | `plan.masked_default.pending_key` | plan | - | no masking key yet, so these masked defaults still carry the source's literal and will be masked once one exists: {reason} |
 | `plan.type_literal.allowed` | plan | - | {table}: the recreated type literal is allowed — {reason} |
 | `plan.type_literal.opt_out_expired` | plan | - | the opt-out on type {table} is not honoured: it records no type fingerprint, or the type changed or is gone |

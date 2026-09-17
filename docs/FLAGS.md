@@ -9,7 +9,7 @@ One row per flag registered on the command tree, grouped as `--help` groups them
 | Flag | Type | Default | Description |
 |---|---|---|---|
 | `--allow-remote-target` | string | - | Permit a non-local target whose host equals HOST; without it a remote target is exit 4 |
-| `--create-target` | bool | - | Start postgres:<source major> as lazyslice-target-<project> instead of asking |
+| `--create-target` | bool | - | Start postgres:&lt;source major&gt; as lazyslice-target-&lt;project&gt; instead of asking |
 | `--docker-host` | string | - | Docker endpoint for container discovery (default: DOCKER_HOST, context, default sockets) |
 | `--password-command` | string | - | Command whose stdout is the password; recorded in the yml as a reference, never its output |
 | `--reconfigure` | bool | - | Ignore an existing lazyslice.yml and run the first-run path |
