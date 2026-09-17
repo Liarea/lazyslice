@@ -195,6 +195,14 @@ Both are heuristics with a stated edge, not a proof: a *third* hard link made af
 
 Blocks v1: **yes** for both refusals.
 
+**Amendment, 2026-09-17 (the round 5 red team's still-leaking entry, T-0251).** Step 2's ".gitignore took the entry" was decided by `internal/repo`'s `appendMissing` matching the entry's *text* against the file's lines, never by asking git — so a `.gitignore` that lists `lazyslice.secret` and then negates it (`lazyslice.secret` followed by `!lazyslice.secret`, the ordinary shape of a stale rule someone re-enabled below) let the text search find the entry "present" and report the file protected, while git itself resolves `check-ignore` in the file's own last-match-wins order and would commit the file on `git add -A`. The masking key is A4, T13's guess-confirmation oracle for every snapshot ever made with it, and this let it be written to a path the transcript called protected.
+
+`repo.Protect` now verifies step 2's own claim with git, the way step 4's tracked check already does: after `appendMissing`, with `git` on `PATH`, it runs `git -C <root> check-ignore -v --no-index -- <path>` on the secret file itself. `check-ignore` reports the *last* matching rule, so exit 0 alone still only means "some rule matched" — the `-v` output is read for whether that rule begins with `!`. Only exit 0 with a rule that does not begin with `!` sets `State.GitignoreWritable`, which is `MayWriteSecret`'s one input besides "no repository at all". Exit 1 (not ignored), exit 128 (no repository) and a rule beginning with `!` are each "not verified protected"; so is git being absent from `PATH` at all — the text-match answer is never used as a substitute for a verified one, which corrects the 2026-09-15 and 2026-09-16 amendments' assumption that "the `.gitignore` entry still protects a never-tracked file" whenever git cannot be asked. Every one of those cases falls back to the ephemeral key section 9 step 3 already uses, and to exit 5 under `--require-key`, because refusing to write beats writing un-ignored — the sentence this file already uses for step 3 now also governs step 2's own verification.
+
+This is a question about the *rule* a `.gitignore` states, not about the *path* the 2026-09-15 and 2026-09-16 amendments cover (a symlink, a symlinked parent directory, a hard link): all three of those assume the matched rule actually ignores the file, and this amendment is what checks that assumption before any of them run.
+
+Blocks v1: **yes** for the verified `.gitignore` check.
+
 ### T7 A malicious or buggy custom masker
 
 Likelihood: low in v1 because none can be loaded; high the day one can. A masker sees every personal value and can write it anywhere (docs/BUILD_PLAN.md PROMPT 2.5). Impact: a pass-through mode with extra steps.

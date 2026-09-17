@@ -2345,6 +2345,38 @@ func (r *run) checkSecretParentSymlink() error {
 	return nil
 }
 
+// ephemeralKeyCause turns repo.State's diagnosis of why the masking key
+// cannot be written into the warn code that names it (for the non-
+// --require-key path) and a developer-facing sentence about r.req.SecretFile
+// that fmt.Sprintf has already filled in (for the --require-key Stop, whose
+// Message is what the operator reads — see core.Stop's own doc comment and
+// cmd/lazyslice's report()).
+//
+// The four causes are mutually exclusive and state carries exactly the bits
+// needed to tell them apart (repo.State's own doc comments): .gitignore
+// itself could not be read or appended to (GitignoreAppendable false) is the
+// original T6 refusal and keeps CodeSecretEphemeral's wording; the other
+// three all follow a *successful* append, so none of them may say ".gitignore
+// cannot be written" (T-0251 round 6) — git absent from PATH so the entry
+// could never be checked (GitFound false), a later rule un-ignoring the
+// entry Protect just appended (GitignoreNegatedBy, which names it), or git
+// checking and finding the path simply not ignored by anything.
+func ephemeralKeyCause(state repo.State, path string) (code event.Code, cause string) {
+	switch {
+	case !state.GitignoreAppendable:
+		return CodeSecretEphemeral, fmt.Sprintf("%s cannot be protected by .gitignore", path)
+	case !state.GitFound:
+		return CodeSecretGitignoreUnverifiable, fmt.Sprintf(
+			"%s was added to .gitignore, but git is not on PATH to verify it is actually ignored", path)
+	case state.GitignoreNegatedBy != "":
+		return CodeSecretGitignoreNegated, fmt.Sprintf(
+			"%s was added to .gitignore, but a later rule un-ignores it (%s)", path, state.GitignoreNegatedBy)
+	default:
+		return CodeSecretGitignoreNotIgnored, fmt.Sprintf(
+			"%s was added to .gitignore, but git does not consider it ignored", path)
+	}
+}
+
 func (r *run) resolveKey() error {
 	found, state, err := r.resolveKeyState()
 	if err != nil || found {
@@ -2361,11 +2393,25 @@ func (r *run) resolveKey() error {
 	if !state.MayWriteSecret() {
 		// Section 9 step 3: the key is ephemeral, and --require-key makes that
 		// exit 5 rather than a run whose masking nobody can reproduce.
-		if r.req.RequireKey {
-			return stop(CodeSecretRefusedKey, exitCredential,
-				"%s cannot be protected by .gitignore and --require-key is set", r.req.SecretFile)
+		//
+		// Which is true — .gitignore itself could not be written to, or it
+		// was written to and the secret is still not actually protected —
+		// is asked of state, not assumed: printing "cannot write .gitignore"
+		// when the append succeeded, and the entry sits right there in the
+		// file, points the operator at a file that is already correct
+		// (T-0251 round 6).
+		warnCode, cause := ephemeralKeyCause(state, r.req.SecretFile)
+		args := event.Args{event.ArgPath: r.req.SecretFile}
+		if warnCode == CodeSecretGitignoreNegated {
+			args[event.ArgReason] = state.GitignoreNegatedBy
 		}
-		r.send(event.Transform, event.Warn, CodeSecretEphemeral, event.Args{event.ArgPath: r.req.SecretFile})
+		if r.req.RequireKey {
+			return &Stop{
+				Code: CodeSecretRefusedKey, Exit: exitCredential, Args: args,
+				Message: fmt.Sprintf("%s and --require-key is set", cause),
+			}
+		}
+		r.send(event.Transform, event.Warn, warnCode, args)
 		return nil
 	}
 	if err := os.WriteFile(r.req.SecretFile, []byte(hexKey(k)+"\n"), 0o600); err != nil {

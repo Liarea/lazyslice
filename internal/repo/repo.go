@@ -9,7 +9,11 @@
 //  1. No repository: the secret is written and the header says it is not
 //     protected by .gitignore.
 //  2. Repository with a writable .gitignore: the missing entries are appended
-//     and the addition is printed.
+//     and the addition is printed. Whether the secret file is actually
+//     protected is then verified with git itself (`git check-ignore -v -z
+//     --no-index --stdin`), never inferred from the file's text alone — a
+//     rule later negated in the same file reads as "present" to a text
+//     search and as "not ignored" to git (T-0251).
 //  3. Repository whose .gitignore is absent or unwritable: the secret file is
 //     not created at all, the run uses an ephemeral key and says so, and
 //     --require-key makes that exit 5.
@@ -56,8 +60,38 @@ type State struct {
 	// Root is the nearest ancestor of the working directory containing .git, ""
 	// when there is no repository.
 	Root string
-	// GitignoreWritable reports whether the entries could be appended.
+	// GitignoreWritable reports whether git itself verifies the secret path is
+	// ignored by a rule that does not begin with "!" — not merely that
+	// .gitignore could be read and appended to. A file that lists the entry
+	// and then negates it lets a text search find the entry "present" while
+	// git commits the file anyway (T-0251); only a verified, non-negated
+	// match sets this true. It is false whenever that cannot be verified —
+	// .gitignore absent or unwritable, the path not ignored, no repository,
+	// or git missing from PATH — because refusing to write beats writing
+	// un-ignored.
 	GitignoreWritable bool
+	// GitignoreAppendable reports whether .gitignore itself could be read and
+	// appended to (appendMissing's own verdict), which is a narrower question
+	// than GitignoreWritable: it says nothing about whether git actually
+	// leaves the path ignored. The caller uses it to tell "the file could not
+	// be written to at all" (the original T6 refusal) apart from "it was
+	// written to, but the entry does not protect the path" — git absent
+	// (GitFound false) or a later rule negating the one just added
+	// (GitignoreNegatedBy) — which is the T-0251 round 6 finding: printing
+	// the first message for the second cause tells the operator to fix a
+	// file that is already correct.
+	GitignoreAppendable bool
+	// GitignoreNegatedBy is set, as "<source>:<lineno>", when
+	// GitignoreWritable is false because `git check-ignore -v` named a
+	// matching rule whose pattern begins with "!" — a later line in the same
+	// file (or another one in git's search order) that un-ignores the path
+	// lazyslice just asked .gitignore to protect (T-0251). It is empty
+	// whenever GitignoreWritable is true, and also empty when it is false for
+	// any other reason (no repository, .gitignore unwritable, git absent, or
+	// git verifying the path is simply not ignored by any rule at all), so an
+	// empty value never by itself means "not negated" — the caller reads it
+	// together with GitignoreAppendable and GitFound.
+	GitignoreNegatedBy string
 	// Added lists the entries this run appended.
 	Added []string
 	// Tracked lists paths git says are tracked, which is exit 2.
@@ -138,16 +172,39 @@ func Protect(secretPath string, mappingPaths []string) (State, error) {
 		return st, err
 	}
 	st.Added = added
-	st.GitignoreWritable = writable
+	st.GitignoreAppendable = writable
 
-	// Step 4: the tracked check. git absent from PATH is not a failure: the
-	// check is skipped, the header says so, and the .gitignore entry from step
-	// 2 still protects a file that was never tracked.
+	// git absent from PATH is not a failure for either the verification below
+	// or the tracked check further down: both are skipped, the header says so,
+	// and everything falls back to the ephemeral key (section 9 step 3) and to
+	// exit 5 under --require-key, because refusing to write beats writing
+	// un-ignored.
 	git, found := lookGit()
+	st.GitFound = found
+
+	// Steps 2 and 3, verified: appendMissing reports only whether .gitignore
+	// could be read and appended to, which is not the same question as
+	// whether git will actually leave the secret path untracked — a rule
+	// later negated in the same file answers "present" to a text search and
+	// "not ignored" to git (T-0251, the round 5 red team's still-leaking
+	// entry against this exact function). With git on PATH the verdict is
+	// asked of git directly, on the real secret path; without git the text
+	// match cannot be verified at all, so GitignoreWritable stays false and
+	// the caller falls back to an ephemeral key exactly as it does when
+	// .gitignore is absent or unwritable.
+	if writable && found {
+		ignored, negatedBy, ignErr := checkIgnored(git, root, secretPath)
+		if ignErr != nil {
+			return st, ignErr
+		}
+		st.GitignoreWritable = ignored
+		st.GitignoreNegatedBy = negatedBy
+	}
+
+	// Step 4: the tracked check.
 	if !found {
 		return st, nil
 	}
-	st.GitFound = true
 
 	paths := append([]string{secretPath}, mappingPaths...)
 	for _, p := range paths {
@@ -317,6 +374,93 @@ func isTracked(git, root, path string) (bool, error) {
 		}
 	}
 	return false, fmt.Errorf("repo: git ls-files on %s: %w", path, runErr)
+}
+
+// checkIgnored asks git whether path is ignored by a rule that does not begin
+// with "!" (T-0251, THREAT_MODEL.md T6). `git check-ignore` reports the
+// *last* matching rule in the file — that is how a later line is allowed to
+// override an earlier one — and it exits 0 whether that rule ignores the
+// path or un-ignores it with a leading "!", so the exit code alone answers
+// "did any rule match", never "will git actually leave this file untracked".
+// `-v` prints the matching rule so the two can be told apart, and
+// `--no-index` is used because there may be no commit yet for git to compare
+// against and the question is only about .gitignore, never about the index.
+//
+// The matching rule is read with `-z --stdin` rather than plain `-v`'s
+// colon-joined "<source>:<lineno>:<pattern>\t<pathname>" line, and the path
+// is written to git's stdin instead of passed as an argument (`-z` "only
+// makes sense with --stdin"). Plain `-v`'s line cannot be split on colons
+// from the left: `<source>` is a filesystem path, and git prints it
+// *absolute* whenever the matching rule comes from core.excludesFile rather
+// than an in-repo .gitignore — which on every platform can itself contain a
+// colon, and on Windows always does ("C:/Users/..."), so
+// `strings.SplitN(line, ":", 3)` was cutting `<source>` itself in two and
+// reading the back half of the path plus `<lineno>` as `<pattern>` (T-0251
+// round 6, the still-leaking case against the round 5 fix below). `-z`'s
+// NUL-separated "<source>\0<lineno>\0<pattern>\0<pathname>\0" has no such
+// ambiguity: none of the four fields needs escaping to be told apart from
+// the others.
+//
+// Exit 0 is a match (checked against the printed rule below); exit 1 is no
+// match at all; exit 128 is "not a repository", which the caller already
+// knows is not the case here but which check-ignore can still report for
+// reasons of its own (a bare `.git` file it does not expect, for one) — both
+// 1 and 128 mean "not ignored". Anything else is an error: a git that
+// answered something this function does not understand has not said the
+// path is protected.
+//
+// It returns whether the path is ignored and, when it is not because the
+// matching rule negates it, that rule's "<source>:<lineno>" — joined with a
+// colon for the caller to print, which is safe here because this is
+// assembled by us from the already-separated fields, not sliced back out of
+// git's colon-joined line.
+func checkIgnored(git, root, path string) (ignored bool, negatedBy string, err error) {
+	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
+	defer cancel()
+
+	// The same reasoning as isTracked's: every path this package is given is
+	// relative to the *process* working directory, and -C root resolves a
+	// relative pathspec against the repository root instead, so the path is
+	// made absolute first.
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return false, "", fmt.Errorf("repo: resolving %s: %w", path, err)
+	}
+
+	cmd := exec.CommandContext(ctx, git, "-C", root, "check-ignore", "-v", "-z", "--no-index", "--stdin")
+	cmd.Stdin = strings.NewReader(abs + "\x00")
+	var out strings.Builder
+	cmd.Stdout = &out
+	cmd.Stderr = nil
+
+	runErr := cmd.Run()
+	if runErr == nil {
+		return parseCheckIgnoreZ(out.String())
+	}
+	var exitErr *exec.ExitError
+	if errors.As(runErr, &exitErr) {
+		switch exitErr.ExitCode() {
+		case 1, 128:
+			return false, "", nil
+		}
+	}
+	return false, "", fmt.Errorf("repo: git check-ignore on %s: %w", path, runErr)
+}
+
+// parseCheckIgnoreZ reads one record of `git check-ignore -v -z --stdin`'s
+// output: "<source>\0<lineno>\0<pattern>\0<pathname>\0". It reports the path
+// ignored unless the matching pattern begins with "!", in which case it
+// returns the rule's location instead.
+func parseCheckIgnoreZ(output string) (ignored bool, negatedBy string, err error) {
+	fields := strings.Split(strings.TrimSuffix(output, "\x00"), "\x00")
+	if len(fields) < 4 {
+		return false, "", fmt.Errorf("repo: unexpected check-ignore -z output: %q", output)
+	}
+	source, lineno, pattern := fields[0], fields[1], fields[2]
+	if strings.HasPrefix(pattern, "!") {
+		return false, source + ":" + lineno, nil
+	}
+	return true, "", nil
 }
 
 func dedupe(in []string) []string {

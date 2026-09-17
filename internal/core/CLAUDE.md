@@ -719,3 +719,33 @@ for a refusal that was reaching people as an internal error.
   from `pg.ReplicaStatus`, and `readOnlyRoleStatement` is the CREATE-ROLE
   block `CodeRoleWritable` renders, which now carries the grant
   ARCHITECTURE.md §9's recommended-role snippet does.
+
+## Decisions made during the 2026-09-17 round 6 review of T-0251
+
+- **`resolveKey`'s ephemeral-key branch no longer says ".gitignore cannot be
+  written" for every cause.** `internal/repo`'s round 6 fix (that package's
+  own CLAUDE.md section) gave `repo.State` two new fields —
+  `GitignoreAppendable` (was `.gitignore` itself readable/writable at all)
+  and `GitignoreNegatedBy` (the `"<source>:<lineno>"` of a later rule that
+  un-ignores the entry `Protect` just appended) — because the review found
+  the transcript naming a false cause in exactly the T-0251 scenario:
+  `.gitignore` had been written to successfully (`secret.gitignore.added`
+  fired), and the operator was told the key was ephemeral because
+  `.gitignore` "cannot be written", with no way to reach the real cause — a
+  `!lazyslice.secret` negating the entry on the next line. `ephemeralKeyCause`
+  (`run.go`) reads `state` and picks one of four mutually exclusive causes:
+  `.gitignore` unwritable (`CodeSecretEphemeral`, unchanged wording), git
+  absent so the append could never be checked
+  (`CodeSecretGitignoreUnverifiable`), a negating rule
+  (`CodeSecretGitignoreNegated`, which names the rule), or git checking and
+  finding the path simply not ignored by anything
+  (`CodeSecretGitignoreNotIgnored`). The three new codes are `kind: warn`
+  rows with no `Exit`, exactly `CodeSecretEphemeral`'s own shape
+  (`internal/event/catalogue.yml`, `docs/ERRORS.md`); the `--require-key`
+  `Stop` still carries `CodeSecretRefusedKey` (every other cause of "no
+  masking key" uses it, and giving this one its own error-kind code per
+  cause would be four more rows for the one branch that turns into exit 5
+  rather than a warning) but its `Message` — what the operator actually
+  reads, per `core.Stop`'s own doc comment and `cmd/lazyslice`'s `report()`
+  — is now built from the same four-way switch, so the CLI and the warn
+  path never disagree about which of the four is true.
