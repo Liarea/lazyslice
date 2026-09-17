@@ -1112,12 +1112,16 @@ kept separate the way ClusterID and SystemID already are.
   `clusterIDDifferenceUnreliableField` first, and the start time's
   disagreement is skipped — read exactly as a field neither side filled —
   while every other field's disagreement still sets `same = false` and
-  `known = true` as before. `data_directory` is unaffected: nothing forces a
-  standby's data directory to disagree with its primary's the way the start
-  time is forced to, so it still decides "different cluster" on
-  disagreement, and `TestADataDirectoryDisagreementStillProvesTwoClusters`
-  (cluster_test.go) pins that this fix did not quietly widen into "no field's
-  disagreement matters."
+  `known = true` as before. **Corrected below (T-0255, round-5 red team):**
+  `data_directory` was *not* left unaffected — `data_directory` joins the
+  start time, but only when the source is a standby.
+  `TestADataDirectoryDisagreementStillProvesTwoClusters`
+  (cluster_test.go) pins that the non-standby case stays decisive, so the
+  carve-out cannot silently widen into "no field's disagreement matters
+  regardless of standby." `internal/core/CLAUDE.md`'s own T-0241 section is
+  now stale about this package's shape (the call site's shape and the "can
+  still be fooled by `data_directory`" claim this fix disproved) — filed as
+  **T-0261**, since that file is outside this package's paths.
   **Consequence, stated rather than hidden:** a weaker role that could
   previously distinguish two genuinely different clusters from a start-time
   mismatch alone now reads that shape as unknown too —
@@ -1187,3 +1191,46 @@ kept separate the way ClusterID and SystemID already are.
   against its own primary. Granting `EXECUTE` restores `system_identifier`,
   which decides the comparison outright and needs none of this section's
   reasoning at all.
+
+## A standby's data directory is not decisive either (T-0255, the 2026-09-17 round-5 red team)
+
+`docs/reviews/2026-09-15-redteam/round5-still-leaking.json`, "the standby
+data_directory variant": the same shape the T-0241 section above closes, with
+`data_directory` readable this time (`pg_read_all_settings`, a monitoring-grade
+grant) instead of denied. `data_directory` was still treated as unconditionally
+decisive on disagreement — this file said so outright, in the paragraph the
+bullet above corrects — and a co-hosted standby's data directory disagrees with
+its primary's by construction (`pg_basebackup` into a second directory beside
+its source is the ordinary shape of standing one up), so under that role the
+comparison read "different cluster" with total confidence exactly as the start
+time alone did before T-0241.
+
+- **`clusterIDDifferenceUnreliableField(i int, standby bool)`** now takes the
+  standby answer and skips `data_directory`'s disagreement (alongside the start
+  time's, which it skips unconditionally) only when `standby` is true.
+  `TestADataDirectoryDisagreementStillProvesTwoClusters` gained a
+  `standby == true` case with a disagreement outside the carve-out (the server
+  version) so the conditional widening cannot collapse into an unconditional
+  one by mutation — see this section's fix-round amendment below, which found
+  the original version of that test did not actually pin this.
+- **A second, cheaper and independent rail**, `senderMatchesTarget`
+  (`target.go`): when the source is a standby and `pg_stat_wal_receiver`'s
+  sender resolves to the target's own `host:port` (`dsn.Ref.SameCluster`,
+  normalised string equality — see ARCHITECTURE.md's own amendment for what
+  that does and does not see through), `Eligibility.SameCluster` is set `true`
+  outright, ahead of the identity comparison. This is an opportunistic extra
+  signal, not a repair of the identity comparison: a role that cannot read the
+  sender columns, or a target reached by a different route than
+  `primary_conninfo` spells, gets nothing from it and falls back to the
+  `data_directory` carve-out and the unknown-defaults-true direction.
+
+**Fix-round corrections (2026-09-17, this file's own review round).** The first
+landing of this section, and of the `data_directory` amendment above, both
+still said outright that "`data_directory` is unaffected: nothing forces a
+standby's data directory to disagree with its primary's the way the start time
+is forced to, so it still decides 'different cluster' on disagreement" — the
+exact claim this fix disproves, left standing in the same files the fix
+touched. `source.go`'s doc comment on `sameClusterIdentity` had the identical
+sentence twenty lines from the code it was rewriting. Both are corrected in
+this pass; the lesson generalises past this one task; do not let a `sameX,
+unless Y` finding land beside prose that still asserts `sameX` unconditionally.

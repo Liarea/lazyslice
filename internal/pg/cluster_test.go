@@ -239,7 +239,11 @@ func TestSameClusterIdentitySkipsFieldsOneSideCouldNotRead(t *testing.T) {
 		{"start time denied on both sides, two different clusters by a pre-PG15 oid",
 			"|3||16.4|", "|5||16.4|", false, true},
 	} {
-		same, known := sameClusterIdentity(c.a, c.b)
+		// standby is false throughout this table: every case here is about
+		// which role can read which field, not about a standby's data
+		// directory — TestAStandbysStartTimeDisagreementWithoutSystemIdentifierIsUnknown
+		// below covers standby true.
+		same, known := sameClusterIdentity(c.a, c.b, false)
 		if same != c.same || known != c.known {
 			t.Errorf("%s: sameClusterIdentity = (%v, %v), want (%v, %v)",
 				c.name, same, known, c.same, c.known)
@@ -322,6 +326,16 @@ func TestSameClusterVerdict(t *testing.T) {
 // TestSameClusterIdentitySkipsFieldsOneSideCouldNotRead and
 // TestGateRecognisesTheSourceClusterWithPostmasterStartTimeDenied already
 // stand in for privilege states no fixture grants a role by name.
+//
+// Extended for T-0255 (round-5 red team,
+// docs/reviews/2026-09-15-redteam/round5-still-leaking.json, "the standby
+// data_directory variant") with the reproduction's own shape: a source role
+// that *can* read data_directory (GRANT pg_read_all_settings, a
+// monitoring-grade read-only role — exactly what the recommended snippet's
+// other reads ask a DBA to hand out), streaming from a co-hosted primary
+// whose data directory necessarily differs from its own. Before this fix
+// data_directory was the one field T-0241 left out of the carve-out, so it
+// took over exactly the role the start time used to play.
 func TestAStandbysStartTimeDisagreementWithoutSystemIdentifierIsUnknown(t *testing.T) {
 	const (
 		// start | maintenance db oid | data directory | server version | system identifier
@@ -336,11 +350,18 @@ func TestAStandbysStartTimeDisagreementWithoutSystemIdentifierIsUnknown(t *testi
 		// first, so the start time disagrees; the system identifier — the
 		// one field that would decide this — the source could not fill.
 		primaryTarget = "2026-09-17 08:58:19.435516|5|/var/lib/postgresql/data|16.4|7686364092739128680"
+
+		// The round-5 variant: a source role that can read data_directory too
+		// (pg_read_all_settings), streaming from the same co-hosted primary —
+		// so both sides now fill data_directory, and it disagrees, the way any
+		// standby's must against its own primary's directory on the same host.
+		monitoringStandbySource = "2026-09-17 09:41:07.220118|5|/var/lib/postgresql/r5/replica|16.4|"
+		coHostedPrimaryTarget   = "2026-09-17 08:58:19.435516|5|/var/lib/postgresql/r5/pgdata|16.4|7686364092739128680"
 	)
 
-	same, known := sameClusterIdentity(standbySource, primaryTarget)
+	same, known := sameClusterIdentity(standbySource, primaryTarget, true)
 	if same || known {
-		t.Errorf("sameClusterIdentity(standby, primary) = (%v, %v), want (false, false): "+
+		t.Errorf("sameClusterIdentity(standby, primary, true) = (%v, %v), want (false, false): "+
 			"a start-time disagreement with no system_identifier on the source side must not read "+
 			"as a confident \"different cluster\" — it is exactly the standby/primary shape",
 			same, known)
@@ -356,23 +377,71 @@ func TestAStandbysStartTimeDisagreementWithoutSystemIdentifierIsUnknown(t *testi
 			"true so the same_cluster warning prints (and, headlessly with no --target, ADR-013's " +
 			"escalation refuses) rather than staying silent the way the round-4 red team measured")
 	}
+
+	// T-0255's own shape: data_directory filled and differing on both sides,
+	// with the source known to be a standby. Before this fix data_directory
+	// was still clusterIDWeakField's opposite number — decisive on
+	// disagreement unconditionally — so this table's start-time agreement
+	// (were it to agree) or disagreement made no difference: data_directory
+	// alone read "different cluster" with total confidence.
+	monSame, monKnown := sameClusterIdentity(monitoringStandbySource, coHostedPrimaryTarget, true)
+	if monSame || monKnown {
+		t.Errorf("sameClusterIdentity(monitoring standby, co-hosted primary, true) = (%v, %v), "+
+			"want (false, false): a co-hosted standby and primary disagree on data_directory by "+
+			"construction, so a role that can read it (pg_read_all_settings) must not turn that "+
+			"disagreement into a confident \"different cluster\" any more than the start time may",
+			monSame, monKnown)
+	}
+	if verdict := sameClusterVerdict("", "7686364092739128680", monSame, monKnown); !verdict {
+		t.Error("sameClusterVerdict is false for the monitoring-role standby/primary shape: " +
+			"SameCluster must be true so the same_cluster warning prints instead of the round-5 " +
+			"red team's silent exit 0 against a named production target")
+	}
 }
 
 // A start-time disagreement is the one field this package no longer
-// believes; every other field still is, including one it can prove
-// "different" with when it is the only field that disagrees. Without this,
-// clusterIDDifferenceUnreliableField could be widened to cover every field —
-// answering every comparison "unknown" — and every test above would still
-// pass.
+// believes when the source is not a standby; every other field still is,
+// including one it can prove "different" with when it is the only field
+// that disagrees. Without this, clusterIDDifferenceUnreliableField could be
+// widened to cover every field unconditionally — answering every comparison
+// "unknown" — and every test above would still pass.
 func TestADataDirectoryDisagreementStillProvesTwoClusters(t *testing.T) {
 	const (
 		a = "2026-09-17 09:41:07.220118|5|/var/lib/postgresql/data|16.4|"
 		b = "2026-09-17 09:41:07.220118|5|/var/lib/postgresql/data-2|16.4|"
 	)
-	same, known := sameClusterIdentity(a, b)
+	// standby is false here: an ordinary, non-standby source has no reason to
+	// share a data directory with an unrelated cluster, so disagreement on it
+	// must stay decisive. TestAStandbysStartTimeDisagreementWithoutSystemIdentifierIsUnknown
+	// above is the standby==true counterpart, where the same disagreement is
+	// unreliable.
+	same, known := sameClusterIdentity(a, b, false)
 	if same || !known {
-		t.Errorf("sameClusterIdentity(a, b) = (%v, %v), want (false, true): two identities that "+
-			"agree on the start time but disagree on data_directory are still two different "+
-			"clusters, and that must still be decisive", same, known)
+		t.Errorf("sameClusterIdentity(a, b, false) = (%v, %v), want (false, true): two identities "+
+			"that agree on the start time but disagree on data_directory are still two different "+
+			"clusters when the source is not a standby, and that must still be decisive", same, known)
+	}
+}
+
+// The standby carve-out is data_directory and nothing else: with standby true,
+// a disagreement on a field that is not part of either carve-out (the server
+// version) must still prove two clusters different. Without this, mutating
+// clusterIDDifferenceUnreliableField's `standby && i ==
+// clusterIDDataDirectoryField` to plain `standby` — every field's
+// disagreement unreliable whenever the source is a standby — would leave the
+// package's tests green, because nothing above pins a non-carve-out field's
+// disagreement while standby is true.
+func TestAStandbySourceStillProvesDifferenceOnANonCarveOutField(t *testing.T) {
+	const (
+		a = "2026-09-17 09:41:07.220118|5|/var/lib/postgresql/data|16.4|"
+		b = "2026-09-17 09:41:07.220118|5|/var/lib/postgresql/data|14.12|"
+	)
+	// start time and data_directory agree; only the server version, a plain
+	// clusterIDWeakField and no part of either carve-out, disagrees.
+	same, known := sameClusterIdentity(a, b, true)
+	if same || !known {
+		t.Errorf("sameClusterIdentity(a, b, true) = (%v, %v), want (false, true): the standby "+
+			"carve-out excuses data_directory's disagreement, not the server version's — a standby "+
+			"source and a genuinely unrelated PG14 target must still be told apart", same, known)
 	}
 }

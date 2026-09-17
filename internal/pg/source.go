@@ -666,11 +666,12 @@ func readClusterID(ctx context.Context, conn *pgxpool.Conn, inTransaction bool) 
 // false when nothing could be compared at all, and the gate reads that as
 // "unknown", which fails closed.
 //
-// Not every positional field is evidence of sameness, though every one of
-// them but one is evidence of difference (T-0222 review round; the start time
-// carve-out below is T-0241, the round-4 red team). data_directory is
-// specific enough to a running cluster that two clusters agreeing on it is
-// not a case worth worrying about, and disagreeing on it is real evidence of
+// Not every positional field is evidence of sameness, and not every field is
+// unconditionally evidence of difference either (T-0222 review round; the
+// carve-outs below are T-0241, the round-4 red team, and T-0255, the round-5
+// red team). data_directory is specific enough to a running cluster that two
+// clusters agreeing on it is not a case worth worrying about, and — outside
+// the standby carve-out below — disagreeing on it is real evidence of
 // difference; the maintenance database's oid and the server version prove
 // neither — the oid is pinned at 5 for every cluster from PostgreSQL 15 on
 // (clusterIDWeakField), and the version is shared by every cluster built from
@@ -684,29 +685,50 @@ func readClusterID(ctx context.Context, conn *pgxpool.Conn, inTransaction bool) 
 // on either weak field still decides "different cluster" on its own, because
 // a mismatch needs no specificity to be believed.
 //
-// **The postmaster start time is the one field whose disagreement is not
-// believed either (T-0241, docs/reviews/2026-09-15-redteam/round4-still-leaking.json).**
+// **The postmaster start time is one field whose disagreement is never
+// believed (T-0241, docs/reviews/2026-09-15-redteam/round4-still-leaking.json).**
 // A primary and its own streaming standby are two postmasters of one
 // cluster, and a standby's start time is necessarily later than its
 // primary's — it started when pg_basebackup finished, not when the cluster
-// did — so a start-time mismatch is not evidence the two clusters differ the
-// way a data_directory or a weak-field mismatch is. Unlike data_directory,
-// which still decides "different" on disagreement, a start-time mismatch
-// contributes nothing at all: neither same nor known is touched by it, the
-// same as a field neither side filled. Agreement on the start time is
-// unaffected and remains as strong evidence of sameness as ever — two
-// independent postmasters starting in the same microsecond is not a case.
-// The consequence is the one ARCHITECTURE.md §9's fail-closed reasoning
-// already states for the oid and the version, read in the opposite
-// direction: when system_identifier is missing on either side and the start
-// time is the only field that disagrees, the verdict downgrades to unknown
-// rather than a confident "different cluster" — which is what let a run
-// whose --source was a standby and whose --target was a database on that
-// standby's own primary print no warning and write there.
+// did — so a start-time mismatch is not evidence the two clusters differ.
+// Unconditionally, on every source: a start-time mismatch contributes
+// nothing at all, neither same nor known is touched by it, the same as a
+// field neither side filled. Agreement on the start time is unaffected and
+// remains as strong evidence of sameness as ever — two independent
+// postmasters starting in the same microsecond is not a case. The
+// consequence is the one ARCHITECTURE.md §9's fail-closed reasoning already
+// states for the oid and the version, read in the opposite direction: when
+// system_identifier is missing on either side and the start time is the
+// only field that disagrees, the verdict downgrades to unknown rather than
+// a confident "different cluster" — which is what let a run whose --source
+// was a standby and whose --target was a database on that standby's own
+// primary print no warning and write there.
+//
+// **data_directory joins it, but only conditionally — only when the source
+// is a standby (T-0255, round-5 red team, below).** On an ordinary,
+// non-standby source, data_directory keeps deciding "different cluster" on
+// disagreement, the same as every field but the start time: an unrelated
+// cluster has no reason to share a data directory with this one, so a
+// mismatch is still real evidence. A co-hosted standby and its primary are
+// the exception — pg_basebackup into a second directory beside its source
+// is the ordinary shape of standing one up, so the two disagree on
+// data_directory by construction, and under a role that can read it
+// (pg_read_all_settings, a monitoring-grade grant) that disagreement used to
+// read as confidently "different cluster" even after this start-time
+// carve-out closed the same gap for the weaker field. Unlike the start
+// time, whose disagreement is discounted for every source, data_directory's
+// is discounted only when standby is true.
 //
 // Fields are positional, so a field may be added only at the end — and
 // clusterIDSystemIDField must move with it.
-func sameClusterIdentity(a, b string) (same, known bool) {
+//
+// standby is Source.Replica's Standby answer for this run (T-0255, round-5
+// red team: docs/reviews/2026-09-15-redteam/round5-still-leaking.json,
+// "the standby data_directory variant") — the carve-out the paragraph above
+// describes. It is read only, never called from a place that lacks it, and
+// clusterIDDifferenceUnreliableField's own comment below is the most precise
+// place for the full reasoning.
+func sameClusterIdentity(a, b string, standby bool) (same, known bool) {
 	if a == "" || b == "" {
 		return false, false
 	}
@@ -732,10 +754,13 @@ func sameClusterIdentity(a, b string) (same, known bool) {
 			}
 			continue
 		}
-		if clusterIDDifferenceUnreliableField(i) {
-			// The start time: a standby's postmaster always started later
-			// than its primary's, so a mismatch here is not evidence the
-			// clusters differ. Read it exactly as a field neither side
+		if clusterIDDifferenceUnreliableField(i, standby) {
+			// The start time, always; data_directory too when the source is
+			// a standby: a standby's postmaster always started later than
+			// its primary's, and a standby's data directory always differs
+			// from its primary's on a co-hosted pair. A mismatch on either,
+			// under the condition that makes it unreliable, is not evidence
+			// the clusters differ. Read it exactly as a field neither side
 			// filled — it decides nothing, in either direction.
 			continue
 		}
@@ -758,14 +783,16 @@ func sameClusterIdentity(a, b string) (same, known bool) {
 	return same, true
 }
 
-// clusterIDStartTimeField is the postmaster start time's position —
-// clusterIDDifferenceUnreliableField's one field.
+// clusterIDStartTimeField is the postmaster start time's position — always
+// one of clusterIDDifferenceUnreliableField's fields.
 const clusterIDStartTimeField = 0
 
-// clusterIDMaintenanceOIDField and clusterIDServerVersionField are the two
-// positions clusterIDWeakField names.
+// clusterIDMaintenanceOIDField, clusterIDDataDirectoryField and
+// clusterIDServerVersionField are the positions clusterIDWeakField and (for
+// the data directory) clusterIDDifferenceUnreliableField name.
 const (
 	clusterIDMaintenanceOIDField = 1
+	clusterIDDataDirectoryField  = 2
 	clusterIDServerVersionField  = 3
 )
 
@@ -784,19 +811,44 @@ func clusterIDWeakField(i int) bool {
 
 // clusterIDDifferenceUnreliableField reports whether positional field i can
 // only prove two cluster identities the same, never that they differ — the
-// mirror image of clusterIDWeakField, and so far it names exactly one field
-// (T-0241, round-4 red team: docs/reviews/2026-09-15-redteam/round4-still-leaking.json).
-// The postmaster start time (position 0) is otherwise the strongest field
-// sameClusterIdentity has short of system_identifier itself, which is
-// exactly why an unqualified disagreement on it used to decide "different
-// cluster" outright — and exactly why that was wrong for a primary and its
-// own streaming standby, whose start times can never agree: the standby's
-// postmaster started when pg_basebackup finished, strictly after the
-// primary's. Agreement is unaffected: two independent postmasters starting
-// in the same microsecond is not a case worth worrying about, so a match
-// here remains as decisive as any other non-weak field.
-func clusterIDDifferenceUnreliableField(i int) bool {
-	return i == clusterIDStartTimeField
+// mirror image of clusterIDWeakField. The postmaster start time (position 0)
+// is unconditionally one of them (T-0241, round-4 red team:
+// docs/reviews/2026-09-15-redteam/round4-still-leaking.json). It is
+// otherwise the strongest field sameClusterIdentity has short of
+// system_identifier itself, which is exactly why an unqualified
+// disagreement on it used to decide "different cluster" outright — and
+// exactly why that was wrong for a primary and its own streaming standby,
+// whose start times can never agree: the standby's postmaster started when
+// pg_basebackup finished, strictly after the primary's. Agreement is
+// unaffected: two independent postmasters starting in the same microsecond
+// is not a case worth worrying about, so a match here remains as decisive as
+// any other non-weak field.
+//
+// data_directory (position 2) joins it, but only when standby is true
+// (T-0255, round-5 red team: docs/reviews/2026-09-15-redteam/round5-still-leaking.json,
+// "the standby data_directory variant"). T-0241's own amendment said
+// data_directory "still decides on disagreement, because nothing about a
+// standby forces its data directory to disagree with its primary's the way
+// the start time is forced to" — which is false for the ordinary way a
+// standby is actually stood up: pg_basebackup into a second directory
+// beside its source is the normal shape of a co-hosted standby and primary,
+// and any such pair disagrees on data_directory by necessity. A monitoring
+// role (pg_read_all_settings) that can read it therefore reached a confident
+// "different cluster" on data_directory alone, exactly the case this
+// function's start-time carve-out already exists to prevent, wide open again
+// through a second field. Unlike the start time, data_directory's
+// disagreement is only unreliable *conditionally*: a source that is not a
+// standby has no reason at all to share a data directory with an unrelated
+// cluster, so TestADataDirectoryDisagreementStillProvesTwoClusters still
+// requires the non-standby case to stay decisive — widening this
+// unconditionally, the way an earlier draft of this fix did, would have
+// made that test pass for the wrong reason (every field becomes unreliable,
+// so nothing this function guards can ever prove difference).
+func clusterIDDifferenceUnreliableField(i int, standby bool) bool {
+	if i == clusterIDStartTimeField {
+		return true
+	}
+	return standby && i == clusterIDDataDirectoryField
 }
 
 // clusterIDField reads one positional field, or "" when the identity is shorter

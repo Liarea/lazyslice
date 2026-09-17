@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -141,12 +142,32 @@ type Target struct {
 	// read system_identifier — which is the role ARCHITECTURE.md §9 itself
 	// recommends (the 2026-09-15 red team's identity-rule-1 finding).
 	sourceCluster string
+	// sourceStandby, sourceSenderHost and sourceSenderPort are the source's
+	// Source.Replica answer, set by internal/core alongside sourceCluster
+	// (T-0255, round-5 red team). sourceStandby feeds sameClusterIdentity's
+	// data_directory carve-out; sourceSenderHost/sourceSenderPort feed
+	// senderMatchesTarget, Gate's cheaper and strictly decisive check for the
+	// same shape.
+	sourceStandby                      bool
+	sourceSenderHost, sourceSenderPort string
 }
 
 // SetSourceCluster records the source's cluster identity for rule 1. It is
 // called by internal/core between OpenTarget and Gate, because the source read
 // it makes needs a connection the target does not have.
 func (t *Target) SetSourceCluster(id string) { t.sourceCluster = id }
+
+// SetSourceReplica records the source's replication status for rule 1
+// (T-0255, round-5 red team:
+// docs/reviews/2026-09-15-redteam/round5-still-leaking.json). Like
+// SetSourceCluster, it is called by internal/core between OpenTarget and
+// Gate, because the source read (Source.Replica) needs a connection the
+// target does not have.
+func (t *Target) SetSourceReplica(status ReplicaStatus) {
+	t.sourceStandby = status.Standby
+	t.sourceSenderHost = status.SenderHost
+	t.sourceSenderPort = status.SenderPort
+}
 
 var _ pipeline.Target = (*Target)(nil)
 
@@ -252,8 +273,18 @@ func (t *Target) Gate(ctx context.Context, source dsn.Ref, sourceSystemID, allow
 		return e, err
 	}
 
-	clusterSame, clusterKnown := sameClusterIdentity(t.sourceCluster, clusterID)
+	clusterSame, clusterKnown := sameClusterIdentity(t.sourceCluster, clusterID, t.sourceStandby)
 	e.SameCluster = sameClusterVerdict(sourceSystemID, systemID, clusterSame, clusterKnown)
+	// T-0255 (round-5 red team, docs/reviews/2026-09-15-redteam/round5-still-leaking.json,
+	// "the standby data_directory variant"): when the source is a standby and
+	// its WAL receiver's sender resolves to this target's own host:port, that
+	// is cheaper and strictly decisive evidence, and does not wait on the
+	// identity comparison above at all — Source.Replica already reads
+	// sender_host/sender_port for the header line; until now nothing compared
+	// them with the target it is about to write to.
+	if t.sourceStandby && senderMatchesTarget(t.sourceSenderHost, t.sourceSenderPort, targetRef) {
+		e.SameCluster = true
+	}
 
 	sameEndpoint, err := targetRef.SameEndpoint(source)
 	if err != nil {
@@ -358,6 +389,27 @@ func hostNamed(allowRemoteHost string, target dsn.Ref) bool {
 	}
 	allowed := dsn.Ref{Host: allowRemoteHost, Port: target.Port, Database: target.Database}
 	same, err := allowed.SameCluster(target)
+	return err == nil && same
+}
+
+// senderMatchesTarget reports whether a standby's WAL receiver sender
+// (Source.Replica's SenderHost/SenderPort) names the same server as this
+// target — host:port only, whatever database is named on it — the way
+// dsn.Ref.SameCluster already normalises for hostNamed above (T-0255,
+// round-5 red team). An empty host or port, or one that will not parse, is
+// never a match: the sender is unreadable exactly when the role lacks
+// pg_read_all_stats, which is no worse than this check simply not firing,
+// and a wrong "false" here still leaves the identity comparison and the
+// data_directory carve-out above to catch what they can.
+func senderMatchesTarget(senderHost, senderPort string, target dsn.Ref) bool {
+	if senderHost == "" || senderPort == "" {
+		return false
+	}
+	port, err := strconv.Atoi(senderPort)
+	if err != nil {
+		return false
+	}
+	same, err := (dsn.Ref{Host: senderHost, Port: port}).SameCluster(target)
 	return err == nil && same
 }
 
