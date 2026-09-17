@@ -7,7 +7,7 @@
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
-| E5 Hardening | 5 | 5 | 1 | 96 | 0 | 0 |
+| E5 Hardening | 5 | 7 | 1 | 96 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
 | E9 Later | later | 72 | 0 | 30 | 5 | 0 |
 
@@ -92,6 +92,8 @@
 - T-0255 [open] E5 · A standby's data directory is not evidence of a different cluster, and the standby's sender address is compared with the target (sonnet)
 - T-0256 [open] E9 · The absence-of-evidence sentence covers every family the validators ran over, and pluralises its count (sonnet)
 - T-0258 [open] E5 · internal/plan's fk-pair refusal can fire on a pair a later classify pass already reconciles ()
+- T-0259 [open] E5 · README's flag table is generated and checked, and a release tag refuses a README that does not name it (sonnet)
+- T-0260 [open] E5 · README is true for v0.1.0: what it does, a quickstart that was run, first-run flags, exit codes at a glance, and the residuals in step with the threat model; SECURITY.md reconciled (sonnet)
 
 ## Recently closed
 
