@@ -3,12 +3,12 @@ id: T-0238
 title: "mask.Apply never returns a foreign error object: a masker's error is rebuilt by the module with only its identity carried across"
 epic: E5
 phase: 5
-status: open
+status: done
 owner: sonnet
 created: 2026-09-17
-started: ""
-closed: ""
-outcome: ""
+started: 2026-09-17
+closed: 2026-09-17
+outcome: done
 ---
 
 # T-0238 · mask.Apply never returns a foreign error object: a masker's error is rebuilt by the module with only its identity carried across
@@ -25,6 +25,10 @@ Round-4 replay (docs/reviews/2026-09-15-redteam/round4-still-leaking.json, the v
 
 - 2026-09-17 created
 
+- 2026-09-17 started
+
+- 2026-09-17 closed: done
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+went well: the module now rebuilds every masker error itself; the Opus reviewer caught, twice, that the rebuilt DomainError still trusted the masker, first by copying its count fields and then by recomputing the domain through Admissible, which re-enters the masker's own Domain method on the error path; the final rule is that no masker method runs on the error path, and the test drives a hostile registered masker through the public Apply | went badly: two fix rounds because the first fix restated a derivation as safe without reading what it called; a test name now states the opposite of the contract (filed) | change next time: a fix that cites another function as evidence of safety reads that function first, and says in the comment what it calls
