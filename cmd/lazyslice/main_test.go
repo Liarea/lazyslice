@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -293,6 +294,210 @@ func TestReportPanicWithholdsTheValueUnlessAsked(t *testing.T) {
 	reportPanic(&asked, secret, true, false)
 	if !strings.Contains(asked.String(), "victim.canary@bigcorp.com") {
 		t.Errorf("--show-row-values-in-errors did not print the panic value: %q", asked.String())
+	}
+}
+
+// unknownCanaryError is an error type renderSafe has never seen before, whose
+// Error() text quotes a row value the way a third-party masker's or a
+// library's own error might. It stands in for "a new error type anywhere in
+// the tree" (T-0212, round 3's R2-13(b)): nothing under internal/ or mask/
+// actually returns a value-bearing error today (the red team grepped for
+// one), so this is the canary that proves the *egress* redacts by default
+// rather than proving no such error currently exists.
+type unknownCanaryError struct{ canary string }
+
+func (e unknownCanaryError) Error() string {
+	return fmt.Sprintf("could not process %q", e.canary)
+}
+
+// TestRenderSafeRedactsAnUnknownErrorTypeByDefault is round 3's R2-13(b):
+// renderSafe used to be an allowlist of two error types to scrub
+// (*pgconn.PgError, a recovered panic under the flag) with `return
+// err.Error()` as its default, so any error type not on that short list
+// carried whatever it quoted straight to stderr, --show-row-values-in-errors
+// or not. renderSafe must never print this canary, at either setting of the
+// flag: the flag only reveals a masker's own reason and a recovered panic's
+// value, both matched by name below it, and does nothing for a type it does
+// not recognise at all.
+func TestRenderSafeRedactsAnUnknownErrorTypeByDefault(t *testing.T) {
+	const canary = "victim.canary@bigcorp.com"
+	err := unknownCanaryError{canary: canary}
+
+	for _, showValues := range []bool{false, true} {
+		got := renderSafe(err, showValues)
+		if strings.Contains(got, canary) {
+			t.Errorf("renderSafe(unknownCanaryError, showValues=%v) = %q, "+
+				"want the canary withheld: an error type off the allowlist must never "+
+				"reach a sink through its own Error() text", showValues, got)
+		}
+		if !strings.Contains(got, "unknownCanaryError") {
+			t.Errorf("renderSafe(unknownCanaryError, showValues=%v) = %q, "+
+				"want it to name the error's own type", showValues, got)
+		}
+	}
+}
+
+// TestRenderSafeAllowlistPrintsInFull pins the other side of the same
+// inversion: an error known by construction to carry no row value still
+// prints its message, so the redaction above is a redaction of the unknown
+// and not a blanket withholding of everything.
+func TestRenderSafeAllowlistPrintsInFull(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{
+			name: "core.Stop",
+			err:  &core.Stop{Code: "test.stop", Message: "a catalogue-rendered sentence"},
+			want: "a catalogue-rendered sentence",
+		},
+		{
+			name: "errUsage",
+			err:  fmt.Errorf("%w: --take must be a positive integer", errUsage),
+			want: "--take must be a positive integer",
+		},
+		{
+			name: "pipeline.ErrNotImplemented",
+			err:  pipeline.ErrNotImplemented,
+			want: "not implemented",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			for _, showValues := range []bool{false, true} {
+				got := renderSafe(c.err, showValues)
+				if !strings.Contains(got, c.want) {
+					t.Errorf("renderSafe(%s, showValues=%v) = %q, want it to contain %q",
+						c.name, showValues, got, c.want)
+				}
+			}
+		})
+	}
+}
+
+// TestRenderSafeWithholdsAnUnclaimedStopsMessage is the T-0212 fix round's
+// finding 2: the allowlist's *core.Stop case only prints in full when
+// `!stop.Unclaimed()`, but every existing test builds &core.Stop{...}
+// directly, which is always claimed, so nothing drove the guard from this
+// package and deleting it left the whole suite green. core.UnclaimedStop
+// builds the one kind of Stop the guard exists for -- asStop's exhaustive
+// fallback for an error no stage's typed refusal recognised -- so this test
+// exercises the actual composition: a Stop reaching renderSafe's allowlist
+// case whose Unclaimed() reports true must still be redacted, at both
+// settings of --show-row-values-in-errors, the same as any other type off
+// the allowlist.
+func TestRenderSafeWithholdsAnUnclaimedStopsMessage(t *testing.T) {
+	const canary = "victim.canary@bigcorp.com"
+	err := unknownCanaryError{canary: canary}
+	stop := core.UnclaimedStop(err)
+
+	if !stop.Unclaimed() {
+		t.Fatalf("core.UnclaimedStop(%T).Unclaimed() = false, want true", err)
+	}
+
+	for _, showValues := range []bool{false, true} {
+		got := renderSafe(stop, showValues)
+		if strings.Contains(got, canary) {
+			t.Errorf("renderSafe(unclaimed *core.Stop, showValues=%v) = %q, want the canary "+
+				"withheld: an Unclaimed Stop must be redacted like any other type off the "+
+				"allowlist, not printed in full the way a claimed *core.Stop is", showValues, got)
+		}
+		// The shape of the redaction, not only the canary's absence: the generic
+		// summary names the type and says why the message is withheld, so a
+		// guard that printed nothing at all, or a different sentence, fails too.
+		if !strings.Contains(got, "its message is withheld") {
+			t.Errorf("renderSafe(unclaimed *core.Stop, showValues=%v) = %q, want the generic "+
+				"summary wording (\"its message is withheld\")", showValues, got)
+		}
+	}
+
+	// The other half of the same guard: a claimed Stop -- Unclaimed() false,
+	// as every stage-built refusal is -- still prints in full. This pins the
+	// composition against the opposite regression: a guard that redacts
+	// every *core.Stop regardless of Unclaimed().
+	claimed := &core.Stop{Code: "test.stop", Message: "a catalogue-rendered sentence"}
+	if claimed.Unclaimed() {
+		t.Fatalf("&core.Stop{...} literal .Unclaimed() = true, want false")
+	}
+	for _, showValues := range []bool{false, true} {
+		got := renderSafe(claimed, showValues)
+		if !strings.Contains(got, "a catalogue-rendered sentence") {
+			t.Errorf("renderSafe(claimed *core.Stop, showValues=%v) = %q, want the catalogue "+
+				"sentence printed in full", showValues, got)
+		}
+	}
+}
+
+// fakeTransformRefusal stands in for *transform.Refusal without importing
+// internal/transform, a stage package, from this file (cmd/CLAUDE.md): it is
+// matched by renderSafe's refusalWithReason interface the same structural way
+// causeWithStack and PanicValue already are.
+type fakeTransformRefusal struct{ reason string }
+
+func (r fakeTransformRefusal) Error() string {
+	return "transform: masker email refused public.people.email: an error of type " +
+		"*errors.errorString (its message is withheld because it may quote the value)"
+}
+
+func (r fakeTransformRefusal) ReasonMessage() string { return r.reason }
+
+// RefusalCode is refusalWithReason's second, narrower discriminator (T-0212
+// fix round, finding 3): a bare ReasonMessage stand-in would no longer match.
+func (r fakeTransformRefusal) RefusalCode() event.Code { return "transform.refused.masker" }
+
+// TestRenderSafePrintsATransformRefusalsReasonOnlyUnderTheFlag is T-0212's
+// acceptance case: a transform refusal's Error() is already value-free
+// (T-0191), and its reason -- the masker's own words, which may quote the row
+// -- must reach stderr under --show-row-values-in-errors and nowhere else.
+func TestRenderSafePrintsATransformRefusalsReasonOnlyUnderTheFlag(t *testing.T) {
+	const canary = "victim.canary@bigcorp.com"
+	refusal := fakeTransformRefusal{reason: fmt.Sprintf("masker blew up on %q", canary)}
+
+	quiet := renderSafe(refusal, false)
+	if strings.Contains(quiet, canary) {
+		t.Errorf("renderSafe(refusal, showValues=false) = %q, want the reason withheld", quiet)
+	}
+	if !strings.Contains(quiet, "transform: masker email refused") {
+		t.Errorf("renderSafe(refusal, showValues=false) = %q, want the refusal's own (value-free) text", quiet)
+	}
+
+	asked := renderSafe(refusal, true)
+	if !strings.Contains(asked, canary) {
+		t.Errorf("renderSafe(refusal, showValues=true) = %q, want the reason shown", asked)
+	}
+}
+
+// reasonOnlyError declares ReasonMessage but not RefusalCode: it is what a
+// future error type looks like if it happens to reuse ReasonMessage's name
+// for something else entirely, its Error() unreviewed for a row value.
+type reasonOnlyError struct{ canary string }
+
+func (e reasonOnlyError) Error() string {
+	return fmt.Sprintf("could not process %q", e.canary)
+}
+
+func (e reasonOnlyError) ReasonMessage() string { return "" }
+
+// TestRenderSafeDoesNotGrantAnUnconditionalPrintOnReasonMessageAlone is
+// T-0212's fix round, finding 3: refusalWithReason used to match on
+// ReasonMessage alone, which handed any error type that happened to declare
+// just that one method an unconditional, full-Error() print ahead of every
+// other branch -- the exact "value-bearing until someone notices" default
+// this file was written to remove, reintroduced under a different key.
+// RefusalCode is now a required second discriminator, and this type does not
+// have it, so it must fall through to the same redaction any other
+// unrecognised error gets.
+func TestRenderSafeDoesNotGrantAnUnconditionalPrintOnReasonMessageAlone(t *testing.T) {
+	const canary = "victim.canary@bigcorp.com"
+	err := reasonOnlyError{canary: canary}
+
+	for _, showValues := range []bool{false, true} {
+		got := renderSafe(err, showValues)
+		if strings.Contains(got, canary) {
+			t.Errorf("renderSafe(reasonOnlyError, showValues=%v) = %q, want the canary withheld: "+
+				"ReasonMessage alone must not grant an unconditional Error() print", showValues, got)
+		}
 	}
 }
 

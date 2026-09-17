@@ -176,7 +176,38 @@ func asStop(err error) error {
 		return wrap(CodeInterrupted, exitInterrupted, err, "interrupted")
 	}
 
-	return wrap(CodeInternal, exitInternal, err, "%s", err.Error())
+	// An error no stage claimed reaches here with an Error() text nobody has
+	// reviewed for a row value — it is not one of the six refusal types
+	// above, each of which builds Message from fields THREAT_MODEL.md T4
+	// already accounts for.
+	return UnclaimedStop(err)
+}
+
+// UnclaimedStop builds the *Stop for an error no stage's typed refusal
+// recognised: asStop's exhaustive fallback, factored out so there is exactly
+// one place that builds an Unclaimed Stop rather than two copies that could
+// drift apart. Message becomes *Stop.Error()'s text, which cmd/lazyslice's
+// renderSafe prints unconditionally for every *core.Stop that is not
+// Unclaimed (T-0212 review, finding 1): copying err.Error() here would
+// reintroduce the leak renderSafe exists to close, on the one path renderSafe
+// cannot see through (asStop runs before report ever gets the error).
+// PanicSummary's rule — type only, never the message — is reused rather than
+// restated a third time (it already covers panicError.Error and
+// transform.reasonSummary); the original err stays reachable through
+// Stop.Unwrap for --debug. The Stop is also marked Unclaimed, so renderSafe
+// does not have to trust that this call site (or any future one shaped like
+// it) got PanicSummary right — belt and braces for the one Stop constructor
+// unbounded in what error type reaches it.
+//
+// It is exported so that cmd/lazyslice's tests can build a genuinely
+// Unclaimed Stop the same way asStop does, rather than constructing a
+// &core.Stop{...} literal that is always claimed (T-0212 fix round, finding
+// 2): the && !stop.Unclaimed() guard at renderSafe's allowlist case has no
+// other way to be driven from outside this package.
+func UnclaimedStop(err error) *Stop {
+	s := wrap(CodeInternal, exitInternal, err, "%s", PanicSummary(err))
+	s.unclaimed = true
+	return s
 }
 
 // ddlRefusalMessage renders internal/load/ddl's refusal as one sentence, naming

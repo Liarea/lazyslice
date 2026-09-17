@@ -282,6 +282,29 @@ type causeWithStack interface {
 	Stack() []byte
 }
 
+// refusalWithReason is what a *transform.Refusal looks like from here
+// (T-0212): Error() is already value-free by construction (T-0191,
+// internal/transform/codes.go), and ReasonMessage is the wrapped masker
+// error's own words, withheld everywhere except behind
+// --show-row-values-in-errors. Unexported and declared here for the same
+// reason causeWithStack is: report has no reason to import internal/transform,
+// a stage package, just to ask for a reason.
+//
+// RefusalCode is a second, value-free discriminator (T-0212 fix round,
+// finding 3): ReasonMessage alone let any future error type that happens to
+// declare one method of that name print its Error() in full, unconditionally,
+// ahead of every other branch, with nobody having reviewed that type's text
+// for a row value — the same "value-bearing until someone notices" default
+// this file exists to invert, reintroduced under a name nothing here checked.
+// Requiring RefusalCode too does not make the match unspoofable, but it means
+// the discount goes to a type built to carry an event.Code the way this one
+// is, not to any error that merely reuses one method's name.
+type refusalWithReason interface {
+	error
+	ReasonMessage() string
+	RefusalCode() event.Code
+}
+
 // printDebugTrail is --debug's half of an ordinary failure: CLAUDE.md's "no
 // stack trace reaches the user without --debug" says nothing reaches the user
 // WITHOUT it, and until this the flag did nothing for the non-panic errors
@@ -314,6 +337,33 @@ func printDebugTrail(stderr io.Writer, cause error) {
 // renderSafe is the only thing report is allowed to print, so that the single
 // error egress of the binary has one redaction pass rather than none.
 //
+// Redaction is the default, not an allowlist of two error types to scrub
+// (round 2's finding, replayed and still open at round 3's R2-13(b)): every
+// error prints its type and a value-free summary unless it is one of a small
+// set known by construction to carry no row value in its own Error() text —
+// *core.Stop, so long as it is not Unclaimed (its Message is either a literal
+// format string internal/core wrote or a typed refusal's own already-reviewed
+// Error(), never an arbitrary error's words — internal/core's asStop and
+// core.Stop's own doc comment), errUsage (a flag the operator typed, not a
+// row) and pipeline.ErrNotImplemented (a fixed sentinel) — or one of the two
+// types matched structurally below, whose *reason* is what
+// --show-row-values-in-errors exists to reveal. A new error type anywhere in
+// the tree is therefore not value-bearing until someone adds it to the
+// allowlist on purpose, rather than being value-bearing until someone notices
+// it leaking.
+//
+// A *core.Stop built by asStop's exhaustive fallback (an error no stage
+// claimed) is Unclaimed and falls through to the generic summary below like
+// any other unrecognised error, even though its Message is already
+// PanicSummary's type-only description and not the wrapped error's own text
+// (T-0212 fix round, finding 1): the T-0212 review found exactly this Stop
+// reaching here with the raw error's words in Message, because asStop's
+// fallback used to build it with err.Error() rather than PanicSummary(err).
+// That is fixed at the source, but renderSafe does not take the rest of
+// internal/core's word for it a second time — the Unclaimed check means a
+// future regression at that one call site is still caught here, not only
+// there.
+//
 // A *pgconn.PgError quotes the conflicting row in Detail and Where, so it is
 // rendered by internal/pg, which drops those fields unless
 // --show-row-values-in-errors (THREAT_MODEL.md T4). An error carrying a
@@ -332,7 +382,39 @@ func renderSafe(err error, showValues bool) string {
 	if showValues && errors.As(err, &withValue) {
 		return fmt.Sprintf("panic: %v", withValue.PanicValue())
 	}
-	return err.Error()
+	// A *transform.Refusal's own Error() already withholds the masker's
+	// reason (T-0191, internal/transform/codes.go); ReasonMessage is the
+	// reason's own words, for the one caller allowed to print them, matched
+	// structurally the same way PanicValue is above and causeWithStack is
+	// below, so this file reaches no stage package to ask for it.
+	var refusal refusalWithReason
+	if errors.As(err, &refusal) {
+		msg := refusal.Error()
+		if showValues {
+			if reason := refusal.ReasonMessage(); reason != "" {
+				msg = fmt.Sprintf("%s (masker's own message: %s)", msg, reason)
+			}
+		}
+		return msg
+	}
+	// Everything past this point is the allowlist. Each of these types is
+	// safe to print in full because of how it is built, not because of what
+	// it happens to say today.
+	var stop *core.Stop
+	switch {
+	case errors.As(err, &stop) && !stop.Unclaimed():
+		return stop.Error()
+	case errors.Is(err, errUsage):
+		return err.Error()
+	case errors.Is(err, pipeline.ErrNotImplemented):
+		return err.Error()
+	}
+	return fmt.Sprintf(
+		"an error of type %T (its message is withheld because it is not on the "+
+			"short list of types known to carry no row value; --show-row-values-in-errors "+
+			"does not change this — it only reveals a masker's own reason and a recovered panic's value)",
+		err,
+	)
 }
 
 // oneDSN is cobra.MaximumNArgs(1) with its error wrapped, so that "too many

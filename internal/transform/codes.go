@@ -76,18 +76,22 @@ func (r *Refusal) Error() string {
 // ReasonMessage is the wrapped error's own message, for the one caller allowed
 // to print it: cmd/lazyslice's error egress under --show-row-values-in-errors,
 // which is the flag whose name says what it does. It is matched structurally
-// there, the way internal/core's PanicValue already is.
-//
-// Nothing calls it yet — cmd/ was outside T-0191's paths — which is why
-// Error() does not name the flag: a message that tells the operator to re-run
-// under a flag that changes nothing is worse than one that does not. Tracker
-// T-0212 wires it up, and the hint goes back in with it.
+// there, the way internal/core's PanicValue already is (T-0212).
 func (r *Refusal) ReasonMessage() string {
 	if r.Reason == nil {
 		return ""
 	}
 	return r.Reason.Error()
 }
+
+// RefusalCode is the event code this refusal carries — an identifier from
+// internal/event/catalogue.yml, never a fragment of a message. It is
+// cmd/lazyslice's second, narrower discriminator for the type Error()'s
+// unconditional print is granted to (T-0212 fix round, finding 3): matching
+// ReasonMessage alone let any future error type that happened to declare one
+// method of that name earn the same trust Error() has by construction here,
+// with nobody having reviewed its text for a row value.
+func (r *Refusal) RefusalCode() event.Code { return r.Code }
 
 // reasonSummary renders a wrapped error the mask module wrote itself, and
 // describes any other without quoting it: the fact that there is one and its
@@ -111,7 +115,9 @@ func reasonSummary(err error) string {
 	if s := maskReason(err); s != "" {
 		return s
 	}
-	return fmt.Sprintf("an error of type %T (its message is withheld because it may quote the value)", err)
+	return fmt.Sprintf(
+		"an error of type %T (its message is withheld because it may quote the value; "+
+			"run with --show-row-values-in-errors to show it)", err)
 }
 
 // maskReason is the mask module's own refusals, every one of which names a
