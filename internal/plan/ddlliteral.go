@@ -4,6 +4,7 @@ package plan
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -188,6 +189,15 @@ var strongValidators = []strongValidator{
 	{name: string(pipeline.CatPersonName), ok: func(s string) bool { return textsig.Dictionary().NameShape(s) }},
 	{name: string(pipeline.CatAddress), ok: addressLiteralShape},
 	{name: string(pipeline.CatFreeText), ok: func(s string) bool { return textsig.Dictionary().ProseName(s) }},
+	// special_category joined at T-0198: internal/textsig.SpecialCategoryVocabulary
+	// is the value half of pipeline.CatSpecial, which had no entry in this list at
+	// all until this task -- so the round-3 red team's own canaries, 'HIV
+	// positive, CD4 210' and 'Ahmadiyya Muslim'
+	// (docs/reviews/2026-09-15-redteam/round3-still-leaking.json, finding 15),
+	// were short of every shape the other nine ask for and crossed a masked
+	// column's own CHECK under exit 0. See internal/textsig/special.go for the
+	// vocabulary and the precision argument.
+	{name: string(pipeline.CatSpecial), ok: textsig.SpecialCategoryVocabulary},
 }
 
 // addressSuffixWords corroborates addressLiteralShape (below): the word, case
@@ -243,6 +253,148 @@ func addressLiteralShape(s string) bool {
 	for _, f := range strings.Fields(s) {
 		f = strings.Trim(f, ",.;:()\"'")
 		if addressSuffixWords[strings.ToLower(f)] {
+			return true
+		}
+	}
+	return false
+}
+
+// reClosedValueList is the shape mask.Constraints.Checks already reads
+// (mask/domain.go's reIn, reAny — unexported there, so duplicated here for
+// the reason addressLiteralShape's own copy already is: a stage package may
+// not import another and internal/plan may not read mask's unexported
+// regexes) to pick a value from when it masks a closed column's rows: an
+// ordinary `CHECK (status IN ('active','banned'))` or
+// `CHECK (tier = ANY (ARRAY['basic','pro']))` bounds the column to its own
+// labels, which is a status, a tier or a plan, never a person's. A leading
+// `NOT` still marks the span: a deny-list of the same kind of business label
+// carries the identical argument, and unrewritableLiteral (below) needs to
+// leave both alone or it refuses most real schemas over a label that was
+// never personal data.
+var reClosedValueList = regexp.MustCompile(`(?is)(?:\bNOT\s+)?\bIN\s*\([^()]*\)|=\s*ANY\s*\(\s*ARRAY\s*\[[^\]]*\]\s*\)`)
+
+// inClosedValueList reports that lit's own byte range sits inside one of
+// def's closed value lists.
+func inClosedValueList(def string, lit pipeline.Literal) bool {
+	for _, span := range reClosedValueList.FindAllStringIndex(def, -1) {
+		if lit.Start >= span[0] && lit.End <= span[1] {
+			return true
+		}
+	}
+	return false
+}
+
+// unrewritableLiteral is T-0198's broadened rule (the decision in the
+// tracker task's own log, 2026-09-16, over
+// docs/reviews/2026-09-15-redteam/round3-still-leaking.json findings 14 and
+// 15): a literal in a masked column's own CHECK, generated expression, index
+// predicate or (when no shape can rewrite it) DEFAULT is refused whatever it
+// parses as, not only the shapes strongHit above recognises. None of those
+// four objects is ever rewritten by anything once a shape declines the
+// default (this file's own package comment), so "no validator recognised
+// it" was never evidence that the literal holds nothing personal — it was
+// only evidence that nothing had looked for the right shape yet, which is
+// exactly what let the round-3 canaries through: both are short of
+// Dict.ProseName's six-word floor and shaped like neither a name nor an
+// address.
+//
+// Three things still leave a literal alone, and all three are shape, not
+// category: a Pattern operand, because its StripPatternMeta-reduced text is a
+// fragment of a shape rather than a value in its own right (testdata/nasty.sql's
+// CHECK ("EmailAddress" LIKE '%@%.%') reduces to "@" — refusing on that would
+// be a false positive by construction, not a personal-data hit); a literal
+// inside a closed value list, for the reason reClosedValueList's own comment
+// gives; and an empty collection literal — '{}' or '[]', ARCHITECTURE.md §5's
+// own rule for a masked column's DEFAULT, restated in
+// internal/invariants/i2_masking_test.go's preservedEmpty for the row side —
+// which is the shape `DEFAULT '{}'::jsonb`/`DEFAULT '{}'::text[]` write on
+// nearly every semi_structured or array-typed masked column in a real schema
+// (measured: seven of testdata/torture/'s ten real-world schemas newly
+// refused over exactly this shape the first time this rule ran with no
+// exemption for it, docs/TORTURE.md's own T-0198 note). An empty container
+// holds nothing to be a person's, the same argument every other exemption
+// here already makes on shape rather than on trusting a category guess. An
+// empty (or whitespace-only) plain literal was never worth refusing on
+// either way.
+//
+// A fourth thing is left alone since the T-0198 fix round: a literal
+// immediately cast to a non-text type (pipeline.CastToNonText, finding 3) --
+// `COALESCE(user_id, '-1'::integer)`, the sentinel shape odoo's and
+// discourse's own torture schemas both carry on an otherwise-masked column.
+// The cast is the deparser's own proof the value can never be free text,
+// which is the identical "shape, not category" argument the empty-collection
+// exemption above already makes.
+func unrewritableLiteral(def string, lit pipeline.Literal) bool {
+	if lit.Pattern {
+		return false
+	}
+	text := strings.TrimSpace(lit.Text)
+	if text == "" || text == "{}" || text == "[]" {
+		return false
+	}
+	if pipeline.CastToNonText(def, lit) {
+		return false
+	}
+	return !inClosedValueList(def, lit)
+}
+
+// enumDefaultLabels resolves a column's declared type against Schema.Enums,
+// internal/transform's own enumLabels (constraints.go) restated here for the
+// reason every other duplicate in this file already is (a stage package may
+// not import another). Schema.Enums is keyed "nspname.typname" while a
+// column's TypeName is format_type's output, visible on the search_path and
+// therefore often unqualified, so the qualified key is tried first and a
+// bare-name match across every key is the fallback.
+//
+// The fallback exempts only when the bare name is unambiguous (T-0198 fix
+// round, finding 5). It used to return the first bare-name match a Go map
+// iteration produced, which is two bugs at once when two schemas each
+// declare an enum of the same bare name (`app.status`, `audit.status`):
+// whether a masked enum-typed column's DEFAULT is exempted as "one of the
+// column's own labels" varied run to run for the same schema, and — in the
+// direction that matters — a wrong schema's label list could exempt a
+// literal that was never this column's own label at all, letting it cross
+// under exit 0. Counting every match and returning one only when there is
+// exactly one is deterministic regardless of iteration order and refuses to
+// guess on ambiguity, which is the fail-closed reading unrewritableLiteral's
+// caller needs: no exemption here still leaves strongHit and the closed-list
+// and cast exemptions to answer, and only widens what refuses.
+func (p *run) enumDefaultLabels(col pipeline.Column) ([]string, bool) {
+	if labels, ok := p.schema.Enums[mask.UnquoteType(col.TypeName)]; ok {
+		return labels, true
+	}
+	bare := mask.BareTypeName(col.TypeName)
+	var match []string
+	matches := 0
+	for key, labels := range p.schema.Enums {
+		if mask.BareTypeName(key) != bare {
+			continue
+		}
+		matches++
+		match = labels
+	}
+	if matches != 1 {
+		return nil, false
+	}
+	return match, true
+}
+
+// enumLabelLiteral reports that lit's text is one of an enum-typed column's
+// own labels — a closed domain by the column's TYPE rather than by a CHECK's
+// IN (...) syntax, which inClosedValueList cannot see because a bare
+// `DEFAULT 'label'` carries none. testdata/nasty.sql's own trap 24 is why
+// this exists: `marital_status public.marital_status DEFAULT 'undisclosed'`
+// is a special_category column masked by name alone (ARCHITECTURE.md §4),
+// constraintsOf cannot build a mask.Constraints for an enum's own type name
+// (mask.TypeTag knows no family called "marital_status"), so the default is
+// never judged rewritable and reaches this file's not-rewritable fallback —
+// and 'undisclosed' is no more a person's marital status than any other
+// label of the type is: it is the type's own vocabulary, the identical
+// argument reClosedValueList already makes for an ordinary
+// CHECK (status IN (...)).
+func enumLabelLiteral(labels []string, lit pipeline.Literal) bool {
+	for _, l := range labels {
+		if l == lit.Text {
 			return true
 		}
 	}
@@ -482,8 +634,8 @@ func (p *run) tableDDLLiterals(t *pipeline.Table) error {
 			}
 		}
 		if col.Generated != "" {
-			if err := p.fixedExpression(t, col.Name, col.Generated, isMasked,
-				[]string{col.Name}, "the generated expression on"); err != nil {
+			if err := p.fixedExpression(t, col.Name, col.Generated,
+				[]string{col.Name}, masked, true, "the generated expression on"); err != nil {
 				return err
 			}
 		}
@@ -496,8 +648,7 @@ func (p *run) tableDDLLiterals(t *pipeline.Table) error {
 			continue
 		}
 		named := namedColumns(con.Def, t)
-		if err := p.fixedExpression(t, con.Name, con.Def,
-			anyMasked(named, masked), named, "the constraint"); err != nil {
+		if err := p.fixedExpression(t, con.Name, con.Def, named, masked, false, "the constraint"); err != nil {
 			return err
 		}
 	}
@@ -518,8 +669,7 @@ func (p *run) tableDDLLiterals(t *pipeline.Table) error {
 	sort.Slice(idxs, func(a, b int) bool { return idxs[a].Name < idxs[b].Name })
 	for _, idx := range idxs {
 		named := namedColumns(idx.Def, t)
-		if err := p.fixedExpression(t, idx.Name, idx.Def,
-			anyMasked(named, masked), named, "the index"); err != nil {
+		if err := p.fixedExpression(t, idx.Name, idx.Def, named, masked, false, "the index"); err != nil {
 			return err
 		}
 	}
@@ -592,9 +742,15 @@ func (p *run) columnDefault(
 		// declines it, or (KeyPending false, drift guard) a key was expected
 		// and is missing — so a literal that is plainly personal data cannot
 		// be shipped and cannot be replaced.
+		enumLabels, _ := p.enumDefaultLabels(col)
 		for _, lit := range lits {
 			if hit := strongHit(lit); hit != "" {
 				return p.refuseNotRewritable(t, col.Name, "the default on", hit)
+			}
+		}
+		for _, lit := range lits {
+			if unrewritableLiteral(def, lit) && !enumLabelLiteral(enumLabels, lit) {
+				return p.refuseUnrewritableLiteral(t, col.Name, "the default on", []string{col.Name})
 			}
 		}
 		return nil
@@ -615,9 +771,15 @@ func (p *run) columnDefault(
 		return res.Out.Text, true
 	})
 	if failed != nil || !ok {
+		enumLabels, _ := p.enumDefaultLabels(col)
 		for _, lit := range lits {
 			if hit := strongHit(lit); hit != "" {
 				return p.refuseNotRewritable(t, col.Name, "the default on", hit)
+			}
+		}
+		for _, lit := range lits {
+			if unrewritableLiteral(def, lit) && !enumLabelLiteral(enumLabels, lit) {
+				return p.refuseUnrewritableLiteral(t, col.Name, "the default on", []string{col.Name})
 			}
 		}
 		return nil
@@ -716,23 +878,79 @@ func (p *run) defaultIsRewritable(col pipeline.Column) bool {
 
 // fixedExpression is the CHECK and generated-expression half: never rewritten,
 // refused at 13 on a masked column and at 12 on an unmasked one.
+//
+// masked is the table's masked-columns map (tableDDLLiterals' own local), not
+// a precomputed bool: this function needs the *names* of whichever of named
+// are actually masked, not only whether any of them is, because
+// refuseUnrewritableLiteral has to name one of them for its --unmask escape
+// (T-0198 fix round, finding 2) rather than the constraint or index name,
+// which is never a column an operator can pass to that flag.
+//
+// **T-0198's broadened net (unrewritableLiteral, below) runs only for a
+// generated expression (broadNet true), never for a CHECK or an index** (the
+// T-0198 fix round's own re-measurement of finding 1, `make torture` against
+// gitlab, odoo, discourse and supabase-auth: every one of the schemas the
+// original landing left refusing, and every fresh refusal this file's own
+// git history shows chasing them one curation round at a time, was a `CHECK`
+// or an index — never a `DEFAULT` or a generated expression). A generated
+// expression is a single column by construction (`named` is always
+// `[]string{col.Name}`, so its own --unmask escape, when it has one, is
+// never ambiguous about which column it names. A `CHECK` or an index is not:
+// its text can mention any number of columns, `namedColumns` only ever
+// reports which ones the *text* names and never which one a given literal
+// sits beside, and a literal there is as often a transformation argument —
+// `regexp_replace`'s own pattern, replacement and flag arguments, a
+// `jsonb_typeof` comparison's return vocabulary — as it is a value about any
+// column at all. Two real schemas found the two shapes of failure this
+// guards against, both privacy-relevant and neither closeable by curating a
+// --unmask flag: odoo's `res_partner_check_name`
+// (`CHECK ((type = 'contact' AND name IS NOT NULL) OR type <> 'contact')`)
+// names both `type` and `name`, and the only reachable escape was `--unmask
+// public.res_partner.name` — the actual person's name Odoo's own CRM
+// contacts table exists to hold, offered as the fix for a literal that is
+// about `type` and never about `name` at all; `res_partner_mobile_partial_
+// gin_idx`'s trigram expression, `regexp_replace(mobile::text,
+// '[\s\\./\(\)\-]', ”, 'g')`, names the single masked column `mobile` — a
+// genuine phone number — and its two non-empty literals are a punctuation
+// character class and a regexp flag, neither a value about the phone number
+// at all, whose only escape was `--unmask public.res_partner.mobile`: the
+// phone number itself. Curating away either would leak real personal data
+// under a flag whose entire purpose is to say a column carries none. A
+// `CHECK` or an index still refuses on a strongHit exactly as it always has
+// (that narrower, escape-free-when-masked refusal is §11.1's own original
+// rule and is unaffected by this bound); what stops is only the newer net
+// that refused on a literal no validator recognised at all.
 func (p *run) fixedExpression(
 	t *pipeline.Table,
 	object, def string,
-	onMasked bool,
 	named []string,
+	masked map[string]pipeline.Decision,
+	broadNet bool,
 	what string,
 ) error {
 	lits := pipeline.Literals(def)
 	if len(lits) == 0 {
 		return nil
 	}
-	if !onMasked {
+	maskedNamed := maskedSubset(named, masked)
+	if len(maskedNamed) == 0 {
 		return p.refuseUnmaskedLiteral(t, object, lits, named, what)
 	}
 	for _, lit := range lits {
 		if hit := strongHit(lit); hit != "" {
 			return p.refuseNotRewritable(t, object, what, hit)
+		}
+	}
+	// len(maskedNamed) == 1 is belt and braces, not the load-bearing half: a
+	// generated expression's named is always one column by construction, so
+	// broadNet alone already excludes every ambiguous case this guards
+	// against. It is kept so a future caller that passed broadNet true for a
+	// multi-column object could not silently reopen the ambiguity.
+	if broadNet && len(maskedNamed) == 1 {
+		for _, lit := range lits {
+			if unrewritableLiteral(def, lit) {
+				return p.refuseUnrewritableLiteral(t, object, what, maskedNamed)
+			}
 		}
 	}
 	return nil
@@ -776,14 +994,19 @@ func namedColumns(def string, t *pipeline.Table) []string {
 	return out
 }
 
-// anyMasked reports whether any of the named columns is masked.
-func anyMasked(named []string, masked map[string]pipeline.Decision) bool {
+// maskedSubset returns the elements of named that are masked, in named's own
+// order. An empty result is fixedExpression's "not on a masked column" case
+// (what anyMasked used to answer with a bare bool); a non-empty one is also
+// what refuseUnrewritableLiteral names in its --unmask escape (T-0198 fix
+// round, finding 2), which a bool alone could never carry.
+func maskedSubset(named []string, masked map[string]pipeline.Decision) []string {
+	var out []string
 	for _, name := range named {
 		if _, ok := masked[name]; ok {
-			return true
+			out = append(out, name)
 		}
 	}
-	return false
+	return out
 }
 
 // containsWord reports whether def carries name as a whole identifier.
@@ -877,6 +1100,53 @@ func (p *run) refuseNotRewritable(t *pipeline.Table, object, what, hit string) e
 			event.ArgColumn: object,
 			event.ArgReason: "a literal in " + what + " this column parses as " + hit +
 				" and lazyslice cannot mask it in place",
+		})
+	r.Column = object
+	return r
+}
+
+// refuseUnrewritableLiteral is exit 13, the same code and shape
+// refuseNotRewritable uses, for T-0198's broadened rule: a masked column's
+// own CHECK, generated expression, index predicate or non-rewritable DEFAULT
+// carries a literal none of strongValidators recognises. It is a second,
+// wider net over the same object class refuseNotRewritable already covers,
+// not a different failure -- see unrewritableLiteral's own comment for why
+// "no validator hit" stopped being enough evidence to let a literal through.
+// The reason is the fixed phrase the tracker task's decision asks for
+// (unrewritableLiteral's own comment), never a category, because by
+// construction nothing here recognised one.
+//
+// masked is the column or columns object's own text actually names that are
+// masked -- always [col.Name] for a DEFAULT, and fixedExpression's own
+// maskedSubset(named, ...) for a CHECK, an index predicate or an index
+// expression (T-0198 fix round, finding 2). Before this parameter existed,
+// a constraint or an index refusal named only the constraint or the index —
+// "the index public.ir_filters.ir_filters_name_model_uid_unique_action_index
+// is masked and carries an unrewritable literal in its own constraint" was a
+// real run's own message — which is wrong on its face (an index is not
+// masked, its columns are) and gave the operator no escape they could act
+// on: --unmask takes a TABLE.COLUMN, and an index or a constraint name is
+// neither. The escape now names the first masked column object's text
+// carries, the same convention refuseUnmaskedLiteral's own escape variable
+// already uses.
+func (p *run) refuseUnrewritableLiteral(t *pipeline.Table, object, what string, masked []string) error {
+	escape := object
+	msg := fmt.Sprintf("%s %s.%s is masked and carries an unrewritable literal in its own constraint, "+
+		"so the target's schema would hold it as the source wrote it", what, t.Ref, object)
+	if len(masked) > 0 {
+		escape = masked[0]
+		if len(masked) != 1 || masked[0] != object {
+			msg = fmt.Sprintf("%s %s.%s is on masked column %s and carries an unrewritable literal in its own "+
+				"constraint, so the target's schema would hold it as the source wrote it",
+				what, t.Ref, object, strings.Join(masked, ", "))
+		}
+	}
+	r := refuse(CodeLiteralNotRewritable, exitSchema, t.Ref, msg,
+		event.Args{
+			event.ArgTable:  t.Ref.String(),
+			event.ArgColumn: object,
+			event.ArgReason: "masked column " + escape + ", unrewritable literal in its own constraint: --unmask " +
+				t.Ref.String() + "." + escape + "=REASON says it is not a person's",
 		})
 	r.Column = object
 	return r

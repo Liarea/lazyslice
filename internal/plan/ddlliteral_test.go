@@ -805,27 +805,36 @@ func TestPlanningTwiceOverOneSchemaProducesOneDefault(t *testing.T) {
 func TestNationalIDStrongHitIsStructuredOnly(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
-		name    string
-		literal string
-		refused bool
+		name       string
+		literal    string
+		refused    bool
+		wantReason string
 	}{
 		{
 			// nationalid_test.go's own Polish PESEL vector: a real weighted
-			// mod-10 checksum with no shape constraint at all.
-			name:    "a PESEL-valid eleven-digit literal in a CHECK is not a hit",
+			// mod-10 checksum with no shape constraint at all. It is not a
+			// national_id hit -- textsig.ValidNationalIDStructured must not
+			// answer for a checksum-only literal (T-0194) -- and, since the
+			// T-0198 fix round's own re-measurement of finding 1, a CHECK no
+			// longer carries the broadened "whatever it parses as" net at
+			// all (fixedExpression's own comment: that net's only escape can
+			// require unmasking a column the flagged literal was never
+			// about, which two real schemas hit for real). So this passes.
+			name:    "a PESEL-valid eleven-digit literal in a CHECK is not a national_id hit",
 			literal: "44050612341",
 		},
 		{
 			// nationalid_test.go's own Canadian SIN vector: nine digits under
 			// the same Luhn check ValidLuhn uses, applied directly, again with
-			// no shape constraint.
-			name:    "a checksum-clearing nine-digit literal in a CHECK is not a hit",
+			// no shape constraint. Same reasoning as above.
+			name:    "a checksum-clearing nine-digit literal in a CHECK is not a national_id hit",
 			literal: "123456782",
 		},
 		{
-			name:    "a dashed US SSN literal in a CHECK is still a hit",
-			literal: "078-05-1001",
-			refused: true,
+			name:       "a dashed US SSN literal in a CHECK is still a national_id hit",
+			literal:    "078-05-1001",
+			refused:    true,
+			wantReason: "parses as national_id",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -844,17 +853,25 @@ func TestNationalIDStrongHitIsStructuredOnly(t *testing.T) {
 			}
 
 			err := planLiterals(t, schema, cls, literalKey(0x44))
+			if !tc.refused {
+				if err != nil {
+					t.Fatalf("Plan: %v, want no refusal: a CHECK no longer carries the broadened net "+
+						"(T-0198 fix round)", err)
+				}
+				return
+			}
 			var refusal *Refusal
-			switch {
-			case tc.refused && !errors.As(err, &refusal):
+			if !errors.As(err, &refusal) {
 				t.Fatalf("Plan returned %v, want a *plan.Refusal", err)
-			case tc.refused && refusal.Code != CodeLiteralNotRewritable:
+			}
+			if refusal.Code != CodeLiteralNotRewritable {
 				t.Fatalf("Plan refused with %s, want %s", refusal.Code, CodeLiteralNotRewritable)
-			case tc.refused && refusal.Column != "items_ref_check":
+			}
+			if refusal.Column != "items_ref_check" {
 				t.Fatalf("the refusal names %q, want the constraint it is about", refusal.Column)
-			case !tc.refused && err != nil:
-				t.Fatalf("Plan: %v: textsig.ValidNationalIDStructured must not answer for a checksum-only "+
-					"literal (T-0194)", err)
+			}
+			if !strings.Contains(refusal.Message, tc.wantReason) {
+				t.Fatalf("Plan refused with %q, want it to carry %q", refusal.Message, tc.wantReason)
 			}
 		})
 	}
@@ -878,24 +895,32 @@ func TestNationalIDStrongHitIsStructuredOnly(t *testing.T) {
 func TestAddressStrongHitNeedsAStreetSuffixWord(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
-		name    string
-		literal string
-		refused bool
+		name       string
+		literal    string
+		refused    bool
+		wantReason string
 	}{
-		{name: "a pricing tier label is not a hit", literal: "Basic 1 user"},
-		{name: "a priority label is not a hit", literal: "P1 High Priority"},
-		{name: "a ranking label is not a hit", literal: "Top 10 sellers"},
-		{name: "a room label is not a hit", literal: "Building 4 Lobby"},
+		// None of these four is an address hit -- addressLiteralShape still
+		// needs a street-type suffix word (T-0189 fix round finding 2) -- and,
+		// since the T-0198 fix round's own re-measurement of finding 1, a
+		// CHECK no longer carries the broadened "whatever it parses as" net
+		// either (fixedExpression's own comment), so none of these refuses.
+		{name: "a pricing tier label is not an address hit", literal: "Basic 1 user"},
+		{name: "a priority label is not an address hit", literal: "P1 High Priority"},
+		{name: "a ranking label is not an address hit", literal: "Top 10 sellers"},
+		{name: "a room label is not an address hit", literal: "Building 4 Lobby"},
 		{
-			name:    "a real street address is still a hit",
-			literal: "42 Elm Street",
-			refused: true,
+			name:       "a real street address is still an address hit",
+			literal:    "42 Elm Street",
+			refused:    true,
+			wantReason: "parses as address",
 		},
 		{
 			// R2-07's own canary must keep refusing through this change.
-			name:    "R2-07's canary address is still a hit",
-			literal: "1742 Kestrel Hollow Lane, Ashford VT 05024",
-			refused: true,
+			name:       "R2-07's canary address is still an address hit",
+			literal:    "1742 Kestrel Hollow Lane, Ashford VT 05024",
+			refused:    true,
+			wantReason: "parses as address",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -914,17 +939,25 @@ func TestAddressStrongHitNeedsAStreetSuffixWord(t *testing.T) {
 			}
 
 			err := planLiterals(t, schema, cls, literalKey(0x44))
+			if !tc.refused {
+				if err != nil {
+					t.Fatalf("Plan: %v, want no refusal: a CHECK no longer carries the broadened net "+
+						"(T-0198 fix round)", err)
+				}
+				return
+			}
 			var refusal *Refusal
-			switch {
-			case tc.refused && !errors.As(err, &refusal):
-				t.Fatalf("Plan returned %v, want a *plan.Refusal: a real address must still refuse", err)
-			case tc.refused && refusal.Code != CodeLiteralNotRewritable:
+			if !errors.As(err, &refusal) {
+				t.Fatalf("Plan returned %v, want a *plan.Refusal", err)
+			}
+			if refusal.Code != CodeLiteralNotRewritable {
 				t.Fatalf("Plan refused with %s, want %s", refusal.Code, CodeLiteralNotRewritable)
-			case tc.refused && refusal.Column != "items_label_check":
+			}
+			if refusal.Column != "items_label_check" {
 				t.Fatalf("the refusal names %q, want the constraint it is about", refusal.Column)
-			case !tc.refused && err != nil:
-				t.Fatalf("Plan: %v: an ordinary label with a digit in it must not refuse the plan "+
-					"(T-0189 fix round finding 2)", err)
+			}
+			if !strings.Contains(refusal.Message, tc.wantReason) {
+				t.Fatalf("Plan refused with %q, want it to carry %q", refusal.Message, tc.wantReason)
 			}
 		})
 	}

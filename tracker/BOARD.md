@@ -9,7 +9,7 @@
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 6 | 1 | 83 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 60 | 0 | 27 | 4 | 0 |
+| E9 Later | later | 62 | 0 | 27 | 4 | 0 |
 
 ## Open and in progress
 
@@ -81,6 +81,8 @@
 - T-0228 [open] E9 · ARCHITECTURE.md's --phone-region flag row and the phone_region_guessed reason fragment describe the removed name-rule corroboration arm (sonnet)
 - T-0229 [open] E9 · internal/transform/codes.go: add mask.ErrMaskerFailed to maskReason's known-sentinel list ()
 - T-0230 [open] E9 · T-0229's goal mischaracterises the R2-13 regression; correct it before acting on it ()
+- T-0231 [open] E9 · special_category has no value validator in the row-level second net ()
+- T-0232 [open] E9 · Curate --unmask flags for gitlab, odoo, discourse and supabase-auth under T-0198's broadened DDL-literal rule ()
 
 ## Recently closed
 

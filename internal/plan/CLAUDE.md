@@ -1106,3 +1106,105 @@ tracker task naming them (T-0189) promotes **T-0163** in the same landing.
   these needed a database; `make torture` against the ten real schemas and
   `testdata/regressions/` is what caught the `credential` false positive
   that a hand-picked fixture could not have.
+
+## `special_category` gets a value validator, and the broadened net is scoped to a `DEFAULT` and a generated expression only (T-0198, 2026-09-16, and its fix round)
+
+`pipeline.CatSpecial` — health, religion, sexual orientation and gender
+identity, ethnicity, trade-union membership, political opinion, the six
+sub-categories `rules.yml`'s own `special_category` name pattern already
+masks a column on — had no value validator anywhere until T-0198
+(`textsig.SpecialCategoryVocabulary`, a precision-over-recall term list,
+internal/textsig's own paths). It joins `strongValidators`/`strongHit` as an
+eleventh entry, the same footing every other parse or shape already has;
+`internal/verify/catalog.go`'s `strongCatalogHit` and, since the fix round
+below, `internal/verify/validators.go`'s row-scanning second net carry the
+identical entry. This closes the round-3 red team's own canaries (finding
+15, `docs/reviews/2026-09-15-redteam/round3-still-leaking.json`) on the
+ordinary strongHit path and costs nothing on `make torture`: none of the ten
+real schemas' generated data happens to carry a special-category term.
+
+**A second, wider change landed the same day and did not survive
+re-measurement.** T-0198's own tracker log proposed refusing a masked
+column's own `CHECK`, generated expression, index predicate or
+non-rewritable `DEFAULT` on *any* literal, whatever it parses as, once no
+strongHit and none of the closed-value-list/empty-collection/Pattern
+exemptions applied — with an explicit conditional: if more than two of the
+ten schemas newly refused, land the wider rule behind the existing `--unmask`
+escape rather than accept the cost. The first landing measured five newly
+refusing (after an empty-collection exemption for a masked column's own
+default, which is `unrewritableLiteral`'s own comment and ARCHITECTURE.md
+§5's rule restated, not invented for the measurement) and landed as default
+anyway, with `docs/TORTURE.md` recording four as still needing curation.
+
+**The fix round (2026-09-16) found curating the rest was not merely large,
+but twice genuinely unsafe, and narrowed the rule instead of finishing the
+curation.** `fixedExpression`'s scoping judges an object — a `CHECK` or an
+index, which can name any number of columns — whole once *any* named column
+is masked, with no notion of which column a given literal is actually about.
+Two real schemas (not a synthetic fixture; a reduced fixture cannot
+reproduce a real table's own column collisions) found where that breaks:
+
+- **odoo's `res_partner_check_name`**
+  (`CHECK ((type = 'contact' AND name IS NOT NULL) OR type <> 'contact')`)
+  names both `type` and `name` on `res_partner`, Odoo's CRM contacts table —
+  `name` there is a real person's or company's name, correctly masked. The
+  literal `'contact'` is about `type` and never about `name`, but the only
+  escape the rule could offer was `--unmask public.res_partner.name`: the
+  actual name the column exists to protect.
+- **odoo's `res_partner_mobile_partial_gin_idx`**, a GIN trigram index over
+  `regexp_replace(mobile::text, '[\s\\./\(\)\-]', '', 'g')` — `mobile` is a
+  real phone number, the index's only masked column, no ambiguity at all —
+  and its two non-empty literals are a punctuation character class and a
+  regexp flag, neither a value about the phone number. The only escape was
+  `--unmask public.res_partner.mobile`: the phone number itself.
+
+Curating either would have shipped real personal data under the one flag
+whose entire purpose is to say a column carries none — a defect in the
+rule's own design, not a curation cost to accept. **The fix: the broadened
+net (`unrewritableLiteral`, still doing the same work — a Pattern operand, a
+closed value list, an empty collection, and, new in this fix round, a
+literal immediately cast to a non-text type such as `'-1'::integer`, all
+still exempt) now runs only for a `DEFAULT` and a generated expression,
+never for a `CHECK`, an exclusion constraint or an index of any kind.**
+Both of those two object classes are a single column by construction —
+`tableDDLLiterals` always calls `fixedExpression` with `named ==
+[]string{col.Name}` for a generated expression, and `columnDefault`'s own
+fallback loops always judge `col.Name` itself — so the ambiguity both odoo
+cases turn on cannot arise there. `fixedExpression` takes a `broadNet bool`
+now (true only for the generated-expression call; false for the constraint
+and index loops), and `maskedSubset(named, masked)` — the renamed, list-
+returning `anyMasked` — is what both decides "unmasked" (`len == 0`) and
+supplies `refuseUnrewritableLiteral`'s `--unmask` escape when it fires. A
+`CHECK` and an index still refuse on a strongHit exactly as §11.1's original
+rule always has; only the newer, escape-free-when-masked net that refused on
+a literal no validator recognised at all is gone from those two classes.
+`internal/verify/catalog.go`'s `unrewritableKind` carries the identical
+scoping (`kindDefault`/`kindGenerated` only), and its own `maskedNamedColumn`
+requires *exactly one* masked column match rather than merely "any", belt
+and braces alongside the plan-side change.
+
+**Re-measured, `make torture` needed none of the curation the first landing
+called for**, gitlab and supabase-auth included, and metabase's own two
+flags for an expression index — landed to close the first measurement —
+turned out not to be needed either once indexes stopped carrying the wider
+net. The suite is back to the original twenty-seven flags, nineteen
+`--unmask`, unmoved by this task net of the reversal. docs/TORTURE.md's own
+"T-0198" section and "the fix round" carry the full account, including the
+`gofmt`/`staticcheck`-clean final diff; ARCHITECTURE.md §11.1 and
+THREAT_MODEL.md T1 carry the corresponding amendments.
+
+`refuseUnrewritableLiteral` also gained a `masked []string` parameter in the
+same fix round (a reviewer's own finding, independent of the scoping
+change): its message used to name only the object (an index or a
+constraint's own name — "the index ... is masked", which is never true, an
+index is not masked, its columns are) and offered no escape a real run could
+act on. It now names the masked column(s) the object's text actually
+carries and points `--unmask` at the first of them. In the current call
+graph this branch is exercised only in the degenerate case where the object
+*is* the single masked column already (a `DEFAULT` or a generated
+expression, where `object == masked[0]` always) — the exact multi-column
+case it was built for can no longer reach this function at all, now that a
+`CHECK` and an index never call it under the broadened net. It is kept
+anyway: correct and harmless for the paths that do reach it, and it closes
+off the wrong message from ever being possible again if a future caller
+passes `broadNet` true for an object that can name more than one column.
