@@ -7,9 +7,9 @@
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
-| E5 Hardening | 5 | 4 | 0 | 103 | 0 | 0 |
+| E5 Hardening | 5 | 2 | 0 | 105 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 81 | 0 | 31 | 5 | 0 |
+| E9 Later | later | 81 | 0 | 32 | 5 | 0 |
 
 ## Open and in progress
 
@@ -95,10 +95,8 @@
 - T-0267 [open] E9 · Workflow scripts carry the checkout's absolute home path in a REPO constant (sonnet)
 - T-0268 [open] E9 · lazyslice doctor prints the stated false negatives, as ARCHITECTURE.md says it does (sonnet)
 - T-0269 [open] E9 · A timestamp column's reason line says its samples look like secrets (sonnet)
-- T-0270 [open] E5 · T4's egress test: the binary runs with only the source and the target reachable, and a packet counter proves it tried nothing else (sonnet)
-- T-0271 [open] E5 · Q2, the root-table question ADR-008 makes the happy path's one question, is asked at a terminal when nothing names the root (sonnet)
 - T-0272 [open] E9 · Per-leaf categories for JSON documents on the Decision, so an email leaf is replaced by a fake email rather than filler (opus)
-- T-0273 [open] E9 · ARCHITECTURE.md section 14's 2026-09-17 amendment still says the egress test 'had not shipped at all' ()
+- T-0274 [open] E9 · The root decision line and the plan's own RootReason give different reasons when a name preference breaks a tie (sonnet)
 
 ## Recently closed
 

@@ -3,12 +3,12 @@ id: T-0270
 title: "T4's egress test: the binary runs with only the source and the target reachable, and a packet counter proves it tried nothing else"
 epic: E5
 phase: 5
-status: open
+status: done
 owner: sonnet
 created: 2026-09-17
 started: ""
-closed: ""
-outcome: ""
+closed: 2026-09-17
+outcome: done
 ---
 
 # T-0270 · T4's egress test: the binary runs with only the source and the target reachable, and a packet counter proves it tried nothing else
@@ -25,6 +25,8 @@ THREAT_MODEL.md T4 lists as a control that 'a test runs the binary under a netwo
 
 - 2026-09-17 created
 
+- 2026-09-17 closed: done
+
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+went well: THREAT_MODEL T4's promised control exists at last: make egress and a blocking CI job run the binary in a NET_ADMIN container whose OUTPUT policy accepts only 127.0.0.1, established traffic and the two databases, and the catch-all's packet counter reads zero after a real masked load; a negative control proves the counter counts. Review caught that accepting the whole lo interface exempted Docker's embedded resolver at 127.0.0.11, so a DNS beacon would have passed uncounted | went badly: the control was written into the threat model on 2026-09-05 as phase-5 work with no tracker task, so nothing owned it and it surfaced only when the gate item was audited against the code on 2026-09-17 | change next time: a control THREAT_MODEL names in the future tense gets a tracker task the day the sentence is written (commits 88cf9b1, 4fce950: interrupt exits non-zero, IPv6 refusal, key in an env file)

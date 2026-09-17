@@ -33,6 +33,7 @@ Phase gates check that every ADR has a stated reversal condition (docs/BUILD_PLA
 | [009](009-schema-fingerprint.md) | One definition of the schema fingerprint: the generated DDL text | accepted 2026-09-06 |
 | [008](008-first-run.md) | First-run experience: the discovery ladder, the one-question rule and the question catalogue | accepted 2026-09-08 |
 | [013](013-headless-target-never-on-the-source-cluster.md) | A headless run's target is never chosen on the source's own cluster | proposed 2026-09-16 |
+| [014](014-question-mark-at-q2-prints-and-tui-stays-a-flag.md) | `?` at the root-table question prints the ranked candidates; `--tui` stays the only way into the two screens | proposed 2026-09-17 |
 
 ## Numbering note
 
