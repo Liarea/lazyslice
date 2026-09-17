@@ -107,6 +107,45 @@ type Decision struct {
 	// for the national_id digits-family entry, alongside
 	// NameMatchedNationalID above.
 	TableHasLikelyPersonalColumn bool
+	// TableHasMaskedPersonalColumn reports that another column of this
+	// column's table was decided at ConfPossible or above, is going to be
+	// masked (not exempt as a surrogate key or an FK column), and holds a
+	// category that identifies a person -- internal/classify's own
+	// identifiesAPerson (T-0240, the 2026-09-15 round-4 red team's three A9b
+	// replays: docs/reviews/2026-09-15-redteam/round4-still-leaking.json). It
+	// is TableHasLikelyPersonalColumn's own question asked at a lower floor:
+	// a name-only match with no samples decides a column at ConfPossible, not
+	// ConfLikely, so a `msisdn numeric` column the run itself masked as a
+	// phone on its name alone was never counted as a personal neighbour by
+	// the field above, and a `taxref` column beside it -- bigint or
+	// varchar(9), a national identifier with no name or value signal of its
+	// own -- read "no name or value signal" and crossed verbatim. A column
+	// the run itself masked is evidence about the table whatever confidence
+	// line it landed on. It is internal/verify's third corroboration signal
+	// for the national_id digits-family and character-family entries,
+	// alongside NameMatchedNationalID and TableHasLikelyPersonalColumn above
+	// -- kept apart from that field rather than lowering its own floor,
+	// because TableHasLikelyPersonalColumn also corroborates
+	// internal/classify's own guessed-region phone pass (guessedPhoneColumns,
+	// T-0221), which this task's brief did not ask to widen.
+	TableHasMaskedPersonalColumn bool
+	// NeverMasked reports that internal/classify exempted this column from
+	// masking outright, independent of Category or Confidence: a surrogate
+	// key, a validated foreign-key child whose parent stayed unmasked, or a
+	// generated column (ARCHITECTURE.md §4's key exemption; work.neverMask in
+	// internal/classify/classify.go's markNeverMasked, keyChildren and
+	// foreignKeys). internal/verify's second net reads it as an unconditional
+	// half of its dense-sequence exemption (T-0240 review round, high
+	// finding): a column classify has already decided is a surrogate key's
+	// own values, or an FK child that mirrors one, is dense by construction
+	// -- `order_id`'s values ARE `id`'s, copied verbatim -- and that has
+	// nothing to do with what category an unrelated column of the same table
+	// was decided under. Gating the exemption on corroboration (the three
+	// fields above) let a genuinely personal neighbour of any category
+	// cancel it for such a column, which is the shape
+	// testdata/regressions/021 exists to keep passing. See
+	// internal/verify/secondnet.go's own comment on the point.
+	NeverMasked bool
 }
 
 // Classification is every decision for one run.

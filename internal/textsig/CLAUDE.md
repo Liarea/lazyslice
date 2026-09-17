@@ -233,9 +233,13 @@ separate function — zero-pad an eight-digit run to nine and apply the SSA's
 own exclusions directly, then fall back to `validNationalID` for every other
 digit length, which is what lets PESEL, BSN, SIN, TFN, CPF and Aadhaar (none
 of which ever had a separator to lose) validate through the same function with
-no special case. It is read only by `internal/classify`'s and
-`internal/verify`'s digits-family entries, never by `Candidates` and never by
-`ValidNationalID` itself: an SSN carries no check digit at all, so a bare
+no special case. It is read only by `internal/classify`'s digits-family entry
+and, since **T-0240**, both of `internal/verify`'s digits-family and
+character-family entries (the character-family twin closes the round-4 red
+team's own A9b replay of this shape stored as `varchar(9)` rather than
+`bigint` — `internal/verify/CLAUDE.md`'s own T-0240 section has the account) —
+never by `Candidates` and never by `ValidNationalID` itself: an SSN carries no
+check digit at all, so a bare
 nine-digit number is "SSN-shaped" about as often as a random nine-digit number
 clears the exclusion ranges (nearly always), which is precise enough for a
 *ratio* over a whole numeric column and would refuse an ordinary schema on one

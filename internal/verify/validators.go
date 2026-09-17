@@ -171,7 +171,7 @@ type validator struct {
 }
 
 // validators is the set: internal/classify's twelve value validators, in its
-// own precedence order, folded into fourteen entries here (its two network
+// own precedence order, folded into fifteen entries here (its two network
 // validators, IP and MAC, share one). Its two financial validators used
 // to share one too, until T-0136 split them back apart: Luhn and IBAN are
 // both checksums over an arbitrary string, but Luhn's only ever matches a run
@@ -188,13 +188,17 @@ type validator struct {
 // the classifier's for financial_account -- the two Luhn rows here answer
 // for the classifier's one.
 //
-// national_id is split three ways (below, T-0187 review round, finding 2),
-// which is why the classifier's twelve validators fold into fourteen entries
-// and not thirteen: a structured, strong, text-family entry; a
-// checksum-only, non-strong, text-family entry; and a digits-family entry
-// that is neither strong nor at the ordinary threshold (nationalIDDigitsThreshold,
-// above). The classifier's own single national_id entry answers for all
-// three, the same asymmetry Luhn already has for two.
+// national_id is split four ways (below, T-0187 review round finding 2 and
+// T-0240), which is why the classifier's twelve validators fold into fifteen
+// entries and not thirteen: a structured, strong, text-family entry; a
+// checksum-only, non-strong, text-family entry; and two entries -- one
+// digits-family, one text-family -- for the same zero-padded, no-check-digit
+// shape (ValidNationalIDDigits), neither strong nor at the ordinary
+// threshold (nationalIDDigitsThreshold, above), because a numeric column and
+// a character column both render that shape with no separator and the read
+// side of ADR-010's numeric/character split is not a reason to read it on
+// one family and not the other. The classifier's own single national_id
+// entry answers for all four, the same asymmetry Luhn already has for two.
 //
 // Eleven, not the ten this comment said until tracker T-0122: internal/classify
 // gained textsig.ValidURL ahead of its secrets validator when T-0100 stopped
@@ -344,6 +348,41 @@ var validators = []validator{
 	// ever asked.
 	{
 		category: pipeline.CatNationalID, name: "national_id", digits: true,
+		minRatio: nationalIDDigitsThreshold, sequenceExempt: true, requiresCorroboration: true,
+		ok: textsig.ValidNationalIDDigits,
+	},
+	// The character-family twin of the entry above, and T-0240 (the 2026-09-17
+	// round-4 red team's three A9b replays,
+	// docs/reviews/2026-09-15-redteam/round4-still-leaking.json): the same
+	// zero-padded, no-check-digit national identifier, moved out of a
+	// bigint/integer/numeric column into a varchar(9), reaches
+	// ValidNationalIDStructured and ValidNationalIDChecksumOnly above and
+	// matches neither -- structured needs a dash, a letter or NIR's fifteen
+	// characters, and none of the six checksum-only formats is nine digits
+	// with no separator the way a padded SSN is (BSN and SIN are nine digits
+	// but carry their own checksum, which an SSN's exclusion-range check does
+	// not satisfy by construction). So a `taxref varchar(9)` holding
+	// '780510001'..'780510300' reached `decide` with the reason "no name or
+	// value signal" and crossed verbatim, reported clean, exactly as A9b's
+	// original bigint form did before the digits entry above existed --
+	// moving the value onto the family this net actually reads for a
+	// character column changed nothing, because nothing on that path ever
+	// called ValidNationalIDDigits at all.
+	//
+	// The fix is not a fourth national_id validator; it is this same one,
+	// `ok: textsig.ValidNationalIDDigits`, offered to the character families
+	// too (`text: true` alongside `digits: true` above), on the identical
+	// footing: not strong, the same nationalIDDigitsThreshold ratio,
+	// sequenceExempt and requiresCorroboration both true. `digitRange` in
+	// secondnet.go now reads a text-family column's own values the same way
+	// it already read a digits-family one's -- a value that will not parse
+	// as a plain non-negative integer breaks the range, which a genuine text
+	// column of ordinary strings does on its very first value, so the dense
+	// exemption and the corroboration gate answer the same question for a
+	// varchar(9) national identifier that they already answered for a
+	// bigint one.
+	{
+		category: pipeline.CatNationalID, name: "national_id", text: true,
 		minRatio: nationalIDDigitsThreshold, sequenceExempt: true, requiresCorroboration: true,
 		ok: textsig.ValidNationalIDDigits,
 	},
