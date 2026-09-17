@@ -241,6 +241,127 @@ func TestApplyPassesItsOwnSentinelThroughUnwrapped(t *testing.T) {
 	}
 }
 
+// A masker that wraps one of this module's own sentinels around a value does
+// not buy the value a way out: the round-3 fix's isModuleError recognised
+// ErrNoRoom inside the wrapper and returned the masker's object whole, canary
+// and all, which is a NEW variant of the T-0223 attack against the T-0223 fix
+// itself (round-4 replay, new variant of finding 16). errors.Is must still
+// see ErrNoRoom, and the canary must not survive in any form.
+func TestApplyRebuildsAMaskersErrorEvenWhenItWrapsAModuleSentinel(t *testing.T) {
+	m := funcMasker{
+		mask: func([32]byte, Value, Constraints) (Value, error) {
+			return Value{}, fmt.Errorf("cannot fit %q: %w", victim, ErrNoRoom)
+		},
+		domain: 0,
+	}
+	_, err := guarded(t, m, CatEmail, Value{Text: victim}, Constraints{TypeTag: "text"})
+	if !errors.Is(err, ErrNoRoom) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrNoRoom) == true", err)
+	}
+	if strings.Contains(strings.ToLower(err.Error()), "victim") {
+		t.Errorf("the wrapped error quotes the value: %q", err)
+	}
+	if !strings.Contains(err.Error(), "rt_probe") {
+		t.Errorf("the error does not name the masker: %q", err)
+	}
+	if !strings.Contains(err.Error(), string(CatEmail)) {
+		t.Errorf("the error does not name the category: %q", err)
+	}
+}
+
+// A masker can also forge one of this module's own typed errors and set its
+// string field to the value it wants to smuggle out: *NoRoomError's TypeTag is
+// just a string, and nothing stopped a masker from returning
+// &NoRoomError{TypeTag: victim}. wrapMaskerError rebuilds the struct from
+// maskCell's own trusted Constraints instead of trusting the masker's fields.
+func TestApplyRebuildsAForgedNoRoomError(t *testing.T) {
+	m := funcMasker{
+		mask: func([32]byte, Value, Constraints) (Value, error) {
+			return Value{}, &NoRoomError{Category: CatEmail, ID: "rt_probe", TypeTag: victim, MaxLen: 4096}
+		},
+		domain: 0,
+	}
+	_, err := guarded(t, m, CatEmail, Value{Text: victim}, Constraints{TypeTag: "text", MaxLen: 8})
+	if !errors.Is(err, ErrNoRoom) {
+		t.Fatalf("err = %v, want errors.Is(err, ErrNoRoom) == true", err)
+	}
+	var noRoom *NoRoomError
+	if !errors.As(err, &noRoom) {
+		t.Fatalf("err = %v, want errors.As to a *NoRoomError", err)
+	}
+	if noRoom.TypeTag != "text" || noRoom.MaxLen != 8 {
+		t.Errorf("NoRoomError = %+v, want the caller's own Constraints (TypeTag=text, MaxLen=8), not the masker's forged fields", noRoom)
+	}
+	if strings.Contains(strings.ToLower(err.Error()), "victim") {
+		t.Errorf("the rebuilt error quotes the value: %q", err)
+	}
+}
+
+// A masker can forge *DomainError the same way: Domain, Required, Rows and
+// MaxRows are plain int64 fields, and nothing stopped a masker from setting
+// them to values of its own choosing. An int64 carries a value as well as a
+// string does — four of them are 32 bytes, enough to move a canary a chunk
+// per refused row — so wrapMaskerError must not copy any of them off the
+// masker's error either; it recomputes Domain from ColumnDomain(c) alone,
+// never Admissible(id, c) — Admissible calls back into the *registered*
+// masker's own Domain method, and on this path that is the same masker whose
+// Mask just ran on the cell, so a hostile masker can stash the cell's value
+// in Mask and hand it back from Domain on the very next call (T-0238 round
+// 2). This test therefore registers the hostile masker under a real id and
+// drives it through the public Apply, not guarded(): guarded() calls
+// maskCell directly with the hardcoded, unregistered id "rt_probe", so
+// Get("rt_probe") misses, Admissible would return 0 regardless of what the
+// masker's own Domain does, and the assertion below would be vacuous on
+// exactly the path this test exists to cover.
+func TestApplyRebuildsAForgedDomainError(t *testing.T) {
+	const hostileID = ID("zz_test_domain_exfil_probe")
+	c := Constraints{TypeTag: "text", Unique: true, Rows: 1000}
+	m := funcMasker{
+		mask: func([32]byte, Value, Constraints) (Value, error) {
+			// A zero-valued DomainError suffices: the forged fields matter
+			// less here than the masker's own Domain method below, which is
+			// the channel this test guards.
+			return Value{}, &DomainError{}
+		},
+		// The canary a hostile masker would return from Domain on the
+		// refusal path — e.g. the digits of the very cell value Mask just
+		// saw, stashed and echoed back here.
+		domain: 4155551234,
+	}
+	Register(hostileID, CatEmail, m)
+	t.Cleanup(func() {
+		mu.Lock()
+		delete(registry, hostileID)
+		ids := categories[CatEmail]
+		for i, id := range ids {
+			if id == hostileID {
+				categories[CatEmail] = append(ids[:i:i], ids[i+1:]...)
+				break
+			}
+		}
+		mu.Unlock()
+	})
+
+	k := testKey(t)
+	_, err := Apply(k, CatEmail, hostileID, Value{Text: victim}, c)
+
+	var domain *DomainError
+	if !errors.As(err, &domain) {
+		t.Fatalf("err = %v, want errors.As to a *DomainError", err)
+	}
+	wantDomain := ColumnDomain(c)
+	wantRequired := Required(c.Rows)
+	wantMaxRows := MaxRows(wantDomain)
+	if domain.Domain != wantDomain || domain.Required != wantRequired ||
+		domain.Rows != c.Rows || domain.MaxRows != wantMaxRows {
+		t.Errorf("DomainError = %+v, want the module's own recomputed fields (Domain=%d, Required=%d, Rows=%d, MaxRows=%d), not the registered masker's own Domain()",
+			domain, wantDomain, wantRequired, c.Rows, wantMaxRows)
+	}
+	if strings.Contains(err.Error(), "4155551234") {
+		t.Errorf("the rebuilt error carries the registered masker's own Domain() return value: %q", err.Error())
+	}
+}
+
 // The same guarantee end to end, through a real registered masker and Apply
 // itself: a column too narrow for gen_email's shortest output still surfaces
 // as ErrNoRoom to a caller of the public entry point, not as an opaque

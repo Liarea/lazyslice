@@ -283,15 +283,60 @@ next change to this module argues with a decision rather than rediscovering it.
   value-free sentinels and typed errors (`ErrNoRoom` foremost — every
   built-in generator's "the column is too short to hold a masked value"), so
   `errors.Is(err, ErrNoRoom)` on an `Apply` error went from true to false and
-  the module's contract broke silently. `isModuleError` now recognises this
-  module's own sentinels and `*NoRoomError`/`*DomainError` and returns them
-  unwrapped; only a residue that is none of those gets the `ErrMaskerFailed`
-  treatment. `internal/transform/codes.go`'s `maskReason` names every other
-  mask sentinel by hand so its exit-code text is the sentinel's own safe words
-  rather than the generic "an error of type %T" fallback; `ErrMaskerFailed`
-  itself is still not named there (T-0229), which only affects a *third-party*
-  masker's own error, since `ErrNoRoom` and the module's other sentinels now
-  reach `maskReason` unwrapped as before.
+  the module's contract broke silently. `internal/transform/codes.go`'s
+  `maskReason` names every other mask sentinel by hand so its exit-code text
+  is the sentinel's own safe words rather than the generic "an error of type
+  %T" fallback; `ErrMaskerFailed` itself is still not named there (T-0229),
+  which only affects a *third-party* masker's own error, since `ErrNoRoom` and
+  the module's other sentinels reach `maskReason` unwrapped as before.
+- **`maskCell` never returns a masker's error object, matched sentinel or not**
+  (`mask.go`, T-0238, round-4 replay: a new variant of finding 16, against the
+  T-0223 fix itself). The fix above added `isModuleError`, gated on
+  `errors.Is`/`errors.As`, and when it matched, `maskCell` returned the
+  masker's own error value whole — so
+  `fmt.Errorf("cannot fit %q: %w", in.Text, mask.ErrNoRoom)` bought the
+  canary a pass straight through the redaction the same fix had just added,
+  because declaring `ErrNoRoom` inside the wrapper was a test the masker
+  controlled. A masker can go further still: `*NoRoomError` and `*DomainError`
+  are exported struct types, so a masker can build or rewrap one itself and
+  set `TypeTag` — a plain string — to anything it likes. `wrapMaskerError`
+  replaced `isModuleError` and never hands back the object it matched against.
+  It always constructs a new error: `%w` on the matched sentinel
+  (`ErrMaskerFailed` when none of them match), the category, the masker id and
+  the returned value's *type* via `panicKind` — never its text. A match on
+  `*NoRoomError` or `*DomainError` rebuilds that same type instead of a plain
+  wrap, so `errors.As` still reaches it, but from fields this call already
+  trusts: `cat` and `id`, the arguments `maskCell` was called with, and for
+  `NoRoomError`, `TypeTag`/`MaxLen` off the `Constraints` it was given — never
+  off the fields on the masker's error. Nothing on this path may read a
+  masker's error fields *or call a masker method*: `DomainError`'s four
+  fields are recomputed from the caller's own `Constraints` alone —
+  `ColumnDomain(c)`, `Required(c.Rows)`, `c.Rows` and `MaxRows(domain)` —
+  never `Admissible(id, c)`. `Admissible` (`registry.go`) is
+  `min(ColumnDomain(c), m.Domain(c))`: it calls back into the *registered*
+  masker's own `Domain` method, and on this path that masker is the same
+  object whose `Mask` just ran on the cell. A masker that stashes the cell's
+  value in `Mask` and hands it back from `Domain` on its very next call
+  smuggles it out through `Domain`/`MaxRows` on the error path with a real,
+  registered id — no forged struct field needed (T-0238 round 2: the
+  round-1 fix used `Admissible(id, c)` here and reopened exactly the leak it
+  closed). No field of a masker's error is trusted, numeric or not, and no
+  masker method runs on this path either: an int64 a masker controls (or
+  computes on demand) carries a value as well as a string does; four of them
+  are 32 bytes, enough to move a canary a chunk per refused row.
+  `errors.Is`/`errors.As` still answer every sentinel and typed error this
+  module documents. Test: a masker whose `Mask` returns
+  `fmt.Errorf("cannot fit %q: %w", victim, ErrNoRoom)`, a second masker that
+  returns `&NoRoomError{TypeTag: victim}` directly, a third that returns
+  `&DomainError{Domain, Required, Rows, MaxRows}` set to canary integers, and
+  a fourth — *registered* under a real id and driven through the public
+  `Apply`, not a helper that skips registration — whose `Mask` stashes the
+  cell's value and returns a zero-valued `&DomainError{}`, and whose `Domain`
+  returns a canary integer on the next call: all four assert
+  `errors.Is`/`errors.As` reaches the module's own rebuilt error, the
+  canary's absence from `err.Error()`, and (the fourth) that `Domain`/
+  `MaxRows` on the rebuilt error are the `Constraints`-derived values, not
+  the masker's canary.
 - **Arrays are the caller's loop.** §5 masks an array element-wise with `h`
   computed per element; `Value` has no array form, and dimensions and lower
   bounds are a pgx concern, so `internal/transform` maps `Apply` over the
