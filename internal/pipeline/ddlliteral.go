@@ -158,12 +158,69 @@ const patternMetaChars = `^$%_\.*+?[](){}|`
 // than discarded twice over — '\\.' is an escaped dot, one literal ".",  not
 // "backslash, removed; dot, removed; nothing left". Every other occurrence of
 // a character in patternMetaChars, including a lone trailing backslash, is
-// discarded outright. So '%@%.%' (LIKE's own wildcard, unescaped) reduces to
-// "@" -- which no validator matches -- and '^ceo@bigcorp\.example$' (the
-// red team's own regex) reduces to "ceo@bigcorp.example" -- the address,
-// intact, because its one metacharacter was an *escaped* literal dot and the
-// anchors around it carried no value at all.
+// discarded outright -- except an unescaped `_`, LIKE's own single-character
+// wildcard, which leaves one space behind instead of closing the gap it sat
+// in. That one exception is the round-5 red team's own finding
+// (docs/reviews/2026-09-15-redteam/round5-still-leaking.json): dropping `_`
+// outright GLUES the tokens on either side of it, so '%HIV_POSITIVE%'
+// reduced to "HIVPOSITIVE" -- one run-together word no vocabulary validator's
+// \b could split back apart, where the LIKE pattern's own value is two words
+// glued by an underscore, the identical shape a status code or enum label
+// spells the term in. Every other metacharacter here still closes its own
+// gap rather than leaving one: '%' is a wildcard spanning zero or more
+// characters, and a bare space where it stood would insert a word boundary a
+// LIKE pattern's own semantics never promised was there. So '%@%.%' (LIKE's
+// own wildcard, unescaped) reduces to "@" -- which no validator matches --
+// '^ceo@bigcorp\.example$' (the red team's own regex) reduces to
+// "ceo@bigcorp.example" -- the address, intact, because its one
+// metacharacter was an *escaped* literal dot and the anchors around it
+// carried no value at all -- and '%HIV_POSITIVE%' reduces to "HIV POSITIVE",
+// which textsig.SpecialCategoryVocabulary's own normalisation then lowercases
+// and matches on "hiv".
 func StripPatternMeta(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == '\\' && i+1 < len(s) {
+			b.WriteByte(s[i+1])
+			i++
+			continue
+		}
+		if c == '_' {
+			b.WriteByte(' ')
+			continue
+		}
+		if strings.IndexByte(patternMetaChars, c) >= 0 {
+			continue
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
+}
+
+// StripPatternMetaGlued is StripPatternMeta's sibling reduction, for the
+// value that spacing `_` loses (T-0254 review, high finding 1): for the tilde
+// operators, `_` is not metacharacter syntax at all -- it is LIKE's own
+// single-character wildcard, and only LIKE and ILIKE actually read it that
+// way -- so a literal like `^john_doe@bigcorp\.example$` carries the address
+// `john_doe@bigcorp.example`, and StripPatternMeta's space closes exactly the
+// gap a validator needs to read it as one token: it becomes "john doe@bigcorp
+// .example", neither piece of which is an email. StripPatternMetaGlued closes
+// the gap instead of spacing it, the same way every metacharacter other than
+// `_` already does here -- so the underscore itself does not survive either
+// (the reduction is "johndoe@bigcorp.example", not the address verbatim), but
+// the two tokens either side of it are glued back into one, and that is
+// enough for a validator to recognise the shape and refuse the run over the
+// literal it came from. A caller does not know which operator produced a
+// given Pattern literal (afterPatternOperator folds LIKE, ILIKE, SIMILAR TO
+// and both tilde spellings into one bool), so this is not a second,
+// operator-aware StripPatternMeta -- it is the other reading of the same
+// text, and a caller runs a validator over both reductions and treats either
+// as a hit: on `%HIV_POSITIVE%` this gives "HIVPOSITIVE", which no vocabulary
+// validator's word boundary can split, so StripPatternMeta's spaced form is
+// still what catches that shape -- the two reductions are complementary, not
+// a replacement for one another.
+func StripPatternMetaGlued(s string) string {
 	var b strings.Builder
 	for i := 0; i < len(s); i++ {
 		c := s[i]
