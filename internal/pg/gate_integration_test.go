@@ -804,3 +804,296 @@ func TestOneClusterReadUnderTwoSessionTimeZonesHasOneClusterIdentity(t *testing.
 			"gate admits the source's own database", utc, tokyo)
 	}
 }
+
+// T-0222, 2026-09-16. The round-3 replay of R2-06
+// (docs/reviews/2026-09-15-redteam/round3-still-leaking.json): a hardened
+// cluster that revokes monitoring functions from PUBLIC denies the source
+// role EXECUTE on pg_postmaster_start_time() too — pg_control_system was
+// already unreadable by an ordinary role, which is the premise the original
+// finding assumed. Before this fix, sqlClusterID was one SELECT
+// concatenating that field with three others, so the permission error on it
+// failed the whole row: Source.ClusterID collapsed to "" even though the
+// maintenance database's oid and the server version, neither privileged,
+// were still readable. With the identity gone on both sides of the
+// comparison, the gate's rule 1 fell back to comparing the two endpoints'
+// spelling — and a second endpoint onto the same server (testutil.
+// SecondEndpoint, this red team's own shape) reads as a different server, so
+// an empty database named differently from the source's own (the
+// mid-migration case: "app" reached directly, "newprod" reached over a
+// second route to the same cluster) passed rule 1 with no same-cluster
+// warning at all.
+//
+// This test creates exactly the role the replay describes, confirms
+// ClusterID still answers under it, and then runs the gate against that
+// second-endpoint, differently-named target the way the red team did.
+func TestGateRecognisesTheSourceClusterWithPostmasterStartTimeDenied(t *testing.T) {
+	ctx := context.Background()
+	f := newGateFixture(ctx, t)
+
+	const role = "gate_no_start_time"
+	f.exec(ctx, t, f.sourceURL,
+		`CREATE ROLE `+role+` LOGIN PASSWORD 'lazyslice' NOSUPERUSER`,
+		`GRANT CONNECT ON DATABASE `+f.sourceRef.Database+` TO `+role,
+		// EXECUTE on pg_control_system() is granted to PUBLIC by default on
+		// every currently supported Postgres (measured against postgres:16;
+		// ARCHITECTURE.md §9 and THREAT_MODEL.md T2 both say otherwise and are
+		// owed a correction — filed as T-0224), so it is revoked here to
+		// reach the SELECT-only shape those sections describe.
+		// pg_postmaster_start_time() genuinely is PUBLIC-executable by
+		// default; this REVOKE is the replay's own hardening step on top.
+		`REVOKE EXECUTE ON FUNCTION pg_control_system() FROM PUBLIC`,
+		`REVOKE EXECUTE ON FUNCTION pg_postmaster_start_time() FROM PUBLIC`,
+	)
+	t.Cleanup(func() {
+		f.exec(context.WithoutCancel(ctx), t, f.sourceURL,
+			`GRANT EXECUTE ON FUNCTION pg_control_system() TO PUBLIC`,
+			`GRANT EXECUTE ON FUNCTION pg_postmaster_start_time() TO PUBLIC`)
+	})
+
+	restricted := *f.base
+	restricted.User = url.UserPassword(role, "lazyslice")
+
+	src, err := OpenSource(ctx, dsn.DSN(restricted.String()))
+	if err != nil {
+		t.Fatalf("opening the source as %s: %v", role, err)
+	}
+	defer src.Close()
+
+	sourceSystemID, err := src.SystemID(ctx)
+	if err != nil {
+		t.Fatalf("SystemID: %v", err)
+	}
+	if sourceSystemID != "" {
+		t.Fatalf("SystemID = %q for a role with no EXECUTE on pg_control_system, want \"\"", sourceSystemID)
+	}
+
+	sourceCluster, err := src.ClusterID(ctx)
+	if err != nil {
+		t.Fatalf("ClusterID: %v", err)
+	}
+	// Assert the degradation field by field, not only that the joined string
+	// is non-empty: field 0 (the start time) must be lost, because this role
+	// has no EXECUTE on pg_postmaster_start_time(), and fields 1 and 3 (the
+	// maintenance database's oid and the server version) must survive it,
+	// because neither needs any privilege this role lacks (fix round, review
+	// — a stub that always returned some non-empty constant passed the old
+	// "!= \"\"" check unchanged).
+	fields := strings.Split(sourceCluster, clusterIDSep)
+	if len(fields) <= clusterIDServerVersionField {
+		t.Fatalf("ClusterID = %q, want at least %d positional fields", sourceCluster, clusterIDServerVersionField+1)
+	}
+	if fields[0] != "" {
+		t.Errorf("ClusterID start-time field = %q, want empty: this role has no EXECUTE on "+
+			"pg_postmaster_start_time()", fields[0])
+	}
+	if fields[clusterIDMaintenanceOIDField] == "" || fields[clusterIDServerVersionField] == "" {
+		t.Fatalf("ClusterID = %q: the maintenance database's oid (field %d) and the server version "+
+			"(field %d) need no privilege this role lacks, and must not be lost along with the start "+
+			"time (T-0222)", sourceCluster, clusterIDMaintenanceOIDField, clusterIDServerVersionField)
+	}
+
+	// The mid-migration shape: an empty database named differently from the
+	// source's, reached over a second route to the same server.
+	newprod := f.database(ctx, t, "gate_newprod")
+	second := testutil.SecondEndpoint(ctx, t, newprod)
+
+	target, err := OpenTarget(ctx, dsn.DSN(second))
+	if err != nil {
+		t.Fatalf("opening the target over the second endpoint: %v", err)
+	}
+	defer target.Close()
+	target.SetSourceCluster(sourceCluster)
+
+	e, err := target.Gate(ctx, f.sourceRef, sourceSystemID, "")
+	if err != nil {
+		t.Fatalf("Gate: %v", err)
+	}
+	if !e.SameCluster {
+		// This case is the fields-agree-or-are-missing shape: both sides can
+		// only fill the two weak fields here, and they agree, so
+		// sameClusterIdentity reports unknown (fix round, review — weak-field
+		// agreement is not evidence of sameness) and sameClusterVerdict's
+		// unknown-defaults-true arm is what actually answers true. It is not
+		// evidence that the split can tell this cluster apart from a
+		// different one; TestGateDistinguishesAGenuinelyDifferentClusterFromWeakFieldsAlone
+		// below is the case where the fields actually decide.
+		t.Fatal("SameCluster = false: gate_newprod is an empty database on the source's own " +
+			"cluster, reached over a second endpoint, with the source read under a role denied " +
+			"EXECUTE on pg_postmaster_start_time() — nothing here is comparable but the two weak " +
+			"fields, and they agree, so this must fail closed as \"possibly same cluster\" rather " +
+			"than fall back to the endpoint spelling and answer \"different cluster\"")
+	}
+	if e.Verdict != pipeline.Eligible {
+		t.Fatalf("Verdict = %v (%s), want Eligible: an empty database on the source's own cluster "+
+			"is eligible by design (ARCHITECTURE.md §9 rule 1) — only SameCluster should carry the "+
+			"warning", e.Verdict, e.Reason)
+	}
+}
+
+// T-0222 fix round, 2026-09-16 (review). The test above only reaches the
+// shape where the surviving weak fields (the maintenance database's oid and
+// the server version) happen to agree, because both reads are of one cluster
+// — and sameClusterVerdict's unknown-defaults-true arm answers SameCluster =
+// true in that shape with or without the T-0222 split: it is also what a
+// reverted has_function_privilege split, or a readClusterID with the
+// privilege check deleted outright, would produce, since either leaves
+// sourceCluster == "" and clusterKnown == false the same way an empty
+// identity always has.
+//
+// This is the one outcome only the split can produce: a genuinely different
+// cluster, read under the same role denied EXECUTE on
+// pg_postmaster_start_time(), whose surviving weak fields disagree. The
+// server version does that on its own between any two different Postgres
+// majors, so the second cluster here is a postgres:14 container rather than
+// a sibling of the source's own postgres:16 — testutil/CLAUDE.md's own rule
+// ("a test that wants two clusters starts a second container"). Neither side
+// can read a system identifier or a start time, so sameClusterIdentity has
+// only the two weak fields to compare, and it must read their disagreement as
+// "different cluster" on its own — the fail-open default arm cannot produce
+// false here, because clusterKnown is true and clusterSame is false the
+// moment any field, weak or not, disagrees.
+func TestGateDistinguishesAGenuinelyDifferentClusterFromWeakFieldsAlone(t *testing.T) {
+	ctx := context.Background()
+	f := newGateFixture(ctx, t)
+
+	const role = "gate_no_start_time_2"
+	f.exec(ctx, t, f.sourceURL,
+		`CREATE ROLE `+role+` LOGIN PASSWORD 'lazyslice' NOSUPERUSER`,
+		`GRANT CONNECT ON DATABASE `+f.sourceRef.Database+` TO `+role,
+		`REVOKE EXECUTE ON FUNCTION pg_control_system() FROM PUBLIC`,
+		`REVOKE EXECUTE ON FUNCTION pg_postmaster_start_time() FROM PUBLIC`,
+	)
+	t.Cleanup(func() {
+		f.exec(context.WithoutCancel(ctx), t, f.sourceURL,
+			`GRANT EXECUTE ON FUNCTION pg_control_system() TO PUBLIC`,
+			`GRANT EXECUTE ON FUNCTION pg_postmaster_start_time() TO PUBLIC`)
+	})
+
+	restricted := *f.base
+	restricted.User = url.UserPassword(role, "lazyslice")
+
+	src, err := OpenSource(ctx, dsn.DSN(restricted.String()))
+	if err != nil {
+		t.Fatalf("opening the source as %s: %v", role, err)
+	}
+	defer src.Close()
+
+	sourceSystemID, err := src.SystemID(ctx)
+	if err != nil {
+		t.Fatalf("SystemID: %v", err)
+	}
+	if sourceSystemID != "" {
+		t.Fatalf("SystemID = %q for a role with no EXECUTE on pg_control_system, want \"\"", sourceSystemID)
+	}
+
+	sourceCluster, err := src.ClusterID(ctx)
+	if err != nil {
+		t.Fatalf("ClusterID: %v", err)
+	}
+	fields := strings.Split(sourceCluster, clusterIDSep)
+	if len(fields) <= clusterIDServerVersionField || fields[clusterIDServerVersionField] == "" {
+		t.Fatalf("ClusterID = %q, want a non-empty server-version field (%d)", sourceCluster, clusterIDServerVersionField)
+	}
+
+	// A second, genuinely different cluster: postgres:14 rather than the
+	// source's own postgres:16, so the server version — the one weak field
+	// this role can read on both sides — is certain to disagree.
+	otherURL := testutil.Postgres(ctx, t, "postgres:14")
+	target, err := OpenTarget(ctx, dsn.DSN(otherURL))
+	if err != nil {
+		t.Fatalf("opening the target: %v", err)
+	}
+	defer target.Close()
+	target.SetSourceCluster(sourceCluster)
+
+	e, err := target.Gate(ctx, f.sourceRef, sourceSystemID, "")
+	if err != nil {
+		t.Fatalf("Gate: %v", err)
+	}
+	if e.SameCluster {
+		t.Fatal("SameCluster = true: the target is a postgres:14 container, genuinely different " +
+			"from the postgres:16 source, and its server version disagrees with the source's own " +
+			"under a role that can read no other field — sameClusterIdentity's weak-field " +
+			"disagreement must decide \"different cluster\" on its own here, not fall back to the " +
+			"unknown-defaults-true arm the test above exercises")
+	}
+}
+
+// T-0222 fix round, 2026-09-16 (review). readClusterID takes a SAVEPOINT
+// around the guarded start-time read only when it runs inside an open
+// transaction — Source.ClusterID's case — because a failed
+// sqlClusterIDStartTime otherwise leaves that transaction aborted:
+// sqlClusterIDRest, sent on it next, would itself fail with 25P02 "current
+// transaction is aborted" and be read as "unreadable", losing the whole
+// identity rather than the one field the privilege check could not
+// guarantee.
+//
+// This forces exactly that failure on a role that genuinely has EXECUTE on
+// pg_postmaster_start_time() — the privilege check truthfully answers yes —
+// by shadowing the built-in to_char(timestamp, text) that sqlClusterIDStartTime
+// calls with one that raises. Postgres always searches pg_catalog first
+// unless it is named explicitly elsewhere in search_path, so putting public
+// ahead of pg_catalog and defining to_char(timestamp, text) there is enough
+// to make the guarded statement fail with no privilege involved at all — a
+// stand-in for "the guarded read failed for a reason unrelated to the
+// privilege check", which is what the fix must survive.
+func TestReadClusterIDRecoversFromAFailedStartTimeReadInsideATransaction(t *testing.T) {
+	ctx := context.Background()
+	f := newGateFixture(ctx, t)
+
+	f.exec(ctx, t, f.sourceURL,
+		`CREATE FUNCTION public.to_char(timestamp, text) RETURNS text AS $$
+         BEGIN RAISE EXCEPTION 'shadowed to_char for the T-0222 fix-round test'; END;
+         $$ LANGUAGE plpgsql`,
+	)
+	t.Cleanup(func() {
+		f.exec(context.WithoutCancel(ctx), t, f.sourceURL,
+			`DROP FUNCTION public.to_char(timestamp, text)`)
+	})
+
+	pool, err := Connect(ctx, dsn.DSN(f.sourceURL), nil)
+	if err != nil {
+		t.Fatalf("connecting: %v", err)
+	}
+	defer pool.Close()
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatalf("acquiring a connection: %v", err)
+	}
+	defer conn.Release()
+
+	if _, err = conn.Exec(ctx, `SET search_path = public, pg_catalog`); err != nil {
+		t.Fatalf("setting search_path so public.to_char shadows the built-in: %v", err)
+	}
+	if _, err = conn.Exec(ctx, sqlBeginReadOnly); err != nil {
+		t.Fatalf("opening the transaction: %v", err)
+	}
+	defer conn.Exec(context.WithoutCancel(ctx), sqlRollback)
+
+	id, err := readClusterID(ctx, conn, true)
+	if err != nil {
+		t.Fatalf("readClusterID: %v", err)
+	}
+	fields := strings.Split(id, clusterIDSep)
+	if len(fields) < 4 {
+		t.Fatalf("readClusterID = %q, want at least 4 positional fields", id)
+	}
+	if fields[0] != "" {
+		t.Errorf("start time field = %q, want empty: the shadowed to_char should have failed the "+
+			"guarded read", fields[0])
+	}
+	if fields[1] == "" || fields[3] == "" {
+		t.Fatalf("readClusterID = %q: the maintenance oid (field 1) and server version (field 3) "+
+			"need no privilege the shadowed to_char failure touches, and must not be lost along with "+
+			"the start time — recovering them is what the SAVEPOINT this fix adds is for", id)
+	}
+
+	// The transaction the caller is still holding must be usable: a plain
+	// statement sent on it after readClusterID must not fail with 25P02,
+	// which is what an unrecovered abort would do to every later statement
+	// on this same connection, not only to sqlClusterIDRest.
+	var one int
+	if err := conn.QueryRow(ctx, `SELECT 1`).Scan(&one); err != nil {
+		t.Fatalf("the transaction is not usable after readClusterID: %v", err)
+	}
+}

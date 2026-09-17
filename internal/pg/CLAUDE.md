@@ -334,7 +334,9 @@ for the privilege.
   25006. `TestConnectSetsNoSessionStateOnASourceConnection` is the unit half —
   no `AfterConnect` hook at all, and no `SET` on the allowlist —
   `TestSystemIDRunsInsideAReadOnlyTransaction` pins the `source.begin →
-  source.system_id → source.rollback` trace, and
+  source.system_id.privilege → source.system_id → source.rollback` trace
+  (the privilege check is its own statement as of T-0222 — see this file's
+  own T-0222 section below for why), and
   `TestAWriteInsideASourceTransactionIsRefusedByTheServer` registers a write
   shape on purpose so that what refuses the write can only be the server (25006).
   THREAT_MODEL.md T9's read-only bullet carries the same wording; it listed the
@@ -888,3 +890,168 @@ integration half that *does* discriminate: one cluster read with
 the alias is refused, and a database of the same name on a genuinely different
 cluster stays eligible — which is the ordinary case (`app` on production, `app`
 locally) and what the fail-closed arm must not take down.
+
+## Decisions made for T-0222 (2026-09-16, R2-06's R3 replay)
+
+- **`has_function_privilege` cannot guard a call inside the same statement,
+  and the section above's "in practice this arm is nearly unreachable" was
+  written before this landed and is corrected by it.** The round-3 replay
+  (`docs/reviews/2026-09-15-redteam/round3-still-leaking.json`) denied the
+  source role `pg_postmaster_start_time()` too — a hardened cluster that
+  revokes monitoring functions from `PUBLIC`, the same class of hardening the
+  original finding already assumed for `pg_control_system` — and the old
+  `sqlClusterID` was one `SELECT` concatenating four fields with `||`, so the
+  permission error on that one call failed the whole row: `ClusterID`
+  collapsed to `""` even though the maintenance database's oid and the server
+  version needed no privilege that role lacked. The fix the replay's own JSON
+  suggested — `CASE WHEN has_function_privilege(...) THEN
+  pg_postmaster_start_time() ... ELSE '' END` in one statement — **does not
+  work**: measured by hand against `postgres:16`, a role
+  denied `EXECUTE` still gets `permission denied for function
+  pg_postmaster_start_time` out of a `CASE`, a scalar subquery around the
+  call, and a CTE with a `WHERE has_function_privilege(...)` guard alike.
+  `TestGateRecognisesTheSourceClusterWithPostmasterStartTimeDenied` runs none
+  of those three shapes and asserts no permission error, so it is not the
+  evidence for this; `TestTheClusterStartTimeIsGuardedByASeparateStatement`
+  is the regression pin, and fails if the guard and the guarded call are ever
+  recombined into one statement. Postgres checks `EXECUTE` for every function call in a compiled plan at
+  executor-initialisation time, before any branch, clause or subquery around
+  it is evaluated — the guard has to be a **separate statement that carries no
+  reference to the guarded function at all**, checked before the guarded
+  statement is ever sent. `sqlClusterID` is now three constants
+  (`sqlCanReadClusterStartTime`, `sqlClusterIDStartTime`, `sqlClusterIDRest`)
+  and `sqlSystemID` is two (`sqlCanReadSystemID`, `sqlSystemID`); `readSystemID`
+  and `readClusterID` (source.go) run the check-then-call sequence and are
+  shared by `Source.SystemID`/`Source.ClusterID` and target.go's
+  `systemIdentifier`/`clusterIdentity`, so both sides of the comparison
+  degrade the same way. `TestSystemIDRunsInsideAReadOnlyTransaction`'s traced
+  shape list grew a `source.system_id.privilege` entry ahead of
+  `source.system_id` for the same reason.
+- **`EXECUTE` on `pg_control_system()` is granted to `PUBLIC` by default on
+  stock PostgreSQL 16** — verified directly against a fresh container, a
+  freshly created `NOSUPERUSER` role, and no grant beyond `CONNECT` on the
+  database. ARCHITECTURE.md §9, THREAT_MODEL.md T2 and this file (the
+  "Decisions made for T-0190" section above, and the `sqlClusterID` bullet
+  before it) all state the opposite — "`EXECUTE` on `pg_control_system` is not
+  granted to `PUBLIC`" — repeatedly, and none of them cites a source; every
+  existing test that wanted a role without it simulated the absence by passing
+  `""` by hand rather than by creating a real restricted role and measuring
+  it. This task's own integration test needed the function actually denied to
+  exercise the code path it is testing, so it revokes `EXECUTE` on both
+  `pg_control_system()` and `pg_postmaster_start_time()` from `PUBLIC`
+  explicitly rather than relying on either being denied by default. Whether
+  the documented claim was ever true on a version this project still supports,
+  or is corrected prose debt from the start, is outside this task's paths to
+  resolve across ARCHITECTURE.md, THREAT_MODEL.md and this file's own history
+  — filed as **T-0224**.
+- **`sameClusterVerdict` (target.go) replaces `Gate`'s inline switch**, whose
+  `default` arm used to fall back to `targetRef.SameCluster(source)` — a
+  comparison of the two normalised endpoint spellings — exactly when neither
+  identity could be compared. That is precisely the case rule 1's identity
+  check exists to cover for: one cluster reached over two transports (a
+  published TCP port and the unix socket, a pooler, an SSH tunnel) normalises
+  to two different endpoints by construction, so falling back to the endpoint
+  comparison when the identity check has nothing to go on answers "different
+  cluster" from the one signal that is guaranteed to be wrong in exactly this
+  case. The R3 replay's mid-migration shape — a target database named
+  differently from the source's (`app` reached directly, `newprod` over a
+  second route to the same server) — also does not reach `sameCatalog`'s own
+  fail-closed arm a few lines below, because that arm is gated on
+  `currentDB == source.Database`. `sameClusterVerdict` now answers `true`
+  (possibly the same cluster) whenever nothing could be compared, matching the
+  direction `clusterUnknown`'s fail-closed refusal already took for the
+  narrower case it covers. `TestSameClusterVerdict` (cluster_test.go) pins the
+  four cases as a pure function, with no database needed.
+- **`sameClusterIdentity`'s field-by-field fallback is not "any two fields
+  present and equal is one cluster" (T-0222 fix round, review).** The
+  maintenance database's oid (`clusterIDMaintenanceOIDField`) is pinned to `5`
+  for every cluster from PostgreSQL 15 on, and the server version
+  (`clusterIDServerVersionField`) is shared by every cluster built from the
+  same image, so agreement on either is not evidence of one cluster — only
+  disagreement is. Under the role denied both `pg_control_system` and
+  `pg_postmaster_start_time` this section already describes, those two are the
+  only fields either side can fill; before this fix, agreeing on both reported
+  `known=true, same=true`, so two unrelated clusters from the same image
+  compared as one and `Eligibility.SameCluster` came back confidently true for
+  a legitimately separate target. `clusterIDWeakField` names the two
+  positions; the comparison loop now tracks whether any *non*-weak field
+  contributed, and reports `known=false` — the same "unknown" as no common
+  field at all — when only weak fields agreed, while a weak field's
+  disagreement still decides "different cluster" on its own, because
+  disagreement needs no specificity to be believed. The `cluster_test.go` case
+  this covers is named for what it now asserts:
+  `"start time denied too: oid and version alone are not decisive, so this is
+  unknown"`.
+- **`readClusterID`'s recovery from a denied start time only works inside an
+  open transaction if the failed statement does not leave it aborted**
+  (T-0222 fix round, review). `Source.ClusterID` runs `sqlCanReadClusterStartTime`,
+  `sqlClusterIDStartTime` and `sqlClusterIDRest` inside one `REPEATABLE READ
+  READ ONLY` transaction; if the privilege check answers yes but the guarded
+  read still fails — the privilege revoked between the two statements, or any
+  other server error — the transaction is left aborted, and `sqlClusterIDRest`
+  sent on it next would itself fail with `25P02` and be swallowed as
+  "unreadable", losing the whole identity rather than the one field. This was
+  invisible on `target.go`'s `clusterIdentity`, which runs the same three
+  statements on the gate's autocommit connection, where a failed statement
+  never touches the next one — so the two callers of `readClusterID` degraded
+  differently despite sharing the helper. `readClusterID` now takes an
+  `inTransaction bool`; when true it takes `SAVEPOINT cluster_start_time`
+  before the guarded read and releases or rolls back to it afterward, so a
+  failure there costs one field and not the transaction. `Source.ClusterID`
+  passes `true` and registers the three new fixed-text shapes this needs
+  (`source.cluster_id.savepoint`, `.release_savepoint`,
+  `.rollback_to_savepoint`); `target.go`'s `clusterIdentity` passes `false` and
+  registers nothing new, because its connection carries no tracer to register
+  against and needs no savepoint.
+  **The exact race — a privilege `REVOKE`d by another session between the two
+  statements — cannot be reproduced by actually revoking**: a `REPEATABLE
+  READ` transaction's catalog reads use the snapshot taken at `BEGIN`, so a
+  `REVOKE` another session commits after that is not visible inside it, and
+  the guarded read would keep succeeding.
+  `TestReadClusterIDRecoversFromAFailedStartTimeReadInsideATransaction`
+  (`gate_integration_test.go`) forces the same failure shape a different way —
+  a role that genuinely holds `EXECUTE` on `pg_postmaster_start_time()`, with
+  the built-in `to_char(timestamp, text)` `sqlClusterIDStartTime` calls
+  shadowed by one that raises, using `search_path = public, pg_catalog` to put
+  a function of our own ahead of the one it is shadowing — and asserts both
+  that the maintenance oid and server version still come back and that the
+  transaction is still usable afterward, not only that `readClusterID` itself
+  returns no error.
+- **Two of this task's own regression pins asserted a shape that correlated
+  with the fix rather than the property the surrounding prose claimed they
+  pinned (T-0222 fix round, review).**
+  `TestTheClusterStartTimeIsGuardedByASeparateStatement` used to assert only
+  that `sqlClusterIDRest` does not mention the guarded function and a
+  compound condition on `sqlCanReadClusterStartTime` that a straight
+  `has_function_privilege` guard could never trip — so rewriting
+  `sqlClusterIDStartTime` as `SELECT CASE WHEN
+  has_function_privilege('pg_postmaster_start_time()','EXECUTE') THEN
+  to_char(...) ELSE '' END` (precisely the shape measured not to work) passed
+  it unchanged, and so did deleting the privilege check from `readClusterID`
+  outright. It now asserts the property by name: the guard contains
+  `has_function_privilege` and none of the guarded call's own shape
+  (`to_char(`, `AT TIME ZONE`); the guarded statement calls
+  `pg_postmaster_start_time` and never `has_function_privilege`; and the two
+  constants are not equal. `sqlCanReadSystemID`/`sqlSystemID` had no pin of
+  this kind at all before this round; `TestTheSystemIdentifierIsGuardedByASeparateStatement`
+  is the same shape for that pair.
+  `TestGateRecognisesTheSourceClusterWithPostmasterStartTimeDenied`'s central
+  assertion (`!e.SameCluster`) is the other one: it is satisfied by
+  `sameClusterVerdict`'s unknown-defaults-true arm on its own, because the
+  fixture's two clusters are one cluster read twice and the only fields the
+  restricted role can compare — the maintenance oid and the server version —
+  are `clusterIDWeakField`s that agree, which the third T-0222 amendment above
+  reports as unknown rather than as evidence of sameness; a reverted
+  `has_function_privilege` split reaches that same unknown state by a
+  different route (`sourceCluster == ""`) and passes the old assertion
+  identically. The test's own failure message claimed a discrimination the
+  fixture does not exercise, and so did ARCHITECTURE.md §9's "still
+  contributes the rest, on both sides of the comparison" — both corrected to
+  say the surviving weak fields prove difference only, never sameness.
+  `TestGateDistinguishesAGenuinelyDifferentClusterFromWeakFieldsAlone` adds
+  the one case that does discriminate: a second, real cluster (a
+  `postgres:14` container, so its server version disagrees with the
+  `postgres:16` source's on its own) reached under the same restricted role,
+  where `sameClusterIdentity` must read the weak fields' disagreement as
+  "different cluster" — the only outcome the split can produce that the
+  default arm cannot.

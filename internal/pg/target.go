@@ -253,17 +253,7 @@ func (t *Target) Gate(ctx context.Context, source dsn.Ref, sourceSystemID, allow
 	}
 
 	clusterSame, clusterKnown := sameClusterIdentity(t.sourceCluster, clusterID)
-
-	switch {
-	case sourceSystemID != "" && systemID != "":
-		e.SameCluster = systemID == sourceSystemID
-	case clusterKnown:
-		e.SameCluster = clusterSame
-	default:
-		if same, clusterErr := targetRef.SameCluster(source); clusterErr == nil {
-			e.SameCluster = same
-		}
-	}
+	e.SameCluster = sameClusterVerdict(sourceSystemID, systemID, clusterSame, clusterKnown)
 
 	sameEndpoint, err := targetRef.SameEndpoint(source)
 	if err != nil {
@@ -283,7 +273,7 @@ func (t *Target) Gate(ctx context.Context, source dsn.Ref, sourceSystemID, allow
 	// production database and did it.
 	//
 	// clusterIdentity is the same question asked of catalog values every role
-	// can read (source.go's sqlClusterID), so the arm now works under the
+	// can read (source.go's readClusterID), so the arm now works under the
 	// recommended role. Every one of those values is a property of the
 	// *cluster* and not of the connection (amended 2026-09-15, R2-06): the
 	// first version of this arm carried inet_server_addr() and
@@ -371,19 +361,56 @@ func hostNamed(allowRemoteHost string, target dsn.Ref) bool {
 	return err == nil && same
 }
 
+// systemIdentifier reads the target's system_identifier through
+// source.go's readSystemID (T-0222, R2-06's R3 replay): the privilege check
+// and the call are two statements, never one guarded statement, because
+// Postgres checks EXECUTE for the whole plan before any guard around the call
+// runs (sqlCanReadSystemID's comment). A role that cannot execute
+// pg_control_system answers "": that is not an identifier that differs, and
+// the endpoint comparison stands on its own with the run saying so in the
+// header.
 func systemIdentifier(ctx context.Context, conn *pgxpool.Conn) (string, error) {
-	var id string
-	err := conn.QueryRow(ctx, sqlSystemID).Scan(&id)
-	if err == nil {
-		return id, nil
-	}
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	id, err := readSystemID(ctx, conn)
+	if err != nil {
 		return "", fmt.Errorf("pg: gate: reading the target system identifier: %w", err)
 	}
-	// Execution of pg_control_system is not granted to PUBLIC. An identifier we
-	// cannot read is not an identifier that differs: the endpoint comparison
-	// stands on its own and the run says so in the header.
-	return "", nil
+	return id, nil
+}
+
+// sameClusterVerdict is rule 1's identity comparison, and fills
+// Eligibility.SameCluster. system_identifier decides alone when both sides
+// could read it; failing that, the ordinary-role cluster identity decides
+// when sameClusterIdentity could compare at least one field on both sides
+// (clusterKnown); and when neither is comparable at all, the target is
+// answered as *possibly* the source's own cluster rather than as different.
+//
+// That last case used to fall back to targetRef.SameCluster(source), a
+// comparison of the two normalised endpoint spellings — which answers
+// "different" for one cluster reached over two transports (a published TCP
+// port and the unix socket, a pooler, an SSH tunnel), because that is
+// precisely what an endpoint spelling cannot see through. Alias-defeating is
+// what rule 1's identity check exists for in the first place, so falling
+// back to the thing it was built to defeat, exactly when the identity check
+// has nothing to go on, answered the R3 replay of R2-06 with a clean "not the
+// same cluster" and a production write (T-0222, 2026-09-16:
+// docs/reviews/2026-09-15-redteam/round3-still-leaking.json — a target
+// database named differently from the source's, so rule 1's sameCatalog arm
+// below does not fire either, reached over a transport the endpoint
+// comparison reads as a different server).
+//
+// A false "possibly same cluster" costs one extra warning line, or — for a
+// headless run whose target the ladder chose rather than the operator named —
+// ADR-013's refusal naming --target. A false "different cluster" is a
+// production write. When nothing can be compared, the answer is true.
+func sameClusterVerdict(sourceSystemID, systemID string, clusterSame, clusterKnown bool) bool {
+	switch {
+	case sourceSystemID != "" && systemID != "":
+		return sourceSystemID == systemID
+	case clusterKnown:
+		return clusterSame
+	default:
+		return true
+	}
 }
 
 // clusterUnknown reports that neither identity could be compared: not the
@@ -404,22 +431,21 @@ func clusterUnknown(sourceSystemID, systemID string, clusterKnown bool) bool {
 	return !clusterKnown
 }
 
-// clusterIdentity is sqlClusterID against the target, with the target's system
-// identifier as its last field (source.go's withSystemID, which is what the
-// source side composes too). Like systemIdentifier it answers "" for a read
-// that failed for any reason other than the context ending: the gate's own rule
-// above decides what an unknown identity means, and it means "refuse a target
-// with the source's database name".
+// clusterIdentity is source.go's readClusterID against the target, with the
+// target's system identifier appended as its last field (withSystemID, which
+// is what the source side composes too). Like systemIdentifier it answers ""
+// for a read that failed for any reason other than the context ending: the
+// gate's own rule above decides what an unknown identity means, and it means
+// "refuse a target with the source's database name".
 func clusterIdentity(ctx context.Context, conn *pgxpool.Conn, systemID string) (string, error) {
-	var id string
-	err := conn.QueryRow(ctx, sqlClusterID).Scan(&id)
-	if err == nil {
-		return withSystemID(id, systemID), nil
-	}
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	// false: this connection is the gate's autocommit connection, never inside
+	// an open transaction, so a failed sqlClusterIDStartTime never aborts a
+	// transaction sqlClusterIDRest depends on — no SAVEPOINT is needed here.
+	id, err := readClusterID(ctx, conn, false)
+	if err != nil {
 		return "", fmt.Errorf("pg: gate: reading the target cluster identity: %w", err)
 	}
-	return "", nil
+	return withSystemID(id, systemID), nil
 }
 
 func (t *Target) markerBound(ctx context.Context, conn *pgxpool.Conn, m MarkerRow, source dsn.Ref, sourceSystemID string) (bool, error) {
