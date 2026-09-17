@@ -103,6 +103,21 @@ type Options struct {
 	// /dev/tty and blocked in Confirm with no timeout — a hang under any
 	// automation with an allocated TTY (docker run -t, script(1), tmux).
 	Yes bool
+	// NoControllingTerminal, when true, makes prompterFor — and so isHeadless,
+	// Headless and OpenPrompter — answer exactly as they do when
+	// openPrompter's own controlling-terminal probe fails: nobody is here to
+	// ask, without ever touching the real terminal. It is a test seam, not a
+	// flag: no production caller sets it, because Yes and the real
+	// /dev/tty (or console) probe are ADR-008 §7's whole answer to "is
+	// anybody here". What it exists for is a test outside this package that
+	// needs "no controlling terminal" to be true on demand: go test itself
+	// has a controlling terminal when it is run from an interactive shell and
+	// does not under CI or a build agent, and a caller that relied on that
+	// ambient fact to exercise this path either hung an interactive
+	// developer's run at the real prompt or silently tested nothing, in CI,
+	// depending on which environment it happened to run in
+	// (internal/core's Q2 test, T-0271 review).
+	NoControllingTerminal bool
 	// PasswordCommand is --password-command. rung0's own doc comment (below)
 	// and rung0Target's (ARCHITECTURE.md §9 Q4) both promise it supplies a
 	// password for a candidate that has none from anywhere else — the source
@@ -191,6 +206,17 @@ type Result struct {
 	// FromContainer, FromCompose — and TargetProvenance alone cannot tell
 	// those two cases apart. TargetNamed can.
 	TargetNamed bool
+
+	// Asked is true when this call put Q1 or Q1' to the controlling terminal —
+	// whatever the answer, and regardless of whether the run went on to
+	// provision or start anything. It carries no identifier, on purpose:
+	// ADR-008's one-question rule only needs a caller with a question of its
+	// own (internal/core's Q2, ADR-008 §6) to know that this run's one
+	// question has already been spent, not which one it was. It is false for
+	// --create-target (a flag is an answer, never a question) and for every
+	// path that never reaches a terminal at all: headless, no usable Docker
+	// endpoint, both endpoints named outright.
+	Asked bool
 }
 
 // Refusal is a stop with the event code and the ADR-005 exit it carries.
@@ -358,11 +384,12 @@ func Resolve(ctx context.Context, o Options, sink event.Sink) (Result, error) {
 		if !o.CreateTarget || !dock.usable() {
 			return res, refuseHeadlessSameCluster(sink, source)
 		}
-		t, err := noTarget(ctx, o, cands, source, dock, sink)
+		t, asked, err := noTarget(ctx, o, cands, source, dock, sink)
 		if err != nil {
 			return res, err
 		}
 		target = t
+		res.Asked = asked
 	} else {
 		target, runnerUp = chooseTarget(cands, source)
 	}
@@ -372,11 +399,12 @@ func Resolve(ctx context.Context, o Options, sink event.Sink) (Result, error) {
 	// that also discarded an otherwise-eligible target would be widening a
 	// frozen ADR (docs/adr/008-first-run.md, root CLAUDE.md).
 	if target == nil {
-		t, err := noTarget(ctx, o, cands, source, dock, sink)
+		t, asked, err := noTarget(ctx, o, cands, source, dock, sink)
 		if err != nil {
 			return res, err
 		}
 		target, runnerUp = t, nil
+		res.Asked = asked
 	}
 	res.Target = string(target.dsn)
 	res.TargetProvenance, res.TargetLabel = target.cand.Provenance, target.cand.Label

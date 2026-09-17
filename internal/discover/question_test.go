@@ -663,6 +663,14 @@ func (f *fakePrompter) Confirm(question string, _ bool) (bool, error) {
 	return f.answer, nil
 }
 
+// Ask is unused by this package's own tests — Q1 and Q1' are Confirm's only —
+// and exists so fakePrompter still satisfies Prompter now that it carries Q2's
+// method too (internal/core's own Q2 tests have their own fake).
+func (f *fakePrompter) Ask(question string, def string) (string, error) {
+	f.questions = append(f.questions, question)
+	return def, nil
+}
+
 func (f *fakePrompter) Close() error { return nil }
 
 // fakeProvisioner records what it was asked to create or start.

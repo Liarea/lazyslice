@@ -174,6 +174,17 @@ type Request struct {
 	// controlling terminal; there is no flag for it, and today only a test
 	// sets it (T-0184, ADR-013 review, the 2026-09-16 reverify).
 	prompter discover.Prompter
+	// noTerminal, when true, is copied onto discover.Options.NoControllingTerminal
+	// by rootQuestion and askRoot (root.go) instead of letting the ladder probe
+	// the real controlling terminal. Like prompter above, there is no flag for
+	// it and today only a test sets it: unlike prompter, whose presence always
+	// means "somebody answers", this is the one way to make "there is nobody
+	// to ask" true on demand rather than depend on whether the process
+	// running the test happens to have a controlling terminal of its own — a
+	// fact that differs between an interactive shell and CI, and a test built
+	// on it either hung a developer's terminal or never ran the branch it
+	// claimed to (T-0271 review).
+	noTerminal bool
 }
 
 // Reviewed is the snapshot an operator approved, carried into the run that
@@ -213,6 +224,26 @@ type Reviewed struct {
 	// four modes that open none (Mode.needsTarget).
 	Source string
 	Target string
+	// Root is the table the preview pass actually planned from
+	// (pipeline.Plan.Root), whichever of --root, the committed yml or ADR-008
+	// §6's Q2 decided it. rootQuestion and planRequest (run.go) prefer this
+	// field over Request.Root when the screens left that field empty, which is
+	// what keeps a --tui run with no --root to ADR-008's one-blocking-question
+	// total: without it, core.Run's own Q2 asked the operator the same
+	// question a second time, and — since two passes are two schema reads —
+	// could in principle answer it differently from the plan just reviewed on
+	// the screens (T-0271 review, finding 5).
+	//
+	// It is a resolved ref.TableRef, not a re-rendered "schema.name" string,
+	// for the same reason r.qRoot is (root.go): TableRef.String() is unquoted,
+	// and a schema or table name containing a dot round-tripped through
+	// Request.Root — the one text field the operator's own --root shares —
+	// came back split on the wrong dot by planRequest's resolveTable, one
+	// process boundary later than the finding-4 fix that first caught this for
+	// Q2's own answer within a single pass (T-0271 review, finding 5's own
+	// fix). Empty for a mode that never reaches the plan (ModeIntrospect,
+	// ModeDoctor, ModeClassify), the same as ClassFingerprint above.
+	Root ref.TableRef
 }
 
 // NewRequest returns a Request carrying the v1 defaults. Flags overwrite fields

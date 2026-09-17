@@ -27,10 +27,14 @@ to treat as a promise.
   marks the bindings that change no request field, and
   `TestEveryTUIActionHasFlag` in `cmd/lazyslice` fails on any action whose
   flag the real command tree does not register.
-- A `?` at a prompt still prints through the line printer and `$PAGER`: the
-  question ladder has no prompt implementation in the tree yet, so `--tui` is
-  the only way in today, and the non-TTY and `--json` fallbacks must keep
-  working whatever else lands.
+- A `?` at Q2 (ADR-008 §6, `internal/core`'s `rootQuestion`) prints the ranked
+  top five root candidates with their score components through the line
+  printer and `$PAGER`, exactly as ADR-008 §7 states, and re-asks — it does
+  not open either Bubble Tea screen. `--tui` is still the only way into the
+  two screens this package owns, because both need a plan (the reasons screen
+  needs a classification, the plan table needs a plan) and Q2 is asked before
+  either exists: there is nothing yet for `?` at that prompt to page into.
+  The non-TTY and `--json` fallbacks must keep working whatever else lands.
 - Never reach a `pipeline` stage interface directly; only ever construct a
   `core.Request` and hand it to `core.Run`. The two classify event codes are
   spelled out in `collect.go` rather than imported from `internal/classify`

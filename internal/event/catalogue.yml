@@ -910,6 +910,33 @@
   message: "this run is not the one that was reviewed: {reason}"
   args: [reason]
 
+# ADR-008 §6's Q2, the root table question. plan.root.decided is the decision
+# line: printed once, whatever decided it -- --root, a committed
+# lazyslice.yml, an answer at the prompt, or the computed default taken
+# silently -- exactly as source.decided and target.decided always print
+# regardless of how their own endpoint was decided. plan.root.candidate is one
+# line of "?"'s ranked top five (§3.1), through the line printer rather than
+# written to stderr directly. plan.root.unknown is the re-ask: the typed
+# answer names no table, or names more than one, and {reason} is the same
+# sentence --root would be refused with.
+- code: plan.root.decided
+  kind: decision
+  stage: plan
+  message: "root {table} — {reason} — {flag}"
+  args: [table, reason, flag]
+
+- code: plan.root.candidate
+  kind: info
+  stage: plan
+  message: "{count}. {table} — {reason}"
+  args: [count, table, reason]
+
+- code: plan.root.unknown
+  kind: warn
+  stage: plan
+  message: "{reason}"
+  args: [reason]
+
 # One line per step of the plan (§3.5). {reason} carries the step's mode and
 # its Why, both rendered from a fixed template set in internal/plan.
 - code: plan.step

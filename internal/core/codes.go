@@ -103,6 +103,25 @@ const (
 	// can check against their own database.
 	CodeSchemaRead event.Code = "introspect.schema.read"
 
+	// CodeRootChosen is ADR-008 §6's Q2 decision line: the root table this run
+	// slices from, printed whatever decided it — --root, a committed
+	// lazyslice.yml, an answer at the prompt, or the computed default taken
+	// silently — exactly as CodeSourceChosen and CodeTargetChosen always print
+	// regardless of how their own endpoint was decided.
+	CodeRootChosen event.Code = "plan.root.decided"
+
+	// CodeRootCandidate is one line of Q2's "?" listing: the ranked top five
+	// with their score components (ARCHITECTURE.md §3.1), sent through the
+	// line printer rather than written to stderr directly (ADR-008 §7), so it
+	// reaches every sink CodePlanStep's lines do.
+	CodeRootCandidate event.Code = "plan.root.candidate"
+
+	// CodeRootUnknown is Q2's re-ask: the typed answer names no table (or
+	// names more than one), and the reason — resolveTable's own error, the
+	// same one --root would be refused with — is what is printed before
+	// asking again.
+	CodeRootUnknown event.Code = "plan.root.unknown"
+
 	// CodePlanStep is one line of the plan (ARCHITECTURE.md section 3.5): the
 	// table, how it was reached and why.
 	CodePlanStep event.Code = "plan.step"
