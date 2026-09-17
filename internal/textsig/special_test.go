@@ -21,6 +21,33 @@ func TestSpecialCategoryVocabularyCatchesTheRedTeamCanaries(t *testing.T) {
 		"identifies as bisexual",
 		"a member of the trade union",
 		"registered Republican",
+		// Round-5 red team canaries
+		// (docs/reviews/2026-09-15-redteam/round5-still-leaking.json): the
+		// spelling a status code or enum label actually takes, glued by
+		// underscores rather than spaced out as prose -- \b treats `_` as a
+		// word character, so these never matched before normalisation.
+		"HIV_POSITIVE",
+		"HIV_STATUS",
+		"TRADE_UNION_MEMBER",
+		// T-0254 review, high finding 2: camel-case space insertion narrowed
+		// SpecialCategoryVocabulary for these -- each already matched as raw,
+		// unreduced text (no separator, only a case difference) before the
+		// normalisation added a lower-to-Upper boundary that split it apart.
+		"TransGender",
+		"BiSexual",
+		"HomoSexual",
+		"HeteroSexual",
+		"UnionIzed",
+		"unionIzed",
+		"aIDS",
+		// T-0254 review, medium finding 3: the acronym camel-case boundary
+		// (an uppercase run followed by Upper+lower), the immediate next
+		// spelling of the round-5 canary the first landing missed half of.
+		"HIVPositive",
+		"HIVStatus",
+		"AIDSDiagnosis",
+		"LGBTQMember",
+		"isHIVPositive",
 	}
 	for _, s := range cases {
 		if !SpecialCategoryVocabulary(s) {

@@ -533,11 +533,76 @@ func TestPatternMetaStripping(t *testing.T) {
 	}{
 		{`%@%.%`, `@`},
 		{`^ceo@bigcorp\.example$`, `ceo@bigcorp.example`},
-		{`%foo_bar%`, `foobar`},
+		// A removed _ leaves a separator instead of gluing the tokens on
+		// either side of it (round-5 red team,
+		// docs/reviews/2026-09-15-redteam/round5-still-leaking.json): the
+		// LIKE spelling of 'HIV_POSITIVE' must not reduce to one
+		// vocabulary-defeating word.
+		{`%foo_bar%`, `foo bar`},
+		{`%HIV_POSITIVE%`, `HIV POSITIVE`},
 	} {
 		if got := pipeline.StripPatternMeta(tc.in); got != tc.want {
 			t.Errorf("StripPatternMeta(%q) = %q, want %q", tc.in, got, tc.want)
 		}
+	}
+}
+
+// StripPatternMetaGlued: the other reduction (T-0254 review, high finding 1).
+// It closes the gap `_` sat in instead of leaving a space, which is what lets
+// a validator read the value that spacing would have cut in two -- an email
+// local part chief among them, since `_` is not a metacharacter at all for
+// the tilde operators.
+func TestPatternMetaGluedStripping(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		in, want string
+	}{
+		{`%@%.%`, `@`},
+		{`^ceo@bigcorp\.example$`, `ceo@bigcorp.example`},
+		{`%foo_bar%`, `foobar`},
+		// The gap is closed, not the address kept letter for letter: an
+		// underscore is still LIKE's own metacharacter and is dropped like
+		// any other, so this reduction is not the literal address -- it is
+		// johndoe@bigcorp.example, still an email, still enough to trigger a
+		// strongHit and refuse the run over the real one.
+		{`^john_doe@bigcorp\.example$`, `johndoe@bigcorp.example`},
+	} {
+		if got := pipeline.StripPatternMetaGlued(tc.in); got != tc.want {
+			t.Errorf("StripPatternMetaGlued(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// TestT0254HighFinding1UnderscoredEmailInARegexOperandIsStillDetected is the
+// reviewer's own reduction for the T-0254 review's high finding 1:
+// CHECK ("email" !~ '^john_doe@bigcorp\.example$') on a masked email column
+// used to cross at exit 0, because StripPatternMeta's spacing of `_` (added
+// for the special-category vocabulary's sake) cut the local part in two
+// before ValidEmail ever saw it, where `_` is not syntax for the tilde
+// operators at all and the address is exactly what the literal carries.
+// strongHit now also tries StripPatternMetaGlued's reduction, which keeps the
+// address intact.
+func TestT0254HighFinding1UnderscoredEmailInARegexOperandIsStillDetected(t *testing.T) {
+	t.Parallel()
+	tbl, schema := literalTable()
+	schema.Tables[0].Columns[1].Default = ""
+	schema.Tables[0].Constraints = []pipeline.Constraint{
+		{Name: "items_email_regex_check", Kind: 'c',
+			Def: `CHECK (("email" !~ '^john_doe@bigcorp\.example$'::text))`},
+	}
+	cls := masking(tbl, "email", pipeline.CatEmail, mask.MaskerEmail)
+
+	err := planLiterals(t, schema, cls, literalKey(0x44))
+	var refusal *Refusal
+	if !errors.As(err, &refusal) {
+		t.Fatalf("Plan returned %v, want a *plan.Refusal: the underscored address crossed unexamined", err)
+	}
+	if refusal.Code != CodeLiteralNotRewritable || refusal.Exit != exitSchema {
+		t.Fatalf("Plan refused with %s exit %d, want %s exit %d",
+			refusal.Code, refusal.Exit, CodeLiteralNotRewritable, exitSchema)
+	}
+	if refusal.Column != "items_email_regex_check" {
+		t.Fatalf("the refusal names %q, want the constraint it is about", refusal.Column)
 	}
 }
 
@@ -960,5 +1025,41 @@ func TestAddressStrongHitNeedsAStreetSuffixWord(t *testing.T) {
 				t.Fatalf("Plan refused with %q, want it to carry %q", refusal.Message, tc.wantReason)
 			}
 		})
+	}
+}
+
+// TestRedTeamR5SpecialCategoryUnderscoreGluingIsRefused is the round-5 red
+// team's still-leaking special-category entry
+// (docs/reviews/2026-09-15-redteam/round5-still-leaking.json, T-0254):
+// CHECK (note <> 'HIV_POSITIVE') on a masked special-category column used to
+// cross at exit 0, because reSpecialCategoryTerm's \b treats `_` as a word
+// character and never split "HIV" from "_POSITIVE". Both fixes have to hold
+// together for this literal specifically: textsig.SpecialCategoryVocabulary's
+// own normalisation reduces the equality operand directly, and this is the
+// end-to-end guard that the plan's strongHit path actually reaches it.
+func TestRedTeamR5SpecialCategoryUnderscoreGluingIsRefused(t *testing.T) {
+	t.Parallel()
+	tbl, schema := literalTable()
+	schema.Tables[0].Columns[1].Default = "" // the email column's own default is not this test's subject
+	schema.Tables[0].Constraints = []pipeline.Constraint{
+		{Name: "ck_note", Kind: 'c', Def: `CHECK (("note" <> 'HIV_POSITIVE'::text))`},
+	}
+	cls := masking(tbl, "email", pipeline.CatEmail, mask.MaskerEmail)
+	noteCol := ref.ColumnRef{Table: tbl, Column: "note"}
+	cls.Decisions[noteCol] = pipeline.Decision{
+		Col: noteCol, Category: pipeline.CatSpecial, Masker: mask.MaskerSpecial, Masked: true,
+	}
+
+	err := planLiterals(t, schema, cls, literalKey(0x44))
+	var refusal *Refusal
+	if !errors.As(err, &refusal) {
+		t.Fatalf("Plan returned %v, want a *plan.Refusal", err)
+	}
+	if refusal.Code != CodeLiteralNotRewritable || refusal.Exit != exitSchema {
+		t.Fatalf("Plan refused with %s exit %d, want %s exit %d",
+			refusal.Code, refusal.Exit, CodeLiteralNotRewritable, exitSchema)
+	}
+	if refusal.Column != "ck_note" {
+		t.Fatalf("the refusal names %q, want the constraint it is about", refusal.Column)
 	}
 }

@@ -5,6 +5,7 @@ package textsig
 import (
 	"regexp"
 	"strings"
+	"unicode"
 )
 
 // SpecialCategoryVocabulary is the value half of pipeline.CatSpecial (tracker
@@ -89,11 +90,76 @@ func quoteTerms(terms []string) []string {
 	return out
 }
 
+// normalizeSpecialCategoryCandidate reduces s to a lowercase, space-separated
+// run of its alphanumeric content before reSpecialCategoryTerm ever sees it
+// (round-5 red team, docs/reviews/2026-09-15-redteam/round5-still-leaking.json:
+// the secrets attacker's catalog variant): \b on both sides of the
+// alternation is a *word*-boundary in Go's regexp, as in PCRE, and `_` is a
+// word character there, so `HIV_POSITIVE` -- the spelling an application
+// status code or enum label actually takes, not prose -- has no boundary
+// between "HIV" and "_POSITIVE" and never matched, alongside HIV_STATUS and
+// TRADE_UNION_MEMBER. Every run of a non-alphanumeric character (underscore,
+// hyphen, dot, ...) collapses to one space, and a camel-case boundary opens
+// one too -- both the ordinary lower-to-Upper one ("hivPositive") and the
+// acronym one, an upper rune immediately followed by an upper-then-lower run
+// ("HIVPositive", "AIDSDiagnosis", "LGBTQMember": T-0254 review, medium
+// finding 3, the immediate next spelling the round-5 canary's own reasoning
+// covers but its first landing did not implement) -- so "HIV_POSITIVE"
+// reduces to "hiv positive" (matches "hiv") and "TRADE_UNION_MEMBER" reduces
+// to "trade union member" (matches "trade union" and "union member"). An
+// all-caps glued spelling such as HIVSTATUS opens no boundary at all and
+// stays unsplittable; that is a residual, not a claim this function makes.
+//
+// This reduction is NOT a strict widening of what s itself exposes, and
+// SpecialCategoryVocabulary below does not treat it as one (T-0254 review,
+// high finding 2): a case difference turning into lowercase is a widening,
+// but a camel-case boundary opening a space is not -- it can turn a
+// previously-matching glued spelling into two words neither of which
+// matches, which is exactly what happened to "TransGender", "BiSexual",
+// "HomoSexual", "HeteroSexual" and "UnionIzed" once this function started
+// inserting the ordinary lower-to-Upper boundary: each of those already
+// matched reSpecialCategoryTerm as raw, unreduced text (no separator, no
+// case difference reSpecialCategoryTerm's own \b does not already tolerate),
+// and reducing them split "trans" from "gender" and so on. The two
+// boundary rules stay, because HIV_POSITIVE's family needs them; the
+// narrowing they can cause is corrected by testing the raw string as well,
+// below.
+func normalizeSpecialCategoryCandidate(s string) string {
+	var b strings.Builder
+	runes := []rune(s)
+	for i, r := range runes {
+		switch {
+		case unicode.IsLetter(r) || unicode.IsDigit(r):
+			if i > 0 {
+				prev := runes[i-1]
+				switch {
+				case unicode.IsLower(prev) && unicode.IsUpper(r):
+					b.WriteByte(' ')
+				case unicode.IsUpper(prev) && unicode.IsUpper(r) &&
+					i+1 < len(runes) && unicode.IsLower(runes[i+1]):
+					b.WriteByte(' ')
+				}
+			}
+			b.WriteRune(unicode.ToLower(r))
+		default:
+			b.WriteByte(' ')
+		}
+	}
+	return b.String()
+}
+
 // SpecialCategoryVocabulary reports whether s carries one of the terms above.
 // It is a value shape in the sense the rest of this package uses the word —
 // func(string) bool, no column, no category, no threshold — and a caller
 // attaches pipeline.CatSpecial to a hit the way every other validator's
 // caller attaches its own category.
+//
+// The vocabulary is matched over s directly as well as over its reduction
+// (T-0254 review, high finding 2): normalizeSpecialCategoryCandidate's own
+// comment explains why the reduction is not a strict widening of s, and
+// testing both is what keeps a term the raw text already carried un-narrowed
+// by a camel-case split the reduction introduces for an entirely different
+// spelling's sake.
 func SpecialCategoryVocabulary(s string) bool {
-	return reSpecialCategoryTerm.MatchString(s)
+	return reSpecialCategoryTerm.MatchString(s) || reSpecialCategoryTerm.MatchString(normalizeSpecialCategoryCandidate(s))
 }

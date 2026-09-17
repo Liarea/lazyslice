@@ -755,10 +755,23 @@ func addressLiteralShape(s string) bool {
 // in the first place — this pass only reads the target's catalog back — so
 // Pattern's rewrite exemption was never this function's to grant or withhold.
 func strongCatalogHit(lit pipeline.Literal) string {
-	s := strings.TrimSpace(lit.Text)
-	if lit.Pattern {
-		s = strings.TrimSpace(pipeline.StripPatternMeta(s))
+	if !lit.Pattern {
+		return strongCatalogHitOverText(strings.TrimSpace(lit.Text))
 	}
+	// Both of StripPatternMeta's reductions are tried, for the identical
+	// reason internal/plan/ddlliteral.go's strongHit does (T-0254 review,
+	// high finding 1): the spaced reduction is what lets a vocabulary
+	// validator split a glued spelling like `HIV_POSITIVE`, and the glued
+	// reduction is what keeps an underscore that is really part of a value
+	// -- an email local part chief among them -- from being cut in two.
+	s := strings.TrimSpace(lit.Text)
+	if hit := strongCatalogHitOverText(strings.TrimSpace(pipeline.StripPatternMeta(s))); hit != "" {
+		return hit
+	}
+	return strongCatalogHitOverText(strings.TrimSpace(pipeline.StripPatternMetaGlued(s)))
+}
+
+func strongCatalogHitOverText(s string) string {
 	if s == "" {
 		return ""
 	}

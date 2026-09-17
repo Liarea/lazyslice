@@ -428,10 +428,25 @@ func enumLabelLiteral(labels []string, lit pipeline.Literal) bool {
 // the reason its own comment gives — rewriting one changes what the database
 // accepts, where detecting one only decides whether to refuse.
 func strongHit(lit pipeline.Literal) string {
-	s := strings.TrimSpace(lit.Text)
-	if lit.Pattern {
-		s = strings.TrimSpace(pipeline.StripPatternMeta(s))
+	if !lit.Pattern {
+		return strongHitOverText(strings.TrimSpace(lit.Text))
 	}
+	// A pattern operand is run over both of StripPatternMeta's reductions
+	// (T-0254 review, high finding 1): the spaced one, which is what lets a
+	// vocabulary validator's word boundary split a glued spelling like
+	// `HIV_POSITIVE`, and the glued one, which is what keeps an underscore
+	// that is really part of a value -- an email local part, a URL, a
+	// national id with separators -- from being cut in two before a parser
+	// ever sees it. Either reduction hitting is a hit; the literal that
+	// crosses is the pattern's own unrewritten text, not the reduction.
+	s := strings.TrimSpace(lit.Text)
+	if hit := strongHitOverText(strings.TrimSpace(pipeline.StripPatternMeta(s))); hit != "" {
+		return hit
+	}
+	return strongHitOverText(strings.TrimSpace(pipeline.StripPatternMetaGlued(s)))
+}
+
+func strongHitOverText(s string) string {
 	if s == "" {
 		return ""
 	}
