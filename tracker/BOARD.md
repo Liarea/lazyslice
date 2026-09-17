@@ -7,7 +7,7 @@
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
-| E5 Hardening | 5 | 4 | 1 | 91 | 0 | 0 |
+| E5 Hardening | 5 | 3 | 1 | 92 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
 | E9 Later | later | 70 | 0 | 29 | 5 | 0 |
 
@@ -81,7 +81,6 @@
 - T-0235 [open] E9 · mask: the masker-error wrap test asserts the original error is dropped, not only that the canary is absent (sonnet)
 - T-0236 [open] E9 · internal/plan: the special-category rule's loose ends: similar_escape's second argument, the bare 'aids' term, enum default lookup by bare name, and the address false-positive controls (sonnet)
 - T-0237 [open] E9 · cmd/lazyslice: renderSafe prints a sentinel's own text rather than its wrapping chain, and internal/load's refusal is value-free without a SQLSTATE (sonnet)
-- T-0242 [open] E5 · Before the first drop, the whole target is re-checked for emptiness under the run lease, and a table that appeared since the gate refuses the load (sonnet)
 - T-0243 [open] E9 · internal/classify/CLAUDE.md's A2b account is stale after T-0239 ()
 - T-0244 [open] E9 · mask: rename the test that says a sentinel passes through unwrapped, since it no longer does (sonnet)
 - T-0245 [open] E9 · docs/TORTURE.md and internal/classify comments: the lowered floor can still force a refusal through an equality group's masker (sonnet)
@@ -103,6 +102,7 @@
 - T-0239 [done] E5 · The certain-neighbour rail no longer skips a column declared shorter than sixteen characters: it masks under a generator that fits or refuses → done
 - T-0240 [done] E5 · National-identifier corroboration counts a masked personal neighbour at any confidence and outranks the dense-sequence exemption; character-family identifiers get the same path → done
 - T-0241 [done] E5 · A streaming standby as source, with the target on its own primary, is refused: a start-time disagreement without the system identifier is unknown, a standby source is announced, and a headless run with no --target refuses on a standby → done
+- T-0242 [done] E5 · Before the first drop, the whole target is re-checked for emptiness under the run lease, and a table that appeared since the gate refuses the load → done
 - T-0178 [done] E9 · TestAStoppedContainerIsOfferedAndStarted binds a fixed host port (127.0.0.1:5433) and collides under parallel container runs → done
 - T-0184 [done] E5 · Should a headless run auto-select a target on the source's own cluster? → done
 - T-0186 [done] E5 · --allow-type-literal is not recorded in lazyslice.yml → done
@@ -116,4 +116,3 @@
 - T-0179 [done] E5 · Bench CI gate compares head against its parent on the same runner; absolute baseline becomes a catastrophic floor → done
 - T-0180 [done] E5 · mask.Apply has no post-condition: a masker that returns its input is accepted → done
 - T-0181 [done] E5 · mask.Apply does not recover: a panicking masker escapes the module → done
-- T-0187 [done] E5 · National-identifier validators with checksums in textsig; classify and the second net treat them as strong; a digits-family SSN shape under the ratio rule → done
