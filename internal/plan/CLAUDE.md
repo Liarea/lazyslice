@@ -1214,3 +1214,44 @@ case it was built for can no longer reach this function at all, now that a
 anyway: correct and harmless for the paths that do reach it, and it closes
 off the wrong message from ever being possible again if a future caller
 passes `broadNet` true for an object that can name more than one column.
+
+## The root's own row count can exceed `--take` (T-0288, ARCHITECTURE.md §3.7)
+
+The root table is not exempt from the parent rule: any selected row, reached
+by any edge, pushes its parent onto the queue as `PARENT_ONLY`, uncapped —
+and that parent can be the root table itself, through an edge other than the
+one that reached the root's own seeded rows. Pagila proved this is not a
+corner case: `payment` is a child of both `rental` and `customer`, a
+payment's own `customer_id` occasionally differs from its rental's, and
+`--root public.customer -n 200` against the real fixture plans 204
+customers, not 200 — verified with `SELECT count(*) FROM payment p JOIN
+rental r ON p.rental_id = r.rental_id WHERE p.customer_id <> r.customer_id`
+restricted to the 200 lowest-id customers' rentals, which returns the same
+four extra customer ids the plan pulls in. This is referential completeness,
+not a defect (root CLAUDE.md, THREAT_MODEL.md): the alternative is a
+`payment` row in the target whose own foreign key cannot validate.
+
+- **`run.rootSeedCount`** (`plan.go`, set in `walk` right after `seedKeys`)
+  is what `--take`/`--where` actually chose, before the closure adds
+  anything. `rootWhy` (`plan.go`, called from `assemble`) compares it against
+  the root step's final `ks.Len()` and, only when the closure grew the table
+  (`M > 0`), replaces the walk's plain `"root"` `Why` with `"root: N chosen,
+  M pulled in by references"`. `M == 0` — every fixture in this package except
+  the one built to prove this — leaves `Why` exactly `"root"`, unchanged.
+- **The root keeps its name on that line.** `rootWhy` writes `"root: N
+  chosen, M pulled in by references"`, not the bare count, because
+  `internal/tui/collect.go`'s `planRow.root()` finds the plan screen's root
+  row by its `Why` (exactly `"root"`, or the `"root: "` prefix) to strike
+  `--root` and `--skip-table` through on it; Pagila's own `--root
+  public.customer` grows the root every time (204 = 200 + 4).
+  `internal/tui/collect_test.go`'s drift guard pins both strings in this
+  file.
+- **Two integration tests, not a `testdata/` fixture.** §3.7's shape needs
+  two tables and one extra foreign key column
+  (`TestPlanRootLineNamesRowsPulledInByReferences`,
+  `TestPlanRootLineIsUnchangedWhenNothingIsPulledIn`,
+  `plan_integration_test.go`'s own `rootClosureSchema`), the same reduction
+  the diagnosis above used, rather than a third shared fixture: `nasty.sql`
+  and pagila are both read by suites outside this task's paths that count
+  their tables, exactly the reason `extraSchema` above lives in this file
+  and not in `testdata/`.

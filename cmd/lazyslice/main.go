@@ -970,7 +970,7 @@ func bindFlags(groups []flagGroup, req *core.Request, raw *rawFlags) {
 	plan.StringVar(&req.Root, "root", "",
 		"Root table (default: computed from the foreign-key graph)")
 	plan.IntVarP(&req.Take, "take", "n", core.DefaultTake,
-		"Root rows, ORDER BY identity LIMIT N")
+		"Root rows, ORDER BY identity LIMIT N; the root holds at least N rows, plus any the closure requires")
 	plan.StringVar(&req.Where, "where", "",
 		"Root predicate instead of LIMIT ordering; a literal is withheld from the yml")
 	plan.StringArrayVar(&raw.caps, "cap", nil,

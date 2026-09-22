@@ -168,6 +168,9 @@ type run struct {
 	skipped     []ref.TableRef
 	unreadable  []ref.TableRef
 	selectedRow int64
+	// rootSeedCount is the root's own seed size (walk, seedKeys): what --take
+	// or --where actually chose, before the closure adds anything more.
+	rootSeedCount int
 
 	// §3.2's inference, decided before the walk and reported by assemble.
 	// inferred holds the pairs the walk follows, by the table they are on;
@@ -600,6 +603,14 @@ func (p *run) walk(ctx context.Context, root ref.TableRef) error {
 		return err
 	}
 	p.why[root] = "root"
+	// rootSeedCount is what --take (or --where) actually chose, before the
+	// closure adds anything: a child reached in CHILD_OK mode can still name
+	// the root as a parent (payment -> customer, beside payment -> rental ->
+	// customer), and referential completeness pulls that customer in as a
+	// PARENT_ONLY addition to the same table (T-0288). assemble reads this to
+	// print "root: N chosen, M pulled in by references" on the root's own line
+	// instead of leaving the extra rows unexplained.
+	p.rootSeedCount = seed.Len()
 	queue := []item{{table: root, keys: seed, mode: pipeline.ChildOK, depth: 0}}
 
 	for len(queue) > 0 {
@@ -872,6 +883,28 @@ func (p *run) filterMemory() int64 {
 	return cells * residualBitsPerCell / 8
 }
 
+// rootWhy is the root table's own Why (T-0288, ARCHITECTURE.md §3.7): when
+// the closure has pulled extra rows into the root table itself — a child
+// reached in CHILD_OK mode naming the root as a parent through an edge other
+// than the one that reached it, such as a payment whose own customer_id
+// differs from its rental's — the plain "root" the walk recorded no longer
+// says what a reader of the plan needs: that the table holds more rows than
+// --take named and why. total is the table's final selected row count
+// (ks.Len()); every other table keeps its ordinary Why unchanged.
+func (p *run) rootWhy(t, root ref.TableRef, total int) string {
+	why := p.why[t]
+	if t != root {
+		return why
+	}
+	pulledIn := total - p.rootSeedCount
+	if pulledIn <= 0 {
+		return why
+	}
+	// It keeps the "root: " prefix: internal/tui finds the root row by it
+	// (planRow.root), and a reader of the plan line still sees which table it is.
+	return fmt.Sprintf("root: %d chosen, %d pulled in by references", p.rootSeedCount, pulledIn)
+}
+
 // assemble builds the Plan: one step per table, in load order, with the
 // estimate §3.5 prints.
 func (p *run) assemble(root ref.TableRef, rootReason string) *pipeline.Plan {
@@ -892,7 +925,7 @@ func (p *run) assemble(root ref.TableRef, rootReason string) *pipeline.Plan {
 				Keys:     ks.set,
 				Cap:      p.capOf[t.Ref],
 				Depth:    p.depth[t.Ref],
-				Why:      p.why[t.Ref],
+				Why:      p.rootWhy(t.Ref, root, ks.Len()),
 			}
 			rows += int64(ks.Len())
 			estBytes += int64(ks.Len()) * rowWidth(t)

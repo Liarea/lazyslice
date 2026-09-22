@@ -1271,3 +1271,113 @@ func TestPlanUncomparableColumnStillRefusesWithNoIdentity(t *testing.T) {
 		t.Errorf("refusal message = %q, want both remedies §3.4 names", refusal.Message)
 	}
 }
+
+// ---------- the root can hold more rows than --take named (T-0288) ----------
+
+// rootClosureSchema is a two-table reduction of the shape the Pagila diagnosis
+// for T-0288 found: `orders` is a child of `customers` via `customer_id` — the
+// edge that reaches it in CHILD_OK mode — and carries a second foreign key,
+// `referred_by`, back to the same table. A selected order can name, through
+// that second edge, a customer the root's own `--take` seed never chose;
+// referential completeness still pulls that customer in, as a PARENT_ONLY
+// addition to the table the walk already labelled CHILD_OK for its seeded row.
+// This is the two-table fixture ARCHITECTURE.md §3.7 describes: a child
+// pointing back at an unchosen root.
+const rootClosureSchema = `
+CREATE TABLE public.customers (
+    id   bigint PRIMARY KEY,
+    name text NOT NULL
+);
+
+CREATE TABLE public.orders (
+    id          bigint PRIMARY KEY,
+    customer_id bigint NOT NULL REFERENCES public.customers (id),
+    referred_by bigint REFERENCES public.customers (id)
+);
+
+INSERT INTO public.customers (id, name) VALUES (1, 'Ada'), (2, 'Grace');
+
+INSERT INTO public.orders (id, customer_id, referred_by) VALUES (10, 1, 2);
+`
+
+func loadRootClosure(ctx context.Context, url string) error {
+	conn, err := pgx.Connect(ctx, url)
+	if err != nil {
+		return fmt.Errorf("connecting to load the root-closure fixture: %w", err)
+	}
+	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
+	if _, err := conn.Exec(ctx, rootClosureSchema); err != nil {
+		return fmt.Errorf("loading the root-closure fixture: %w", err)
+	}
+	return nil
+}
+
+// TestPlanRootLineNamesRowsPulledInByReferences pins ARCHITECTURE.md §3.7's
+// wording: with --take 1, the root's seed is {1}, and orders(10)'s
+// referred_by pulls customer 2 into the same table as PARENT_ONLY. The root's
+// count (2) exceeds the seed (1), so the plan's line for it must say why
+// rather than leaving the extra row unexplained as "root" always used to.
+func TestPlanRootLineNamesRowsPulledInByReferences(t *testing.T) {
+	ctx := context.Background()
+	r, schema := fixture(ctx, t, loadRootClosure)
+
+	customers := tref("public", "customers")
+	orders := tref("public", "orders")
+	root := customers
+	req := pipeline.PlanRequest{Root: &root, Take: 1}
+
+	p, err := New().Plan(ctx, r, schema, nil, req)
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	steps := stepsByTable(p)
+
+	cust := steps[customers]
+	if got := fmt.Sprint(intKeysOf(t, cust)); got != "[1 2]" {
+		t.Fatalf("customers = %s, want [1 2]: --take 1 seeds customer 1, and orders(10)."+
+			"referred_by pulls in customer 2", got)
+	}
+	if cust.Mode != pipeline.ChildOK {
+		t.Errorf("customers mode = %d, want ChildOK: the seed's own mode, never overwritten "+
+			"by the later PARENT_ONLY pop that pulls customer 2 in", cust.Mode)
+	}
+	if want := "root: 1 chosen, 1 pulled in by references"; cust.Why != want {
+		t.Errorf("customers.Why = %q, want %q (ARCHITECTURE.md §3.7)", cust.Why, want)
+	}
+
+	ord := steps[orders]
+	if got := fmt.Sprint(intKeysOf(t, ord)); got != "[10]" {
+		t.Errorf("orders = %s, want [10]", got)
+	}
+	if ord.Why != "child of public.customers via public.orders.customer_id" {
+		t.Errorf("orders.Why = %q, unaffected by this section", ord.Why)
+	}
+}
+
+// TestPlanRootLineIsUnchangedWhenNothingIsPulledIn is the M == 0 side: the
+// overwhelmingly common case, and every fixture elsewhere in this package,
+// must keep the plain "root" Why the walk has always produced. --take 2 here
+// seeds both customers, so referred_by names a customer already selected and
+// pulls nothing in.
+func TestPlanRootLineIsUnchangedWhenNothingIsPulledIn(t *testing.T) {
+	ctx := context.Background()
+	r, schema := fixture(ctx, t, loadRootClosure)
+
+	customers := tref("public", "customers")
+	root := customers
+	req := pipeline.PlanRequest{Root: &root, Take: 2}
+
+	p, err := New().Plan(ctx, r, schema, nil, req)
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	steps := stepsByTable(p)
+
+	cust := steps[customers]
+	if got := fmt.Sprint(intKeysOf(t, cust)); got != "[1 2]" {
+		t.Fatalf("customers = %s, want [1 2]: --take 2 seeds both", got)
+	}
+	if cust.Why != "root" {
+		t.Errorf(`customers.Why = %q, want "root": nothing was pulled in beyond the seed`, cust.Why)
+	}
+}
