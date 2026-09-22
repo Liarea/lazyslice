@@ -149,6 +149,23 @@ homebrew_casks:
     # quarantine attribute" as something the author puts in a hook
     # (goreleaser#5958). The CI release-config job asserts the generated cask
     # still has one.
+    #
+    # This renders as Homebrew's `postflight` stanza, which Homebrew 7.0.0
+    # (2026-09-13, https://brew.sh/2026/09/13/homebrew-7.0.0/, "Install
+    # steps") deprecated in favour of the declarative `postflight_steps`:
+    # third-party taps (ours included) get a warning on every install until
+    # 2027-12-11, and are rejected outright after. goreleaser has no way to
+    # emit `postflight_steps` yet: as of today (2026-09-22) the customization
+    # docs (https://goreleaser.com/customization/homebrew_casks/, latest
+    # release v2.18.2) document only `hooks.post.install`, and the PR that
+    # would add `hooks.post.install_steps`
+    # (https://github.com/goreleaser/goreleaser/pull/6873,
+    # "feat(cask): add hooks install_steps, deprecate raw Ruby hooks") is
+    # still open and unmerged. T-0277 tracks switching this block the day
+    # that PR ships in a release; until then the warning is noise, not a
+    # break — see docs/RUNBOOK.md's release section and the CI
+    # release-config job's assertion for what actually happens on
+    # 2027-12-11 if this has not moved by then.
     hooks:
       post:
         install: |
