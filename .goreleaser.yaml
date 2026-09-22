@@ -9,6 +9,13 @@ version: 2
 
 project_name: lazyslice
 
+# The repo root's go.work (T-0285) would make every go command here build
+# mask/ from the working tree; a release must compile the mask version
+# go.mod requires, the same one `go install` of the tag resolves (T-0290).
+# A global env reaches the before hooks as well as the builds.
+env:
+  - GOWORK=off
+
 before:
   hooks:
     - go mod download
