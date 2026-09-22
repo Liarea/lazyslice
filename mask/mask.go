@@ -38,6 +38,27 @@ import (
 // "email", "phone", "person_name", "null", "fixed:$lazyslice$invalid".
 type ID string
 
+// Role is a person_name column's sub-category: given, family or full
+// (T-0287). It is decided at classify time from the column's name, carried on
+// pipeline.Decision beside Category, written to lazyslice.yml and read back
+// from it, the same route pipeline.Config.PhoneRegion follows to reach a
+// masker's Constraints. Every other category ignores it; Get and the registry
+// carry no per-category notion of a role, so a masker that wants one reads
+// Constraints.Role itself.
+type Role string
+
+const (
+	// RoleFull is the zero value and personNameMasker's original behaviour:
+	// a given name and a surname, "Given Family". A caller built before this
+	// field existed leaves it unset, so RoleFull has to be what an unset
+	// Constraints.Role already meant.
+	RoleFull Role = ""
+	// RoleGiven emits a given name only.
+	RoleGiven Role = "given"
+	// RoleFamily emits a surname only.
+	RoleFamily Role = "family"
+)
+
 // Category is the classification a column was masked under. It is the info
 // string of the HKDF derivation, so two columns in different categories never
 // share a mapping, and changing a category changes every masked value in it.
@@ -151,6 +172,11 @@ type Constraints struct {
 	// Region is the libphonenumber region hint for phone canonicalisation, ""
 	// when unknown.
 	Region string
+	// Role is a person_name column's sub-category (T-0287): RoleGiven emits a
+	// given name only, RoleFamily a surname only, and the zero value RoleFull
+	// keeps personNameMasker's original "Given Family". No other generator
+	// reads it.
+	Role Role
 }
 
 // Masker is one generator. Mask is pure: every choice it makes comes from h,

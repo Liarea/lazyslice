@@ -17,20 +17,36 @@ func titleASCII(s string) string {
 
 // ---------- person_name ----------
 
-// personNameMasker draws a name from the embedded lists. A column wide enough
-// gets "Given Surname"; a narrower one gets a single given name that fits; a
-// column too narrow for any name at all has a domain of 0 and is refused at
-// plan rather than truncated here, because a truncated name keeps a length.
+// personNameMasker draws a name from the embedded lists, shaped by
+// Constraints.Role (T-0287). RoleGiven and RoleFamily each draw one word from
+// their own dedicated list (roleGivenNames, roleFamilyNames -- a synthetic,
+// non-dictionary vocabulary disjoint from givenNames/surnames, mask/words.go's
+// own comment on roleGivenWords/roleFamilyWords has the reason: a single word
+// off the shared, real-name lists collides with a real production value in an
+// ordinary first_name or last_name column far too often to be a coincidence
+// the residual scan should have to swallow). The zero value, RoleFull, is the
+// original behaviour -- a column wide enough gets "Given Surname" off the
+// shared givenNames/surnames lists, unchanged, and a narrower one gets a
+// single given name that fits. A column too narrow for any name at all has a
+// domain of 0 and is refused at plan rather than truncated here, because a
+// truncated name keeps a length.
 type personNameMasker struct{}
 
 func (personNameMasker) Domain(c Constraints) int64 {
 	if d, ok := labelDomain(c); ok {
 		return d
 	}
-	if n := pairCount(givenNames, surnames, 1, room(c)); n > 0 {
-		return n
+	switch c.Role {
+	case RoleGiven:
+		return int64(roleGivenNames.count(room(c)))
+	case RoleFamily:
+		return int64(roleFamilyNames.count(room(c)))
+	default:
+		if n := pairCount(givenNames, surnames, 1, room(c)); n > 0 {
+			return n
+		}
+		return int64(givenNames.count(room(c)))
 	}
-	return int64(givenNames.count(room(c)))
 }
 
 func (personNameMasker) Mask(h [32]byte, _ Value, c Constraints) (Value, error) {
@@ -39,14 +55,27 @@ func (personNameMasker) Mask(h [32]byte, _ Value, c Constraints) (Value, error) 
 	}
 	s := newStream(h)
 	budget := room(c)
-	if n := pairCount(givenNames, surnames, 1, budget); n > 0 {
-		g, sn := pairAt(givenNames, surnames, 1, budget, s.intn(n))
-		return Value{Text: titleASCII(g) + " " + titleASCII(sn)}, nil
+	switch c.Role {
+	case RoleGiven:
+		if n := roleGivenNames.count(budget); n > 0 {
+			return Value{Text: titleASCII(roleGivenNames.words[s.intn(int64(n))])}, nil
+		}
+		return Value{}, ErrNoRoom
+	case RoleFamily:
+		if n := roleFamilyNames.count(budget); n > 0 {
+			return Value{Text: titleASCII(roleFamilyNames.words[s.intn(int64(n))])}, nil
+		}
+		return Value{}, ErrNoRoom
+	default:
+		if n := pairCount(givenNames, surnames, 1, budget); n > 0 {
+			g, sn := pairAt(givenNames, surnames, 1, budget, s.intn(n))
+			return Value{Text: titleASCII(g) + " " + titleASCII(sn)}, nil
+		}
+		if n := givenNames.count(budget); n > 0 {
+			return Value{Text: titleASCII(givenNames.words[s.intn(int64(n))])}, nil
+		}
+		return Value{}, ErrNoRoom
 	}
-	if n := givenNames.count(budget); n > 0 {
-		return Value{Text: titleASCII(givenNames.words[s.intn(int64(n))])}, nil
-	}
-	return Value{}, ErrNoRoom
 }
 
 // ---------- address ----------
