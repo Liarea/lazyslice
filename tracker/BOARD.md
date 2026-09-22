@@ -9,7 +9,7 @@
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 1 | 0 | 107 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 83 | 0 | 32 | 5 | 0 |
+| E9 Later | later | 84 | 0 | 32 | 5 | 0 |
 
 ## Open and in progress
 
@@ -98,6 +98,7 @@
 - T-0275 [open] E9 · tracker.py: close writes the archive file before it closes the issue, and every gh call has a timeout (sonnet)
 - T-0276 [open] E9 · tracker.py: five small robustness findings from T-0196's review (sonnet)
 - T-0277 [open] E9 · The generated cask's quarantine hook uses postflight, which Homebrew deprecates in favour of postflight_steps (sonnet)
+- T-0278 [open] E9 · Release notes name the range as 'since the first commit' when the previous tag is the root (sonnet)
 
 ## Recently closed
 
