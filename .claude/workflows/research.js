@@ -52,6 +52,7 @@ const DOCS = [
 
 const GUIDES = [
   { key: 'fable-5-1', url: 'https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5-1', model: 'Claude Fable 5.1' },
+  { key: 'opus-5-5', url: 'https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5-5', model: 'Claude Opus 5.5' },
   { key: 'opus-5', url: 'https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5', model: 'Claude Opus 5' },
   { key: 'sonnet-5', url: 'https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-sonnet-5', model: 'Claude Sonnet 5' },
   { key: 'opus-4-8', url: 'https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-4-8', model: 'Claude Opus 4.8' },
