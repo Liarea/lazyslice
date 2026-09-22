@@ -5,8 +5,10 @@ the tool is that the copy is safe to hold on a laptop, so a bug that leaves
 personal data unmasked is not a cosmetic defect: it is the failure the tool was
 built to prevent.
 
-**lazyslice is pre-release.** The pipeline runs end to end against PostgreSQL,
-but there is no supported version until `v0.1.0` is tagged. The findings of
+**lazyslice is pre-release.** The pipeline runs end to end against PostgreSQL;
+`v0.1.0` is the first version a stranger may install and the first that a
+report is triaged against, and its `lazyslice.yml` schema, flags and exit
+codes may still change between `0.x` minors. The findings of
 the independent review of 2026-09-09
 ([docs/reviews/2026-09-09/REVIEW.md](docs/reviews/2026-09-09/REVIEW.md)) and
 of six red-team rounds have landed; what is still open is an

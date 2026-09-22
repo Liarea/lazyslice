@@ -133,9 +133,13 @@ jobs:
       # (tools/relnotes/relnotes.py; every task commit carries release-note
       # bullets, .claude/skills/lazyslice-commit), not from goreleaser's list of
       # subjects. --release-notes makes goreleaser use the file verbatim.
+      # A v0.0.x tag is a pipeline proof that published nothing a user saw
+      # (ROADMAP.md "Versioning and releases"), so it is not a previous
+      # version: without --exclude, v0.1.0's notes would have covered the four
+      # commits since v0.0.3 instead of everything since the first commit.
       - name: release notes from the commits since the previous tag
         run: |
-          prev=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || git rev-list --max-parents=0 HEAD)
+          prev=$(git describe --tags --abbrev=0 --exclude 'v0.0.*' "${GITHUB_REF_NAME}^" 2>/dev/null || git rev-list --max-parents=0 HEAD)
           python3 tools/relnotes/relnotes.py "$prev" "${GITHUB_REF_NAME}" > /tmp/relnotes.md
           echo "release notes: from $prev to ${GITHUB_REF_NAME}, $(wc -l < /tmp/relnotes.md) lines"
       - uses: goreleaser/goreleaser-action@v6
