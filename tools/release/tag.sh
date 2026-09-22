@@ -152,7 +152,9 @@ log "pushed $TAG; release.yml is starting"
 
 release_id=""
 for _ in $(seq 1 18); do
-	release_id="$(gh run list --workflow release.yml --limit 5 --json databaseId,headBranch,createdAt --jq --arg t "$TAG" '[.[] | select(.headBranch == $t)] | sort_by(.createdAt) | last | .databaseId // empty')"
+	# gh's --jq takes a program only (no --arg), so the tag is interpolated
+	# into it; a tag matched the shape check above, so it carries no quote.
+	release_id="$(gh run list --workflow release.yml --limit 5 --json databaseId,headBranch,createdAt --jq "[.[] | select(.headBranch == \"$TAG\")] | sort_by(.createdAt) | last | .databaseId // empty")"
 	[ -n "$release_id" ] && break
 	sleep 10
 done
