@@ -43,12 +43,20 @@ brew install Liarea/tap/lazyslice
 lazyslice --version
 ```
 
-`go install` of the tagged module doesn't work yet: `go.mod` still points the
-nested `mask` module at a local `replace` directive rather than a tagged
-version, which Go refuses to resolve for anyone outside this tree (verified
-2026-09-22 against `v0.1.0` and `@latest` alike, from an empty
-`GOMODCACHE`/`GOPATH`). Until `mask` has its own tag, use the tap or an
-archive below.
+Or with `go install`, once Go's own module cache and `$GOPATH/bin` are on
+your `PATH`:
+
+```sh
+go install github.com/Liarea/lazyslice/cmd/lazyslice@v0.2.0
+lazyslice --version
+```
+
+`v0.1.0`'s tag predates this fix and still fails: its `go.mod` points the
+nested `mask` module at a local `replace` directive, which Go refuses to
+resolve for anyone outside this tree (verified 2026-09-22, from an empty
+`GOMODCACHE`/`GOPATH`). From `v0.2.0` on, `go.mod` requires
+`github.com/Liarea/lazyslice/mask` by its own tagged version instead, and
+`go install` works.
 
 Every release also carries macOS, Linux and Windows archives (six in total,
 amd64 and arm64), each with an SBOM, and a `checksums.txt` signed keylessly

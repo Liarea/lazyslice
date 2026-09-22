@@ -87,6 +87,51 @@ Domain(c Constraints) int64
   the category — changing a list changes every masked value in that category,
   which is a release note and a `classification changed` line, not a tidy-up.
 
+## Workspace and release (T-0285)
+
+The repo root's `go.work` (`use ./ ./mask`) is how a change here reaches the
+binary during development: edit `mask/`, and `go build`/`go test` in the root
+module pick up this directory directly, with no `replace` directive and no
+tag needed, because a workspace member always wins over the root module's own
+`require github.com/Liarea/lazyslice/mask v0.x.y`. That requirement is what
+everyone *without* this workspace resolves — `go install`, a CI job with
+`GOWORK=off`, anyone who has cloned only the root module — so it has to be
+moved forward by hand once a change here is meant to ship:
+
+1. Edit and test the change here, in the workspace (`go test ./...` from
+   `mask/`, or `make test` from the root, which walks both modules).
+2. Tag this module on its own: `make tag TAG=mask/vX.Y.Z` (docs/RUNBOOK.md).
+   A mask tag is not a version of the tool — `.goreleaser.yaml`'s
+   `git.ignore_tags` keeps goreleaser from reading it as one — and carries no
+   release run of its own to watch.
+3. Bump the root `go.mod`'s `require github.com/Liarea/lazyslice/mask` to
+   that tag and run `go mod tidy` **outside the workspace**
+   (`GOWORK=off go mod tidy`, or just `go mod tidy` from a checkout with no
+   `go.work`): inside the workspace, `go mod tidy` still resolves this
+   directory locally and the tagged version's checksum can end up unwritten.
+   Land this bump before, or in the same change as, the tool's own next tag —
+   never after — so the tag that ships always requires a `mask` version the
+   proxy can actually serve.
+
+`make install-proof` (root `Makefile`) is the check that a local override can
+never come back unnoticed: it builds a copy of the working tree with `mask/`
+and `go.work` deleted, from a fresh module cache, so it fails the moment
+`go.mod` stops naming a real, tagged `mask` version — `GOWORK=off` alone
+proved nothing about a `replace` directive still sitting next to `go.mod`,
+since a relative `replace ... => ./mask` resolves whether or not workspace
+mode is on, and the target's own negative control now asserts that a
+reintroduced `replace` fails the build. `install-proof` is scoped to the
+`cmd/lazyslice` build; `.github/workflows/ci.yml`'s `install-proof` job also
+runs the test suite once with `GOWORK=off` and no other change, as a cheaper
+stand-in for what a release build would resolve — it does not reach
+goreleaser's own build, which still compiles inside this tree with `go.work`
+present, so a tag cut before this module's version is bumped in `go.mod` can
+still ship a binary built against a different `mask` than `go install`
+resolves for the same tag. Landing order (item 3, above) is what actually
+prevents that today; making the release build itself GOWORK=off, and
+checking a release tag's `go.mod` requirement against `mask/`'s own tag, is
+tracked in the tracker (T-0290) and not yet done.
+
 ## Test
 
 `cd mask && go test -race ./...`, or `make test`, which walks both modules.
