@@ -17,7 +17,7 @@ below. What it produces is pseudonymised, not anonymised —
 some things about the original rows survive on purpose, and the honest list
 of what survives is below.
 
-## Status: v0.0.3 proves the release pipeline; pre-release, PostgreSQL only
+## Status: v0.1.0, the first version a stranger may install; pre-release, PostgreSQL only
 
 The pipeline runs end to end against PostgreSQL 14 to 18: it discovers a
 source and a target, refuses a target that is not empty or not its own,
@@ -27,14 +27,16 @@ residual scan of the target against the source). Hardening is done: the
 defects an independent review found on 2026-09-09 and six rounds of an
 adversarial red team have landed in the open ([docs/reviews/](docs/reviews/)),
 and what remains is tracked as
-[issues](https://github.com/Liarea/lazyslice/issues). `v0.0.3` exists to prove
-that a tag builds, signs and reaches the Homebrew tap, and nothing else
-(`v0.0.1` failed before its first step and `v0.0.2` at signing; neither
-published anything); there is no supported version until `v0.1.0` is tagged.
+[issues](https://github.com/Liarea/lazyslice/issues). `v0.1.0` is a
+pre-release: the `lazyslice.yml` schema, the flags and the exit codes may
+still change between `0.x` minors, with every such change named in the
+release notes; a `0.x.y` patch never changes them. (`v0.0.1` to `v0.0.3`
+were throwaway tags that proved the release pipeline; the first two
+published nothing.)
 
-Until then, point it only at data you are already allowed to hold on the
-machine that runs it. What a snapshot does not hide is listed below and in
-[THREAT_MODEL.md](THREAT_MODEL.md).
+Whatever the version, point it only at data you are already allowed to hold
+on the machine that runs it. What a snapshot does not hide is listed below
+and in [THREAT_MODEL.md](THREAT_MODEL.md).
 
 - What it will do, and what it refuses to do: [CONCEPT.md](CONCEPT.md)
 - How it is built: [ARCHITECTURE.md](ARCHITECTURE.md) and
@@ -48,7 +50,18 @@ machine that runs it. What a snapshot does not hide is listed below and in
 
 ## Install
 
-From source, today — this is the only way to get it before `v0.1.0`:
+From the tap, on macOS:
+
+```sh
+brew install Liarea/tap/lazyslice
+lazyslice --version
+```
+
+Every release also carries Linux and Windows archives, each with an SBOM, and
+a `checksums.txt` signed keylessly with cosign; the verification command is in
+[docs/RUNBOOK.md](docs/RUNBOOK.md) under "Cutting a release".
+
+From source:
 
 ```sh
 git clone https://github.com/Liarea/lazyslice
@@ -56,16 +69,6 @@ cd lazyslice
 make build                     # bin/lazyslice
 export PATH="$PWD/bin:$PATH"   # the examples below call it as lazyslice
 ```
-
-From the tap:
-
-```sh
-brew install Liarea/tap/lazyslice
-```
-
-The tap carries whatever the latest tag built. Before `v0.1.0` that is a
-pipeline proof (`v0.0.x`), not a version anyone should rely on; `brew install`
-against an empty tap fails rather than installing something untagged.
 
 ## Quickstart
 
