@@ -17,7 +17,7 @@ below. What it produces is pseudonymised, not anonymised —
 some things about the original rows survive on purpose, and the honest list
 of what survives is below.
 
-## Status: v0.0.2 proves the release pipeline; pre-release, PostgreSQL only
+## Status: v0.0.3 proves the release pipeline; pre-release, PostgreSQL only
 
 The pipeline runs end to end against PostgreSQL 14 to 18: it discovers a
 source and a target, refuses a target that is not empty or not its own,
@@ -27,10 +27,10 @@ residual scan of the target against the source). Hardening is done: the
 defects an independent review found on 2026-09-09 and six rounds of an
 adversarial red team have landed in the open ([docs/reviews/](docs/reviews/)),
 and what remains is tracked as
-[issues](https://github.com/Liarea/lazyslice/issues). `v0.0.2` exists to prove
+[issues](https://github.com/Liarea/lazyslice/issues). `v0.0.3` exists to prove
 that a tag builds, signs and reaches the Homebrew tap, and nothing else
-(`v0.0.1` failed before its first step and published nothing); there is no
-supported version until `v0.1.0` is tagged.
+(`v0.0.1` failed before its first step and `v0.0.2` at signing; neither
+published anything); there is no supported version until `v0.1.0` is tagged.
 
 Until then, point it only at data you are already allowed to hold on the
 machine that runs it. What a snapshot does not hide is listed below and in
