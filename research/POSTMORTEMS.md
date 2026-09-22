@@ -105,7 +105,7 @@ Seven weeks after the shutdown (31 August 2024 to 17 October 2024), an HN user e
 
 | Package | Weekly downloads | What it is |
 |---|---|---|
-| [`@snaplet/copycat`](https://api.npmjs.org/downloads/range/2026-08-23:2026-08-29/@snaplet/copycat) | **more than 12×** `@snaplet/snapshot`'s downloads (121,478) | Deterministic fake values. No service. ~1,000 lines of pure function. |
+| [`@snaplet/copycat`](https://api.npmjs.org/downloads/range/2026-08-23:2026-08-29/@snaplet/copycat) | 121,478 (**more than 12×** `@snaplet/snapshot`'s) | Deterministic fake values. No service. ~1,000 lines of pure function. |
 | [`@snaplet/seed`](https://registry.npmjs.org/@snaplet/seed) | 41,159 | Schema-based generation (calls a hosted LLM) |
 | [`@snaplet/snapshot`](https://api.npmjs.org/downloads/range/2026-08-23:2026-08-29/@snaplet/snapshot) | 9,808 | **The actual snapshot tool** |
 | [`snaplet`](https://registry.npmjs.org/snaplet) | 3,511 | The original CLI |
