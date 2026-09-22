@@ -8,8 +8,8 @@
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 1 | 0 | 107 | 0 | 0 |
-| E6 Launch | 6 | 3 | 0 | 6 | 0 | 0 |
-| E9 Later | later | 88 | 0 | 32 | 6 | 0 |
+| E6 Launch | 6 | 6 | 0 | 7 | 0 | 0 |
+| E9 Later | later | 87 | 0 | 33 | 6 | 0 |
 
 ## Open and in progress
 
@@ -96,15 +96,17 @@
 - T-0274 [open] E9 · The root decision line and the plan's own RootReason give different reasons when a name preference breaks a tie (sonnet)
 - T-0275 [open] E9 · tracker.py: close writes the archive file before it closes the issue, and every gh call has a timeout (sonnet)
 - T-0276 [open] E9 · tracker.py: five small robustness findings from T-0196's review (sonnet)
-- T-0277 [open] E9 · The generated cask's quarantine hook uses postflight, which Homebrew deprecates in favour of postflight_steps (sonnet)
+- T-0277 [open] E6 · The generated cask's quarantine hook uses postflight, which Homebrew deprecates in favour of postflight_steps (sonnet)
 - T-0278 [open] E9 · Release notes name the range as 'since the first commit' when the previous tag is the root (sonnet)
 - T-0282 [open] E6 · Write the 'why I built this' paragraph for the README (human)
 - T-0283 [open] E6 · Decide whether v0.2.0 ships a docs site (mkdocs-material on GitHub Pages) or the in-repo docs stay the docs (human)
-- T-0286 [open] E9 · research/POSTMORTEMS.md carries two stale facts the blog draft inherited (sonnet)
-- T-0287 [open] E6 · The person_name masker respects the column's role: a first-name column gets a given name, a last-name column a surname (sonnet)
-- T-0288 [open] E9 · A root table can hold more rows than --take names; say so in the flag's help or stop it (sonnet)
-- T-0289 [open] E9 · make gif records with a read-only role, probes readiness from the host, and pace.awk fails when it paused nothing (sonnet)
+- T-0286 [open] E6 · research/POSTMORTEMS.md carries two stale facts the blog draft inherited (sonnet)
+- T-0288 [open] E6 · A root table can hold more rows than --take names; say so in the flag's help or stop it (sonnet)
+- T-0289 [open] E6 · make gif records with a read-only role, probes readiness from the host, and pace.awk fails when it paused nothing (sonnet)
 - T-0291 [open] E9 · Makefile's .SHELLFLAGS (-eu -o pipefail) is silently ignored by macOS's GNU Make 3.81 (sonnet)
+- T-0292 [open] E9 · person_name role masking can collide with real name corpora on ordinary tables ()
+- T-0294 [open] E9 · plan-time DEFAULT rewrite for a person_name column ignores Role (sonnet)
+- T-0295 [open] E9 · second net's dictionary rule has no single-word check, and T-0287 makes that shape normal (sonnet)
 
 ## Recently closed
 
@@ -116,7 +118,9 @@
 - T-0281 [done] E6 · Issue templates that keep personal data out of reports, and CHANGELOG.md as the pointer at releases → done
 - T-0284 [cancelled] E9 · go install of lazyslice fails: go.mod's mask replace directive rejects @v0.1.0/@latest → cancelled
 - T-0285 [done] E6 · go install works: the mask module gets its own tag and go.mod requires it by version, with go.work for local development → done
+- T-0287 [done] E6 · The person_name masker respects the column's role: a first-name column gets a given name, a last-name column a surname → done
 - T-0290 [done] E6 · goreleaser release build still compiles mask/ from go.work, not the tagged version go.mod requires → done
+- T-0293 [done] E9 · plan equality groups ignore person_name Role, letting an FK pair mask two roles alike → done
 - T-0083 [done] E5 · Target type registration for CopyFrom: no owner since internal/load shipped → done
 - T-0170 [done] E9 · torture regression 013 (json-object-key-email) fails on main → done
 - T-0197 [done] E5 · R2-05/A10 residual: a name in a language names.txt does not carry still reports "no name or value signal" as a clean bill of health → done
@@ -131,5 +135,3 @@
 - T-0239 [done] E5 · The certain-neighbour rail no longer skips a column declared shorter than sixteen characters: it masks under a generator that fits or refuses → done
 - T-0240 [done] E5 · National-identifier corroboration counts a masked personal neighbour at any confidence and outranks the dense-sequence exemption; character-family identifiers get the same path → done
 - T-0241 [done] E5 · A streaming standby as source, with the target on its own primary, is refused: a start-time disagreement without the system identifier is unknown, a standby source is announced, and a headless run with no --target refuses on a standby → done
-- T-0242 [done] E5 · Before the first drop, the whole target is re-checked for emptiness under the run lease, and a table that appeared since the gate refuses the load → done
-- T-0251 [done] E5 · The .gitignore protection of the secret file is verified by asking git, never by matching the file's text → done
