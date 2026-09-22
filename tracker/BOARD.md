@@ -9,7 +9,7 @@
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 1 | 0 | 107 | 0 | 0 |
 | E6 Launch | 6 | 6 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 84 | 0 | 32 | 5 | 0 |
+| E9 Later | later | 85 | 0 | 32 | 5 | 0 |
 
 ## Open and in progress
 
@@ -104,6 +104,7 @@
 - T-0281 [open] E6 · Issue templates that keep personal data out of reports, and CHANGELOG.md as the pointer at releases (sonnet)
 - T-0282 [open] E6 · Write the 'why I built this' paragraph for the README (human)
 - T-0283 [open] E6 · Decide whether v0.2.0 ships a docs site (mkdocs-material on GitHub Pages) or the in-repo docs stay the docs (human)
+- T-0284 [open] E9 · go install of lazyslice fails: go.mod's mask replace directive rejects @v0.1.0/@latest ()
 
 ## Recently closed
 

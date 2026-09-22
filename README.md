@@ -1,21 +1,9 @@
 # lazyslice
 
-Snapshot a production SQL database into a safe local copy: subset by a root
-table, follow foreign keys, mask personal data, load.
+![lazyslice's first run: discovering two Postgres containers, subsetting from a root table, masking personal data, loading, and verifying — against the Pagila fixture](docs/media/first-run.gif)
 
-lazyslice reads a production Postgres database, follows one root table's
-foreign keys outward to build a small, referentially complete subset, masks
-every column that looks like personal data with a deterministic key so joins
-still work, and loads the result into an empty local database you name. It
-refuses to write anywhere but an empty database or one it created itself;
-there is no flag and no mode that turns masking off
-(`cmd/lazyslice`'s `TestForbiddenFlagsDoNotExist`); and when its classifier is
-unsure whether a column is personal data, it masks it rather than guess it is
-safe. A column with no name signal, no recognised value shape and no personal
-neighbour in its table is not "unsure" — it is copied, and that is residual 4
-below. What it produces is pseudonymised, not anonymised —
-some things about the original rows survive on purpose, and the honest list
-of what survives is below.
+Point it at a production Postgres database and get a small, referentially
+complete, pseudonymised copy in a local database — one command, no config.
 
 ## Status: v0.1.0, the first version a stranger may install; pre-release, PostgreSQL only
 
@@ -30,9 +18,7 @@ and what remains is tracked as
 [issues](https://github.com/Liarea/lazyslice/issues). `v0.1.0` is a
 pre-release: the `lazyslice.yml` schema, the flags and the exit codes may
 still change between `0.x` minors, with every such change named in the
-release notes; a `0.x.y` patch never changes them. (`v0.0.1` to `v0.0.3`
-were throwaway tags that proved the release pipeline; the first two
-published nothing.)
+release notes; a `0.x.y` patch never changes them.
 
 Whatever the version, point it only at data you are already allowed to hold
 on the machine that runs it. What a snapshot does not hide is listed below
@@ -57,20 +43,29 @@ brew install Liarea/tap/lazyslice
 lazyslice --version
 ```
 
-Every release also carries Linux and Windows archives, each with an SBOM, and
-a `checksums.txt` signed keylessly with cosign; the verification command is in
-[docs/RUNBOOK.md](docs/RUNBOOK.md) under "Cutting a release".
+`go install` of the tagged module doesn't work yet: `go.mod` still points the
+nested `mask` module at a local `replace` directive rather than a tagged
+version, which Go refuses to resolve for anyone outside this tree (verified
+2026-09-22 against `v0.1.0` and `@latest` alike, from an empty
+`GOMODCACHE`/`GOPATH`). Until `mask` has its own tag, use the tap or an
+archive below.
 
-From source:
+Every release also carries macOS, Linux and Windows archives (six in total,
+amd64 and arm64), each with an SBOM, and a `checksums.txt` signed keylessly
+with cosign:
 
 ```sh
-git clone https://github.com/Liarea/lazyslice
-cd lazyslice
-make build                     # bin/lazyslice
-export PATH="$PWD/bin:$PATH"   # the examples below call it as lazyslice
+cosign verify-blob --bundle checksums.txt.sigstore.json \
+  --certificate-identity-regexp '^https://github.com/Liarea/lazyslice/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  checksums.txt
 ```
 
-## Quickstart
+then check the archive's own line against the verified `checksums.txt`. The
+full steps, and what to do if verification fails, are in
+[docs/RUNBOOK.md](docs/RUNBOOK.md) under "Cutting a release".
+
+## The run
 
 This ran against two disposable Postgres containers holding invented data —
 no real database, no real person. Nothing below is typed; it is what actually
@@ -203,7 +198,7 @@ $ echo $?
 $ docker rm -f shop-db shop-dev
 ```
 
-## Flags
+### Flags
 
 <!-- docgen:flags:start -->
 
@@ -226,28 +221,118 @@ The flags a first run meets. The full set, one row per registered flag grouped b
 
 <!-- docgen:flags:end -->
 
-## Exit codes at a glance
+## Why
 
-Every exit code above 1 names a stage and a reason; `1` is the one code that
-by construction names no reason (an internal failure; run with `--debug`).
-The full table, one row per code with its message template, is
-[docs/ERRORS.md](docs/ERRORS.md). In one line:
+**Zero config.** A first run asks at most one blocking question — which table
+to start from — and then works; a headless run asks none. Nothing above
+needed a YAML file written before it could run: `lazyslice.yml` is what a run
+*emits* once it has already worked, a record to commit for next time, never a
+prerequisite for the first one. We refuse to ship any feature whose first-run
+path is "write a YAML file."
 
-`0` ok · `1` internal failure with no code of its own — run with `--debug` ·
-`2` usage — a flag names something that cannot work (this is also the code a
-same-database target is refused with: that check runs at the flag surface,
-before discovery, not as one of the `4`s below) · `3` no source · `4` target
-refused · `5` no usable source credential or masking key · `6` the source
-role can write and `--require-read-only-role` was set · `7` extract or load
-failed · `8` a foreign key does not hold · `9` a masked column still holds a
-source value, or a value that could not be confirmed either way · `10` a
-column the committed config has never seen, under `--strict-schema` · `11` a
-row or memory budget was exceeded · `12` the plan was refused — a column
-cannot be masked in place, or an identifier is missing · `13` the target's
-schema cannot be recreated safely — an unrewritable literal, or an object
-lazyslice does not recreate · `130` interrupted — the in-flight transaction
-rolled back; tables already committed stay as they are, so the target may be
-partly loaded and the next run will truncate it.
+**Safe by default.** Anything that might be personal data is masked unless a
+person opts a specific column out and says why; the source above is opened
+read-only with its role's privileges checked and printed, not assumed, and the
+target has to be empty or a database lazyslice wrote before. The output is
+pseudonymised, not anonymised, and the section below says exactly what that
+means. We refuse to ship a flag, mode, or default that copies an unclassified
+column as-is — there is no flag and no mode that turns masking off, enforced
+by `cmd/lazyslice`'s `TestForbiddenFlagsDoNotExist`.
+
+**Terminal first.** One static binary, one-line install, no native
+dependencies, no call to anything we operate — the run above never left the
+two databases it named. The same command a human types at a prompt works
+headless in CI with `--yes`. We refuse to ship a capability that exists only
+in the TUI.
+
+## How it compares
+
+Every cell about another tool is that tool's own documentation, fetched
+2026-09-22; a cell nothing found could confirm says "not stated" instead of
+guessing. lazyslice's own cells describe `v0.1.0` exactly as installed above.
+
+| | lazyslice | Greenmask | PostgreSQL Anonymizer | Tonic Structural |
+|---|---|---|---|---|
+| Time to first snapshot | One command, no separate config step — the run above, `517` rows, held about a second | A config file is written first; the bundled playground's own quickstart edits its sample `config.yml` before the first `dump`[^gm-quick] | Six DDL/SQL statements before a masked read: create the extension, enable it, load a sample table, initialise masking, create a masked role, declare a rule[^pga-home] | Sign up, verify by email, create a workspace, then a sensitivity scan and a generation run — about seven to eight steps end to end[^tonic-quick] |
+| Config required before first run | None — `--no-config` above wrote nothing, and a run with no flags at all asks one question and proceeds | Yes — "a configuration file is mandatory for Greenmask functioning"[^gm-quick] | Yes — masking rules are declared as `SECURITY LABEL`s on each column, a policy stored in the database, before anything is masked[^pga-rules] | An account and a workspace, always; a bundled sample workspace needs no database connection, but masking your own data does[^tonic-quick] |
+| Databases | PostgreSQL 14–18 only | PostgreSQL (full support); MySQL "in progress"[^gm-repo] | PostgreSQL only, plus the Postgres-compatible forks Greenplum and YugabyteDB[^pga-home] | Postgres, Oracle, Db2, MySQL, SQL Server, Redshift, Snowflake, BigQuery, MongoDB, Databricks, Spark, S3, Salesforce and flat files[^tonic-product] |
+| Masking determinism (same input, same output across runs) | Deterministic under a local key by construction — the same value always masks the same way for the same key and category (see "How it decides what is personal data" below) | Opt-in, not the default: `engine` "by default is set to `random`"; the hash engine has to be chosen explicitly for the same input to always produce the same output[^gm-engine] | Opt-in, not the default: the built-in masking functions are random; the same input is deterministic only through the separate `pseudo_*`/`hash` functions, seeded by hand[^pga-funcs] | Stated as a feature — "automated, consistent transformations that preserve relationships and referential integrity"[^tonic-product] |
+| Licence | Apache-2.0 | Apache-2.0[^gm-repo] | The PostgreSQL License[^pga-license] | Proprietary — no free or open-source tier; "Professional" and "Enterprise" are both custom-priced[^tonic-price] |
+
+[^gm-quick]: [Greenmask — Playground](https://docs.greenmask.io/latest/playground/), fetched 2026-09-22.
+[^gm-repo]: [github.com/GreenmaskIO/greenmask](https://github.com/GreenmaskIO/greenmask), fetched 2026-09-22 (Apache-2.0 licence badge; README: "Designed for PostgreSQL and MySQL (in progress)").
+[^gm-engine]: [Greenmask — Transformation engines](https://docs.greenmask.io/latest/built_in_transformers/transformation_engines/), fetched 2026-09-22.
+[^pga-home]: [PostgreSQL Anonymizer — documentation home](https://postgresql-anonymizer.readthedocs.io/en/stable/), fetched 2026-09-22.
+[^pga-rules]: [PostgreSQL Anonymizer — Declare Masking Rules](https://postgresql-anonymizer.readthedocs.io/en/stable/declare_masking_rules/), fetched 2026-09-22.
+[^pga-funcs]: [PostgreSQL Anonymizer — Masking Functions](https://postgresql-anonymizer.readthedocs.io/en/stable/masking_functions/), fetched 2026-09-22.
+[^pga-license]: [gitlab.com/dalibo/postgresql_anonymizer — LICENSE.md](https://gitlab.com/dalibo/postgresql_anonymizer/-/blob/latest/LICENSE.md), fetched 2026-09-22.
+[^tonic-product]: [Tonic Structural — product page](https://www.tonic.ai/products/tonic-structural), fetched 2026-09-22.
+[^tonic-price]: [Tonic — pricing](https://www.tonic.ai/pricing), fetched 2026-09-22.
+[^tonic-quick]: [Tonic Structural — Getting started with the free trial](https://docs.tonic.ai/app/quick-start-guide), fetched 2026-09-22.
+
+## How it decides what is personal data
+
+Three signals feed every decision, and the run above shows all three in its
+reason lines. A column's **name** is checked against a multilingual rule pack
+(`email`, `phone`, `full_name`, and so on — `customers.email: name matches
+email`). Its **sampled values** — about two hundred rows, never the whole
+table — are run through validators built for the same categories: an email
+parser, libphonenumber, a Luhn check for card numbers, a name dictionary
+(`200/200 samples parse as addresses`). And its **neighbours** matter, in two
+ways. A column already at low confidence is raised to suspect the moment
+another column in the same table is at likely or above, because a
+personal-shaped table tends to be personal throughout. And a character column
+with no name or value signal at all — nothing to raise, and not a unique or
+key column — is still swept into free-text masking when it sits beside a
+column the classifier is certain identifies a person. A signal-less column
+that isn't character-typed — an integer, numeric, date or uuid column, the
+shape of a surrogate key like `customers.id` above — is copied verbatim
+regardless of its neighbours; the sweep only ever reaches columns free-text
+masking can apply to. A name hit alone is enough to mask; a value hit alone is
+enough to mask. A column with no name signal, no recognised value shape and no
+personal neighbour in its table is not "unsure" — it is copied; that gap is
+residual 4 below. Nothing here calls out to a network or a model; it runs
+entirely against the box being read.
+
+Every decision earns one line explaining itself — the lines the run above
+printed before a single row moved — and that same reason is what
+`lazyslice.yml` records and what `--json` emits, so a decision that looks
+wrong can be read, not just trusted.
+
+### How to override it
+
+A decision that's wrong can be told so, per column:
+
+```sh
+lazyslice --unmask public.film.description="product catalogue text, no personal data" ...
+```
+
+The bare flag with no reason is refused at exit 2 — "not personal data" is a
+claim someone has to own, not a checkbox. The run records that reason in the
+`lazyslice.yml` it emits, alongside every other decision it made:
+
+```yaml
+columns:
+  public.film.description:
+    category: free_text
+    confidence: possible
+    reason: "name matches description; neighbouring-column rule did not apply (no PII in film)"
+    unmask:
+      reason: "product catalogue text, no personal data"   # never empty; --unmask TABLE.COL=REASON
+      by: flag                                             # or the person's name, for a hand-written entry
+      type: 3e51a0c2                                        # this opt-out expires if the column's type changes
+```
+
+(`masker:` is omitted here — its presence on a column means the run masked
+it, and an unmasked column never carries one.)
+
+Commit that file and the next run — including CI's — needs no flag and asks
+no question. A column the file has never seen is classified fresh, exactly as
+any column is: masked when the classifier lands at `possible` confidence or
+above, copied when it lands at `low` or `none`, and printed under `drift:`
+either way (ADR-004). `--strict-schema` turns any drift into exit 10 instead.
+An opt-out itself only ever narrows what gets copied, never widens it by
+omission — it takes a recorded `unmask` with a reason, never silence.
 
 ## The safety model
 
@@ -313,17 +398,47 @@ residuals are accepted rather than hidden:
    target strictly after one run finishes and strictly before the next run's
    first drop is left alone and unmentioned.
 
+## Exit codes at a glance
+
+Every exit code above 1 names a stage and a reason; `1` is the one code that
+by construction names no reason (an internal failure; run with `--debug`).
+The full table, one row per code with its message template, is
+[docs/ERRORS.md](docs/ERRORS.md). In one line:
+
+`0` ok · `1` internal failure with no code of its own — run with `--debug` ·
+`2` usage — a flag names something that cannot work (this is also the code a
+same-database target is refused with: that check runs at the flag surface,
+before discovery, not as one of the `4`s below) · `3` no source · `4` target
+refused · `5` no usable source credential or masking key · `6` the source
+role can write and `--require-read-only-role` was set · `7` extract or load
+failed · `8` a foreign key does not hold · `9` a masked column still holds a
+source value, or a value that could not be confirmed either way · `10` a
+column the committed config has never seen, under `--strict-schema` · `11` a
+row or memory budget was exceeded · `12` the plan was refused — a column
+cannot be masked in place, or an identifier is missing · `13` the target's
+schema cannot be recreated safely — an unrewritable literal, or an object
+lazyslice does not recreate · `130` interrupted — the in-flight transaction
+rolled back; tables already committed stay as they are, so the target may be
+partly loaded and the next run will truncate it.
+
 ## Building
 
 ```sh
-make check        # lint and unit tests; this is what CI runs
+git clone https://github.com/Liarea/lazyslice
+cd lazyslice
 make build        # bin/lazyslice
+export PATH="$PWD/bin:$PATH"   # the examples above call it as lazyslice
+make check        # lint and unit tests; this is what CI runs
 make integration  # container-backed tests; needs a Docker endpoint
 make egress       # runs the binary with only its two databases reachable and counts every other packet
 ```
 
 The masker is a nested Go module, `github.com/Liarea/lazyslice/mask`, so it can
 be imported by a program that has never heard of lazyslice (ADR-006).
+
+## Roadmap
+
+What's next, and what's deliberately not yet: [ROADMAP.md](ROADMAP.md).
 
 ## Licence
 
