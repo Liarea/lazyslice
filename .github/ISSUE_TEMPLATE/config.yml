@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a vulnerability or a PII miss privately
+    url: https://github.com/Liarea/lazyslice/security/advisories/new
+    about: Do not open a public issue for a masking miss or any other vulnerability. Use GitHub's private advisory form instead — see SECURITY.md.

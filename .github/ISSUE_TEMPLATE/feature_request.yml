@@ -1,0 +1,40 @@
+name: Feature request
+description: Propose a new capability.
+title: "feature: "
+labels: ["type:feature"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        lazyslice has three principles ([CONCEPT.md](https://github.com/Liarea/lazyslice/blob/main/CONCEPT.md#principles)):
+        **zero config**, **safe by default**, and **terminal first**. A feature
+        request must say which one it serves and what it must refuse to do to
+        stay inside it.
+  - type: dropdown
+    id: principle
+    attributes:
+      label: Which principle does this serve?
+      options:
+        - Zero config
+        - Safe by default
+        - Terminal first
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What is the feature?
+      description: What it does and why you want it.
+    validations:
+      required: true
+  - type: textarea
+    id: refuses
+    attributes:
+      label: What must it refuse to do?
+      description: >
+        The boundary that keeps it inside the principle above — e.g. a
+        masking feature must refuse to ship a mode that copies an
+        unclassified column as-is; a config feature must refuse to demand a
+        YAML file before first run.
+    validations:
+      required: true
