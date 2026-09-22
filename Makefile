@@ -97,26 +97,40 @@ egress:
 ## Builds the binary, starts two disposable postgres:16 containers on
 ## unusual host ports (GIF_SRC_PORT, GIF_TGT_PORT) named with a suffix this
 ## invocation's own shell PID owns so a concurrent run never collides, waits
-## for both with pg_isready, loads testdata/pagila/pagila-schema.sql and
-## pagila-data.sql into the source with psql, then hands docs/media/first-run.tape
-## to vhs with the two DSNs (sslmode=disable) exported for it to read. Both
+## for both from the host (psql/pg_isready -h 127.0.0.1 -p <published port>,
+## not `docker exec` — the recording connects the same way, over the
+## published port, so readiness must be proven the same way; T-0289), loads
+## testdata/pagila/pagila-schema.sql and pagila-data.sql into the source
+## with psql, creates GIF_READONLY_ROLE in the source (LOGIN, NOSUPERUSER,
+## CONNECT on the database, USAGE on schema public, SELECT on every table in
+## it — the exact role the CodeRoleWritable warning
+## (internal/event/catalogue.yml) recommends; verified empty by running the
+## binary under it, T-0289), then hands docs/media/first-run.tape to vhs
+## with the source DSN pointed at that role and the target DSN still the
+## superuser (sslmode=disable, both), exported for the tape to read. Both
 ## containers are removed on every exit path — success, a failed load, a
 ## failed recording — by a trap set before either is started. Refuses if the
 ## resulting GIF is over GIF_MAX_BYTES, so a regression in vhs, a theme
 ## change or a wider terminal cannot silently bloat what ships in the repo.
+## Also refuses if docs/media/pace.awk paced fewer than 3 of the masking
+## lines it anchors on (docs/media/.gif-pace-status, written by the tape's
+## own hidden postamble under `set -o pipefail`): the tape's output format
+## changed under it and the recording is not trustworthy.
 ##
 ## Needs vhs (charmbracelet/vhs, pinned nowhere else because it produces a
 ## committed asset rather than gating a check) and a Docker endpoint; neither
 ## is installed by `make tools`.
-GIF_TAPE      := docs/media/first-run.tape
-GIF_OUT       := docs/media/first-run.gif
-GIF_MAX_BYTES := 4194304
-GIF_SUFFIX    := $(shell echo $$$$)
-GIF_SRC_NAME  := lazyslice-firstrun-src-$(GIF_SUFFIX)
-GIF_TGT_NAME  := lazyslice-firstrun-tgt-$(GIF_SUFFIX)
-GIF_SRC_PORT  := 55901
-GIF_TGT_PORT  := 55902
-GIF_PASSWORD  := lazyslice-tape
+GIF_TAPE            := docs/media/first-run.tape
+GIF_OUT             := docs/media/first-run.gif
+GIF_MAX_BYTES       := 4194304
+GIF_SUFFIX          := $(shell echo $$$$)
+GIF_SRC_NAME        := lazyslice-firstrun-src-$(GIF_SUFFIX)
+GIF_TGT_NAME        := lazyslice-firstrun-tgt-$(GIF_SUFFIX)
+GIF_SRC_PORT        := 55901
+GIF_TGT_PORT        := 55902
+GIF_PASSWORD        := lazyslice-tape
+GIF_READONLY_ROLE   := lazyslice_tape_reader
+GIF_READONLY_PASS   := lazyslice-tape-ro
 
 gif: build
 	@if ! command -v vhs >/dev/null 2>&1; then \
@@ -127,33 +141,48 @@ gif: build
 		echo "gif: psql not found; install the PostgreSQL client"; \
 		exit 1; \
 	fi
-	@set -eu; \
+	@if ! command -v pg_isready >/dev/null 2>&1; then \
+		echo "gif: pg_isready not found; install the PostgreSQL client"; \
+		exit 1; \
+	fi
+	@set -e; set -o pipefail; \
 	trap 'docker rm -f $(GIF_SRC_NAME) $(GIF_TGT_NAME) >/dev/null 2>&1 || true' EXIT; \
 	echo "==> gif: starting $(GIF_SRC_NAME) on $(GIF_SRC_PORT) and $(GIF_TGT_NAME) on $(GIF_TGT_PORT)"; \
 	docker run -d --name $(GIF_SRC_NAME) -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=$(GIF_PASSWORD) -e POSTGRES_DB=pagila -p 127.0.0.1:$(GIF_SRC_PORT):5432 postgres:16 >/dev/null; \
 	docker run -d --name $(GIF_TGT_NAME) -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=$(GIF_PASSWORD) -e POSTGRES_DB=pagila -p 127.0.0.1:$(GIF_TGT_PORT):5432 postgres:16 >/dev/null; \
-	for name in $(GIF_SRC_NAME) $(GIF_TGT_NAME); do \
-		echo "==> gif: waiting for $$name"; \
+	for port in $(GIF_SRC_PORT) $(GIF_TGT_PORT); do \
+		echo "==> gif: waiting for 127.0.0.1:$$port"; \
 		ready=0; \
 		for i in $$(seq 1 60); do \
-			if docker exec $$name pg_isready -U postgres >/dev/null 2>&1; then ready=1; break; fi; \
+			if pg_isready -h 127.0.0.1 -p $$port -U postgres >/dev/null 2>&1; then ready=1; break; fi; \
 			sleep 1; \
 		done; \
-		if [ "$$ready" != 1 ]; then echo "gif: $$name did not become ready within 60s"; exit 1; fi; \
+		if [ "$$ready" != 1 ]; then echo "gif: 127.0.0.1:$$port did not become ready within 60s"; exit 1; fi; \
 	done; \
 	src_dsn="postgres://postgres:$(GIF_PASSWORD)@127.0.0.1:$(GIF_SRC_PORT)/pagila?sslmode=disable"; \
+	src_ro_dsn="postgres://$(GIF_READONLY_ROLE):$(GIF_READONLY_PASS)@127.0.0.1:$(GIF_SRC_PORT)/pagila?sslmode=disable"; \
 	tgt_dsn="postgres://postgres:$(GIF_PASSWORD)@127.0.0.1:$(GIF_TGT_PORT)/pagila?sslmode=disable"; \
 	echo "==> gif: loading Pagila into the source"; \
 	psql "$$src_dsn" -v ON_ERROR_STOP=1 -q -f testdata/pagila/pagila-schema.sql; \
 	psql "$$src_dsn" -v ON_ERROR_STOP=1 -q -f testdata/pagila/pagila-data.sql; \
 	psql "$$src_dsn" -v ON_ERROR_STOP=1 -q -c 'ANALYZE;'; \
+	echo "==> gif: creating the read-only role $(GIF_READONLY_ROLE) the CodeRoleWritable warning recommends"; \
+	psql "$$src_dsn" -v ON_ERROR_STOP=1 -q -c "CREATE ROLE $(GIF_READONLY_ROLE) LOGIN PASSWORD '$(GIF_READONLY_PASS)' NOSUPERUSER;"; \
+	psql "$$src_dsn" -v ON_ERROR_STOP=1 -q -c "GRANT CONNECT ON DATABASE pagila TO $(GIF_READONLY_ROLE);"; \
+	psql "$$src_dsn" -v ON_ERROR_STOP=1 -q -c "GRANT USAGE ON SCHEMA public TO $(GIF_READONLY_ROLE);"; \
+	psql "$$src_dsn" -v ON_ERROR_STOP=1 -q -c "GRANT SELECT ON ALL TABLES IN SCHEMA public TO $(GIF_READONLY_ROLE);"; \
 	echo "==> gif: recording $(GIF_TAPE)"; \
-	rm -f docs/media/.gif-status; \
-	LAZYSLICE_TAPE_SRC="$$src_dsn" LAZYSLICE_TAPE_TGT="$$tgt_dsn" vhs $(GIF_TAPE); \
+	rm -f docs/media/.gif-status docs/media/.gif-pace-status; \
+	LAZYSLICE_TAPE_SRC="$$src_ro_dsn" LAZYSLICE_TAPE_TGT="$$tgt_dsn" vhs $(GIF_TAPE); \
 	run_status=$$(cat docs/media/.gif-status 2>/dev/null || echo missing); \
-	rm -f docs/media/.gif-status; \
+	pace_status=$$(cat docs/media/.gif-pace-status 2>/dev/null || echo missing); \
+	rm -f docs/media/.gif-status docs/media/.gif-pace-status; \
 	if [ "$$run_status" != "0" ]; then \
 		echo "gif: the recorded lazyslice run exited $$run_status (expected 0); the tape recorded a failed or garbled run"; \
+		exit 1; \
+	fi; \
+	if [ "$$pace_status" != "0" ]; then \
+		echo "gif: docs/media/pace.awk exited $$pace_status (expected 0): it paced fewer than 3 masking lines, so the tape's output no longer matches what pace.awk anchors on"; \
 		exit 1; \
 	fi; \
 	size=$$(wc -c <"$(GIF_OUT)" | tr -d ' '); \
