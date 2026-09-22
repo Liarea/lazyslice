@@ -3,11 +3,12 @@ export const meta = {
   description: 'Phase 6: the GIF, the README as landing page, the launch-post drafts and the issue templates, each through implement.js; the posting itself is the maintainer\'s',
   phases: [
     { title: 'Material', detail: 'docs/BUILD_PLAN.md prompts 6.1 to 6.4 as tasks the orchestrator can run: GIF, README, posts, templates. The docs-site decision (T-0283) and the maintainer\'s paragraph (T-0282) are outside this script.' },
+    { title: 'v0.2.0', detail: 'what a stranger hits in the first ten minutes: go install, and a first-name column masked with a full name. The orchestrator cuts mask/v0.1.0 with make tag before this step runs.' },
   ],
 }
 const REPO = '/Users/gareth/personal_repos/lazyslice'
 const IMPL = `${REPO}/.claude/workflows/implement.js`
-// args: { step: 'material', from?: index }  from skips merged tasks; a task's brief starts with `python3 tools/tracker.py show T-NNNN` (T-0196: open tasks are GitHub issues, not files)
+// args: { step: 'material' | 'v020', from?: index }  from skips merged tasks; a task's brief starts with `python3 tools/tracker.py show T-NNNN` (T-0196: open tasks are GitHub issues, not files)
 const step = (args && args.step) || 'material'
 const from = (args && args.from) || 0
 
@@ -22,6 +23,24 @@ const MATERIAL = [
     brief: `Read the task with python3 tools/tracker.py show T-0281, SECURITY.md in full, CONCEPT.md's principles, CONTRIBUTING.md and ROADMAP.md "Versioning and releases". Write GitHub issue forms (YAML, .github/ISSUE_TEMPLATE/): bug_report.yml whose first visible text says never to paste a row, a dump or a screenshot of one and asks for the shape (table and column names and types, the reasons lines, the exit code and its message, the lazyslice version and Postgres major), pii_miss.yml whose body is one paragraph pointing at SECURITY.md's private route and a single checkbox confirming the report contains no real value, feature_request.yml that requires the requester to name which of the three principles the feature serves and what it must refuse to do, and config.yml with blank_issues_enabled false and a contact link to the security advisory page. Templates apply type:bug or type:feature (labels that exist). CHANGELOG.md: five lines saying release notes live on the GitHub releases page, are generated from commit bodies by make relnotes, and that this file is a pointer until v1.0.0 (ROADMAP.md). CONTRIBUTING.md gets one line naming the templates. Prove each YAML parses (python3 -c with a yaml library if present, else ruby -ryaml) and that every label named exists (gh label list); open no issue and change no label. In your return value's checks_output write "documentation task: yaml parsed, labels checked" and set checks_passed true.` },
 ]
 
+const V020 = [
+  { id: 'T-0285', title: 'go install works: go.mod requires the mask module by version; go.work for local development', model: 'sonnet', effort: 'high', reviewers: 1, stage: 'foundations', paths: ['go.mod', 'go.sum', 'go.work', 'go.work.sum', 'mask/go.mod', 'mask/go.sum', 'Makefile', '.github/workflows/ci.yml', 'README.md', 'CONTRIBUTING.md', 'docs/RUNBOOK.md', 'internal/CLAUDE.md', 'mask/CLAUDE.md'], checks: 'check',
+    brief: `Read the task with python3 tools/tracker.py show T-0285 (its log says the tag part is already done: mask/v0.1.0 exists on origin, cut by the orchestrator, so the module proxy can serve github.com/Liarea/lazyslice/mask v0.1.0), README.md's Install section (the paragraph that says go install does not work yet), ADR-006 (why mask is its own module), and the Makefile's check target. Do it in this order and prove each step. (1) go.mod: drop the replace directive and require github.com/Liarea/lazyslice/mask v0.1.0; go mod tidy; go.sum gains the module's entries. (2) go.work at the repo root with use ./ and ./mask (commit go.work and go.work.sum), so a change under mask/ is seen by the root module during development without a replace; say in mask/CLAUDE.md and internal/CLAUDE.md how a change to mask/ now reaches the binary (edit, test in the workspace, tag mask/vX.Y.Z with make tag, bump the require) and that go mod tidy runs outside the workspace. (3) Makefile: a target install-proof that builds the root module the way go install does, with GOWORK=off and GOFLAGS=-mod=mod in a temporary GOMODCACHE, so the replace can never come back unnoticed; wire it into make check only if it stays under ten seconds warm, otherwise into a CI job named install-proof on ubuntu that runs go install github.com/Liarea/lazyslice/cmd/lazyslice@$GITHUB_SHA-style (use the checked-out tree: GOWORK=off go build ./cmd/lazyslice from a fresh module cache) and then runs the binary with --version. (4) Prove go install of the tagged v0.1.0 still fails (the tag predates this change; that is expected and the README must say the fix is in the next tag) and that HEAD's tree builds with GOWORK=off from an empty GOMODCACHE and GOPATH in a scratch directory; paste both. (5) README.md: replace the paragraph that says go install does not work with the go install line for the next tag (v0.2.0) and one sentence that v0.1.0's tag predates the fix; CONTRIBUTING.md gets the workspace rule in one line. make check passes; docs/RUNBOOK.md's release section gains two lines: a change under mask/ needs a mask/vX.Y.Z tag and a require bump before the tool's tag, and make tag TAG=mask/vX.Y.Z cuts it. Run make check and paste the output.` },
+  { id: 'T-0287', title: 'The person_name masker respects the column role: given name, surname, or full name', model: 'sonnet', effort: 'high', reviewers: 1, stage: 'mask', paths: ['mask/', 'internal/classify/', 'internal/pipeline/', 'internal/transform/', 'internal/emit/', 'internal/verify/', 'testdata/regressions/', 'docs/media/', 'ARCHITECTURE.md', 'THREAT_MODEL.md'], integration: './internal/classify/... ./internal/transform/... ./internal/verify/...',
+    brief: `Read the task with python3 tools/tracker.py show T-0287, ADR-006, ARCHITECTURE.md section 5 (the masker contract and the category maskers), mask/CLAUDE.md, the person_name masker in mask/, internal/classify's name rules for person_name (rules.yml and where the Decision is built), and how the phone region reaches the masker (Decision field, transform, emit, verify) since this follows the same route. Work in the go.work workspace T-0285 landed: a change under mask/ is visible to the root module during development, and the orchestrator tags mask/v0.2.0 and bumps the require when this merges, so do not edit go.mod's require. The change: a person_name column carries a role, given, family or full, decided at classify time from the column's name (first, given, forename, fname -> given; last, family, surname, lname -> family; anything else, including name and full_name -> full), carried on the Decision beside the category, written to lazyslice.yml and read back from it, and honoured by the masker: given emits a given name only, family a surname only, full the existing "Given Family". Determinism is unchanged: the same input under the same key and the same role masks the same way, and a role change is a category change for verify's purposes (the residual scan still compares canonical equality; the second net's name validator still scores a single given name or a single surname as a name, check it does). Prove it with mask/'s tests, a classify test for each role, a regression under testdata/regressions/ with first_name, last_name and full_name columns whose expected target rows show one word, one word and two words, and make torture (the regression corpus changed). Re-record the GIF with make gif afterwards and read its last frame back: public.customer.first_name shows one given name. Run make check, the named integration packages and make torture; paste the output.` },
+]
+
+if (step === 'v020') {
+  phase('v0.2.0')
+  const results = []
+  for (const t of V020.slice(from)) {
+    const r = await workflow({ scriptPath: IMPL }, { ...t, model: t.model || 'sonnet', effort: t.effort || 'medium' })
+    results.push(r)
+    if (!r || r.status !== 'merged') { log(`Stopped at ${t.id}`); return { results, stopped_at: t.id } }
+  }
+  return { results }
+}
+
 if (step === 'material') {
   phase('Material')
   const results = []
@@ -33,5 +52,5 @@ if (step === 'material') {
   return { results }
 }
 
-log(`unknown step '${step}'; this script has one: material`)
+log(`unknown step '${step}'; this script has two: material, v020`)
 return { results: [], stopped_at: null }
