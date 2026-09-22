@@ -3,12 +3,12 @@ id: T-0196
 title: "Migrate the tracker to GitHub Issues and Projects behind the existing tools/tracker.py command surface"
 epic: E5
 phase: 5
-status: open
+status: done
 owner: sonnet
 created: 2026-09-15
 started: ""
-closed: ""
-outcome: ""
+closed: 2026-09-22
+outcome: done
 ---
 
 # T-0196 · Migrate the tracker to GitHub Issues and Projects behind the existing tools/tracker.py command surface
@@ -19,20 +19,14 @@ The maintainer 2026-09-16: use the GitHub project system instead of text files. 
 
 ## Acceptance
 
-
+—
 
 ## Log
 
-- 2026-09-15 created
-
-- 2026-09-15 2026-09-16 the maintainer: project scope granted; internal AI tasks are shown publicly. Orchestrator created one GitHub Project (lazyslice) with fields Epic, Owner, Type, Tracker id and Status columns Backlog/Ready/In progress/Blocked/Done/Cancelled; repo labels epic:*, owner:*, type:*, area:*, filed-by-agent; milestones v0.1.0, v0.2.0, v1.0.0, Later. Views (Board by Status, Table, Roadmap by milestone) are added in the UI. The wrapper maps: tracker status open->Ready or Backlog (E9), blocked->Blocked, done->Done, cancelled->Cancelled; epic->Epic field and epic label; phase->milestone; owner->Owner; post-mortem->closing comment.
-
-- 2026-09-15 2026-09-16 the maintainer: project scope granted; internal AI tasks are shown publicly. Orchestrator created GitHub Project 3 (lazyslice, linked to the repo) with fields Epic, Owner, Kind (Type is a reserved name), Tracker id, and Status columns Backlog/Ready/In progress/Blocked/Done/Cancelled; repo labels epic:*, owner:*, type:*, area:*, filed-by-agent; milestones v0.1.0, v0.2.0, v1.0.0, Later. Views (Board by Status, Table, Roadmap by milestone) are added in the UI. Wrapper mapping: tracker open -> Ready (or Backlog for E9), blocked -> Blocked, done -> Done, cancelled -> Cancelled; epic -> Epic field and epic label; phase -> milestone; owner -> Owner field and label; post-mortem -> closing comment.
-
-- 2026-09-15 the notes above dated 2026-09-16 describe 2026-09-15; the day was misdated in the prose, not in the created field
-
-- 2026-09-17 moved to E5 phase 5
+- 2026-09-22 2026-09-22 2026-09-22 the orchestrator ran the live migrate on 4c50999 after a clean dry run: 84 open task files matched their issues, 0 created, 84 removed; this note is the smoke test of a mutating command over gh
+- 2026-09-22 2026-09-22 moved to E5 phase 5
+- 2026-09-22 closed: done
 
 ## Post-mortem
 
-_(filled on close: what went well, what went badly, what we change next time)_
+went well: every pre-existing subcommand kept its arguments and stdout contract while moving over gh, with show added; the migration matched all 84 open task files to the issues the one-way mirror had already created, created nothing, and removed the files in one pass after a clean dry run; 39 unit tests drive every command against a fake gh so nothing during development touched the live repository; the live smoke test (log, move, and this close) worked first time (commit 4c50999) | went badly: review found migrate deleting a file on a closed or unmatched card, and the first landing swept two pyc files into the commit because __pycache__ was not ignored; seven low findings remain, of which two matter before heavy use: gh calls have no timeout, and close closes the issue before writing the archive file | change next time: a developer brief for a tool that writes to a shared service names the failure ordering it must keep (write the durable record first, then the remote state) as an explicit rule, not something a reviewer has to catch
