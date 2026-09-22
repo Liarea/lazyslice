@@ -6,10 +6,11 @@ personal data unmasked is not a cosmetic defect: it is the failure the tool was
 built to prevent.
 
 **lazyslice is pre-release.** The pipeline runs end to end against PostgreSQL,
-but there is no supported version until `v0.1.0` is tagged, and the findings of
+but there is no supported version until `v0.1.0` is tagged. The findings of
 the independent review of 2026-09-09
-([docs/reviews/2026-09-09/REVIEW.md](docs/reviews/2026-09-09/REVIEW.md)) are
-tracked in [tracker/](tracker/) until each lands. Report anything you find
+([docs/reviews/2026-09-09/REVIEW.md](docs/reviews/2026-09-09/REVIEW.md)) and
+of six red-team rounds have landed; what is still open is an
+[issue](https://github.com/Liarea/lazyslice/issues). Report anything you find
 anyway — a hole in the design is cheaper to fix than a hole in the code.
 
 ## Reporting a masking miss, or any other vulnerability
