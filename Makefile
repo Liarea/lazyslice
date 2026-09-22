@@ -38,7 +38,7 @@ LDFLAGS := -s -w \
 	-X main.commit=$(COMMIT) \
 	-X main.date=$(DATE)
 
-.PHONY: all build test lint integration egress torture vet-tagged forbidden unsafe-flags spdx fmt check tools clean help docs docs-check vulncheck bench relnotes bench-compare tools-test
+.PHONY: all build test lint integration egress torture vet-tagged forbidden unsafe-flags spdx fmt check tools clean help docs docs-check vulncheck bench relnotes bench-compare tools-test tag
 
 ## build: compile the binary into bin/
 build:
@@ -588,6 +588,16 @@ snapshot:
 		echo "goreleaser not found; run: make tools"; exit 1; \
 	fi
 	$(GORELEASER) release --snapshot --clean --skip=$(SNAPSHOT_SKIP)
+
+## tag: cut a release tag on HEAD once every precondition docs/RUNBOOK.md names holds
+## (TAG=vX.Y.Z; TAG_FLAGS=--dry-run runs the checks only, --no-watch does not wait
+## for the release run). This is the one way a tag leaves the checkout: it refuses
+## unless the tree is clean and is origin/main, the tag is new, README's Status
+## heading names it, every action release.yml pins resolves, goreleaser check
+## passes and CI is green on the commit; then it tags, pushes and watches the
+## release run. It builds and publishes nothing itself.
+tag:
+	@tools/release/tag.sh "$(TAG)" $(TAG_FLAGS)
 
 ## clean: remove build output
 clean:
