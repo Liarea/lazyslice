@@ -172,6 +172,47 @@ jobs:
       - name: no flag, field, key or variable turns masking off
         run: make forbidden
 
+  # T-0285: proves `go install github.com/Liarea/lazyslice/cmd/lazyslice`
+  # resolves github.com/Liarea/lazyslice/mask from the tagged module the
+  # proxy serves rather than from this tree's own `go.work` or a `replace`
+  # directive. `make install-proof` builds a copy of the checked-out tree
+  # with mask/ and go.work removed and a fresh GOMODCACHE — the same shape
+  # `go install` runs outside this tree, and proven against a reintroduced
+  # `replace` by the target's own negative control — rather than
+  # `go install ...@$GITHUB_SHA`: the commit under test is not tagged and
+  # has no public go.sum entry yet, so the only thing a real `go install` of
+  # it could prove here is that the proxy has *not* heard of it. Not part of
+  # `make check`: a fresh GOMODCACHE re-downloads every dependency, which
+  # measured over ten seconds warm on a laptop, too slow for every push.
+  install-proof:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: go install resolves the mask module without go.work or a replace (T-0285)
+        run: make install-proof
+
+      # T-0285 review: go.work at the repo root makes every ordinary build
+      # and test in this tree (this job's own `install-proof` target aside,
+      # which builds a mask/-free copy) compile mask/ from the workspace
+      # directory rather than from the version go.mod requires, because a
+      # workspace member always wins. The `test` job below never sets
+      # GOWORK=off, so it is silent on that gap. This step is: does the
+      # test suite even build and pass against the *versioned* mask, with
+      # go.work out of the way, on the actual checkout (not install-proof's
+      # scratch copy, so this also stands in for `go vet`/`go test`
+      # ordinary compilation, which install-proof does not exercise). It
+      # does not reach goreleaser's own build (.goreleaser.yaml, outside
+      # this task's authorized paths; tracked in tools/tracker.py as
+      # follow-up work — see mask/CLAUDE.md and docs/RUNBOOK.md).
+      - name: build and test against the versioned mask module, go.work out of the way (T-0285)
+        run: |
+          GOWORK=off go build ./...
+          GOWORK=off go test -race -count=1 ./...
+
   test:
     strategy:
       fail-fast: false

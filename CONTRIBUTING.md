@@ -121,6 +121,12 @@ public contract, and changing it is a major version of the module.
 Adding a masker is a pull request to that module. **The classifier is not
 pluggable**, by design and not by omission.
 
+The repo root carries a `go.work` (`use ./ ./mask`) so a local edit under
+`mask/` is built and tested by the root module without a `replace` directive;
+`go mod tidy` still runs outside the workspace (`GOWORK=off`), and
+`mask/CLAUDE.md` has the release step that gets a change under `mask/` into
+the root module's `go.mod`.
+
 ## Security
 
 Do not open a public issue for a masking miss or any other vulnerability. See

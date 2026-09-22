@@ -28,6 +28,17 @@ depend on. See each subdirectory's own CLAUDE.md for which.
 **Test.** `go build ./internal/...` then `go test -race ./internal/...`. Test
 one package with `go test ./internal/<pkg>/...`.
 
+**`mask/` reaches this binary through `go.work` while you edit it, and
+through `go.mod`'s tagged `require` for everyone else** (T-0285). The repo
+root's `go.work` (`use ./ ./mask`) makes a local edit under `mask/` visible
+here immediately, with no `replace` and no tag needed; `go install`, CI's
+`install-proof` job and anyone who has not run `go work init` all build with
+`GOWORK=off` and see only the version `go.mod` requires. So a change under
+`mask/` that this package needs is not done at edit time: it needs its own
+`mask/vX.Y.Z` tag and a bump of the root `require` before it reaches anyone
+outside the workspace — see `mask/CLAUDE.md`'s "Workspace and release" for
+the exact steps.
+
 **Never:** put pipeline logic in `cmd/`; let a stage package reach another
 stage package directly instead of through `pipeline`'s types; let a
 value-bearing field (a row, a DSN with a password) leave the type it is

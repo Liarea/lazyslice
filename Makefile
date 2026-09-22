@@ -38,7 +38,7 @@ LDFLAGS := -s -w \
 	-X main.commit=$(COMMIT) \
 	-X main.date=$(DATE)
 
-.PHONY: all build test lint integration egress torture vet-tagged forbidden unsafe-flags spdx fmt check tools clean help docs docs-check vulncheck bench relnotes bench-compare tools-test tag gif
+.PHONY: all build test lint integration egress torture vet-tagged forbidden unsafe-flags spdx fmt check install-proof tools clean help docs docs-check vulncheck bench relnotes bench-compare tools-test tag gif
 
 ## build: compile the binary into bin/
 build:
@@ -634,6 +634,102 @@ tools-test:
 ## the release path should block on it too. tools-test needs no network
 ## either — it is a fake gh — so it belongs here and not with vulncheck.
 check: lint forbidden unsafe-flags docs-check vet-tagged tools-test test
+
+## install-proof: build the root module the way `go install` would — from a
+## copy of the working tree with mask/ and go.work removed, and a fresh
+## module cache — so a local override of github.com/Liarea/lazyslice/mask
+## can never come back unnoticed (T-0285).
+##
+## GOWORK=off alone is not the point, and used to be: a workspace member
+## always wins over a versioned requirement, but so does a relative
+## `replace github.com/Liarea/lazyslice/mask => ./mask` sitting next to
+## go.mod, and GOWORK=off never looks at `replace` at all. A T-0285 review
+## reproduced exactly that against the previous version of this target: it
+## appended a `replace` to go.mod in a scratch copy of this tree and
+## `make install-proof` built and ran clean, because GOWORK=off had
+## disabled the workspace but ./mask was still sitting right there to
+## satisfy the replace. Building from a `git archive HEAD` copy with mask/
+## deleted closes that gap structurally — there is nothing at ./mask for a
+## `replace` to resolve to, workspace or not — and proves what T-0285 asked
+## for: go.mod resolves the mask module from the tagged version the proxy
+## serves, not from anything sitting next to it. go.work and go.work.sum
+## are deleted from the copy too, so a future go directive that reads
+## go.work even under GOWORK=off (it does not today) still could not use it.
+##
+## The negative control appends that same `replace` to the scratch copy's
+## go.mod, where ./mask does not exist, and asserts the build now fails —
+## so this target is proven to catch the case it exists for rather than
+## merely asserted to (the same shape as `unsafe-flags`'s self-test, above).
+##
+## GOFLAGS=-mod=readonly, not -mod=mod: a real `go install pkg@version`
+## never reads or writes a go.sum in the tree it builds, so a go.sum entry
+## it is missing is a hard failure, not something silently added back. The
+## previous -mod=mod let a deleted go.sum line pass and rewrote it into the
+## tree — reproduced the same way, by deleting the mask module's two lines
+## from go.sum and observing `make install-proof` pass and rewrite them.
+## Building from the scratch copy also means this target can no longer
+## write anything into the real checkout either way.
+##
+## The copy is `git ls-files --cached --others --exclude-standard` (the same
+## listing `spdx`, above, uses), read into the scratch tree file by file,
+## rather than `git archive HEAD`: every other check in this Makefile reads
+## the working tree, uncommitted edits included, and a `make check` run
+## before a commit is the one CLAUDE.md asks for ("run the checks... paste
+## the result" — not "commit first"). `git archive HEAD` would silently
+## grade the last commit instead of the tree in front of the developer,
+## which is exactly wrong the day this file's own go.mod/go.sum change is
+## still unstaged. `--exclude-standard` also keeps bin/, dist/ and other
+## gitignored build output out of the copy, the same way `spdx` keeps them
+## out of its listing.
+##
+## GOMODCACHE is a fresh scratch directory so nothing already on this
+## machine's module cache — including an old build made before the
+## `replace` directive was dropped — can hide a regression.
+##
+## Not a prerequisite of `check`: a fresh GOMODCACHE re-downloads every
+## dependency, which measured over ten seconds warm on this machine, too
+## slow for every push. `.github/workflows/ci.yml`'s `install-proof` job
+## runs this target instead, on every push, and docs/RUNBOOK.md's release
+## section is what actually gates a tag on it being green.
+##
+## `set -e; set -o pipefail;` is explicit in the recipe body, not left to
+## this Makefile's `.SHELLFLAGS`: the whole recipe is one shell invocation
+## (backslash-continued), and this machine's default `make` (GNU Make 3.81
+## on macOS) silently ignores `.SHELLFLAGS` — it was added in 3.82 — so
+## without an explicit `set -e` here, a failing build inside `( cd ... &&
+## go build ... )` fell through to `"$$scratch/$(BINARY)" --version`
+## (which also failed, binary absent) and then the closing `echo`, which
+## returned 0. Reproduced: delete the mask module's two lines from go.sum
+## in a scratch copy and run `make install-proof` — before this line it
+## printed the build's "missing go.sum entry" error, then "No such file or
+## directory" for --version, then still claimed success and exited 0. The
+## `-o pipefail` half matters for the `git ls-files | ( cd ... && xargs
+## ... )` copy step below: without it, a failure on the `git ls-files` side
+## of that pipe (for example, run from a directory that is not a git
+## checkout) is masked by the right-hand `xargs`, which exits 0 on empty
+## input.
+install-proof:
+	@set -e; set -o pipefail; \
+	scratch=$$(mktemp -d); \
+	trap 'GOMODCACHE="$$scratch/mod" go clean -modcache >/dev/null 2>&1 || true; GOMODCACHE="$$scratch/negmod" go clean -modcache >/dev/null 2>&1 || true; rm -rf "$$scratch"' EXIT; \
+	echo "==> install-proof: copying the working tree (git-tracked and untracked-but-not-ignored files) into a scratch tree with mask/ and go.work removed"; \
+	mkdir -p "$$scratch/src"; \
+	git ls-files -z --cached --others --exclude-standard | ( cd "$$scratch/src" && xargs -0 -I{} sh -c 'mkdir -p "$$(dirname "$$1")" && cp -p "$(CURDIR)/$$1" "$$1"' _ {} ); \
+	rm -rf "$$scratch/src/mask" "$$scratch/src/go.work" "$$scratch/src/go.work.sum"; \
+	cp "$$scratch/src/go.mod" "$$scratch/go.mod.orig"; \
+	echo "==> install-proof: negative control — a replace directive to the now-absent ./mask must fail the build"; \
+	printf '\nreplace github.com/Liarea/lazyslice/mask => ./mask\n' >>"$$scratch/src/go.mod"; \
+	if ( cd "$$scratch/src" && GOFLAGS=-mod=mod GOMODCACHE="$$scratch/negmod" go build -o "$$scratch/negcontrol" ./cmd/$(BINARY) ) >"$$scratch/negcontrol.log" 2>&1; then \
+		echo "install-proof: negative control failed — a replace directive to a nonexistent ./mask still built the binary; this target no longer proves anything about a reintroduced replace"; \
+		cat "$$scratch/negcontrol.log"; \
+		exit 1; \
+	fi; \
+	echo "==> install-proof: negative control failed to build, as expected"; \
+	cp "$$scratch/go.mod.orig" "$$scratch/src/go.mod"; \
+	echo "==> install-proof: GOFLAGS=-mod=readonly GOMODCACHE=$$scratch/mod go build ./cmd/$(BINARY) (scratch copy, mask/ and go.work removed, no replace)"; \
+	( cd "$$scratch/src" && GOFLAGS=-mod=readonly GOMODCACHE="$$scratch/mod" go build -o "$$scratch/$(BINARY)" ./cmd/$(BINARY) ); \
+	"$$scratch/$(BINARY)" --version; \
+	echo "==> install-proof: built and ran from a fresh module cache and a mask/-free, go.work-free copy of the tree, with a reintroduced replace refused by the negative control above"
 
 ## tools: install the pinned build tools into bin/tools
 tools:
