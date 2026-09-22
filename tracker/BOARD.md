@@ -8,8 +8,8 @@
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 1 | 0 | 107 | 0 | 0 |
-| E6 Launch | 6 | 5 | 0 | 9 | 0 | 0 |
-| E9 Later | later | 88 | 0 | 34 | 6 | 0 |
+| E6 Launch | 6 | 2 | 0 | 12 | 0 | 0 |
+| E9 Later | later | 89 | 0 | 34 | 7 | 0 |
 
 ## Open and in progress
 
@@ -91,7 +91,6 @@
 - T-0266 [open] E9 · The second net's surrogate-key exemption is measured against a key with no sequence or identity default (opus)
 - T-0267 [open] E9 · Workflow scripts carry the checkout's absolute home path in a REPO constant (sonnet)
 - T-0268 [open] E9 · lazyslice doctor prints the stated false negatives, as ARCHITECTURE.md says it does (sonnet)
-- T-0269 [open] E6 · A timestamp column's reason line says its samples look like secrets (sonnet)
 - T-0272 [open] E9 · Per-leaf categories for JSON documents on the Decision, so an email leaf is replaced by a fake email rather than filler (opus)
 - T-0274 [open] E9 · The root decision line and the plan's own RootReason give different reasons when a name preference breaks a tie (sonnet)
 - T-0275 [open] E9 · tracker.py: close writes the archive file before it closes the issue, and every gh call has a timeout (sonnet)
@@ -100,30 +99,33 @@
 - T-0278 [open] E9 · Release notes name the range as 'since the first commit' when the previous tag is the root (sonnet)
 - T-0282 [open] E6 · Write the 'why I built this' paragraph for the README (human)
 - T-0283 [open] E6 · Decide whether v0.2.0 ships a docs site (mkdocs-material on GitHub Pages) or the in-repo docs stay the docs (human)
-- T-0286 [open] E6 · research/POSTMORTEMS.md carries two stale facts the blog draft inherited (sonnet)
 - T-0291 [open] E9 · Makefile's .SHELLFLAGS (-eu -o pipefail) is silently ignored by macOS's GNU Make 3.81 (sonnet)
 - T-0292 [open] E9 · person_name role masking can collide with real name corpora on ordinary tables ()
 - T-0295 [open] E9 · second net's dictionary rule has no single-word check, and T-0287 makes that shape normal (sonnet)
 - T-0296 [open] E9 · tracker.py retries a GitHub GraphQL secondary rate limit with backoff instead of failing the write (sonnet)
-- T-0297 [open] E6 · A phone column's reason line says its digits parse as MAC addresses (sonnet)
-- T-0298 [open] E9 · Add a digit-run/phone-without-plus signal so plain 10-12 digit columns are not left to Luhn chance ()
+- T-0299 [open] E9 · internal/classify: two stale anyMatched comments and a Pagila test that no longer proves the samples look like secrets (sonnet)
+- T-0300 [open] E9 · A name column whose values carry digits is masked as an address (sonnet)
 
 ## Recently closed
 
 - T-0065 [done] E6 · 20-second VHS GIF of the first run on Pagila → done
 - T-0155 [done] E5 · v0.0.1 proves the release pipeline end to end: goreleaser, the tap cask, brew install prints a version → done
 - T-0196 [done] E5 · Migrate the tracker to GitHub Issues and Projects behind the existing tools/tracker.py command surface → done
+- T-0269 [done] E6 · A timestamp column's reason line says its samples look like secrets → done
 - T-0279 [done] E6 · README as the landing page: GIF first, install, the run, why, a verified comparison table, how PII is decided, the rails → done
 - T-0280 [done] E6 · Launch-post drafts in docs/launch/: Show HN, r/PostgreSQL, r/devops, r/webdev, a blog post from the post-mortems, and ten places a listing PR is welcome → done
 - T-0281 [done] E6 · Issue templates that keep personal data out of reports, and CHANGELOG.md as the pointer at releases → done
 - T-0284 [cancelled] E9 · go install of lazyslice fails: go.mod's mask replace directive rejects @v0.1.0/@latest → cancelled
 - T-0285 [done] E6 · go install works: the mask module gets its own tag and go.mod requires it by version, with go.work for local development → done
+- T-0286 [done] E6 · research/POSTMORTEMS.md carries two stale facts the blog draft inherited → done
 - T-0287 [done] E6 · The person_name masker respects the column's role: a first-name column gets a given name, a last-name column a surname → done
 - T-0288 [done] E6 · A root table can hold more rows than --take names; say so in the flag's help or stop it → done
 - T-0289 [done] E6 · make gif records with a read-only role, probes readiness from the host, and pace.awk fails when it paused nothing → done
 - T-0290 [done] E6 · goreleaser release build still compiles mask/ from go.work, not the tagged version go.mod requires → done
 - T-0293 [done] E9 · plan equality groups ignore person_name Role, letting an FK pair mask two roles alike → done
 - T-0294 [done] E9 · plan-time DEFAULT rewrite for a person_name column ignores Role → done
+- T-0297 [done] E6 · A phone column's reason line says its digits parse as MAC addresses → done
+- T-0298 [cancelled] E9 · Add a digit-run/phone-without-plus signal so plain 10-12 digit columns are not left to Luhn chance → cancelled
 - T-0083 [done] E5 · Target type registration for CopyFrom: no owner since internal/load shipped → done
 - T-0170 [done] E9 · torture regression 013 (json-object-key-email) fails on main → done
 - T-0197 [done] E5 · R2-05/A10 residual: a name in a language names.txt does not carry still reports "no name or value signal" as a clean bill of health → done
@@ -131,7 +133,3 @@
 - T-0212 [done] E5 · renderSafe redacts by default, and prints a transform refusal's reason under the values flag → done
 - T-0222 [done] E5 · Cluster identity degrades field by field, and two unknown identities are treated as possibly the same cluster → done
 - T-0223 [done] E5 · mask.Apply never returns a masker's error verbatim: the module wraps it without the value → done
-- T-0230 [done] E9 · T-0229's goal mischaracterises the R2-13 regression; correct it before acting on it → done
-- T-0231 [done] E9 · special_category has no value validator in the row-level second net → done
-- T-0232 [cancelled] E9 · Curate --unmask flags for gitlab, odoo, discourse and supabase-auth under T-0198's broadened DDL-literal rule → cancelled
-- T-0238 [done] E5 · mask.Apply never returns a foreign error object: a masker's error is rebuilt by the module with only its identity carried across → done
