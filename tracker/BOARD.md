@@ -8,8 +8,8 @@
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 1 | 0 | 107 | 0 | 0 |
-| E6 Launch | 6 | 6 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 85 | 0 | 32 | 5 | 0 |
+| E6 Launch | 6 | 4 | 0 | 4 | 0 | 0 |
+| E9 Later | later | 88 | 0 | 32 | 5 | 0 |
 
 ## Open and in progress
 
@@ -17,7 +17,6 @@
 - T-0031 [open] E9 · Licence for the lazyslice.yml schema and docs; confirm copyright holder statement (fable)
 - T-0048 [open] E9 · Explicit --key on an uncomparable column type surfaces a raw pgx error instead of a refusal (opus)
 - T-0064 [open] E5 · Dogfood: two sessions against a real project of the maintainer's choosing, logged in docs/DOGFOOD_LOG.md (human)
-- T-0065 [open] E6 · 20-second VHS GIF of the first run on Pagila (sonnet)
 - T-0087 [open] E9 · internal/classify's JSON leaf signal never consults the name dictionary, so verify's second net cannot score person_name or free_text over document leaves ()
 - T-0102 [open] E9 · A text column holding a JSON document is invisible to ARCHITECTURE.md 4's JSON rule ()
 - T-0124 [open] E9 · testdata/regressions covers plan.refused.unique_domain no longer ()
@@ -99,17 +98,23 @@
 - T-0276 [open] E9 · tracker.py: five small robustness findings from T-0196's review (sonnet)
 - T-0277 [open] E9 · The generated cask's quarantine hook uses postflight, which Homebrew deprecates in favour of postflight_steps (sonnet)
 - T-0278 [open] E9 · Release notes name the range as 'since the first commit' when the previous tag is the root (sonnet)
-- T-0279 [open] E6 · README as the landing page: GIF first, install, the run, why, a verified comparison table, how PII is decided, the rails (sonnet)
-- T-0280 [open] E6 · Launch-post drafts in docs/launch/: Show HN, r/PostgreSQL, r/devops, r/webdev, a blog post from the post-mortems, and ten places a listing PR is welcome (sonnet)
-- T-0281 [open] E6 · Issue templates that keep personal data out of reports, and CHANGELOG.md as the pointer at releases (sonnet)
 - T-0282 [open] E6 · Write the 'why I built this' paragraph for the README (human)
 - T-0283 [open] E6 · Decide whether v0.2.0 ships a docs site (mkdocs-material on GitHub Pages) or the in-repo docs stay the docs (human)
 - T-0284 [open] E9 · go install of lazyslice fails: go.mod's mask replace directive rejects @v0.1.0/@latest ()
+- T-0285 [open] E6 · go install works: the mask module gets its own tag and go.mod requires it by version, with go.work for local development (sonnet)
+- T-0286 [open] E9 · research/POSTMORTEMS.md carries two stale facts the blog draft inherited (sonnet)
+- T-0287 [open] E6 · The person_name masker respects the column's role: a first-name column gets a given name, a last-name column a surname (sonnet)
+- T-0288 [open] E9 · A root table can hold more rows than --take names; say so in the flag's help or stop it (sonnet)
+- T-0289 [open] E9 · make gif records with a read-only role, probes readiness from the host, and pace.awk fails when it paused nothing (sonnet)
 
 ## Recently closed
 
+- T-0065 [done] E6 · 20-second VHS GIF of the first run on Pagila → done
 - T-0155 [done] E5 · v0.0.1 proves the release pipeline end to end: goreleaser, the tap cask, brew install prints a version → done
 - T-0196 [done] E5 · Migrate the tracker to GitHub Issues and Projects behind the existing tools/tracker.py command surface → done
+- T-0279 [done] E6 · README as the landing page: GIF first, install, the run, why, a verified comparison table, how PII is decided, the rails → done
+- T-0280 [done] E6 · Launch-post drafts in docs/launch/: Show HN, r/PostgreSQL, r/devops, r/webdev, a blog post from the post-mortems, and ten places a listing PR is welcome → done
+- T-0281 [done] E6 · Issue templates that keep personal data out of reports, and CHANGELOG.md as the pointer at releases → done
 - T-0083 [done] E5 · Target type registration for CopyFrom: no owner since internal/load shipped → done
 - T-0170 [done] E9 · torture regression 013 (json-object-key-email) fails on main → done
 - T-0197 [done] E5 · R2-05/A10 residual: a name in a language names.txt does not carry still reports "no name or value signal" as a clean bill of health → done
@@ -129,7 +134,3 @@
 - T-0252 [done] E5 · The run lease is re-asserted before the first drop and before each table drop; a lost lease refuses the load → done
 - T-0253 [done] E5 · The certain-neighbour rail raises both ends of a validated foreign key together, or refuses the pair → done
 - T-0254 [done] E5 · Special-category vocabulary matches a term glued to the next token by an underscore, and stripping a LIKE metacharacter leaves a separator → done
-- T-0255 [done] E5 · A standby's data directory is not evidence of a different cluster, and the standby's sender address is compared with the target → done
-- T-0257 [done] E9 · internal/plan has no exit-12 refusal for an FK pair unknownColumnsBesideCertain cannot raise → done
-- T-0258 [done] E5 · internal/plan's fk-pair refusal can fire on a pair a later classify pass already reconciles → done
-- T-0259 [done] E5 · README's flag table is generated and checked, and a release tag refuses a README that does not name it → done
