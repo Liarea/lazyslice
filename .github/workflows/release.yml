@@ -111,7 +111,12 @@ jobs:
       - name: the same gate a branch push gets, before anything is published
         run: make check
 
-      - uses: sigstore/cosign-installer@v4
+      # Pinned to an exact release: cosign-installer publishes v4.x.y tags but
+      # no floating v4 (only v3 and v2 float), so `@v4` failed the v0.0.1
+      # release at "Set up job" before a single step ran (run 35736762240,
+      # 2026-09-22). No push to main exercises this job, so a tag is the only
+      # thing that proves it; the v0.0.x tags exist for exactly that.
+      - uses: sigstore/cosign-installer@v4.1.2
 
       # syft, for the sboms pipe in .goreleaser.yaml (THREAT_MODEL.md T10's
       # "published SBOM"). goreleaser shells out to it rather than generating
