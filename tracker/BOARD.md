@@ -8,7 +8,7 @@
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 1 | 0 | 107 | 0 | 0 |
-| E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
+| E6 Launch | 6 | 6 | 0 | 0 | 0 | 0 |
 | E9 Later | later | 84 | 0 | 32 | 5 | 0 |
 
 ## Open and in progress
@@ -99,6 +99,11 @@
 - T-0276 [open] E9 · tracker.py: five small robustness findings from T-0196's review (sonnet)
 - T-0277 [open] E9 · The generated cask's quarantine hook uses postflight, which Homebrew deprecates in favour of postflight_steps (sonnet)
 - T-0278 [open] E9 · Release notes name the range as 'since the first commit' when the previous tag is the root (sonnet)
+- T-0279 [open] E6 · README as the landing page: GIF first, install, the run, why, a verified comparison table, how PII is decided, the rails (sonnet)
+- T-0280 [open] E6 · Launch-post drafts in docs/launch/: Show HN, r/PostgreSQL, r/devops, r/webdev, a blog post from the post-mortems, and ten places a listing PR is welcome (sonnet)
+- T-0281 [open] E6 · Issue templates that keep personal data out of reports, and CHANGELOG.md as the pointer at releases (sonnet)
+- T-0282 [open] E6 · Write the 'why I built this' paragraph for the README (human)
+- T-0283 [open] E6 · Decide whether v0.2.0 ships a docs site (mkdocs-material on GitHub Pages) or the in-repo docs stay the docs (human)
 
 ## Recently closed
 

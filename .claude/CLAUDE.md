@@ -1,13 +1,13 @@
 # .claude/
 
 `workflows/` and `skills/`: one resumable workflow script per phase (`research.js`,
-`architecture.js`, `foundations.js`, `slice.js`, `hardening.js`), plus
+`architecture.js`, `foundations.js`, `slice.js`, `hardening.js`, `launch.js`), plus
 `implement.js`, the shared one-task runner every phase workflow calls into.
 `skills/` holds the two chore skills, `lazyslice-tracker` and `lazyslice-commit`, that root CLAUDE.md points at; a skill is instructions for a recurring operation, not a workflow. No product code, no docs content — this is orchestration only. Since T-0196, an open, in-progress or blocked task is a GitHub issue, not a file under `tracker/tasks/`; a brief that still says "Read tracker/tasks/T-NNNN-*.md" for such a task is stale and should say `tools/tracker.py show T-NNNN` instead (see that task's `concerns` for which briefs still need it).
 
 **Contract.** Each workflow exports `meta` (`name`, `description`, `phases`)
 matching `docs/BUILD_PLAN.md`'s gates. Resuming at a named step is **not**
-uniform: only `foundations.js` and `hardening.js` read `args.step` today.
+uniform: only `foundations.js`, `hardening.js` and `launch.js` read `args.step` today.
 `research.js`, `architecture.js` and `slice.js` resume by re-running and
 skipping work that is already on disk or already closed in the tracker, so
 `args: { step: '...' }` does nothing for them — check the file before
