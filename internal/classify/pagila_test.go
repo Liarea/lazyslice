@@ -4,7 +4,6 @@ package classify
 
 import (
 	"sort"
-	"strings"
 	"testing"
 	"time"
 
@@ -401,16 +400,19 @@ func pagilaSamples() mapSampler {
 //
 // Every `last_update` in pagila is a `timestamp with time zone` whose text form
 // ("2017-02-15T09:34:33Z") has no space and no "@", mixes character classes and
-// clears the entropy threshold, so the credential validator fires on 100% of the
-// samples. `film.fulltext` is a tsvector whose printed lexemes are digits and
-// words, which is the address validator's shape. Neither category's masker can
-// write into either column: the run used to reach `internal/transform` and die
-// at exit 7 with rows already moved.
+// clears the entropy threshold, so the credential validator would fire on 100%
+// of the samples if it were ever run over them. `film.fulltext` is a tsvector
+// whose printed lexemes are digits and words, which is the address validator's
+// shape. Neither category's masker can write into either column: the run used
+// to reach `internal/transform` and die at exit 7 with rows already moved.
 //
-// ARCHITECTURE.md §4's accepted-types gate now runs over a value signal as it
-// always did over a name signal, so neither column can be decided above `low`
-// for a category its type cannot hold, and the reason says which conflict it
-// was.
+// ARCHITECTURE.md §4's accepted-types gate now keeps a value validator from
+// ever running over a column whose type its category cannot hold (T-0269),
+// exactly as it always kept a name hit from deciding one: the gate applies
+// before scoring, not after, so neither column carries a category no masker
+// could have written, and the timestamp's reason line reads exactly as any
+// other signal-free column's does -- it never named the credential check that
+// could never have applied.
 func TestPagilaValueSignalsRespectAcceptedTypes(t *testing.T) {
 	t.Parallel()
 	cls, err := New().Classify(pagilaSchema(), pagilaSamples(), nil)
@@ -418,7 +420,6 @@ func TestPagilaValueSignalsRespectAcceptedTypes(t *testing.T) {
 		t.Fatalf("Classify: %v", err)
 	}
 
-	conflicts := 0
 	for c, d := range cls.Decisions {
 		if c.Column != "last_update" {
 			continue
@@ -427,20 +428,13 @@ func TestPagilaValueSignalsRespectAcceptedTypes(t *testing.T) {
 			t.Errorf("%s is %s at %v (%s); a timestamp holds no category whose masker emits text",
 				c, d.Category, d.Confidence, d.Reason)
 		}
-		if d.Category == pipeline.CatNone {
-			continue
+		if d.Category != pipeline.CatNone {
+			t.Errorf("%s category = %q, want none: the credential entropy check is never scored against a "+
+				"type it could never have been accepted for (T-0269)", c, d.Category)
 		}
-		// A category recorded at low is the value signal that fired, kept as a
-		// record with the conflict named rather than dropped silently.
-		want := "is not an accepted type for " + string(d.Category)
-		if !strings.Contains(d.Reason, want) {
-			t.Errorf("%s is %s at low and its reason does not say why it was not masked: %s", c, d.Category, d.Reason)
-			continue
+		if d.Reason != "no name or value signal" {
+			t.Errorf("%s reason = %q, want the same line any signal-free column gets", c, d.Reason)
 		}
-		conflicts++
-	}
-	if conflicts == 0 {
-		t.Error("no last_update column recorded a type conflict: the samples no longer trip the validator, so this test is no longer testing the gate")
 	}
 
 	fulltext := col(ref.TableRef{Schema: "public", Name: "film"}, "fulltext")

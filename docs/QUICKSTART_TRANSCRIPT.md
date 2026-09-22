@@ -80,7 +80,7 @@ $ lazyslice --source postgres://ls:pw@127.0.0.1:55701/shop?sslmode=disable \
 ! the role ls can write to 4 table(s) in shop — recommend a read-only role: CREATE ROLE lazyslice_ro LOGIN PASSWORD '…'; GRANT CONNECT ON DATABASE shop TO lazyslice_ro; GRANT USAGE ON SCHEMA public TO lazyslice_ro; GRANT SELECT ON ALL TABLES IN SCHEMA public TO lazyslice_ro; GRANT EXECUTE ON FUNCTION pg_control_system() TO lazyslice_ro;
   target shop_dev on 127.0.0.1 — --target
   4 tables on Postgres 160015: 17 columns, 3 foreign keys
-  public.customers.created_at: 200/200 samples look like secrets; timestamp is not an accepted type for credential; no name signal
+  public.customers.created_at: no name or value signal
   public.customers.email: name matches email; 200/200 samples parse as addresses
   public.customers.full_name: name matches person_name; 200/200 samples mixed digits and words
   public.customers.id: no name or value signal; surrogate key: preserved verbatim
@@ -91,7 +91,7 @@ $ lazyslice --source postgres://ls:pw@127.0.0.1:55701/shop?sslmode=disable \
   public.order_items.qty: no name or value signal
   public.orders.customer_id: no name or value signal; foreign key to public.customers: preserved verbatim
   public.orders.id: no name or value signal; surrogate key: preserved verbatim
-  public.orders.placed_at: 200/200 samples look like secrets; timestamp is not an accepted type for credential; no name signal
+  public.orders.placed_at: no name or value signal
   public.orders.status: nothing recognised in 200 samples, not proof the column is impersonal
   public.products.id: no name or value signal; surrogate key: preserved verbatim
   public.products.price_cents: no name or value signal
@@ -117,11 +117,13 @@ $ echo $?
 
 `created_at`, `placed_at`, `qty`, `price_cents`, `.status`, `.sku` and the
 `order_items`/`orders`/`products` FK-column reasons are the lines the README
-excerpt drops — they are honest, but they are not about personal data, and
-"200/200 samples look like secrets; timestamp is not an accepted type for
-credential" is the classifier trying a signal that Postgres's own type system
-already rules out (ADR-010's recall boundary), not a decision that means
-anything for a `timestamptz` column.
+excerpt drops — they are honest, and unremarkable: `created_at` and
+`placed_at` read "no name or value signal", the same line any other
+signal-free column gets. The classifier does not run the credential check
+against a `timestamptz` column's samples at all — Postgres's own type system
+already rules out every category whose masker would need to write text into
+one (ADR-010's recall boundary), so there is nothing for the reason to name
+(T-0269).
 
 `root public.customers (named by --root) — --root` is the one line `--root`
 answers outright: without it (and with no root already recorded in

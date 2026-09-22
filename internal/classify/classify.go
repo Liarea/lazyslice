@@ -681,12 +681,16 @@ func byteaTextSignal(dict *textsig.Dict, values []string, p *compiledPack, vs []
 
 // signals is what the validators said about one column's samples.
 //
-// The four are kept apart because ARCHITECTURE.md §4's accepted-types gate
-// applies to a value signal exactly as it does to a name signal (T-0054; see
+// They are kept apart because ARCHITECTURE.md §4's accepted-types gate applies
+// to a value signal exactly as it does to a name signal (T-0054; see
 // internal/classify/CLAUDE.md). strong and weak are validators whose category
-// the column's type family can hold; refused is one it cannot, recorded so that
-// the reason can say why the column was *not* decided on it, and never so that a
-// decision can be made from it.
+// the column's type family can hold. A validator whose category the family
+// cannot hold is never run at all as a candidate decision (T-0269; see
+// bestSignal's silencedByType branch): its category, phrase and sample count
+// are never kept, because keeping them only for a reason line is exactly what
+// T-0269 removed (a timestamp column truthfully and uselessly "looks like a
+// secret"). silencedStrong is the one trace such a validator can still leave
+// (T-0269 fix round) -- see its own comment below.
 type signals struct {
 	strong *valueSignal
 	weak   *valueSignal
@@ -704,8 +708,22 @@ type signals struct {
 	// internal/verify's own minValues floor already fails any hit on an
 	// unproven column, so there is no gap at that size for this to close.
 	strongHit *valueSignal
-	refused   *valueSignal
-	total     int
+	// silencedStrong is true when some validator whose category this column's
+	// type family cannot hold (silencedByType) matched at or above
+	// validatorThreshold -- the shape the pre-T-0269 sig.refused field held,
+	// with none of what made its reason an alarm: no category, no phrase, no
+	// sample count. decide()'s own sig.silencedStrong case (T-0269 fix round,
+	// a reviewer finding on T-0269) is the only reader, and it exists so that
+	// a column this shape describes keeps sameColumnName, guessedPhoneColumns
+	// and fkPairs off it exactly as sig.refused's typeConflict used to --
+	// dropping the field entirely (T-0269's first landing) let those raising
+	// passes reach a column no category was ever going to be decided under,
+	// because nothing on the column recorded that a validator had even been
+	// silenced. This field is not a decision and is read only by that one
+	// case, which sets w.typeConflict and nothing else about the column's
+	// category or reason.
+	silencedStrong bool
+	total          int
 	// anyMatched is true the moment any validator matches at least one
 	// sample, independent of minSamples, weakThreshold or silencedByType --
 	// it is the only field in this struct answering "did anything recognise
@@ -804,8 +822,11 @@ func (st *state) samples(c ref.ColumnRef, ct columnType) []string {
 
 // bestSignal runs the validators over the non-NULL samples and reports the
 // first that reaches a threshold on a category the column's type family can
-// hold, the first that reaches the strong threshold on one it cannot, and the
-// number of values considered.
+// hold, and the number of values considered. A validator whose category the
+// family cannot hold never decides the column, strong or weak, and never
+// leaves its category, phrase or sample count behind for a reason to name
+// (T-0269) -- the one trace it can leave is sig.silencedStrong, a bare flag
+// with none of that (T-0269 fix round; see signals.silencedStrong).
 //
 // The type gate is the whole of the difference from an earlier version of this
 // function, and it is T-0054's fix: a validator whose category the family
@@ -896,19 +917,33 @@ func bestSignal(dict *textsig.Dict, values []string, p *compiledPack, family str
 		if matched > 0 {
 			sig.anyMatched = true
 		}
-		hit := &valueSignal{cat: v.cat, phrase: v.phrase, matched: matched, total: sig.total}
 		if silencedByType(p, v.cat, family) {
-			// The values look like a category this column cannot hold. It is
-			// recorded once, for the reason line, and it decides nothing: the
-			// weak threshold is not consulted for a refused category either,
-			// because `low` is what the neighbouring-column rule raises and a
-			// raise here would put the same unwritable masker on the column by
-			// a longer route.
-			if ratio >= validatorThreshold && sig.refused == nil {
-				sig.refused = hit
+			// T-0269: a category whose accepted types this column's type is
+			// not in decides nothing and is never named in a reason -- scoring
+			// it and keeping the *result* only for the reason line (the
+			// pre-T-0269 behaviour) is what produced "200/200 samples look
+			// like secrets" on a timestamp column: technically true of the
+			// entropy check and irrelevant, since credential was never an
+			// option for that type.
+			//
+			// T-0269 fix round: dropping the result entirely, rather than just
+			// its category and phrase, was itself a T1 regression -- a
+			// silenced validator at or above validatorThreshold used to set
+			// typeConflict (sig.refused, before T-0269) and keep
+			// sameColumnName, guessedPhoneColumns and fkPairs off the column;
+			// with nothing recorded at all, a same-named column elsewhere in
+			// the schema, or a corroborating neighbour, could raise this one
+			// on evidence that was never actually about it (see decide()'s own
+			// sig.silencedStrong case). silencedStrong is the flag that keeps
+			// those raising passes off, and it is deliberately bare: no
+			// category, no phrase, no count, so decide() cannot render the
+			// alarm T-0269 removed from it.
+			if ratio >= validatorThreshold {
+				sig.silencedStrong = true
 			}
 			continue
 		}
+		hit := &valueSignal{cat: v.cat, phrase: v.phrase, matched: matched, total: sig.total}
 		if ratio >= validatorThreshold {
 			sig.strong = hit
 			return sig
@@ -932,7 +967,7 @@ func bestSignal(dict *textsig.Dict, values []string, p *compiledPack, family str
 			// produced Category=free_text, Masked=true on a family
 			// mask.Writable refuses, and internal/plan/writeback.go refused
 			// the whole run at exit 12. A column this excludes is not
-			// silenced outright: it is left for sig.weak/sig.refused/none as
+			// silenced outright: it is left for sig.weak/none as
 			// before T-0136, and internal/verify's second net (T-0136's
 			// matching fix on validators.go) is what catches the loaded
 			// value on the family this branch cannot reach.
@@ -1223,21 +1258,30 @@ func (st *state) decide(w *work, col pipeline.Column, ct columnType, values []st
 			render("samples", sig.weak.matched, sig.weak.total, sig.weak.phrase),
 			render("no_name_signal"))
 
-	case sig.refused != nil:
-		// The values validate for a category whose masker emits a value this
-		// column's type cannot hold -- a timestamp full of high-entropy text
-		// reading as `credential` is the case that took every pagila run down at
-		// exit 7 (T-0054). The decision is recorded at `low` with the conflict
-		// named, exactly as a type-conflicting *name* hit is, and typeConflict
-		// keeps every raising pass off it: `low` is below the mask threshold, so
-		// the column is copied and the line says why it was not masked.
-		w.d.Category = sig.refused.cat
-		w.d.Confidence = pipeline.ConfLow
+	case sig.silencedStrong:
+		// T-0269 fix round (a reviewer finding on T-0269 itself): the samples
+		// validate, at validatorThreshold, for a category this column's type
+		// family cannot hold -- exactly the shape the pre-T-0269 sig.refused
+		// case existed for. That case set Category to the refused category and
+		// named it in the reason ("timestamp is not an accepted type for
+		// credential"), which is the alarm T-0269 removed; this case keeps only
+		// the half of the old behaviour that matters operationally and none of
+		// the noise. Category and Confidence are left at their zero values
+		// (CatNone, ConfNone) -- not the refused category, and not `low` --
+		// so the column reads exactly as any other column with no name or
+		// value signal does (TestTimestampCredentialEntropyIsNeverScored), and
+		// bypassing `default` below means a family with its own typeSignals
+		// entry (inet, cidr, macaddr) is not masked on that entry either: the
+		// silenced hit pre-empts it exactly as sig.refused used to.
+		//
+		// w.typeConflict is the one thing this case sets, and it is the fix:
+		// sameColumnName, guessedPhoneColumns and fkPairs all gate on it, so a
+		// same-named column elsewhere in the schema or a corroborating
+		// neighbour can no longer raise this column to `possible` on evidence
+		// that was never actually about it.
+		// TestSameColumnNameDoesNotRaiseASilencedTypeConflict pins this.
 		w.typeConflict = true
-		w.frags = append(w.frags,
-			render("samples", sig.refused.matched, sig.refused.total, sig.refused.phrase),
-			render("type_conflict", ct.Family, string(sig.refused.cat)),
-			render("no_name_signal"))
+		w.frags = append(w.frags, render("no_signal"))
 
 	default:
 		if cat, ok := typeSignals[ct.Family]; ok {
