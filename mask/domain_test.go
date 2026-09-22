@@ -69,6 +69,8 @@ func TestDomainMatchesWhatTheGeneratorEmits(t *testing.T) {
 		{"person_date", MaskerPersonDate, Value{Text: "1974-03-02"}, Constraints{TypeTag: famDate}, 400_000},
 		{"geo two places", MaskerGeo, Value{Text: "1"}, Constraints{TypeTag: famVarchar, MaxLen: 6}, 300_000},
 		{"name narrow", MaskerPersonName, Value{Text: "x"}, Constraints{TypeTag: famVarchar, MaxLen: 6}, 6_000},
+		{"name given role", MaskerPersonName, Value{Text: "x"}, Constraints{TypeTag: famText, Role: RoleGiven}, 3_000},
+		{"name family role", MaskerPersonName, Value{Text: "x"}, Constraints{TypeTag: famText, Role: RoleFamily}, 3_000},
 		{"postcode", MaskerAddress, Value{Text: "x"}, Constraints{TypeTag: famVarchar, MaxLen: 3}, 600_000},
 		{"special enum", MaskerSpecial, Value{Text: "x"},
 			Constraints{TypeTag: famEnum, EnumLabels: []string{"a", "b", "c"}}, 500},

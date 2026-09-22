@@ -504,6 +504,146 @@ next change to this module argues with a decision rather than rediscovering it.
   meaningful: the first registration is the category's default and the rest are
   the alternates `Pick` considers for a unique column. `Get` understands the
   one parametric id, `fixed:LITERAL`.
+- **`Constraints.Role` is `person_name`'s alone** (`mask.go`, `gen_text.go`,
+  T-0287). Every other generator's `Domain`/`Mask` ignores it, the same way
+  every generator but `phone`/`phone_unique` ignores `Region`. `RoleFull`, the
+  zero value, is `personNameMasker`'s original behaviour — a given name and a
+  surname when the column is wide enough, one given name when it is not, off
+  the shared `givenNames`/`surnames` lists — so a caller that built a
+  `Constraints` before this field existed changes nothing by upgrading, and
+  those two lists and every value they already mask (`RoleFull`, and
+  `emailMasker`'s local part) are byte-for-byte v0.1.0's. `RoleGiven` and
+  `RoleFamily` each draw one word off their own dedicated list instead
+  (`roleGivenNames`, `roleFamilyNames`, `words.go`) and refuse with
+  `ErrNoRoom`, never truncate, the same as every other narrow case here. The
+  field is decided outside this module, in `internal/classify`, from the
+  column's own name — this module has no column names to read, only
+  `Constraints` — and reaches `Mask`/`Domain` through `internal/transform` the
+  way `Region` does.
+  - **`RoleGiven`/`RoleFamily` do not read `givenNames`/`surnames`, and that
+    is T-0292 decided rather than filed.** The first landing of this field
+    shrank the admissible domain from `pairCount`'s ~20,000 to one *shared*
+    list's own size, which put every masked `first_name`/`last_name` column
+    one word away from the residual scan's own kind of hit ARCHITECTURE.md §6
+    already documents for the IP and email generators' output ranges: a
+    masked value equal to *some other row's* real value in the same column,
+    confirmed and refused at exit 9 -- not a passthrough, not this cell's own
+    source value, just an ordinary coincidence over a small alphabet of real
+    names. `docs/media/first-run.gif`'s own Pagila fixture hit this on the
+    very demo T-0287 exists to fix: 27 of `givenWords`' 141 entries and 34 of
+    `surnameWords`' 145 were also literal values of
+    `public.customer`/`public.staff`'s `first_name`/`last_name` columns, so
+    masking every row of a 200-row customer table to one of 141 given names
+    collided with a value already in that column on virtually every run,
+    whatever the key. Removing those words from the shared list is the fix a
+    prior round of this task took, and a review round rejected it: it is not
+    additive, `RoleFull` and `emailMasker` read the same list
+    (`mask/CLAUDE.md`'s own "Determinism scope" rule and ADR-006 §"Consequences"
+    both call a changed list a major version, whatever changed it), and it is
+    a fixture-shaped fix besides -- it clears the one dataset this repository
+    demos from and nothing about the general case, where a customer table of a
+    few thousand rows, over almost any real-name corpus of a hundred-odd
+    entries, finds an overlap somewhere regardless of which words are on the
+    list.
+  - **The actual fix is `roleGivenWords`/`roleFamilyWords`: a corpus outside
+    the real-name dictionary entirely, not a wider one inside it.** A wider
+    *real*-name list narrows the odds without closing the question — a bigger
+    dictionary of real given names and surnames is still real given names and
+    surnames, so it is still the space an ordinary `first_name`/`last_name`
+    column's own values are drawn from, and `small_domain:` already says a
+    substitution over any list small enough to be practical here is
+    recoverable by frequency, which is the same narrowness read a second way.
+    `roleGivenWords`/`roleFamilyWords` (`words.go`) are synthetic,
+    pronounceable, letters-only tokens built from consonant-vowel syllables. A
+    token from that corpus is not a rarer *name*; it is not *drawn from* the
+    space of names at all, so an ordinary production `first_name` or
+    `last_name` column containing one is not the near-certainty a shared
+    hundred-word list of common names made it. This does not raise `Domain()`
+    anywhere near §5's `d_required` for a unique column -- `RoleGiven`/
+    `RoleFamily` on a unique column still refuses at plan exactly as it did
+    at either list's size, which this fix leaves unchanged -- and it is
+    stated as a mitigation and not a proof: a real person could in principle
+    be named a string that happens to also be a synthetic token, the way a
+    real production value could in principle equal `example.com` or
+    `192.0.2.1`, which is exactly the "known false-positive surface, not a
+    leak" framing this module's other reserved ranges already carry, extended
+    here to a corpus rather than a registered range because a person's name
+    has no registered range to borrow.
+  - **This landing's own "by construction" claim was false, and a fix-round
+    review measured it (T-0287, high finding 1).** The paragraph above used to
+    say the two lists were "never drawn from a real-name dictionary and
+    disjoint from `givenWords`/`surnameWords` by construction" -- true about
+    the *generation* process (a syllable grammar, not a lookup into any name
+    list) and false as read: a syllable grammar can still land on a string
+    that happens to be somebody's real name, drawn or not, the same way a
+    random ASCII string can still land on `example.com`. Of the two lists'
+    original 900 entries each, 34 were literal entries of
+    `internal/textsig/names.txt` -- siri, nero, leni, mena, nela, risa, sona,
+    sosa, rumi, sibel, geri, veli, vesa and more on the given list; tani, sama,
+    nuno, runo, gema, tunes and more on the family one -- and materially more
+    again (gale, sage, mari, boris, titus among them) were ordinary common
+    given names, surnames or English words the dictionary does not carry at
+    all. The residual scan checks every masked value against the whole source
+    column, so on a `users` table of a few thousand rows each of those tokens
+    is emitted many times over, and one real Gale, Sage, Boris or Titus in the
+    column still refuses the run at exit 9 -- a lower chance than the original
+    114/111-word real-name lists, but not zero, on the default first run over
+    a large real table.
+  - **The fix is filtering, not a rewrite of the generation method.** Every
+    token now in `roleGivenWords`/`roleFamilyWords` was checked against three
+    corpora and excluded if it appeared in any of them:
+    `internal/textsig/names.txt` itself; a census-style corpus of common given
+    names and surnames independent of this project (the zxcvbn-data name
+    lists, several thousand entries each, ranked by real population
+    frequency); and a general English dictionary (`/usr/share/dict/words`,
+    ~235,000 entries), which also catches a role token that is not a name at
+    all but an ordinary recognisable word. Five more tokens the review's own
+    finding named directly (manu, levon, deron, lorin, mati) were not caught
+    by any of the three corpora and were removed by hand on the finding's
+    word alone. This is a one-time, offline editorial pass over the committed
+    word lists, the same way `givenWords`/`surnameWords` were originally
+    hand-curated -- none of the three corpora is a build or runtime
+    dependency of this module -- and it narrows the lists from 900 to 780
+    (given) and 900 to 863 (family). `mask/role_test.go`'s
+    `TestRoleWordsExcludeKnownRealNames` pins the specific tokens the review
+    found as a permanent regression guard, and its
+    `TestRoleWordsDisjointFromSharedNameLists` checks -- rather than merely
+    comments -- the one part of the original claim this module can verify on
+    its own: neither role list shares a token with `givenWords`/
+    `surnameWords`. Because this module may import nothing under `internal/`
+    (this file's own "Never" list), it cannot check its own lists against the
+    live `internal/textsig/names.txt` the way the finding also asked; the
+    fuller check runs the other side of that boundary, in
+    `internal/classify/role_test.go`'s
+    `TestRoleWordsExcludeCurrentNameDictionary`, which imports both this
+    module and `internal/textsig` already and calls the same
+    `mask.RoleWords(Role) []string` this fix adds -- an exported reader over
+    `roleGivenNames`/`roleFamilyNames`, additive and read outside the masking
+    algorithm §5 fixes, so exposing it changes no masked value. What this
+    filtering does not close -- the residual risk stated two paragraphs up,
+    and the reason a materially wider *shared* real-name list (T-0292, still
+    open) is the fix that would actually move it rather than this one -- is
+    unchanged: a masked value can still coincide with a real production name
+    none of the three corpora carries.
+  - **`testdata/regressions/039` is the residual-scan regression the finding
+    also asked for**: a `first_name`/`last_name` column seeded with exactly
+    the common real names the review found colliding (gale, sage, mari, rani,
+    sade, boris, titus, kota, mako among them), so a reintroduced overlap
+    fails there under `make torture` rather than on a stranger's production
+    `users` table.
+  - **`Constraints.Role` reaches this module; two of its downstream readers do
+    not read it, and both are owed to `internal/plan`, outside this module's
+    own paths.** `internal/plan/equality.go`'s `constraintsOf` (the FK
+    equality-group check) and `internal/plan/ddlliteral.go`'s masked-`DEFAULT`
+    rewrite both build a `Constraints` for a `person_name` column without
+    carrying `Role` onto it, so a `RoleGiven` column and a `RoleFull` column
+    can be judged equal-domain at plan time (**T-0293**) or have their
+    `DEFAULT` rewritten as a `RoleFull` pair while their own rows mask under a
+    different role (**T-0294**). Neither is a leak — both are a shape
+    disagreement between the plan and what `internal/transform` actually
+    writes, caught at load (`T-0293`, exit 8) or left silently inconsistent in
+    the target's own catalogue (`T-0294`) — and neither is fixed here, because
+    `internal/plan` is outside this fix's paths.
 
 ## Never
 
