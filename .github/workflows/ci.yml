@@ -134,11 +134,31 @@ jobs:
             fi
           done
 
+          # The cask still renders as the deprecated `postflight` stanza
+          # (Homebrew 7.0.0, 2026-09-13,
+          # https://brew.sh/2026/09/13/homebrew-7.0.0/, "Install steps":
+          # third-party taps get a warning until 2027-12-11, then rejection)
+          # because goreleaser has no `hooks.post.install_steps` to emit it
+          # with yet (https://goreleaser.com/customization/homebrew_casks/,
+          # v2.18.2 as of 2026-09-22; the PR that would add it,
+          # https://github.com/goreleaser/goreleaser/pull/6873, is still
+          # open). T-0277 tracks the switch once that ships; until then this
+          # still has to assert `postflight`, not `postflight_steps` — a
+          # future goreleaser upgrade that quietly starts emitting
+          # `postflight_steps` should make this grep start failing, which is
+          # the prompt to update .goreleaser.yaml's comment and this
+          # assertion together, not to widen the grep to match either.
           cask=dist/homebrew/Casks/lazyslice.rb
           if ! grep -q 'postflight' "$cask"; then
             echo "release-config: the generated cask has no postflight, so the binary it installs carries"
             echo "com.apple.quarantine and macOS kills it on first run. Restore the hooks.post.install"
             echo "block in .goreleaser.yaml's homebrew_casks entry."
+            exit 1
+          fi
+          if grep -q 'postflight_steps' "$cask"; then
+            echo "release-config: the cask now renders postflight_steps, not postflight — goreleaser"
+            echo "apparently gained hooks.post.install_steps (T-0277, goreleaser#6873). Update this"
+            echo "assertion and .goreleaser.yaml's comment above the hooks block to match, then close T-0277."
             exit 1
           fi
           if ! grep -q 'com.apple.quarantine' "$cask"; then
