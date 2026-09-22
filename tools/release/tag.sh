@@ -113,7 +113,10 @@ while IFS= read -r use; do
 	else
 		die "$workflow pins $use, and $owner/$repo has no tag, branch or commit '$ref' (gh api $api/tags lists what it has)"
 	fi
-done < <(grep -E '^\s*-?\s*uses:' "$workflow" | sed -E 's/^\s*-?\s*uses:\s*//; s/\s+#.*$//; s/["'"'"']//g')
+# POSIX classes, not \s: BSD sed on macOS does not know \s and left the
+# "- uses:" prefix in place, so every action read as unresolvable.
+done < <(grep -E '^[[:space:]]*-?[[:space:]]*uses:' "$workflow" |
+	sed -E 's/^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*//; s/[[:space:]]+#.*$//; s/["'"'"']//g')
 
 # ---------- 6. goreleaser accepts its configuration ----------
 GORELEASER="$(command -v goreleaser || true)"
