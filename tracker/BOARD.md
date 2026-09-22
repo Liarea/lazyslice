@@ -8,7 +8,7 @@
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 1 | 0 | 107 | 0 | 0 |
-| E6 Launch | 6 | 5 | 0 | 8 | 0 | 0 |
+| E6 Launch | 6 | 5 | 0 | 9 | 0 | 0 |
 | E9 Later | later | 87 | 0 | 34 | 6 | 0 |
 
 ## Open and in progress
@@ -91,21 +91,21 @@
 - T-0266 [open] E9 · The second net's surrogate-key exemption is measured against a key with no sequence or identity default (opus)
 - T-0267 [open] E9 · Workflow scripts carry the checkout's absolute home path in a REPO constant (sonnet)
 - T-0268 [open] E9 · lazyslice doctor prints the stated false negatives, as ARCHITECTURE.md says it does (sonnet)
-- T-0269 [open] E9 · A timestamp column's reason line says its samples look like secrets (sonnet)
+- T-0269 [open] E6 · A timestamp column's reason line says its samples look like secrets (sonnet)
 - T-0272 [open] E9 · Per-leaf categories for JSON documents on the Decision, so an email leaf is replaced by a fake email rather than filler (opus)
 - T-0274 [open] E9 · The root decision line and the plan's own RootReason give different reasons when a name preference breaks a tie (sonnet)
 - T-0275 [open] E9 · tracker.py: close writes the archive file before it closes the issue, and every gh call has a timeout (sonnet)
 - T-0276 [open] E9 · tracker.py: five small robustness findings from T-0196's review (sonnet)
-- T-0277 [open] E6 · The generated cask's quarantine hook uses postflight, which Homebrew deprecates in favour of postflight_steps (sonnet)
+- T-0277 [open] E9 · The generated cask's quarantine hook uses postflight, which Homebrew deprecates in favour of postflight_steps (sonnet)
 - T-0278 [open] E9 · Release notes name the range as 'since the first commit' when the previous tag is the root (sonnet)
 - T-0282 [open] E6 · Write the 'why I built this' paragraph for the README (human)
 - T-0283 [open] E6 · Decide whether v0.2.0 ships a docs site (mkdocs-material on GitHub Pages) or the in-repo docs stay the docs (human)
 - T-0286 [open] E6 · research/POSTMORTEMS.md carries two stale facts the blog draft inherited (sonnet)
-- T-0289 [open] E6 · make gif records with a read-only role, probes readiness from the host, and pace.awk fails when it paused nothing (sonnet)
 - T-0291 [open] E9 · Makefile's .SHELLFLAGS (-eu -o pipefail) is silently ignored by macOS's GNU Make 3.81 (sonnet)
 - T-0292 [open] E9 · person_name role masking can collide with real name corpora on ordinary tables ()
 - T-0295 [open] E9 · second net's dictionary rule has no single-word check, and T-0287 makes that shape normal (sonnet)
 - T-0296 [open] E9 · tracker.py retries a GitHub GraphQL secondary rate limit with backoff instead of failing the write (sonnet)
+- T-0297 [open] E6 · A phone column's reason line says its digits parse as MAC addresses (sonnet)
 
 ## Recently closed
 
@@ -119,6 +119,7 @@
 - T-0285 [done] E6 · go install works: the mask module gets its own tag and go.mod requires it by version, with go.work for local development → done
 - T-0287 [done] E6 · The person_name masker respects the column's role: a first-name column gets a given name, a last-name column a surname → done
 - T-0288 [done] E6 · A root table can hold more rows than --take names; say so in the flag's help or stop it → done
+- T-0289 [done] E6 · make gif records with a read-only role, probes readiness from the host, and pace.awk fails when it paused nothing → done
 - T-0290 [done] E6 · goreleaser release build still compiles mask/ from go.work, not the tagged version go.mod requires → done
 - T-0293 [done] E9 · plan equality groups ignore person_name Role, letting an FK pair mask two roles alike → done
 - T-0294 [done] E9 · plan-time DEFAULT rewrite for a person_name column ignores Role → done
@@ -133,4 +134,3 @@
 - T-0231 [done] E9 · special_category has no value validator in the row-level second net → done
 - T-0232 [cancelled] E9 · Curate --unmask flags for gitlab, odoo, discourse and supabase-auth under T-0198's broadened DDL-literal rule → cancelled
 - T-0238 [done] E5 · mask.Apply never returns a foreign error object: a masker's error is rebuilt by the module with only its identity carried across → done
-- T-0239 [done] E5 · The certain-neighbour rail no longer skips a column declared shorter than sixteen characters: it masks under a generator that fits or refuses → done
