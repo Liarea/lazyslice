@@ -9,7 +9,7 @@
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 1 | 0 | 107 | 0 | 0 |
 | E6 Launch | 6 | 5 | 0 | 9 | 0 | 0 |
-| E9 Later | later | 87 | 0 | 34 | 6 | 0 |
+| E9 Later | later | 88 | 0 | 34 | 6 | 0 |
 
 ## Open and in progress
 
@@ -106,6 +106,7 @@
 - T-0295 [open] E9 · second net's dictionary rule has no single-word check, and T-0287 makes that shape normal (sonnet)
 - T-0296 [open] E9 · tracker.py retries a GitHub GraphQL secondary rate limit with backoff instead of failing the write (sonnet)
 - T-0297 [open] E6 · A phone column's reason line says its digits parse as MAC addresses (sonnet)
+- T-0298 [open] E9 · Add a digit-run/phone-without-plus signal so plain 10-12 digit columns are not left to Luhn chance ()
 
 ## Recently closed
 

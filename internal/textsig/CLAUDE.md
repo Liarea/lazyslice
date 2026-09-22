@@ -354,3 +354,36 @@ upper case, no synonym resolution, so `"gb"` and `"UK"` both answer `false`
 and only `"GB"` answers `true`. `cmd/lazyslice`'s `checkPhoneRegion` is its
 one caller: `--phone-region` is normalised to upper case and refused at the
 flag surface, exit 2, before a region string ever reaches either net.
+
+## T-0297 (2026-09-22): `ValidMAC` no longer admits a plain digit run, and what that costs
+
+`net.ParseMAC` alone accepts a bare run of hex digits with no separator, which
+made a 12-digit phone number indistinguishable from a 6-byte MAC address:
+Pagila's `address.phone` (10-to-12 plain digits, no "+", no separators) parsed
+as a hardware address and a `phone`-name-matched column's reason read "N/M
+samples parse as MAC addresses" — a value signal of a different category that
+did not decide the column, reading as a misfire on the first-run GIF. `ValidMAC`
+now requires a colon, dash or dot separator, or at least one hex letter
+(a-f/A-F), before it asks `net.ParseMAC` at all — see the function's own
+comment in `textsig.go`.
+
+**This is a THREAT_MODEL.md T1 narrowing, not a free fix.** Before this
+change, a column with *no name match* holding plain 12-digit phone numbers
+(`447911123456`) was masked as `network_id` on the MAC hit alone — the wrong
+category, but masked. Now only a chance Luhn hit (roughly one in ten
+12-to-19-digit values) keeps such a column masked; a mixed-length or smaller
+column can clear neither and land `Category: none, Masked: false`. The
+callers that lose this coverage: `internal/classify`'s `CatNetworkID` value
+signal (`classify.go`'s `phraseMAC` entry), `internal/verify/validators.go`'s
+`CatNetworkID` entry (the second net's own refusal), `internal/verify/
+catalog.go`'s `strongCatalogHitOverText`, and `internal/plan/ddlliteral.go`'s
+`strongValidators` (both DDL-literal passes — this file's own "Owed
+elsewhere" note above about the DDL-literal passes' shared home is a
+different, unrelated gap). On realistic sample sizes the Luhn fallback still
+masks most such columns, so this was not a merge blocker for T-0297, but the
+gap is real and is not covered by any test today.
+
+**Owed:** tracker **T-0298** — a digit-run/phone-without-plus signal of its
+own (plain 10-to-12-digit run, no separators, no leading "+") so a column
+with no name match is not left to Luhn chance, wired into all four callers
+named above.

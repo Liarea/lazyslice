@@ -157,13 +157,55 @@ func ValidIP(s string) bool {
 }
 
 // ValidMAC reports whether a value is a hardware address.
+//
+// net.ParseMAC alone accepts a bare run of hex digits with no separator at
+// all, which admits 10-to-20-digit runs of plain 0-9 that were never written
+// as a MAC by anyone: Pagila's address.phone (10-to-12 plain digits) is one
+// (tracker T-0297), the same failure mode luhnSeparator's own comment records
+// for a card written with "." groups. A MAC is written either with colon,
+// dash or dot separators, or (unseparated) with at least one hex letter
+// a-f/A-F; a value with neither is a plain digit run under a different
+// category, so ValidMAC requires one of the two before it asks net.ParseMAC
+// at all.
+//
+// This narrows what network_id catches, on purpose, and it is a
+// THREAT_MODEL.md T1 question: a column with no name match that holds
+// 12-digit phone numbers written without "+" (e.g. 447911123456) used to be
+// masked as network_id on the MAC hit alone -- the wrong category, but
+// masked. Now only a chance Luhn hit (roughly one in ten 12-to-19-digit
+// values, internal/classify/classify.go's phraseLuhn / internal/verify's
+// financial entry) keeps such a column masked; a mixed-length column with
+// few 12-to-19-digit values can clear neither and land Category: none,
+// Masked: false. The callers that lose this coverage are
+// internal/classify's CatNetworkID value signal,
+// internal/verify/validators.go's CatNetworkID digits/text entries (T1's
+// second-net refusal), internal/verify/catalog.go's strongCatalogHitOverText
+// and internal/plan/ddlliteral.go's strongValidators (both DDL-literal
+// passes). Tracker T-0298 is the owed fix: a digit-run/phone-without-plus
+// signal of its own, so a plain 10-to-12-digit column is not left to Luhn
+// chance. See internal/textsig/CLAUDE.md's T-0297 section for the full
+// account.
 func ValidMAC(s string) bool {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return false
 	}
+	if !strings.ContainsAny(s, ":-.") && !containsHexLetter(s) {
+		return false
+	}
 	_, err := net.ParseMAC(s)
 	return err == nil
+}
+
+// containsHexLetter reports whether s has at least one a-f/A-F character.
+func containsHexLetter(s string) bool {
+	for _, r := range s {
+		switch r {
+		case 'a', 'b', 'c', 'd', 'e', 'f', 'A', 'B', 'C', 'D', 'E', 'F':
+			return true
+		}
+	}
+	return false
 }
 
 // ValidUUID reports whether a value is a UUID in the canonical form.
