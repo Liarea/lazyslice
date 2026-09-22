@@ -89,35 +89,3 @@ func TestSupportedPhoneRegion(t *testing.T) {
 		}
 	}
 }
-
-// ValidMAC requires a separator (colon, dash or dot groups) or at least one
-// hex letter; a bare run of plain digits is not a MAC even though
-// net.ParseMAC alone accepts it as unseparated hex (tracker T-0297: Pagila's
-// address.phone is 10-to-12 plain digits, which used to parse as a MAC and
-// print a misfired reason line on a column already classified as phone by
-// name).
-func TestValidMACRequiresSeparatorOrHexLetter(t *testing.T) {
-	t.Parallel()
-
-	macs := []string{
-		"01:23:45:67:89:ab", // colon-separated
-		"01-23-45-67-89-AB", // dash-separated
-		"0123.4567.89ab",    // dotted Cisco form
-		"0123456789AB",      // 12 hex characters, no separator, but a letter
-	}
-	for _, s := range macs {
-		if !ValidMAC(s) {
-			t.Errorf("ValidMAC(%q) = false, want true", s)
-		}
-	}
-
-	notMACs := []string{
-		"012345678901", // 12 plain digits, no separator and no hex letter
-		"1802001234",   // 10 plain digits (Pagila's address.phone shape)
-	}
-	for _, s := range notMACs {
-		if ValidMAC(s) {
-			t.Errorf("ValidMAC(%q) = true, want false: a plain digit run is not a MAC (T-0297)", s)
-		}
-	}
-}

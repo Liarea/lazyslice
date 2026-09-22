@@ -488,60 +488,6 @@ func TestNameMatchedPhoneColumnMasksOnNameAlone(t *testing.T) {
 	}
 }
 
-// TestPhoneColumnReasonDoesNotNameMAC is tracker T-0297: Pagila's
-// address.phone is 10-to-12 plain digits, which textsig.ValidMAC used to
-// accept as unseparated hex (net.ParseMAC alone admits a bare hex run), so a
-// column the name pattern already classified as phone also printed "N/M
-// samples parse as MAC addresses" -- a value signal of a different category
-// that did not decide it, reading as a misfire on the first-run GIF. The
-// column here matches rules.yml's phone name pattern and carries only plain
-// digit runs of Pagila's own lengths; the decision must still be phone (the
-// name match decides it, corroborated by phraseE164/phraseE164Region on
-// values that parse), and the reason must not carry phraseMAC.
-func TestPhoneColumnReasonDoesNotNameMAC(t *testing.T) {
-	t.Parallel()
-	// All five samples are 12 plain digits -- 12 hex characters is exactly
-	// the 6-byte width net.ParseMAC accepts unseparated, so before T-0297's
-	// fix every one of these parsed as a MAC address and the reason read
-	// "name matches phone; 5/5 samples parse as MAC addresses" (reviewer
-	// finding on the original 9/10/11-digit samples, none of which are 6,
-	// 8 or 20 bytes and so never reached net.ParseMAC at all pre-fix).
-	pagilaShaped := []any{
-		"180020155567", // 12 digits
-		"180020155568", // 12 digits
-		"180020155569", // 12 digits
-		"180020155570", // 12 digits
-		"180020155571", // 12 digits
-	}
-
-	tbl := ref.TableRef{Schema: "public", Name: "address"}
-	schema := &pipeline.Schema{
-		Tables: []pipeline.Table{
-			tt("public", "address", nil,
-				tc("phone", "text"), // matches rules.yml's phone pattern; no separators or hex letters
-			),
-		},
-	}
-	samples := mapSampler{
-		ref.ColumnRef{Table: tbl, Column: "phone"}: pagilaShaped,
-	}
-	cls, err := New().Classify(schema, samples, nil)
-	if err != nil {
-		t.Fatalf("Classify: %v", err)
-	}
-
-	d := cls.Decisions[ref.ColumnRef{Table: tbl, Column: "phone"}]
-	if !d.Masked || d.Category != pipeline.CatPhone {
-		t.Errorf("address.phone = %+v, want masked as phone on the name match", d)
-	}
-	if strings.Contains(d.Reason, phraseMAC) {
-		t.Errorf("address.phone reason = %q, must not name MAC addresses for a plain digit run (T-0297)", d.Reason)
-	}
-	if bad, ok := ParseReason(d.Reason); !ok {
-		t.Errorf("address.phone reason %q holds a fragment no template produced: %q", d.Reason, bad)
-	}
-}
-
 // TestConfigCannotLowerConfidence is ADR-004's tighten-only rule and
 // THREAT_MODEL.md T3's control: the yml supplies opt-outs and raises, never a
 // way to reduce a category or a confidence.

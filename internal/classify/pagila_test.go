@@ -4,6 +4,7 @@ package classify
 
 import (
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -449,5 +450,31 @@ func TestPagilaValueSignalsRespectAcceptedTypes(t *testing.T) {
 	// the lexemes of the text it was derived from, which may itself be masked.
 	if d.Category != pipeline.CatDerivedText || !d.Masked {
 		t.Errorf("film.fulltext is %s masked=%v, want %s masked (%s)", d.Category, d.Masked, pipeline.CatDerivedText, d.Reason)
+	}
+}
+
+// TestPagilaPhoneIsAPhoneNotAMAC is T-0297: Pagila's address.phone holds plain
+// 10-to-12-digit numbers, which net.ParseMAC reads as bare-hex hardware
+// addresses. The name says phone and the values are only digits, so the column
+// is masked as a phone and its reason does not name MAC addresses.
+func TestPagilaPhoneIsAPhoneNotAMAC(t *testing.T) {
+	t.Parallel()
+	samples := pagilaSamples()
+	phone := col(ref.TableRef{Schema: "public", Name: "address"}, "phone")
+	// Pagila's own twelve-digit phones: net.ParseMAC accepts every one.
+	samples[phone] = anyOf("838635286649", "448477190408", "705814003527", "211256301880", "406784385440")
+	cls, err := New().Classify(pagilaSchema(), samples, nil)
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+	d, ok := cls.Decisions[phone]
+	if !ok {
+		t.Fatal("address.phone has no decision")
+	}
+	if d.Category != pipeline.CatPhone || !d.Masked {
+		t.Errorf("address.phone is %s masked=%v (%s), want phone masked", d.Category, d.Masked, d.Reason)
+	}
+	if strings.Contains(d.Reason, "MAC") {
+		t.Errorf("address.phone reason = %q; a digit run is not evidence of a hardware address", d.Reason)
 	}
 }

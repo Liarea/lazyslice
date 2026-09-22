@@ -392,6 +392,10 @@ type valueSignal struct {
 	phrase  string
 	matched int
 	total   int
+	// digitsOnly is true when every sample that matched is plain 0-9 after
+	// trimming (T-0297: a 12-digit phone number is a bare-hex MAC to
+	// net.ParseMAC). Set only by bestSignal's validator loop.
+	digitsOnly bool
 }
 
 // validatorEntry is one row of the ordered validator list. It used to be an
@@ -908,9 +912,11 @@ func bestSignal(dict *textsig.Dict, values []string, p *compiledPack, family str
 	proven := sig.total >= minSamples
 	for _, v := range vs {
 		matched := 0
+		digitsOnly := true
 		for _, s := range values {
 			if v.ok(dict, s) {
 				matched++
+				digitsOnly = digitsOnly && allDigits(s)
 			}
 		}
 		ratio := float64(matched) / float64(sig.total)
@@ -943,7 +949,7 @@ func bestSignal(dict *textsig.Dict, values []string, p *compiledPack, family str
 			}
 			continue
 		}
-		hit := &valueSignal{cat: v.cat, phrase: v.phrase, matched: matched, total: sig.total}
+		hit := &valueSignal{cat: v.cat, phrase: v.phrase, matched: matched, total: sig.total, digitsOnly: matched > 0 && digitsOnly}
 		if ratio >= validatorThreshold {
 			sig.strong = hit
 			return sig
@@ -1142,6 +1148,16 @@ func (st *state) decide(w *work, col pipeline.Column, ct columnType, values []st
 		case best != nil && best.cat == hit.Category:
 			w.d.Confidence = pipeline.ConfCertain
 			w.frags = append(w.frags, render("samples", best.matched, best.total, best.phrase))
+		case best != nil && hit.Category == pipeline.CatPhone && digitsOnlyMAC(best):
+			// A column named phone whose only value evidence is plain digit runs
+			// parsing as bare-hex MAC addresses (Pagila's address.phone, T-0297)
+			// is a phone column: net.ParseMAC accepts 12 unseparated decimal
+			// digits. It stays masked at the confidence the values would have
+			// given it, and the reason does not name a category that did not
+			// decide it. textsig.ValidMAC itself is unchanged, because the
+			// second net and the DDL-literal passes read it too and must not
+			// lose a digit run with no name to vouch for it.
+			w.d.Confidence = pipeline.ConfLikely
 		case best != nil:
 			// The name and the values disagree about which category. The values
 			// win, because they are evidence about this column rather than
@@ -2806,4 +2822,27 @@ func appendField(dst []byte, s string) []byte {
 	dst = strconv.AppendInt(dst, int64(len(s)), 10)
 	dst = append(dst, ':')
 	return append(dst, s...)
+}
+
+// digitsOnlyMAC reports whether a value signal is the MAC validator firing on
+// samples with no separator and no hex letter, which is how a plain 12-digit
+// number reads to net.ParseMAC (T-0297). The samples themselves are not kept on
+// the signal, so the phrase and the category stand for them: the MAC entry is
+// the only network_id validator with that phrase.
+func digitsOnlyMAC(v *valueSignal) bool {
+	return v.cat == pipeline.CatNetworkID && v.phrase == phraseMAC && v.digitsOnly
+}
+
+// allDigits reports whether s, trimmed, is one or more ASCII digits.
+func allDigits(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
