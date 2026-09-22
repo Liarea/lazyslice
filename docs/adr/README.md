@@ -28,12 +28,12 @@ Phase gates check that every ADR has a stated reversal condition (docs/BUILD_PLA
 | [006](006-extension-model.md) | Maskers are a library, rules are data, nothing is loaded at runtime | accepted 2026-09-05 |
 | [007](007-tool-not-company.md) | v1 is a tool, not a company | accepted 2026-09-05 |
 | [011](011-unique-index-domain-rule.md) | Unique-index domain rule for composite and partial indexes | accepted 2026-09-08 |
-| [012](012-mapping-file-deferred.md) | mapping_file is deferred past v1 | proposed 2026-09-14 |
+| [012](012-mapping-file-deferred.md) | mapping_file is deferred past v1 | accepted 2026-09-22 |
 | [010](010-type-gate-on-value-signals.md) | The accepted-types gate silences value signals too; derived_text for tsvector | accepted 2026-09-06 |
 | [009](009-schema-fingerprint.md) | One definition of the schema fingerprint: the generated DDL text | accepted 2026-09-06 |
 | [008](008-first-run.md) | First-run experience: the discovery ladder, the one-question rule and the question catalogue | accepted 2026-09-08 |
-| [013](013-headless-target-never-on-the-source-cluster.md) | A headless run's target is never chosen on the source's own cluster | proposed 2026-09-16 |
-| [014](014-question-mark-at-q2-prints-and-tui-stays-a-flag.md) | `?` at the root-table question prints the ranked candidates; `--tui` stays the only way into the two screens | proposed 2026-09-17 |
+| [013](013-headless-target-never-on-the-source-cluster.md) | A headless run's target is never chosen on the source's own cluster | accepted 2026-09-22 |
+| [014](014-question-mark-at-q2-prints-and-tui-stays-a-flag.md) | `?` at the root-table question prints the ranked candidates; `--tui` stays the only way into the two screens | accepted 2026-09-22 |
 
 ## Numbering note
 

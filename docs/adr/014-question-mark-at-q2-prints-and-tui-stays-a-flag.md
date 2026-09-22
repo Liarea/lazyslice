@@ -1,6 +1,6 @@
 # ADR-014: `?` at the root-table question prints the ranked candidates; `--tui` stays the only way into the two screens
 
-Status: proposed, 2026-09-17. Narrows one clause of ADR-002 ("entered only by `--tui`, or by pressing `?` at a prompt") and one of ADR-008 (section 7's "`?` at Q2 prints the ranked candidates through the line printer and `$PAGER` until the Bubble Tea screens land"). It supersedes neither: ADR-002's two screens, its rule that the TUI owns no logic and that every TUI action exists as a flag first, and ADR-008's question table all stand as written. Both are accepted and frozen, which is why this is a new record rather than an edit (root CLAUDE.md).
+Status: accepted, 2026-09-22 (frozen at the phase 5 gate; proposed 2026-09-17). Narrows one clause of ADR-002 ("entered only by `--tui`, or by pressing `?` at a prompt") and one of ADR-008 (section 7's "`?` at Q2 prints the ranked candidates through the line printer and `$PAGER` until the Bubble Tea screens land"). It supersedes neither: ADR-002's two screens, its rule that the TUI owns no logic and that every TUI action exists as a flag first, and ADR-008's question table all stand as written. Both are accepted and frozen, which is why this is a new record rather than an edit (root CLAUDE.md).
 
 ## Context
 

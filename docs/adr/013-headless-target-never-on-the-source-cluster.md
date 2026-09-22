@@ -1,6 +1,6 @@
 # ADR-013: A headless run's target is never chosen on the source's own cluster
 
-Status: proposed, 2026-09-16. Narrows ADR-008 section 5 and ARCHITECTURE.md section 9 rule 1 for headless runs only — it does not supersede either, and does not touch what either says about an interactive run or an explicitly named `--target`. ADR-008 is accepted and frozen (root CLAUDE.md: "to change an accepted decision, add a new ADR that supersedes it"); this ADR adds a rule rather than changing the one ADR-008 states, which is why it narrows rather than supersedes.
+Status: accepted, 2026-09-22 (frozen at the phase 5 gate; proposed 2026-09-16). Narrows ADR-008 section 5 and ARCHITECTURE.md section 9 rule 1 for headless runs only — it does not supersede either, and does not touch what either says about an interactive run or an explicitly named `--target`. ADR-008 is accepted and frozen (root CLAUDE.md: "to change an accepted decision, add a new ADR that supersedes it"); this ADR adds a rule rather than changing the one ADR-008 states, which is why it narrows rather than supersedes.
 
 ## Context
 
