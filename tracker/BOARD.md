@@ -9,7 +9,7 @@
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 1 | 0 | 107 | 0 | 0 |
 | E6 Launch | 6 | 2 | 0 | 12 | 0 | 0 |
-| E9 Later | later | 89 | 0 | 34 | 7 | 0 |
+| E9 Later | later | 90 | 0 | 34 | 7 | 0 |
 
 ## Open and in progress
 
@@ -105,6 +105,7 @@
 - T-0296 [open] E9 · tracker.py retries a GitHub GraphQL secondary rate limit with backoff instead of failing the write (sonnet)
 - T-0299 [open] E9 · internal/classify: two stale anyMatched comments and a Pagila test that no longer proves the samples look like secrets (sonnet)
 - T-0300 [open] E9 · A name column whose values carry digits is masked as an address (sonnet)
+- T-0301 [open] E9 · A go install build prints 'lazyslice dev' instead of its module version (sonnet)
 
 ## Recently closed
 
