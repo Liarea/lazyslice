@@ -1,4 +1,4 @@
-# Board · 2026-09-17
+# Board · generated 2026-09-22 by tools/tracker.py (source: GitHub project 3 plus tracker/tasks/) — do not hand-edit
 
 | Epic | Phase | Open | In progress | Done | Cancelled | Blocked |
 |---|---|---|---|---|---|---|
@@ -7,9 +7,9 @@
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
-| E5 Hardening | 5 | 3 | 0 | 105 | 0 | 0 |
+| E5 Hardening | 5 | 2 | 0 | 106 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 80 | 0 | 32 | 5 | 0 |
+| E9 Later | later | 82 | 0 | 32 | 5 | 0 |
 
 ## Open and in progress
 
@@ -46,7 +46,6 @@
 - T-0183 [open] E9 · verify does not assert the object its catalog pass refused is gone after the quarantine ()
 - T-0185 [open] E9 · ARCHITECTURE.md does not know about --allow-type-literal ()
 - T-0195 [open] E9 · classify: national_id's checksum-only formats can weak-ratio-mask an ordinary numeric business key ()
-- T-0196 [open] E5 · Migrate the tracker to GitHub Issues and Projects behind the existing tools/tracker.py command surface (sonnet)
 - T-0199 [open] E9 · internal/load's gate test holds its own copy of the cluster-identity SQL ()
 - T-0200 [open] E9 · A cluster identity test that reaches one server over a genuinely different socket ()
 - T-0201 [open] E9 · internal/pipeline/ddlliteral.go: validate a pattern operand both raw and with metacharacters stripped, and strip _ only for LIKE-family operators (sonnet)
@@ -97,9 +96,12 @@
 - T-0269 [open] E9 · A timestamp column's reason line says its samples look like secrets (sonnet)
 - T-0272 [open] E9 · Per-leaf categories for JSON documents on the Decision, so an email leaf is replaced by a fake email rather than filler (opus)
 - T-0274 [open] E9 · The root decision line and the plan's own RootReason give different reasons when a name preference breaks a tie (sonnet)
+- T-0275 [open] E9 · tracker.py: close writes the archive file before it closes the issue, and every gh call has a timeout (sonnet)
+- T-0276 [open] E9 · tracker.py: five small robustness findings from T-0196's review (sonnet)
 
 ## Recently closed
 
+- T-0196 [done] E5 · Migrate the tracker to GitHub Issues and Projects behind the existing tools/tracker.py command surface → done
 - T-0083 [done] E5 · Target type registration for CopyFrom: no owner since internal/load shipped → done
 - T-0170 [done] E9 · torture regression 013 (json-object-key-email) fails on main → done
 - T-0197 [done] E5 · R2-05/A10 residual: a name in a language names.txt does not carry still reports "no name or value signal" as a clean bill of health → done
@@ -124,4 +126,3 @@
 - T-0258 [done] E5 · internal/plan's fk-pair refusal can fire on a pair a later classify pass already reconciles → done
 - T-0259 [done] E5 · README's flag table is generated and checked, and a release tag refuses a README that does not name it → done
 - T-0260 [done] E5 · README is true for v0.1.0: what it does, a quickstart that was run, first-run flags, exit codes at a glance, and the residuals in step with the threat model; SECURITY.md reconciled → done
-- T-0263 [done] E5 · internal/testutil outlasts Docker's port-table race: a longer bounded wait for the mapped port and one container restart before failing → done
