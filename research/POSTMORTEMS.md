@@ -94,7 +94,7 @@ Neosync's own launch post names the same status quo, and it is worth quoting bec
 
 ### The proxy, and deterministic fake values
 
-A year after the shutdown, an HN user explaining what he missed named two specific things — neither of which was the cloud product:
+Seven weeks after the shutdown (31 August 2024 to 17 October 2024), an HN user explaining what he missed named two specific things — neither of which was the cloud product:
 
 > I liked similar thing, snaplet, unfortunately they're dead now. One thing I liked was the option to run proxy to which you could connect with any tool you like (psql, dbeaver, ...) and see preview of your transformations. Also they had some good (stable) generators for names, emails, etc...
 > — muhehe, on a Greenmask thread ([HN, 17 Oct 2024](https://news.ycombinator.com/item?id=41867092))
@@ -105,12 +105,12 @@ A year after the shutdown, an HN user explaining what he missed named two specif
 
 | Package | Weekly downloads | What it is |
 |---|---|---|
-| [`@snaplet/copycat`](https://registry.npmjs.org/@snaplet/copycat) | **121,478** | Deterministic fake values. No service. ~1,000 lines of pure function. |
+| [`@snaplet/copycat`](https://api.npmjs.org/downloads/range/2026-08-23:2026-08-29/@snaplet/copycat) | **more than 12×** `@snaplet/snapshot`'s downloads (121,478) | Deterministic fake values. No service. ~1,000 lines of pure function. |
 | [`@snaplet/seed`](https://registry.npmjs.org/@snaplet/seed) | 41,159 | Schema-based generation (calls a hosted LLM) |
-| [`@snaplet/snapshot`](https://registry.npmjs.org/@snaplet/snapshot) | 9,808 | **The actual snapshot tool** |
+| [`@snaplet/snapshot`](https://api.npmjs.org/downloads/range/2026-08-23:2026-08-29/@snaplet/snapshot) | 9,808 | **The actual snapshot tool** |
 | [`snaplet`](https://registry.npmjs.org/snaplet) | 3,511 | The original CLI |
 
-(Verified via `https://api.npmjs.org/downloads/point/last-week/<pkg>` on the research date.)
+(Verified via `https://api.npmjs.org/downloads/range/2026-08-23:2026-08-29/<pkg>`, the week of 23–29 August 2026, the research date; a `point/last-week` link would drift as the calendar moves and no longer back these numbers.)
 
 The smallest, most boring, least differentiated component — a deterministic faker with nothing behind it — outlives the platform by **12×**. GitHub stars agree: [copycat 1,057](https://github.com/supabase-community/copycat), [seed 790](https://github.com/supabase-community/seed), [snapshot 328](https://github.com/supabase-community/snapshot). The thing the company was built to sell is bottom of both lists.
 
