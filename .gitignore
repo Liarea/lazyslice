@@ -21,3 +21,4 @@ coverage.out
 /tools/docgen/docgen
 /lazyslice
 __pycache__/
+docs/media/.gif-status

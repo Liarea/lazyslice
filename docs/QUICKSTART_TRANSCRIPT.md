@@ -1,6 +1,6 @@
 <!-- This is a transcript, not a guide: every command below was actually run,
      against two disposable Postgres containers holding invented data, and
-     removed afterwards. README.md's Quickstart section is a trimmed excerpt
+     removed afterwards. README.md's "The run" section is a trimmed excerpt
      of it. Nothing here is a real database or a real person. -->
 
 # Quickstart transcript
@@ -69,7 +69,7 @@ select (i % 900) + 1, (i % 20) + 1, 1 + (i % 4)
 from generate_series(1, 1800) i;
 ```
 
-## The run README.md's Quickstart trims
+## The run README.md's "The run" section trims
 
 ```sh
 $ export LAZYSLICE_SECRET=$(openssl rand -hex 32)   # a throwaway key for this transcript

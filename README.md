@@ -1,6 +1,6 @@
 # lazyslice
 
-![lazyslice's first run: discovering two Postgres containers, subsetting from a root table, masking personal data, loading, and verifying — against the Pagila fixture](docs/media/first-run.gif)
+![lazyslice's first run against the Pagila fixture: one command names the source and the target, every column's masking decision prints with its reason, the plan and the load follow, and three customer rows read back from the target with invented names and addresses](docs/media/first-run.gif)
 
 Point it at a production Postgres database and get a small, referentially
 complete, pseudonymised copy in a local database — one command, no config.
@@ -253,8 +253,8 @@ guessing. lazyslice's own cells describe `v0.1.0` exactly as installed above.
 
 | | lazyslice | Greenmask | PostgreSQL Anonymizer | Tonic Structural |
 |---|---|---|---|---|
-| Time to first snapshot | One command, no separate config step — the run above, `517` rows, held about a second | A config file is written first; the bundled playground's own quickstart edits its sample `config.yml` before the first `dump`[^gm-quick] | Six DDL/SQL statements before a masked read: create the extension, enable it, load a sample table, initialise masking, create a masked role, declare a rule[^pga-home] | Sign up, verify by email, create a workspace, then a sensitivity scan and a generation run — about seven to eight steps end to end[^tonic-quick] |
-| Config required before first run | None — `--no-config` above wrote nothing, and a run with no flags at all asks one question and proceeds | Yes — "a configuration file is mandatory for Greenmask functioning"[^gm-quick] | Yes — masking rules are declared as `SECURITY LABEL`s on each column, a policy stored in the database, before anything is masked[^pga-rules] | An account and a workspace, always; a bundled sample workspace needs no database connection, but masking your own data does[^tonic-quick] |
+| Time to first snapshot | One command and no config step — the run above went from the command line to `complete` with nothing written beforehand | A config file is written first; the bundled playground's own quickstart edits its sample `config.yml` before the first `dump`[^gm-quick] | Six DDL/SQL statements before a masked read: create the extension, enable it, load a sample table, initialise masking, create a masked role, declare a rule[^pga-home] | Sign up, verify by email, create a workspace, then a sensitivity scan and a generation run — about seven to eight steps end to end[^tonic-quick] |
+| Config required before first run | None — `--no-config` above wrote nothing; a run with no flags asks at most one question (which table to start from, or whether to start a target container when none is found) and otherwise stops naming the flag it needs | Yes — "a configuration file is mandatory for Greenmask functioning"[^gm-quick] | Yes — masking rules are declared as `SECURITY LABEL`s on each column, a policy stored in the database, before anything is masked[^pga-rules] | An account and a workspace, always; a bundled sample workspace needs no database connection, but masking your own data does[^tonic-quick] |
 | Databases | PostgreSQL 14–18 only | PostgreSQL (full support); MySQL "in progress"[^gm-repo] | PostgreSQL only, plus the Postgres-compatible forks Greenplum and YugabyteDB[^pga-home] | Postgres, Oracle, Db2, MySQL, SQL Server, Redshift, Snowflake, BigQuery, MongoDB, Databricks, Spark, S3, Salesforce and flat files[^tonic-product] |
 | Masking determinism (same input, same output across runs) | Deterministic under a local key by construction — the same value always masks the same way for the same key and category (see "How it decides what is personal data" below) | Opt-in, not the default: `engine` "by default is set to `random`"; the hash engine has to be chosen explicitly for the same input to always produce the same output[^gm-engine] | Opt-in, not the default: the built-in masking functions are random; the same input is deterministic only through the separate `pseudo_*`/`hash` functions, seeded by hand[^pga-funcs] | Stated as a feature — "automated, consistent transformations that preserve relationships and referential integrity"[^tonic-product] |
 | Licence | Apache-2.0 | Apache-2.0[^gm-repo] | The PostgreSQL License[^pga-license] | Proprietary — no free or open-source tier; "Professional" and "Enterprise" are both custom-priced[^tonic-price] |
@@ -272,8 +272,8 @@ guessing. lazyslice's own cells describe `v0.1.0` exactly as installed above.
 
 ## How it decides what is personal data
 
-Three signals feed every decision, and the run above shows all three in its
-reason lines. A column's **name** is checked against a multilingual rule pack
+Three signals feed every decision, and the run above shows the first two in
+its reason lines. A column's **name** is checked against a multilingual rule pack
 (`email`, `phone`, `full_name`, and so on — `customers.email: name matches
 email`). Its **sampled values** — about two hundred rows, never the whole
 table — are run through validators built for the same categories: an email
