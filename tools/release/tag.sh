@@ -25,7 +25,14 @@
 # runner, and the brew-install proof on a machine that did not build it is a
 # separate, human-witnessed step.
 #
-# Usage: tools/release/tag.sh vX.Y.Z [--dry-run] [--no-watch]
+# A mask module tag, mask/vX.Y.Z (ROADMAP.md "Versioning and releases"),
+# takes the same checks 1 to 3 and 7 and skips the rest: release.yml ignores
+# mask/v* on purpose (the module is imported, never built into a binary), so
+# there is no README heading to name it, no action to resolve, no goreleaser
+# pipe and no run to watch. The tag is what lets go.mod require the module
+# by version instead of a local replace (T-0285).
+#
+# Usage: tools/release/tag.sh vX.Y.Z|mask/vX.Y.Z [--dry-run] [--no-watch]
 #   --dry-run   run every check and stop before tagging
 #   --no-watch  push the tag and print the release run's URL without waiting
 
@@ -55,12 +62,18 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
 # ---------- 1. the tag's shape ----------
-[ -n "$TAG" ] || die "no tag given; usage: make tag TAG=vX.Y.Z"
-[[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] ||
-	die "'$TAG' is not a tag this project cuts (vX.Y.Z, optionally -suffix; ROADMAP.md 'Versioning and releases')"
-case "$TAG" in
-*-*) log "$TAG carries a pre-release suffix: goreleaser publishes the binaries and skips the cask (skip_upload: auto)" ;;
-esac
+[ -n "$TAG" ] || die "no tag given; usage: make tag TAG=vX.Y.Z (or TAG=mask/vX.Y.Z for the mask module)"
+MASK=0
+case "$TAG" in mask/*) MASK=1 ;; esac
+[[ "${TAG#mask/}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] ||
+	die "'$TAG' is not a tag this project cuts (vX.Y.Z or mask/vX.Y.Z, optionally -suffix; ROADMAP.md 'Versioning and releases')"
+if [ "$MASK" -eq 1 ]; then
+	log "$TAG is a mask module tag: no release run follows it (release.yml ignores mask/v*); it exists so go.mod can require the module by version"
+else
+	case "$TAG" in
+	*-*) log "$TAG carries a pre-release suffix: goreleaser publishes the binaries and skips the cask (skip_upload: auto)" ;;
+	esac
+fi
 
 # ---------- 2. the checkout ----------
 command -v gh >/dev/null 2>&1 || die "gh is not on PATH"
@@ -83,12 +96,15 @@ fi
 
 # ---------- 4. README names the tag ----------
 # The same test release.yml applies (T-0259): the first `## Status` heading
-# must contain the tag as a whole token.
+# must contain the tag as a whole token. A mask tag is not a version of the
+# tool and is not named there.
+if [ "$MASK" -eq 0 ]; then
 status_line="$(grep -m1 '^## Status' README.md || true)"
 [ -n "$status_line" ] || die "README.md has no '## Status' heading"
 escaped_tag="$(printf '%s' "$TAG" | sed -e 's/[.[\*^$]/\\&/g')"
 if ! grep -qE "(^|[^A-Za-z0-9._-])${escaped_tag}([^A-Za-z0-9._-]|\$)" <<<"$status_line"; then
 	die "README.md's Status heading does not name $TAG — release.yml would refuse the tag: '$status_line'"
+fi
 fi
 
 # ---------- 5. every action the release workflow pins resolves ----------
@@ -97,6 +113,7 @@ fi
 # floating v4. Nothing but a tag exercises release.yml, so check here.
 workflow=.github/workflows/release.yml
 [ -f "$workflow" ] || die "$workflow is missing"
+if [ "$MASK" -eq 0 ]; then
 while IFS= read -r use; do
 	[ -n "$use" ] || continue
 	case "$use" in ./*) continue ;; esac # a local action has no ref to check
@@ -117,12 +134,15 @@ while IFS= read -r use; do
 # "- uses:" prefix in place, so every action read as unresolvable.
 done < <(grep -E '^[[:space:]]*-?[[:space:]]*uses:' "$workflow" |
 	sed -E 's/^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*//; s/[[:space:]]+#.*$//; s/["'"'"']//g')
+fi
 
 # ---------- 6. goreleaser accepts its configuration ----------
+if [ "$MASK" -eq 0 ]; then
 GORELEASER="$(command -v goreleaser || true)"
 [ -n "$GORELEASER" ] || die "goreleaser is not on PATH (make tools)"
 "$GORELEASER" check >/dev/null 2>&1 || die "goreleaser check rejects .goreleaser.yaml; run it for the reason"
 log "goreleaser check passed"
+fi
 
 # ---------- 7. CI is green on HEAD ----------
 # release.yml refuses a tag whose commit has no finished, successful ci run;
@@ -148,6 +168,10 @@ fi
 git tag -a "$TAG" -m "$TAG" "$sha"
 log "tagged ${sha:0:7} as $TAG"
 git push origin "refs/tags/$TAG"
+if [ "$MASK" -eq 1 ]; then
+	log "pushed $TAG; nothing runs for a mask tag. go.mod may now require github.com/Liarea/lazyslice/mask ${TAG#mask/}"
+	exit 0
+fi
 log "pushed $TAG; release.yml is starting"
 
 release_id=""
