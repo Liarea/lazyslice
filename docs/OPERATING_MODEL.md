@@ -24,6 +24,8 @@ How this project is built by one orchestrator and a fleet of agents, with a huma
 | Reviews: correctness, security, scope | Opus | high | A cheap reviewer that misses a leak is worse than no reviewer. |
 | Format conversion, boilerplate, tracker board regeneration | Haiku | low | Mechanical. |
 
+Correction, 2026-09-22 (Opus 5.5): Opus means Opus 5.5 and its effort is `medium` wherever the table says `high`. `medium` is Opus 5.5's default and matches or beats Opus 5 at `high` on coding and review in fewer tokens (docs/prompting/opus-5-5.md); an Opus 5.5 reviewer at `medium` also catches more with fewer false alarms than Opus 5 did. `high` is now a step up, taken only where a sweep shows a gain. Opus 5 stays available as the fallback.
+
 Correction, 2026-09-09 (the maintainer): phase 5 ran an Opus developer plus three Opus reviewers on nearly every task and burned the weekly allowance. The defaults are now a Sonnet developer and one Opus reviewer; a task opts in to Opus or to three reviewers only for masking, verify, and source-safety logic. Mechanical work goes to Haiku or Sonnet. Any single run expected to exceed about one million tokens is confirmed with the maintainer first.
 
 ## Budget reality

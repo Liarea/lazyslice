@@ -6,8 +6,9 @@ Per-model cheat sheets and ready-to-paste role templates for lazyslice's agents.
 |---|---|---|
 | [general.md](general.md) | All models, from [best practices](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices) | Skeleton, phrases, anti-patterns; all we have on Haiku 4.5 |
 | [fable-5-1.md](fable-5-1.md) | Fable 5.1 / Mythos 5.1, from [its page](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-fable-5-1) | The orchestrator and the synthesiser |
-| [opus-5.md](opus-5.md) | Opus 5, from [its page](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5) | Researchers, core-pipeline devs, reviewers |
-| [opus-4-8.md](opus-4-8.md) | Opus 4.8, from [its page](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-4-8) | Fallback if Opus 5 is unavailable |
+| [opus-5-5.md](opus-5-5.md) | Opus 5.5, from [its page](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5-5) | Researchers, core-pipeline devs, reviewers: what changed from Opus 5 (effort default `medium`, thinking always on, early stops on unattended runs) |
+| [opus-5.md](opus-5.md) | Opus 5, from [its page](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-5) | The phrases Opus 5.5 inherits (scope, subagents, length, narration); fallback if Opus 5.5 is unavailable |
+| [opus-4-8.md](opus-4-8.md) | Opus 4.8, from [its page](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-opus-4-8) | Second fallback |
 | [sonnet-5.md](sonnet-5.md) | Sonnet 5, from [its page](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/prompting-claude-sonnet-5) | Peripheral developers, fix rounds |
 
 Every agent prompt carries a role, repo path, the exact files it may write, the definition of done, the return schema, and instructions to touch nothing else and to finish without asking ([OPERATING_MODEL.md](../OPERATING_MODEL.md)). Templates use `{placeholders}`.
@@ -19,17 +20,19 @@ Copied from [docs/OPERATING_MODEL.md](../OPERATING_MODEL.md#model-tiers).
 | Work | Model | Effort | Why |
 |---|---|---|---|
 | Research synthesis, architecture decisions, ADRs, threat model | Fable | high | Judgment under uncertainty; the cost of a wrong decision compounds. |
-| Individual research documents, sqlit study, name check | Opus | high | Long web research with judgment, no irreversible decision. |
-| Core pipeline code: introspect, classify, plan, extract, transform, load | Opus | high | Streaming, constraints, and masking are where subtle bugs leak data. |
+| Individual research documents, sqlit study, name check | Opus | medium | Long web research with judgment, no irreversible decision. |
+| Core pipeline code: introspect, classify, plan, extract, transform, load | Opus | medium | Streaming, constraints, and masking are where subtle bugs leak data. |
 | Fixtures, CI, docs, tests scaffolding, TUI wiring, adapters after the first | Sonnet | medium | Well-specified work with a clear definition of done. |
-| Reviews: correctness, security, scope | Opus | high | A cheap reviewer that misses a leak is worse than no reviewer. |
+| Reviews: correctness, security, scope | Opus | medium | A cheap reviewer that misses a leak is worse than no reviewer. |
 | Format conversion, boilerplate, tracker board regeneration | Haiku | low | Mechanical. |
 
 Default is to inherit the session model when unsure. Never downgrade a reviewer to save tokens.
 
-## Researcher — Opus 5, effort high
+Opus means Opus 5.5 from 2026-09-22, and its effort column reads `medium`, not `high`: `medium` is Opus 5.5's default and, in Anthropic's testing, matches or beats Opus 5 at `high` on coding and review in fewer tokens ([opus-5-5.md](opus-5-5.md)). `high` on Opus 5.5 is a step up from what the table used to mean, taken only where a sweep shows a gain.
 
-Give Opus 5 the whole spec up front and leave it to run; its written files run long, so keep the length line ([opus-5.md](opus-5.md)).
+## Researcher — Opus 5.5, effort medium
+
+Give it the whole spec up front and leave it to run; written files run long, so keep the length line ([opus-5.md](opus-5.md)). It runs unattended, so the early-stop paragraph from [opus-5-5.md](opus-5-5.md) goes last.
 
 ```text
 ROLE      Researcher on lazyslice. Repo: {repo_path}. Read CONCEPT.md and CLAUDE.md first.
@@ -54,7 +57,7 @@ RETURN    {return_schema}. Lead with the outcome.
 <tone_preference>Keep outputs reasonably concise.</tone_preference>
 ```
 
-## Developer — Opus 5 high (core pipeline) or Sonnet 5 medium (peripheral)
+## Developer — Opus 5.5 medium (core pipeline) or Sonnet 5 medium (peripheral)
 
 Same skeleton for both. For Sonnet, state scope per item: it does not generalise an instruction from one file to the rest ([sonnet-5.md](sonnet-5.md)).
 
@@ -77,9 +80,9 @@ RETURN    {return_schema}, including a one-line post-mortem:
 <tone_preference>Keep outputs reasonably concise.</tone_preference>
 ```
 
-## Reviewer — Opus 5, effort high
+## Reviewer — Opus 5.5, effort medium
 
-One lens per agent, three in parallel. Reviewers find; the orchestrator filters. Never write "be conservative" or "only high-severity" — Opus obeys it and recall drops ([opus-5.md](opus-5.md)).
+One lens per agent, three in parallel. Reviewers find; the orchestrator filters. Never write "be conservative" or "only high-severity" — Opus obeys it and recall drops ([opus-5.md](opus-5.md)). Opus 5.5 catches more and raises fewer false alarms than Opus 5 at the same setting ([opus-5-5.md](opus-5-5.md)).
 
 ```text
 ROLE      Reviewer on lazyslice, lens: {correctness | security_and_invariants | scope}.

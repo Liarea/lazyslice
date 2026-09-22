@@ -4,10 +4,11 @@ Every line traces to [Prompting best practices](https://platform.claude.com/docs
 
 ## What is different about this model
 
-It covers Fable 5.1/5, Mythos 5.1/5, Opus 5 and 4.6–4.8, Sonnet 5 and 4.6, and Haiku 4.5; read the [model-specific guidance](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices#model-specific-guidance) table first.
+It covers Fable 5.1/5, Mythos 5.1/5, Opus 5.5, 5 and 4.6–4.8, Sonnet 5 and 4.6, and Haiku 4.5 (re-read 2026-09-22 for Opus 5.5); read the [model-specific guidance](https://platform.claude.com/docs/en/build-with-claude/prompt-engineering/claude-prompting-best-practices#model-specific-guidance) table first.
 
 - Current models are "more direct and grounded" and "less verbose", and may skip summaries after tool calls.
 - **Opus 5 inverts this**: responses run longer and `effort` "does not reliably change visible response length". Ask for concision explicitly. It self-verifies well unprompted, so "remove these instructions rather than rewriting them" when migrating.
+- **Opus 5.5** keeps Opus 5's prompts and adds: `effort` defaults to `medium`, thinking is always on, and history must stay append-only — "modifying the conversation before a thinking block" invalidates it on Fable 5.1 and Opus 5.5 ([opus-5-5.md](opus-5-5.md)).
 - **Fable 5.1** writes *fewer* progress updates in agent loops; ask for them and drop any "keep it brief" line. It formats less already, so anti-markdown blocks suppress needed structure.
 - Instruction following is literal: "can you suggest some changes" gets suggestions, not edits.
 - Opus 4.5/4.6 respond more to system prompts, so old anti-laziness prompting now **over**triggers. Opus 4.6 over-explores and has "a strong predilection for subagents"; so does Opus 5.
