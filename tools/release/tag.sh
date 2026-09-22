@@ -18,6 +18,9 @@
 #      that the action does not publish, and no push to main runs that job.
 #   6. `goreleaser check` accepts .goreleaser.yaml.
 #   7. HEAD has a finished, green `ci` run; an unfinished one is waited for.
+#   8. mask/ at HEAD is exactly the mask/vX.Y.Z tag go.mod requires, so the
+#      release binary and `go install` of the same tag mask identically
+#      (T-0290; goreleaser builds with GOWORK=off for the same reason).
 #
 # Then it tags HEAD, pushes the tag, finds the release run it starts and, by
 # default, watches that run to the end and prints the release URL. It never
@@ -105,6 +108,21 @@ escaped_tag="$(printf '%s' "$TAG" | sed -e 's/[.[\*^$]/\\&/g')"
 if ! grep -qE "(^|[^A-Za-z0-9._-])${escaped_tag}([^A-Za-z0-9._-]|\$)" <<<"$status_line"; then
 	die "README.md's Status heading does not name $TAG — release.yml would refuse the tag: '$status_line'"
 fi
+fi
+
+# ---------- 8. mask/ is the version go.mod requires ----------
+# With go.work at the root, an unreleased edit under mask/ passes every
+# local check; the release (GOWORK=off) and `go install` would both build
+# the older tagged mask instead. Cut mask/vX.Y.Z and bump the require first.
+# Markdown under mask/ is excluded: a doc edit changes no masker.
+if [ "$MASK" -eq 0 ]; then
+mask_ver="$(awk '$1 == "github.com/Liarea/lazyslice/mask" { print $2; exit }' go.mod)"
+[ -n "$mask_ver" ] || die "go.mod does not require github.com/Liarea/lazyslice/mask"
+git rev-parse -q --verify "refs/tags/mask/$mask_ver" >/dev/null ||
+	die "go.mod requires mask $mask_ver but there is no mask/$mask_ver tag; cut it with make tag TAG=mask/$mask_ver"
+git diff --quiet "mask/$mask_ver" HEAD -- mask/ ':(exclude,glob)mask/**/*.md' ||
+	die "mask/ at HEAD differs from mask/$mask_ver, the version go.mod requires; cut the next mask/vX.Y.Z with make tag, bump the require, then tag the tool"
+log "mask/ at HEAD is mask/$mask_ver, the version go.mod requires"
 fi
 
 # ---------- 5. every action the release workflow pins resolves ----------
