@@ -4,5 +4,12 @@
   "The command's output never reaches an event, a log line, a refusal message, lazyslice.yml or the trace; its own stderr passes through to the operator untouched",
   "A command that exits non-zero, times out or prints nothing refuses the run with a message naming the exit status and nothing else",
   "The command also runs for an endpoint the discovery ladder resolved, not only for one named on the command line"
+ ],
+ "87aea49": [
+  "Reverted before release by the entry above (5711c6b); nothing in this commit shipped, and no check was narrowed."
+ ],
+ "930c9b1": [
+  "Research doc: the Hacker News comment is dated precisely, seven weeks after the Snaplet shutdown (31 August 2024 to 17 October 2024), not a year.",
+  "Research doc: the npm figures are for the dated week 23-29 August 2026 (@snaplet/copycat 121,478, @snaplet/snapshot 9,808, more than twelve times), linked to npm's dated range endpoints so the links keep backing the numbers."
  ]
 }
