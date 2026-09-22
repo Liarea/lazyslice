@@ -17,16 +17,19 @@ below. What it produces is pseudonymised, not anonymised —
 some things about the original rows survive on purpose, and the honest list
 of what survives is below.
 
-## Status: pre-release, PostgreSQL only
+## Status: v0.0.1 proves the release pipeline; pre-release, PostgreSQL only
 
 The pipeline runs end to end against PostgreSQL 14 to 18: it discovers a
 source and a target, refuses a target that is not empty or not its own,
 subsets from a root table across foreign keys, masks personal data
 deterministically, loads, and verifies the copy (foreign keys, row counts, a
-residual scan of the target against the source). It is in hardening: an
-independent review on 2026-09-09 found leak-class defects that are being fixed
-in the open ([docs/reviews/](docs/reviews/), tracked in [tracker/](tracker/)),
-and there is no supported version until `v0.1.0` is tagged.
+residual scan of the target against the source). Hardening is done: the
+defects an independent review found on 2026-09-09 and six rounds of an
+adversarial red team have landed in the open ([docs/reviews/](docs/reviews/)),
+and what remains is tracked as
+[issues](https://github.com/Liarea/lazyslice/issues). `v0.0.1` exists to prove
+that a tag builds, signs and reaches the Homebrew tap, and nothing else; there
+is no supported version until `v0.1.0` is tagged.
 
 Until then, point it only at data you are already allowed to hold on the
 machine that runs it. What a snapshot does not hide is listed below and in
@@ -53,15 +56,15 @@ make build                     # bin/lazyslice
 export PATH="$PWD/bin:$PATH"   # the examples below call it as lazyslice
 ```
 
-From the tap, once `v0.1.0` is tagged:
+From the tap:
 
 ```sh
 brew install Liarea/tap/lazyslice
 ```
 
-There is nothing to install from the tap yet: no tag means no release, and
-`brew install` against an empty tap fails rather than installing something
-untagged.
+The tap carries whatever the latest tag built. Before `v0.1.0` that is a
+pipeline proof (`v0.0.x`), not a version anyone should rely on; `brew install`
+against an empty tap fails rather than installing something untagged.
 
 ## Quickstart
 
