@@ -1,6 +1,6 @@
 # ADR-012: mapping_file is deferred past v1
 
-Status: proposed, 2026-09-14. Supersedes the `mapping_file:` paragraph of ADR-006 for v1. ADR-006 is accepted and frozen (its own header: "After Gate 2 this file is frozen and a change is a superseding ADR"), so that paragraph is not edited; this ADR is the correction and takes effect on its own gate.
+Status: accepted, 2026-09-22 (frozen at the phase 5 gate; proposed 2026-09-14). Supersedes the `mapping_file:` paragraph of ADR-006 for v1. ADR-006 is accepted and frozen (its own header: "After Gate 2 this file is frozen and a change is a superseding ADR"), so that paragraph is not edited; this ADR is the correction and takes effect on its own gate.
 
 ## Context
 
