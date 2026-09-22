@@ -8,7 +8,7 @@ export const meta = {
 }
 const REPO = '/Users/gareth/personal_repos/lazyslice'
 const IMPL = `${REPO}/.claude/workflows/implement.js`
-// args: { step: 'material' | 'v020', from?: index }  from skips merged tasks; a task's brief starts with `python3 tools/tracker.py show T-NNNN` (T-0196: open tasks are GitHub issues, not files)
+// args: { step: 'material' | 'v020' | 'polish', from?: index }  from skips merged tasks; a task's brief starts with `python3 tools/tracker.py show T-NNNN` (T-0196: open tasks are GitHub issues, not files)
 const step = (args && args.step) || 'material'
 const from = (args && args.from) || 0
 
@@ -41,6 +41,29 @@ if (step === 'v020') {
   return { results }
 }
 
+// Launch polish (2026-09-22): four Later tasks re-homed to E6 because a stranger meets each before or at the v0.2.0 tag. T-0288 runs first because its plan line may change what the GIF shows; T-0289 re-records the GIF last.
+const POLISH = [
+  { id: 'T-0288', title: 'A root table can hold more rows than --take names: find out why, then say so or stop it', model: 'sonnet', effort: 'high', reviewers: 1, stage: 'plan', paths: ['cmd/lazyslice/', 'internal/plan/', 'internal/core/', 'internal/render/', 'internal/event/', 'ARCHITECTURE.md', 'README.md', 'docs/', 'testdata/regressions/'], integration: './internal/plan/... ./internal/core/...',
+    brief: `Read the task with python3 tools/tracker.py show T-0288, ARCHITECTURE.md section 3 (the planner and the closure), internal/plan's root selection and closure, the --take flag's help in cmd/lazyslice, and the README's quickstart transcript. Diagnose first, with evidence: load Pagila (internal/testutil's fixture, or make gif's container recipe) and count the payments whose customer_id differs from their rental's customer_id among the 200 lowest-id customers' rentals, and show that the extra roots are exactly those customers; paste the query and its answer. If that is the cause, the behaviour is correct (referential completeness wins over the row count, THREAT_MODEL and ARCHITECTURE both require it): change --take's help to say the root holds at least N rows plus any the closure requires, the root's plan line to say 'N chosen, M pulled in by references' when M > 0 (through internal/event's catalogue if that line is an event: make docs regenerates docs/FLAGS.md, docs/ERRORS.md and README's flag table), ARCHITECTURE.md section 3 to match, and a test that pins the wording on a two-table fixture where a child points back at an unchosen root. If it is not the cause, it is a planner defect: stop, write the diagnosis in your summary and concerns, and add a failing regression under testdata/regressions/ only; do not fix the planner in this task. Run make check and the named integration packages; paste the output.` },
+  { id: 'T-0289', title: 'make gif records with a read-only role, probes readiness from the host, and pace.awk fails when it paused nothing', model: 'sonnet', effort: 'medium', reviewers: 1, stage: 'peripheral', paths: ['Makefile', 'docs/media/', 'docs/CLAUDE.md', 'README.md'], checks: 'check',
+    brief: `Read the task with python3 tools/tracker.py show T-0289, the gif target in the Makefile, docs/media/first-run.tape, docs/media/pace.awk, and the warning text lazyslice prints for a source role that can write (grep internal/ for 'can write to'). Do the three items it names: (1) make gif creates, in the source container after Pagila loads, the read-only role the warning recommends (LOGIN, no superuser, SELECT on the schema's tables and USAGE on the schema, and whatever else the run needs to read the catalog; find out by running it) and the tape connects as that role, so the recording has no write warning; (2) readiness is probed from the host over the published port (psql or pg_isready with -h 127.0.0.1 -p the host port), not inside the container; (3) pace.awk anchors on the column names it pauses on, not on a two-space marker, and exits non-zero when fewer than three lines matched, and make gif fails when it does. Start the recipe with set -e and set -o pipefail explicitly: this machine's GNU Make 3.81 ignores .SHELLFLAGS (T-0291). Re-record with make gif and read the first and last frames back (ffmpeg or vhs's own screenshot) and paste what they say; the README's embedded frame must still match its transcript. Run make check; paste the output. Do not commit.` },
+  { id: 'T-0277', title: 'The cask quarantine hook without the postflight Homebrew deprecates', model: 'sonnet', effort: 'medium', reviewers: 1, stage: 'release', paths: ['.goreleaser.yaml', '.github/workflows/ci.yml', '.github/workflows/release.yml', 'docs/RUNBOOK.md'], checks: 'check',
+    brief: `Read the task with python3 tools/tracker.py show T-0277, .goreleaser.yaml's homebrew_casks block, ci.yml's release-config job (it asserts the cask's hook), and docs/RUNBOOK.md's release section. Find out from goreleaser's current documentation and changelog (fetch them; cite the page and the version in your summary, as of today) whether goreleaser can emit a cask hook that is not the deprecated postflight block, and from Homebrew's Cask Cookbook what postflight_steps or its replacement looks like. If goreleaser supports it, change the block and the release-config assertion together; if it does not, say so with the source, and keep the hook but make the release-config assertion and RUNBOOK name the deprecation and the day it bites (every fresh install on macOS stops at Gatekeeper). Either way, prove it with make snapshot and paste dist/homebrew/Casks/lazyslice.rb, and run brew style on that file if brew is present. The installed binary must still lose its quarantine attribute; that is the hook's whole job. Run make check; paste the output. Do not commit.` },
+  { id: 'T-0286', title: 'research/POSTMORTEMS.md says what the blog draft now says', model: 'sonnet', effort: 'low', reviewers: 1, stage: 'peripheral', paths: ['research/POSTMORTEMS.md'], checks: 'none',
+    brief: `Read the task with python3 tools/tracker.py show T-0286, research/POSTMORTEMS.md lines 90 to 115, and the corresponding sentences in docs/launch/BLOG_POSTMORTEMS.md. Make the two facts in the research document match the blog draft with the same sources: the Hacker News comment is seven weeks after the shutdown (give both dates), and the npm figure is the ratio with the npm downloads API endpoints as sources. Fetch each source today and confirm it says what the sentence claims; if one does not, say so and write what it does say. Change nothing else in the file. Do not commit.` },
+]
+
+if (step === 'polish') {
+  phase('Polish')
+  const results = []
+  for (const t of POLISH.slice(from)) {
+    const r = await workflow({ scriptPath: IMPL }, { ...t, model: t.model || 'sonnet', effort: t.effort || 'medium' })
+    results.push(r)
+    if (!r || r.status !== 'merged') { log(`Stopped at ${t.id}`); return { results, stopped_at: t.id } }
+  }
+  return { results }
+}
+
 if (step === 'material') {
   phase('Material')
   const results = []
@@ -52,5 +75,5 @@ if (step === 'material') {
   return { results }
 }
 
-log(`unknown step '${step}'; this script has two: material, v020`)
+log(`unknown step '${step}'; this script has three: material, v020, polish`)
 return { results: [], stopped_at: null }
