@@ -267,6 +267,73 @@ func TestEqualValuesMaskAlikeAcrossColumnsOfOneCategory(t *testing.T) {
 	}
 }
 
+// ---------- person_name role ----------
+
+// TestPersonNameRoleReachesTheMasker is testdata/regressions/038's own
+// end-to-end proof, run where a database is not needed (T-0287's fix round):
+// not-copied: alone cannot tell a correctly shaped fake from a differently
+// wrong one, and mask/role_test.go's TestPersonNameRoleShape only calls the
+// masker directly, so deleting this package's own
+// `plans[i].shape.constraints.Role = d.Role` (transform.go) -- which drops
+// every person_name column back to personNameMasker's RoleFull default --
+// passes both `make check` and `make torture` without this test. A
+// first_name column masked with no Role reaching the masker comes back a
+// "Given Family" pair, which this test catches as two words where it wants
+// one.
+func TestPersonNameRoleReachesTheMasker(t *testing.T) {
+	schema := &pipeline.Schema{
+		Tables: []pipeline.Table{{
+			Ref: tbl("people_roles"),
+			Columns: []pipeline.Column{
+				{Name: "person_id", TypeName: "bigint", TypeOID: 20},
+				{Name: "first_name", TypeName: "text", TypeOID: 25},
+				{Name: "last_name", TypeName: "text", TypeOID: 25},
+				{Name: "full_name", TypeName: "text", TypeOID: 25},
+			},
+			PK: []string{"person_id"},
+		}},
+	}
+	roled := func(c ref.ColumnRef, role mask.Role) pipeline.Decision {
+		return pipeline.Decision{
+			Col: c, Category: pipeline.CatPersonName, Confidence: pipeline.ConfCertain,
+			Masker: mask.MaskerPersonName, Masked: true, Role: role,
+		}
+	}
+	pid := col("people_roles", "person_id")
+	cls := &pipeline.Classification{Decisions: map[ref.ColumnRef]pipeline.Decision{
+		pid:                               {Col: pid, Category: pipeline.CatNone},
+		col("people_roles", "first_name"): roled(col("people_roles", "first_name"), mask.RoleGiven),
+		col("people_roles", "last_name"):  roled(col("people_roles", "last_name"), mask.RoleFamily),
+		col("people_roles", "full_name"):  roled(col("people_roles", "full_name"), mask.RoleFull),
+	}}
+	b := pipeline.RowBatch{
+		Table: tbl("people_roles"),
+		Cols:  []string{"person_id", "first_name", "last_name", "full_name"},
+		Rows: [][]any{
+			{int64(1), "Margaret", "Hamilton", "Margaret Hamilton"},
+		},
+		Last: true,
+	}
+	k := key(t, 0x99)
+	out, err := New(schema).Transform(b, cls, &k, NewResidual(10))
+	if err != nil {
+		t.Fatalf("Transform: %v", err)
+	}
+	wantWords := map[string]int{"first_name": 1, "last_name": 1, "full_name": 2}
+	for i, name := range b.Cols {
+		if i == 0 {
+			continue // person_id: a surrogate key, never masked
+		}
+		s, ok := out.Rows[0][i].(string)
+		if !ok {
+			t.Fatalf("%s masked to %T, want a string", name, out.Rows[0][i])
+		}
+		if got := len(strings.Fields(s)); got != wantWords[name] {
+			t.Errorf("%s masked to %q (%d word(s)), want %d", name, s, got, wantWords[name])
+		}
+	}
+}
+
 // ---------- JSON ----------
 
 // Every scalar leaf is replaced; structure and key names survive (§4,

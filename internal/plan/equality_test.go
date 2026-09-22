@@ -244,3 +244,52 @@ func TestEqualityGroupRefusesWhenNoMaskerFitsEveryMember(t *testing.T) {
 		}
 	}
 }
+
+// nameRoles turns fkRun's two credential columns into person_name columns with
+// the given roles, neither under a unique index (T-0293).
+func nameRoles(p *run, pcol, ccol ref.ColumnRef, parentRole, childRole mask.Role) {
+	for c, r := range map[ref.ColumnRef]mask.Role{pcol: parentRole, ccol: childRole} {
+		d := p.cls.Decisions[c]
+		d.Category = pipeline.CatPersonName
+		d.Masker = mask.MaskerPersonName
+		d.UniqueIndex = false
+		d.Role = r
+		p.cls.Decisions[c] = d
+	}
+}
+
+// TestEqualityGroupBringsDisagreeingRolesToFull is T-0293. A first-name column
+// referencing a full-name column holds equal values at both ends; masked under
+// different roles they would differ and the key would break at load (exit 8).
+// Both ends must mask as a full name.
+func TestEqualityGroupBringsDisagreeingRolesToFull(t *testing.T) {
+	t.Parallel()
+	p, pcol, ccol := fkRun("text", -1, "text", -1, false, 200)
+	nameRoles(p, pcol, ccol, mask.RoleFull, mask.RoleGiven)
+
+	if err := p.checkUniqueDomain(); err != nil {
+		t.Fatalf("checkUniqueDomain refused a person_name pair it can bring into agreement: %v", err)
+	}
+	for _, c := range []ref.ColumnRef{pcol, ccol} {
+		if r := p.cls.Decisions[c].Role; r != mask.RoleFull {
+			t.Errorf("%s role = %q, want %q: both ends of a foreign key must mask alike", c, r, mask.RoleFull)
+		}
+	}
+}
+
+// TestEqualityGroupKeepsAnAgreedRole: two given-name columns joined by a key
+// agree already and keep their role.
+func TestEqualityGroupKeepsAnAgreedRole(t *testing.T) {
+	t.Parallel()
+	p, pcol, ccol := fkRun("text", -1, "text", -1, false, 200)
+	nameRoles(p, pcol, ccol, mask.RoleGiven, mask.RoleGiven)
+
+	if err := p.checkUniqueDomain(); err != nil {
+		t.Fatalf("checkUniqueDomain: %v", err)
+	}
+	for _, c := range []ref.ColumnRef{pcol, ccol} {
+		if r := p.cls.Decisions[c].Role; r != mask.RoleGiven {
+			t.Errorf("%s role = %q, want %q", c, r, mask.RoleGiven)
+		}
+	}
+}

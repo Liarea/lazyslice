@@ -1063,3 +1063,42 @@ func TestRedTeamR5SpecialCategoryUnderscoreGluingIsRefused(t *testing.T) {
 		t.Fatalf("the refusal names %q, want the constraint it is about", refusal.Column)
 	}
 }
+
+// TestAMaskedNameDefaultIsMaskedUnderTheColumnsRole is T-0294: a first_name
+// column's rows are masked to one given name (T-0287), so its default must be
+// too, not a full "Given Family" name.
+func TestAMaskedNameDefaultIsMaskedUnderTheColumnsRole(t *testing.T) {
+	t.Parallel()
+	tbl := ref.TableRef{Schema: "public", Name: "people"}
+	schema := &pipeline.Schema{Tables: []pipeline.Table{{
+		Ref: tbl,
+		Columns: []pipeline.Column{
+			{Name: "id", TypeName: "bigint", TypeOID: 20},
+			{Name: "first_name", TypeName: "text", Default: "'Margaret'::text"},
+		},
+		PK: []string{"id"},
+	}}}
+	cls := masking(tbl, "first_name", pipeline.CatPersonName, mask.MaskerPersonName)
+	col := ref.ColumnRef{Table: tbl, Column: "first_name"}
+	d := cls.Decisions[col]
+	d.Role = mask.RoleGiven
+	cls.Decisions[col] = d
+	key := literalKey(0x22)
+
+	if err := planLiterals(t, schema, cls, key); err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	want, err := mask.Apply(*key, mask.CatPersonName, mask.MaskerPersonName,
+		mask.Value{Text: "Margaret"}, mask.Constraints{TypeTag: "text", Role: mask.RoleGiven})
+	if err != nil {
+		t.Fatalf("mask.Apply: %v", err)
+	}
+	got := schema.Tables[0].Columns[1].Default
+	if expect := pipeline.QuoteLiteral(want.Out.Text) + "::text"; got != expect {
+		t.Fatalf("the default is %q, want %q: a first_name default must mask as one given name, "+
+			"the way the column's own rows do", got, expect)
+	}
+	if strings.Contains(want.Out.Text, " ") {
+		t.Fatalf("mask.Apply under RoleGiven gave %q, two words", want.Out.Text)
+	}
+}

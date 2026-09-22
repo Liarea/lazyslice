@@ -95,6 +95,11 @@ type ColumnConfig struct {
 	Masker     mask.ID
 	Unique     bool
 	TypeFP     string
+	// Role is Decision.Role, round-tripped the way TypeFP is (T-0287): written
+	// under `role:` for a person_name column and read back so a re-run needs no
+	// re-derivation, though internal/classify recomputes it from the column's
+	// name every run regardless, the same way it recomputes Category.
+	Role mask.Role
 	// MappingFile is deliberately absent. ADR-006 named a 1:1 CSV mapping as a
 	// unique-index escape hatch; ADR-012 defers the full contract (uniqueness,
 	// missing values, FK consistency, secret-file protection) past v1, because

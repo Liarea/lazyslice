@@ -71,6 +71,16 @@ type Decision struct {
 	Reason string
 	Masker mask.ID
 	Masked bool
+	// Role is a person_name column's sub-category (T-0287): mask.RoleGiven or
+	// mask.RoleFamily when the column's name says so, mask.RoleFull (the zero
+	// value) otherwise. internal/classify sets it at decision time for every
+	// CatPersonName column, masked or not; internal/transform carries it onto
+	// mask.Constraints.Role, the way UniqueIndex below reaches Constraints.Unique,
+	// and internal/emit writes and reads it back under `columns:`'s `role:` --
+	// the same route Config.PhoneRegion follows to reach a masker, except
+	// per-column rather than per-run because the role a name column plays is a
+	// property of the column, not of the source database.
+	Role   mask.Role
 	Source DecisionSource
 	TypeFP string // Column.Fingerprint at decision time
 	// UniqueIndex reports that the column sits under a unique index, so the

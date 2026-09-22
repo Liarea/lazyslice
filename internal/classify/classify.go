@@ -32,6 +32,7 @@ import (
 	"github.com/Liarea/lazyslice/internal/pipeline"
 	"github.com/Liarea/lazyslice/internal/ref"
 	"github.com/Liarea/lazyslice/internal/textsig"
+	"github.com/Liarea/lazyslice/mask"
 )
 
 type classifier struct{}
@@ -2439,6 +2440,41 @@ func honourOptOut(u *pipeline.Unmask, fingerprint string) bool {
 
 // ---------- pass 6: the threshold ----------
 
+// reRoleGiven and reRoleFamily are Decision.Role's source for a person_name
+// column (T-0287, mask.Role): the column's own name, matched the way
+// rules.yml's patterns are -- against normaliseName's output, which lower-cases
+// and splits camelCase and digit runs onto underscore boundaries. They are
+// deliberately narrower than rules.yml's own person_name pattern, which is
+// multilingual and matches many more words than these two care about: a role is
+// a bare English word away from the masker's original "Given Family" behaviour
+// (mask.RoleFull), never a reason to mask a column this pattern set misses, so
+// guessing wrong here costs nothing worse than the full name every person_name
+// column already emitted before this field existed.
+// The optional, non-capturing "(_?names?)?" lets a bare root match the same
+// way whether or not "name" is spelled onto it -- "first", "first_name" and
+// "firstname" all decide RoleGiven, the way rules.yml's own person_name
+// pattern already treats an underscore before "name" as optional.
+var (
+	reRoleGiven  = regexp.MustCompile(`(^|_)(first|given|forename|fname)(_?names?)?(_|$)`)
+	reRoleFamily = regexp.MustCompile(`(^|_)(last|family|surname|lname)(_?names?)?(_|$)`)
+)
+
+// roleForColumn is Decision.Role's whole implementation: first/given/forename/
+// fname decide RoleGiven, last/family/surname/lname decide RoleFamily, and
+// everything else -- "name", "full_name", a column no pattern here recognises
+// -- decides mask.RoleFull, the masker's unchanged default.
+func roleForColumn(name string) mask.Role {
+	n := normaliseName(name)
+	switch {
+	case reRoleGiven.MatchString(n):
+		return mask.RoleGiven
+	case reRoleFamily.MatchString(n):
+		return mask.RoleFamily
+	default:
+		return mask.RoleFull
+	}
+}
+
 // finalise applies ARCHITECTURE.md §4's threshold and fills the fields the plan
 // and the emitter read.
 func (st *state) finalise() {
@@ -2447,6 +2483,13 @@ func (st *state) finalise() {
 		w.d.Reason = joinReason(w.frags...)
 		w.d.TypeFP = w.column.Fingerprint
 		w.d.UniqueIndex = st.unique[c]
+		if w.d.Category == pipeline.CatPersonName {
+			// Read from the column's name at classify time, the way every other
+			// name-pattern decision is, and carried on the Decision beside
+			// Category whether or not the column ends up masked below -- the
+			// same footing TypeFP and UniqueIndex are already on.
+			w.d.Role = roleForColumn(w.column.Name)
+		}
 		// NeverMasked is w.neverMask's final value, after keyChildren and
 		// foreignKeys have both run (T-0240 review round, high finding):
 		// internal/verify's second net reads it as the unconditional half of
