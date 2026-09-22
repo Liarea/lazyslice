@@ -71,6 +71,15 @@ sboms:
   - id: archive
     artifacts: archive
 
+# The mask module's tags (mask/vX.Y.Z, ROADMAP.md "Versioning and releases")
+# are not versions of the tool: goreleaser reads the nearest tag as .Version,
+# and once mask/v0.1.0 sat on a later commit than v0.1.0 the snapshot template
+# below failed with "invalid semantic version" (CI's release-config job,
+# 2026-09-22). Ignoring the pattern keeps .Version on the tool's own tags.
+git:
+  ignore_tags:
+    - "mask/*"
+
 snapshot:
   version_template: "{{ incpatch .Version }}-next"
 
