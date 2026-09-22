@@ -30,27 +30,28 @@ body:
     attributes:
       label: Reasons output
       description: >
-        The "press ? to see why" / classify reasons lines lazyslice printed
-        for the columns involved.
-      placeholder: "customers.email: matched column name pattern \"email\""
+        The per-column reason lines lazyslice printed for the columns
+        involved (the lines before the plan; also in the lazyslice.yml the
+        run emits and in --json).
+      placeholder: "public.customers.email: name matches email; 200/200 samples parse as addresses"
     validations:
       required: true
   - type: input
     id: exit-code
     attributes:
       label: Exit code
-      description: The numeric exit code lazyslice returned.
+      description: The numeric exit code lazyslice returned. Leave empty if the run exited 0 and the bug is in what it did.
       placeholder: "9"
     validations:
-      required: true
+      required: false
   - type: input
     id: exit-message
     attributes:
       label: Exit message
-      description: The message printed alongside the exit code.
-      placeholder: "verify failed: 3 unmasked email-shaped values in customers.notes"
+      description: The last line lazyslice printed, which names the code and the reason (docs/ERRORS.md has every one). Leave empty for a run that exited 0.
+      placeholder: "lazyslice: verify.refused.second_net: public.customers.notes is not masked and 3 of its values validate as email"
     validations:
-      required: true
+      required: false
   - type: input
     id: version
     attributes:

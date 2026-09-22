@@ -30,10 +30,20 @@ Set Framerate 5
 # whole line — command and the export it leaves in the shell — is hidden.
 # LAZYSLICE_TAPE_SRC and LAZYSLICE_TAPE_TGT come from `make gif`'s
 # environment, already pointed at the two running containers.
+# The hidden preamble also defines `lazyslice` as a function around the
+# freshly built binary: the visible command is then exactly what a person
+# types after `brew install`, and the function writes the binary's own exit
+# status to docs/media/.gif-status on the way out, where `make gif` reads it.
+# Capturing the status this way keeps it off the screen: a Hide/Show pair
+# around a separate `echo` stops recording frames but leaves the typed line
+# on the terminal, so it reappeared in every frame after Show (T-0065's
+# first recording).
 Hide
 Type "clear"
 Enter
 Type "export LAZYSLICE_SECRET=$(openssl rand -hex 32)"
+Enter
+Type 'lazyslice() { bin/lazyslice "$@" 2>&1; echo $? > docs/media/.gif-status; }'
 Enter
 Sleep 500ms
 Type "clear"
@@ -49,25 +59,19 @@ Show
 # public.customer's email, first_name and last_name are masked get held
 # longer than the rest.
 #
-# The pipeline's own exit status is awk's, always 0, so nothing above proves
-# the recorded run actually succeeded. Wait for the prompt to return (vhs
-# normalizes it to "> "), then capture the real status in a Hidden aside:
-# ${PIPESTATUS[0]} still refers to the lazyslice|awk pipeline because Wait
-# itself runs no command, and this hidden `echo` is the next one. `make gif`
-# fails the recipe if docs/media/.gif-status doesn't read back 0.
-Type "bin/lazyslice --source $LAZYSLICE_TAPE_SRC --target $LAZYSLICE_TAPE_TGT --root public.customer -n 200 --no-config 2>&1 | awk -f docs/media/pace.awk"
+# The pipeline's own exit status is awk's, always 0, so the `lazyslice`
+# function above writes the binary's real status to docs/media/.gif-status
+# before awk ever finishes; `make gif` fails the recipe unless that file
+# reads back 0. Wait for the prompt to return (vhs normalizes it to "> ").
+Type 'lazyslice --source "$LAZYSLICE_TAPE_SRC" --target "$LAZYSLICE_TAPE_TGT" --root public.customer -n 200 --no-config | awk -f docs/media/pace.awk'
 Enter
 Wait /^>\s*$/
-Hide
-Type "echo ${PIPESTATUS[0]} > docs/media/.gif-status"
-Enter
-Show
 Sleep 1s
 
 # Proof, not a promise: three customer rows read back from the target with
 # a plain psql select. Real names and a real-shaped email, neither copied
 # from the source.
-Type "psql $LAZYSLICE_TAPE_TGT -c 'SELECT customer_id, first_name, last_name, email FROM public.customer ORDER BY customer_id LIMIT 3;'"
+Type 'psql "$LAZYSLICE_TAPE_TGT" -c "SELECT customer_id, first_name, last_name, email FROM public.customer ORDER BY customer_id LIMIT 3;"'
 Enter
 Wait /^>\s*$/
 Sleep 1s
