@@ -7,10 +7,14 @@ output and must never be hand-edited; `prompting/` holds per-model cheat
 sheets. `media/` holds launch material: `first-run.tape` and `pace.awk`
 (T-0065) are source, reviewed and committed like any other file; the GIF
 `make gif` records from them is a committed binary asset, regenerated with
-that target rather than hand-edited. `launch/` is an empty directory left over from the phase 0 scaffold;
-nothing has been decided about what goes in it, and no document in this
-repository assigns it a purpose. Do not write one into a CLAUDE.md — either
-delete the directory or land an ADR that says what it is for.
+that target rather than hand-edited. `launch/` (T-0280) holds drafts of
+launch-post copy — `SHOW_HN.md`, `R_POSTGRESQL.md`, `R_DEVOPS.md`,
+`R_WEBDEV.md`, `BLOG_POSTMORTEMS.md`, `LISTINGS.md` — written for the
+maintainer to edit and post by hand. Nothing under it is ever posted,
+opened, or submitted by a task or workflow; a task that drafts here says so
+inline and signs prose "the maintainer" rather than a real name. Update
+these drafts in place rather than adding new ones unless a task names a
+new file.
 
 **Contract.** `docs/adr/README.md` is this directory's own format spec for
 ADRs (Status/Context/Options/Decision/Consequences/Reversal condition,
