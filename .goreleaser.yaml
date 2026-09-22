@@ -144,15 +144,24 @@ homebrew_casks:
 # in the release, so one signature covers them all (THREAT_MODEL.md T10). The
 # identity is the release workflow's OIDC token: there is no signing key to
 # store, and nothing to rotate. Signing is skipped by `make snapshot`.
+#
+# One Sigstore bundle, checksums.txt.sigstore.json, holds the signature and
+# the certificate together. cosign v3 writes that bundle by default and
+# ignores --output-signature/--output-certificate, so the v2-era pair of
+# flags failed v0.0.2 with "create bundle file: open : no such file or
+# directory" (2026-09-22); this is goreleaser's own cosign-v3 shape. Verify:
+#   cosign verify-blob --bundle checksums.txt.sigstore.json \
+#     --certificate-identity-regexp '^https://github.com/Liarea/lazyslice/' \
+#     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+#     checksums.txt
 signs:
   - cmd: cosign
     artifacts: checksum
-    certificate: "${artifact}.pem"
+    signature: "${artifact}.sigstore.json"
     output: true
     args:
       - sign-blob
-      - "--output-certificate=${certificate}"
-      - "--output-signature=${signature}"
+      - "--bundle=${signature}"
       - "${artifact}"
       - "--yes"
 

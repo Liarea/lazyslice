@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(make tag *)",
+      "Bash(tools/release/tag.sh *)"
+    ]
+  }
+}
