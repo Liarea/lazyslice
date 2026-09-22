@@ -807,6 +807,10 @@ plan(schema, cls, req, priv):
 
 **3.5 What the plan prints**, before any extraction: every step with mode, identity kind and reason; every SCC and the sentence "FKs are created after data, so no edge is deferred"; every virtual FK and unmapped value; every unindexed FK edge; unreachable, unreadable and skipped tables; every source object class that will not be recreated, with counts (§11.1); every masked column with a small admissible domain (§5); estimated rows, bytes, key memory (`Σ Bytes()`), filter memory and snapshot hold with its assumption (`assuming 20,000 rows/s`); and the flag that changes each number.
 
+**3.7 The root can hold more rows than `--take` named (T-0288).** `--take` (or `--where`) bounds only the seed: the root's own `SELECT ... ORDER BY identity LIMIT take` read at the start of the walk. The root table is not exempt from the parent rule in the pseudo-code above (`for fk in outgoing(t) where fk.Validated ∨ fk.Virtual`): any selected row of any table, reached by any edge, pushes its parent's key onto the queue as `PARENT_ONLY`, uncapped, and that parent can be the root table itself through an edge other than the one that reached the root's own seeded rows. Pagila carries the shape: `payment` is a child of both `rental` (`payment.rental_id`) and `customer` (`payment.customer_id`), and a payment's own `customer_id` occasionally differs from its rental's `customer_id` — a rental transferred between accounts, in the source data, not a bug in the walk. Such a payment is reached in `CHILD_OK` mode through `rental`, which is itself reached through the seeded customer; its outgoing edge to `customer` then pushes that payment's own customer as `PARENT_ONLY`, and if that customer was not already in the seed, `absorb` grows `selected[customer]` past `take`. This is referential completeness, not a defect: every row the target holds has every parent it needs, which is what THREAT_MODEL.md and §3 both require, and the alternative — dropping the payment, or nulling its `customer_id` — would ship a row the target's own foreign key cannot validate. `--take` therefore bounds what the root's own read chooses, never what the table ends up holding.
+
+The plan says so on the root's own line rather than leaving the extra rows unexplained: when the closure has added `M` rows to the root table beyond the `N` the seed chose (`M > 0`), the root's `plan.step` line reads `root: N chosen, M pulled in by references` in place of the bare `root` every other run has always shown; `M == 0` — the overwhelmingly common case, and every fixture this repository carries except the two-table one `internal/plan/plan_integration_test.go` builds to pin this section's wording — leaves the line exactly as it always was. Nothing about the walk changes: `Step.Keys` already held every one of these rows before this section existed, and `Plan.Estimate.Rows` already counted them; what changed is only that the root's own reason now says why its count can exceed `--take`.
+
 Walk on a schema with two cycles:
 
 ```mermaid
@@ -981,7 +985,7 @@ type Sink interface{ Send(Event) }
 | `--allow-remote-target HOST` | none | discover | Permits a non-local target whose host equals HOST; without it a remote target is exit 4 (THREAT_MODEL.md T2) |
 | `--require-read-only-role` | off | discover | Exit 6 when the source role holds INSERT/UPDATE/DELETE |
 | `--root TABLE` | computed (§3.1), Q2 on a TTY | plan | Root table |
-| `--take N`, `-n` | 500 | plan | Root rows, `ORDER BY identity LIMIT N` |
+| `--take N`, `-n` | 500 | plan | Root rows, `ORDER BY identity LIMIT N`; the root holds at least N rows, plus any the closure requires (§3.7) |
 | `--where SQL` | none | plan | Root predicate instead of `LIMIT` ordering |
 | `--cap N`, `--cap TABLE=N` | 100 | plan | Children per parent key per edge |
 | `--depth N` | 3 | plan | Child depth from the root |

@@ -146,8 +146,10 @@ func (r planRow) child() bool {
 	return r.Mode == "child_ok" && strings.HasPrefix(r.Why, "child of ")
 }
 
-// root reports whether this row is the plan's root table.
-func (r planRow) root() bool { return r.Why == "root" }
+// root reports whether this row is the plan's root table: its Why is "root",
+// or "root: N chosen, M pulled in by references" when the closure added rows
+// to the root beyond what --take chose (T-0288).
+func (r planRow) root() bool { return r.Why == "root" || strings.HasPrefix(r.Why, "root: ") }
 
 // splitStep pulls a plan.step event's mode and why back out of the one argument
 // internal/core packs them into ("child_ok; child of public.orders via ...").

@@ -30,7 +30,7 @@ One row per flag registered on the command tree, grouped as `--help` groups them
 | `--root` | string | - | Root table (default: computed from the foreign-key graph) |
 | `--row-budget` | int | 1000000 | Abort planning above this many rows (exit 11) |
 | `--skip-table` | stringArray | - | Drop a child-only table to schema-only; repeatable |
-| `-n, --take` | int | 500 | Root rows, ORDER BY identity LIMIT N |
+| `-n, --take` | int | 500 | Root rows, ORDER BY identity LIMIT N; the root holds at least N rows, plus any the closure requires |
 | `--where` | string | - | Root predicate instead of LIMIT ordering; a literal is withheld from the yml |
 
 ## classify

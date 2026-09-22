@@ -157,7 +157,7 @@ func TestStepModeAndWhyComeBackApart(t *testing.T) {
 func TestThePlanWordingTheScreenParsesIsStillTheOneThePlanWrites(t *testing.T) {
 	for path, wants := range map[string][]string{
 		// internal/plan writes the Why the screen reads.
-		"../plan/plan.go": {`p.why[root] = "root"`, `p.noteWhy(fk.Child, "child of "`},
+		"../plan/plan.go": {`p.why[root] = "root"`, `"root: %d chosen, %d pulled in by references"`, `p.noteWhy(fk.Child, "child of "`},
 		// internal/core packs the mode and the Why into one argument, and names
 		// the mode the screen compares against.
 		"../core/run.go":   {`modeName(s.Mode) + "; " + s.Why`},
@@ -173,6 +173,22 @@ func TestThePlanWordingTheScreenParsesIsStillTheOneThePlanWrites(t *testing.T) {
 					"plan.step event to decide whether --cap and --skip-table apply to a row",
 					path, want)
 			}
+		}
+	}
+}
+
+// TestTheRootRowIsFoundWhenTheClosureGrewIt is T-0288: a root the closure
+// added rows to reads "root: N chosen, M pulled in by references", and the
+// plan screen must still strike --root and --skip-table through on it.
+func TestTheRootRowIsFoundWhenTheClosureGrewIt(t *testing.T) {
+	for why, want := range map[string]bool{
+		"root": true,
+		"root: 200 chosen, 4 pulled in by references":       true,
+		"child of public.rental via payment_rental_id_fkey": false,
+		"lookup": false,
+	} {
+		if got := (planRow{Why: why}).root(); got != want {
+			t.Errorf("planRow{Why: %q}.root() = %v, want %v", why, got, want)
 		}
 	}
 }
