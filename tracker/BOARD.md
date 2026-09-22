@@ -7,9 +7,9 @@
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
-| E5 Hardening | 5 | 2 | 0 | 106 | 0 | 0 |
+| E5 Hardening | 5 | 1 | 0 | 107 | 0 | 0 |
 | E6 Launch | 6 | 1 | 0 | 0 | 0 | 0 |
-| E9 Later | later | 82 | 0 | 32 | 5 | 0 |
+| E9 Later | later | 83 | 0 | 32 | 5 | 0 |
 
 ## Open and in progress
 
@@ -30,7 +30,6 @@
 - T-0145 [open] E9 · A read-only verify command that checks the current target without dropping it (opus)
 - T-0146 [open] E9 · internal/verify: a residual hit on an array element cannot be confirmed by either probe of section 6 item 3 ()
 - T-0154 [open] E9 · Equality groups over inferred edges: virtual_fks and polymorphic pairs ()
-- T-0155 [open] E5 · v0.0.1 proves the release pipeline end to end: goreleaser, the tap cask, brew install prints a version (sonnet)
 - T-0157 [open] E9 · Performance: the 20,000,000-row child run and byte-budget accounting (0.2) (sonnet)
 - T-0158 [open] E9 · Export the closed-value label list from mask so plan compares labels, not CHECK text ()
 - T-0159 [open] E9 · FK equality group: members with different type families can still mask differently ()
@@ -98,9 +97,11 @@
 - T-0274 [open] E9 · The root decision line and the plan's own RootReason give different reasons when a name preference breaks a tie (sonnet)
 - T-0275 [open] E9 · tracker.py: close writes the archive file before it closes the issue, and every gh call has a timeout (sonnet)
 - T-0276 [open] E9 · tracker.py: five small robustness findings from T-0196's review (sonnet)
+- T-0277 [open] E9 · The generated cask's quarantine hook uses postflight, which Homebrew deprecates in favour of postflight_steps (sonnet)
 
 ## Recently closed
 
+- T-0155 [done] E5 · v0.0.1 proves the release pipeline end to end: goreleaser, the tap cask, brew install prints a version → done
 - T-0196 [done] E5 · Migrate the tracker to GitHub Issues and Projects behind the existing tools/tracker.py command surface → done
 - T-0083 [done] E5 · Target type registration for CopyFrom: no owner since internal/load shipped → done
 - T-0170 [done] E9 · torture regression 013 (json-object-key-email) fails on main → done
@@ -125,4 +126,3 @@
 - T-0257 [done] E9 · internal/plan has no exit-12 refusal for an FK pair unknownColumnsBesideCertain cannot raise → done
 - T-0258 [done] E5 · internal/plan's fk-pair refusal can fire on a pair a later classify pass already reconciles → done
 - T-0259 [done] E5 · README's flag table is generated and checked, and a release tag refuses a README that does not name it → done
-- T-0260 [done] E5 · README is true for v0.1.0: what it does, a quickstart that was run, first-run flags, exit codes at a glance, and the residuals in step with the threat model; SECURITY.md reconciled → done

@@ -26,7 +26,7 @@ Phase 4 closed 2026-09-08. Evidence: all eleven packages merged; `make integrati
 Gate 3 (this list is the definition; CLAUDE.md:7 currently restates it and has drifted — a follow-up task should reduce it to a pointer at this section):
 
 - [ ] CI is green on an empty implementation, and integration tests fail for the right reason.
-- [ ] `brew install` from your tap installs a binary that prints its version.
+- [x] (2026-09-22, v0.0.3: `brew install Liarea/tap/lazyslice` on a Mac that did not build the release printed `lazyslice 0.0.3` with its commit; docs/RUNBOOK.md "Cutting a release") `brew install` from your tap installs a binary that prints its version.
 - [ ] Both fixtures load, and testdata/README.md names every trap.
 - [ ] Per-directory CLAUDE.md files are in place (T-0023).
 - [ ] This ROADMAP.md is in place (this task).
@@ -94,7 +94,7 @@ Release notes come from goreleaser's changelog grouped by the commit prefix (`st
 - [x] The tap repository has an initial commit (README, 2026-09-14), so goreleaser's first cask push has a branch to land on.
 - [x] Visibility flipped to public 2026-09-14, with THIRD_PARTY_NOTICES.md for the ten torture schemas committed first (f4f37d7). The first public CI run, 34901076717 on c6fb76d, is green on every job: lint, forbidden, unsafe-flags, docs, release-config, govulncheck, tests on Ubuntu, macOS and Windows, and integration on Postgres 14 to 18; the first green CI since 2026-09-09 04:23 UTC. Run 34924823369 on b132d03 (2026-09-15) is the first green run that includes the torture job on main (T-0140): ten schemas, thirteen regressions, the catalogue guard and the I4 negative control.
 - [x] Branch protection on main 2026-09-14: no force pushes, no deletion, linear history. Required status checks are deliberately not set: they would reject the orchestrator's direct pushes (every new commit has unfinished checks at push time); the enforced gate is the release workflow, which refuses a tag whose commit has not passed `ci` (T-0140). DCO runs on pull requests, which is where outside commits arrive.
-- [ ] v0.0.1 tagged and the pipeline proven (T-0155). The human steps above are T-0156.
+- [x] (2026-09-22) v0.0.x tagged and the pipeline proven (T-0155): v0.0.1 failed before its first step on an action tag that does not exist, v0.0.2 at signing on cosign v3's bundle format, and v0.0.3 published six archives, six SBOMs, a signed checksum file (`cosign verify-blob` answers `Verified OK`) and the cask; each failure and its fix is in docs/RUNBOOK.md. `make tag` now refuses a tag until every precondition the runbook names holds. The human steps above are T-0156.
 
 ## Phase 6: Launch
 
