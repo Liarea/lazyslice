@@ -1,0 +1,69 @@
+name: Bug report
+description: Something is wrong with a real run of lazyslice.
+title: "bug: "
+labels: ["type:bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Never paste a row, a dump, or a screenshot of one.** Describe the
+        shape instead — see [SECURITY.md](https://github.com/Liarea/lazyslice/blob/main/SECURITY.md#do-not-send-us-personal-data).
+        If what you found is a personal-data column the classifier missed,
+        stop here and use the "PII miss" template instead, which routes to
+        the private advisory.
+  - type: textarea
+    id: shape
+    attributes:
+      label: Table and column names and types
+      description: >
+        The schema shape, not the data: table name, column name, column
+        type (e.g. `customers.email text`). Invent a value with the same
+        shape if you need an example.
+      placeholder: |
+        table: customers
+        column: email, text
+        column: signup_ip, inet
+    validations:
+      required: true
+  - type: textarea
+    id: reasons
+    attributes:
+      label: Reasons output
+      description: >
+        The "press ? to see why" / classify reasons lines lazyslice printed
+        for the columns involved.
+      placeholder: "customers.email: matched column name pattern \"email\""
+    validations:
+      required: true
+  - type: input
+    id: exit-code
+    attributes:
+      label: Exit code
+      description: The numeric exit code lazyslice returned.
+      placeholder: "9"
+    validations:
+      required: true
+  - type: input
+    id: exit-message
+    attributes:
+      label: Exit message
+      description: The message printed alongside the exit code.
+      placeholder: "verify failed: 3 unmasked email-shaped values in customers.notes"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: lazyslice version
+      description: Output of `lazyslice --version`.
+      placeholder: "v0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: postgres-major
+    attributes:
+      label: Postgres major version
+      description: The source or target Postgres major version, e.g. 14, 15, 16, 17, 18.
+      placeholder: "16"
+    validations:
+      required: true

@@ -1,0 +1,22 @@
+name: PII miss / vulnerability
+description: The classifier left personal data unmasked, or you found another vulnerability. This is not the place to report it.
+title: "do not file here — see SECURITY.md"
+labels: ["type:security"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A PII miss or any other vulnerability is reported privately, never as a public
+        issue: use GitHub's private vulnerability reporting on this repository
+        (**Security** tab → **Report a vulnerability**), described in
+        [SECURITY.md](https://github.com/Liarea/lazyslice/blob/main/SECURITY.md#reporting-a-masking-miss-or-any-other-vulnerability).
+        That form also holds the one rule that matters here — never send a
+        real value, a row, or a dump; send the shape instead. Do not put any
+        detail in this public form.
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Confirmation
+      options:
+        - label: This report contains no real value — no real email, name, phone number, row, or dump.
+          required: true

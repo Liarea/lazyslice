@@ -127,6 +127,9 @@ Do not open a public issue for a masking miss or any other vulnerability. See
 [SECURITY.md](SECURITY.md) for the private route, and read the rule about not
 sending us personal data before you write the report.
 
+Opening an issue on GitHub uses one of the forms under
+[.github/ISSUE_TEMPLATE/](.github/ISSUE_TEMPLATE/): bug report, PII miss (which redirects to the private route above), or feature request.
+
 ## Commit messages
 
 Release notes are generated from commit bodies (`make relnotes FROM=<tag> TO=<ref>`), so a commit that changes behaviour says what a user now sees:
