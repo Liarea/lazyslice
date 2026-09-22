@@ -38,7 +38,7 @@ LDFLAGS := -s -w \
 	-X main.commit=$(COMMIT) \
 	-X main.date=$(DATE)
 
-.PHONY: all build test lint integration egress torture vet-tagged forbidden unsafe-flags spdx fmt check tools clean help docs docs-check vulncheck bench relnotes bench-compare tools-test tag
+.PHONY: all build test lint integration egress torture vet-tagged forbidden unsafe-flags spdx fmt check tools clean help docs docs-check vulncheck bench relnotes bench-compare tools-test tag gif
 
 ## build: compile the binary into bin/
 build:
@@ -90,6 +90,79 @@ integration:
 ## have.
 egress:
 	bash tools/egress/run.sh
+
+## gif: docs/media/first-run.gif — the ~20s VHS recording of lazyslice's
+## first run against the real Pagila fixture (T-0065)
+##
+## Builds the binary, starts two disposable postgres:16 containers on
+## unusual host ports (GIF_SRC_PORT, GIF_TGT_PORT) named with a suffix this
+## invocation's own shell PID owns so a concurrent run never collides, waits
+## for both with pg_isready, loads testdata/pagila/pagila-schema.sql and
+## pagila-data.sql into the source with psql, then hands docs/media/first-run.tape
+## to vhs with the two DSNs (sslmode=disable) exported for it to read. Both
+## containers are removed on every exit path — success, a failed load, a
+## failed recording — by a trap set before either is started. Refuses if the
+## resulting GIF is over GIF_MAX_BYTES, so a regression in vhs, a theme
+## change or a wider terminal cannot silently bloat what ships in the repo.
+##
+## Needs vhs (charmbracelet/vhs, pinned nowhere else because it produces a
+## committed asset rather than gating a check) and a Docker endpoint; neither
+## is installed by `make tools`.
+GIF_TAPE      := docs/media/first-run.tape
+GIF_OUT       := docs/media/first-run.gif
+GIF_MAX_BYTES := 4194304
+GIF_SUFFIX    := $(shell echo $$$$)
+GIF_SRC_NAME  := lazyslice-firstrun-src-$(GIF_SUFFIX)
+GIF_TGT_NAME  := lazyslice-firstrun-tgt-$(GIF_SUFFIX)
+GIF_SRC_PORT  := 55901
+GIF_TGT_PORT  := 55902
+GIF_PASSWORD  := lazyslice-tape
+
+gif: build
+	@if ! command -v vhs >/dev/null 2>&1; then \
+		echo "gif: vhs not found; install charmbracelet/vhs: https://github.com/charmbracelet/vhs"; \
+		exit 1; \
+	fi
+	@if ! command -v psql >/dev/null 2>&1; then \
+		echo "gif: psql not found; install the PostgreSQL client"; \
+		exit 1; \
+	fi
+	@set -eu; \
+	trap 'docker rm -f $(GIF_SRC_NAME) $(GIF_TGT_NAME) >/dev/null 2>&1 || true' EXIT; \
+	echo "==> gif: starting $(GIF_SRC_NAME) on $(GIF_SRC_PORT) and $(GIF_TGT_NAME) on $(GIF_TGT_PORT)"; \
+	docker run -d --name $(GIF_SRC_NAME) -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=$(GIF_PASSWORD) -e POSTGRES_DB=pagila -p 127.0.0.1:$(GIF_SRC_PORT):5432 postgres:16 >/dev/null; \
+	docker run -d --name $(GIF_TGT_NAME) -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=$(GIF_PASSWORD) -e POSTGRES_DB=pagila -p 127.0.0.1:$(GIF_TGT_PORT):5432 postgres:16 >/dev/null; \
+	for name in $(GIF_SRC_NAME) $(GIF_TGT_NAME); do \
+		echo "==> gif: waiting for $$name"; \
+		ready=0; \
+		for i in $$(seq 1 60); do \
+			if docker exec $$name pg_isready -U postgres >/dev/null 2>&1; then ready=1; break; fi; \
+			sleep 1; \
+		done; \
+		if [ "$$ready" != 1 ]; then echo "gif: $$name did not become ready within 60s"; exit 1; fi; \
+	done; \
+	src_dsn="postgres://postgres:$(GIF_PASSWORD)@127.0.0.1:$(GIF_SRC_PORT)/pagila?sslmode=disable"; \
+	tgt_dsn="postgres://postgres:$(GIF_PASSWORD)@127.0.0.1:$(GIF_TGT_PORT)/pagila?sslmode=disable"; \
+	echo "==> gif: loading Pagila into the source"; \
+	psql "$$src_dsn" -v ON_ERROR_STOP=1 -q -f testdata/pagila/pagila-schema.sql; \
+	psql "$$src_dsn" -v ON_ERROR_STOP=1 -q -f testdata/pagila/pagila-data.sql; \
+	psql "$$src_dsn" -v ON_ERROR_STOP=1 -q -c 'ANALYZE;'; \
+	echo "==> gif: recording $(GIF_TAPE)"; \
+	rm -f docs/media/.gif-status; \
+	LAZYSLICE_TAPE_SRC="$$src_dsn" LAZYSLICE_TAPE_TGT="$$tgt_dsn" vhs $(GIF_TAPE); \
+	run_status=$$(cat docs/media/.gif-status 2>/dev/null || echo missing); \
+	rm -f docs/media/.gif-status; \
+	if [ "$$run_status" != "0" ]; then \
+		echo "gif: the recorded lazyslice run exited $$run_status (expected 0); the tape recorded a failed or garbled run"; \
+		exit 1; \
+	fi; \
+	size=$$(wc -c <"$(GIF_OUT)" | tr -d ' '); \
+	echo "==> gif: $(GIF_OUT) is $$size bytes"; \
+	if [ "$$size" -gt $(GIF_MAX_BYTES) ]; then \
+		echo "gif: $(GIF_OUT) is $$size bytes, over the $(GIF_MAX_BYTES)-byte limit"; \
+		exit 1; \
+	fi
+	@echo "==> gif: docs/media/first-run.gif recorded"
 
 ## bench: BenchmarkExtractThroughput (internal/extract), compared against the
 ## recorded baseline
