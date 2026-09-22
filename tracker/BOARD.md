@@ -8,7 +8,7 @@
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 1 | 0 | 107 | 0 | 0 |
-| E6 Launch | 6 | 4 | 0 | 4 | 0 | 0 |
+| E6 Launch | 6 | 4 | 0 | 5 | 0 | 0 |
 | E9 Later | later | 87 | 0 | 32 | 6 | 0 |
 
 ## Open and in progress
@@ -100,11 +100,11 @@
 - T-0278 [open] E9 · Release notes name the range as 'since the first commit' when the previous tag is the root (sonnet)
 - T-0282 [open] E6 · Write the 'why I built this' paragraph for the README (human)
 - T-0283 [open] E6 · Decide whether v0.2.0 ships a docs site (mkdocs-material on GitHub Pages) or the in-repo docs stay the docs (human)
-- T-0285 [open] E6 · go install works: the mask module gets its own tag and go.mod requires it by version, with go.work for local development (sonnet)
 - T-0286 [open] E9 · research/POSTMORTEMS.md carries two stale facts the blog draft inherited (sonnet)
 - T-0287 [open] E6 · The person_name masker respects the column's role: a first-name column gets a given name, a last-name column a surname (sonnet)
 - T-0288 [open] E9 · A root table can hold more rows than --take names; say so in the flag's help or stop it (sonnet)
 - T-0289 [open] E9 · make gif records with a read-only role, probes readiness from the host, and pace.awk fails when it paused nothing (sonnet)
+- T-0290 [open] E6 · goreleaser release build still compiles mask/ from go.work, not the tagged version go.mod requires ()
 
 ## Recently closed
 
@@ -115,6 +115,7 @@
 - T-0280 [done] E6 · Launch-post drafts in docs/launch/: Show HN, r/PostgreSQL, r/devops, r/webdev, a blog post from the post-mortems, and ten places a listing PR is welcome → done
 - T-0281 [done] E6 · Issue templates that keep personal data out of reports, and CHANGELOG.md as the pointer at releases → done
 - T-0284 [cancelled] E9 · go install of lazyslice fails: go.mod's mask replace directive rejects @v0.1.0/@latest → cancelled
+- T-0285 [done] E6 · go install works: the mask module gets its own tag and go.mod requires it by version, with go.work for local development → done
 - T-0083 [done] E5 · Target type registration for CopyFrom: no owner since internal/load shipped → done
 - T-0170 [done] E9 · torture regression 013 (json-object-key-email) fails on main → done
 - T-0197 [done] E5 · R2-05/A10 residual: a name in a language names.txt does not carry still reports "no name or value signal" as a clean bill of health → done
@@ -132,4 +133,3 @@
 - T-0242 [done] E5 · Before the first drop, the whole target is re-checked for emptiness under the run lease, and a table that appeared since the gate refuses the load → done
 - T-0251 [done] E5 · The .gitignore protection of the secret file is verified by asking git, never by matching the file's text → done
 - T-0252 [done] E5 · The run lease is re-asserted before the first drop and before each table drop; a lost lease refuses the load → done
-- T-0253 [done] E5 · The certain-neighbour rail raises both ends of a validated foreign key together, or refuses the pair → done
