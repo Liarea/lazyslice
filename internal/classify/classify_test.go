@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Liarea/lazyslice/internal/pipeline"
 	"github.com/Liarea/lazyslice/internal/ref"
@@ -809,8 +810,19 @@ func TestValueSignalSurvivesATypeNothingCanJudge(t *testing.T) {
 	if stamp.Masked {
 		t.Errorf("records.ref_d is masked: a timestamptz cannot hold what any text category emits (%+v)", stamp)
 	}
-	if stamp.Confidence != pipeline.ConfLow {
-		t.Errorf("records.ref_d confidence = %v, want low", stamp.Confidence)
+	// T-0269: the email validator is never scored against ref_d's samples at
+	// all -- timestamptz is not an accepted type for email -- so the column
+	// carries no category and no fragment naming one, same as any other
+	// column with no name or value signal, rather than being recorded at low
+	// with the conflict named.
+	if stamp.Category != pipeline.CatNone {
+		t.Errorf("records.ref_d category = %q, want none: no category is ever scored against a type it is not accepted for", stamp.Category)
+	}
+	if stamp.Confidence != pipeline.ConfNone {
+		t.Errorf("records.ref_d confidence = %v, want none", stamp.Confidence)
+	}
+	if stamp.Reason != "no name or value signal" {
+		t.Errorf("records.ref_d reason = %q, want the same line any signal-free column gets", stamp.Reason)
 	}
 }
 
@@ -1578,5 +1590,140 @@ func TestReasonGrammarQuotesOddIdentifiers(t *testing.T) {
 	}
 	if len(saw) != 2 {
 		t.Errorf("the fixture rendered %d of the two fragments that interpolate a table name; it proves nothing about the rest", len(saw))
+	}
+}
+
+// TestTimestampCredentialEntropyIsNeverScored pins T-0269: a timestamp
+// column's text form ("2017-02-15T09:34:33Z") has no space and no "@", mixes
+// character classes and clears the entropy threshold, so the credential
+// validator would call it a secret on every sample if it were ever run over
+// the column -- exactly the run T-0054 fixed for the *decision* (a timestamp
+// accepts no category whose masker emits text, so the column stays unmasked)
+// but not for the *reason line*, which used to read "200/200 samples look
+// like secrets; timestamp is not an accepted type for credential; no name
+// signal" -- true of the entropy check and an alarm over a column that was
+// never going to be masked either way.
+//
+// The fix is at the gate, not at the line: credential is never scored
+// against a timestamp column's samples at all, so there is nothing for a
+// reason to name and the column reads exactly as any other column with no
+// name or value signal does.
+func TestTimestampCredentialEntropyIsNeverScored(t *testing.T) {
+	t.Parallel()
+	tbl := ref.TableRef{Schema: "public", Name: "orders"}
+	schema := &pipeline.Schema{
+		Tables: []pipeline.Table{
+			tt("public", "orders", []string{"id"},
+				tc("id", "bigint"), tc("placed_at", "timestamptz")),
+		},
+	}
+	samples := mapSampler{
+		col(tbl, "id"): anyOf(int64(1), int64(2), int64(3)),
+		col(tbl, "placed_at"): anyOf(
+			time.Date(2017, 2, 15, 9, 34, 33, 0, time.UTC),
+			time.Date(2018, 6, 3, 14, 2, 19, 0, time.UTC),
+			time.Date(2020, 12, 23, 7, 12, 45, 0, time.UTC),
+			time.Date(2022, 6, 1, 18, 45, 30, 0, time.UTC),
+			time.Date(2024, 9, 30, 23, 59, 1, 0, time.UTC)),
+	}
+	cls, err := New().Classify(schema, samples, nil)
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+	d := decision(t, cls, col(tbl, "placed_at"))
+	if d.Masked {
+		t.Errorf("orders.placed_at is masked: %+v, want copied: a timestamp holds no category whose masker emits text", d)
+	}
+	if d.Category != pipeline.CatNone {
+		t.Errorf("orders.placed_at category = %q, want none: the credential entropy check must never be scored "+
+			"against a type its category is not accepted for", d.Category)
+	}
+	if d.Reason != "no name or value signal" {
+		t.Errorf(`orders.placed_at reason = %q, want "no name or value signal": no fragment may name a category `+
+			"the type could never have been decided under", d.Reason)
+	}
+	if bad, ok := ParseReason(d.Reason); !ok {
+		t.Errorf("orders.placed_at reason %q holds a fragment no template produced: %q", d.Reason, bad)
+	}
+}
+
+// TestSameColumnNameDoesNotRaiseASilencedTypeConflict pins the T-0269 fix
+// round's own finding: dropping sig.refused entirely (rather than only the
+// category and phrase it carried) left a column whose values cleared the
+// credential entropy check, on a family credential cannot hold, with
+// typeConflict unset -- so sameColumnName could raise it to `possible` on
+// nothing but another table's column sharing its name.
+//
+// births.birth is a genuine person_date name hit and is masked on the name
+// alone. a.stamp is an FK child of births.birth, so propagateKeys carries
+// person_date onto it. b.stamp shares a.stamp's column name ("stamp") but has
+// no FK to births at all and no name signal of its own -- only the same
+// high-entropy timestamp values TestTimestampCredentialEntropyIsNeverScored
+// uses, which clear the credential validator's entropy check on every sample
+// and clear nothing else, since credential is not an accepted category for a
+// timestamp. Before this fix, b.stamp's silenced credential hit left no trace
+// on the column at all, so sameColumnName's second pass -- which only checks
+// neverMask, typeConflict and the column's own category -- raised it to
+// person_date/ConfPossible on public.a.stamp's name alone. With the fix,
+// silencedStrong sets typeConflict, and sameColumnName's own gate
+// (`w.typeConflict`) keeps it off.
+func TestSameColumnNameDoesNotRaiseASilencedTypeConflict(t *testing.T) {
+	t.Parallel()
+	births := ref.TableRef{Schema: "public", Name: "births"}
+	a := ref.TableRef{Schema: "public", Name: "a"}
+	b := ref.TableRef{Schema: "public", Name: "b"}
+	schema := &pipeline.Schema{
+		Tables: []pipeline.Table{
+			tt("public", "births", []string{"birth"}, tc("birth", "timestamp")),
+			tt("public", "a", []string{"id"},
+				tc("id", "bigint"),
+				tc("stamp", "timestamp")),
+			tt("public", "b", []string{"id"},
+				tc("id", "bigint"),
+				tc("stamp", "timestamp")),
+		},
+		FKs: []pipeline.ForeignKey{
+			fk("a_stamp_fkey", a, []string{"stamp"}, births, []string{"birth"}),
+		},
+	}
+	secretLooking := anyOf(
+		time.Date(2017, 2, 15, 9, 34, 33, 0, time.UTC),
+		time.Date(2018, 6, 3, 14, 2, 19, 0, time.UTC),
+		time.Date(2020, 12, 23, 7, 12, 45, 0, time.UTC),
+		time.Date(2022, 6, 1, 18, 45, 30, 0, time.UTC),
+		time.Date(2024, 9, 30, 23, 59, 1, 0, time.UTC))
+	samples := mapSampler{
+		col(births, "birth"): secretLooking,
+		col(a, "id"):         anyOf(int64(1), int64(2), int64(3)),
+		col(a, "stamp"):      secretLooking,
+		col(b, "id"):         anyOf(int64(1), int64(2), int64(3)),
+		col(b, "stamp"):      secretLooking,
+	}
+	cls, err := New().Classify(schema, samples, nil)
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+
+	parent := decision(t, cls, col(births, "birth"))
+	if !parent.Masked || parent.Category != pipeline.CatPersonDate {
+		t.Fatalf("births.birth = %+v, want a masked person_date name hit", parent)
+	}
+	child := decision(t, cls, col(a, "stamp"))
+	if !child.Masked || child.Category != pipeline.CatPersonDate {
+		t.Fatalf("a.stamp = %+v, want person_date propagated from births.birth", child)
+	}
+
+	d := decision(t, cls, col(b, "stamp"))
+	if d.Masked {
+		t.Errorf("b.stamp is masked: %+v, want copied: its only signal is a credential entropy "+
+			"hit on a type credential cannot hold, and sameColumnName must not raise a column on "+
+			"that evidence", d)
+	}
+	if d.Reason != "no name or value signal" {
+		t.Errorf(`b.stamp reason = %q, want "no name or value signal": a silenced type conflict `+
+			"names nothing", d.Reason)
+	}
+	if bad, ok := ParseReason(d.Reason); !ok {
+		t.Errorf("b.stamp reason %q holds a fragment no template produced: %q", d.Reason, bad)
 	}
 }

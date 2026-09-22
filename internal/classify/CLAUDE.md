@@ -172,8 +172,10 @@ was chosen and is recorded here rather than only in a comment.
       reached by a branch that substitutes a category the gate never saw.
       The gate is now `silencedByType(p, pipeline.CatFreeText, family)` —
       the category `decide` is actually going to write — so a `bigint`
-      column with a Luhn minority hit is left for `sig.weak`/`sig.refused`/
-      `none` exactly as before T-0136, and `internal/verify`'s second net
+      column with a Luhn minority hit is left for `sig.weak`/`none` exactly
+      as before T-0136 (T-0269 later removed the `sig.refused` field this
+      sentence originally named; see the T-0054/T-0269 bullet above), and
+      `internal/verify`'s second net
       (the family-split Luhn entry in `internal/verify/validators.go`,
       T-0136 review finding 2) is what catches the value on the family this
       branch cannot reach — a refusal at exit 9 over an already-loaded
@@ -376,13 +378,48 @@ was chosen and is recorded here rather than only in a comment.
   type family cannot hold now decides nothing: not `certain`, not `likely`, and
   not `low` either, because `low` is what the neighbouring-column rule raises and
   a raise would put the same unwritable masker on the column by a longer route.
-  The hit is still *recorded* at `low` with `typeConflict` set and the reason
-  names the conflict (`4/5 samples look like secrets; timestamp is not an
-  accepted type for credential`), exactly as a type-conflicting name hit has
-  been recorded since T-0033. The gate reads the rule pack's own `accepts:`
-  list, not a hard-coded list of families, so `person_date` still decides a
-  `date` column on its values and only the categories whose maskers emit text
-  are shut out of a timestamp.
+  The gate reads the rule pack's own `accepts:` list, not a hard-coded list of
+  families, so `person_date` still decides a `date` column on its values and
+  only the categories whose maskers emit text are shut out of a timestamp.
+  - **T-0269 corrects the sentence above this bullet's original wording.**
+    From T-0054 until T-0269 the hit was still *scored* and *recorded* at
+    `low` with `typeConflict` set, and the reason named the conflict
+    (`4/5 samples look like secrets; timestamp is not an accepted type for
+    credential`) exactly as a type-conflicting name hit is. That line reads as
+    an alarm over a column that was never going to be masked either way — the
+    decision (`low`, unmasked) was already right, only the reason was noise —
+    so `bestSignal` no longer keeps the refused hit's category, phrase or
+    sample count for anything a reason could name: the column falls through to
+    whatever else has a signal, or to the same `no name or value signal` every
+    signal-free column gets. `TestTimestampCredentialEntropyIsNeverScored`
+    (`classify_test.go`) and `TestPagilaValueSignalsRespectAcceptedTypes`
+    (`pagila_test.go`) pin this.
+    - **T-0269's first landing dropped the whole result, not only the noisy
+      half of it, and a review round on that same task found the difference
+      is not cosmetic.** `signals.refused` used to do two things at once: name
+      the conflict in the reason (the alarm this fix is about), and set
+      `w.typeConflict = true` so `sameColumnName`, `guessedPhoneColumns` and
+      `fkPairs` — three raising passes that key on nothing but a column's own
+      name, region guess or FK partner — stayed off a column no category was
+      ever going to be decided under. Dropping the field entirely kept the
+      first half fixed and reopened the second: a column whose only signal was
+      a silenced hit at or above `validatorThreshold` was indistinguishable,
+      to every later pass, from a column the validators never looked at, so a
+      same-named column elsewhere in the schema could raise it to `possible`
+      on evidence that was never about it. `signals.silencedStrong` (a bare
+      `bool`, set only when a silenced validator reaches `validatorThreshold`)
+      and `decide`'s own `case sig.silencedStrong` are the fix: `w.typeConflict
+      = true` and nothing else — no category, no phrase, no count, and the
+      case sits before `default` in the switch so a family with its own
+      `typeSignals` entry (inet, cidr, macaddr) is not masked on that entry
+      either, the same pre-emption `signals.refused` gave it before T-0269.
+      `TestSameColumnNameDoesNotRaiseASilencedTypeConflict` (`classify_test.go`)
+      pins the reproduction: `births.birth timestamp` is a genuine
+      `person_date` name hit, `a.stamp timestamp` is its FK child and is
+      propagated to `person_date`, and `b.stamp timestamp` — no FK to
+      `births`, no name signal, only the same high-entropy timestamp values
+      `TestTimestampCredentialEntropyIsNeverScored` uses — must stay unmasked
+      because `a.stamp` and `b.stamp` share a column name and nothing else.
   - **It is narrower than `accepts:`, by three families** (`silencedByType`).
     `accepts:` answers which families a *name* hit may decide a column on, and
     §4 keeps that tight because a name is weak evidence. Silencing a *value*
@@ -915,10 +952,12 @@ names and addresses and phone numbers, in the target in cleartext under exit 0
 That branch now falls back to `typeSignals[family]` when the samples say nothing.
 
 The rule to keep in mind when touching `decide`: **every branch that rejects a
-signal has to be at least as safe as the branch with no signal at all.** The
-`sig.refused` branch below is the same shape with a value signal instead of a
-name, and it has not been measured against a real schema; if one turns up, it
-gets the same treatment.
+signal has to be at least as safe as the branch with no signal at all.**
+`bestSignal`'s `silencedByType` gate (see the T-0054/T-0269 bullet above) is
+the same shape with a value signal instead of a name, and as of T-0269 it does
+not even reach `decide` as a distinct branch any more — the validator is never
+scored, so a rejected value signal and no signal at all are now the same
+branch by construction, not two branches kept equally safe by measurement.
 
 ## Two decision fields carried for internal/verify (T-0187 third review round, finding 1)
 
