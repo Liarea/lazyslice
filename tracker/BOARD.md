@@ -8,8 +8,8 @@
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 1 | 0 | 107 | 0 | 0 |
-| E6 Launch | 6 | 6 | 0 | 7 | 0 | 0 |
-| E9 Later | later | 87 | 0 | 33 | 6 | 0 |
+| E6 Launch | 6 | 5 | 0 | 8 | 0 | 0 |
+| E9 Later | later | 87 | 0 | 34 | 6 | 0 |
 
 ## Open and in progress
 
@@ -101,12 +101,11 @@
 - T-0282 [open] E6 · Write the 'why I built this' paragraph for the README (human)
 - T-0283 [open] E6 · Decide whether v0.2.0 ships a docs site (mkdocs-material on GitHub Pages) or the in-repo docs stay the docs (human)
 - T-0286 [open] E6 · research/POSTMORTEMS.md carries two stale facts the blog draft inherited (sonnet)
-- T-0288 [open] E6 · A root table can hold more rows than --take names; say so in the flag's help or stop it (sonnet)
 - T-0289 [open] E6 · make gif records with a read-only role, probes readiness from the host, and pace.awk fails when it paused nothing (sonnet)
 - T-0291 [open] E9 · Makefile's .SHELLFLAGS (-eu -o pipefail) is silently ignored by macOS's GNU Make 3.81 (sonnet)
 - T-0292 [open] E9 · person_name role masking can collide with real name corpora on ordinary tables ()
-- T-0294 [open] E9 · plan-time DEFAULT rewrite for a person_name column ignores Role (sonnet)
 - T-0295 [open] E9 · second net's dictionary rule has no single-word check, and T-0287 makes that shape normal (sonnet)
+- T-0296 [open] E9 · tracker.py retries a GitHub GraphQL secondary rate limit with backoff instead of failing the write (sonnet)
 
 ## Recently closed
 
@@ -119,8 +118,10 @@
 - T-0284 [cancelled] E9 · go install of lazyslice fails: go.mod's mask replace directive rejects @v0.1.0/@latest → cancelled
 - T-0285 [done] E6 · go install works: the mask module gets its own tag and go.mod requires it by version, with go.work for local development → done
 - T-0287 [done] E6 · The person_name masker respects the column's role: a first-name column gets a given name, a last-name column a surname → done
+- T-0288 [done] E6 · A root table can hold more rows than --take names; say so in the flag's help or stop it → done
 - T-0290 [done] E6 · goreleaser release build still compiles mask/ from go.work, not the tagged version go.mod requires → done
 - T-0293 [done] E9 · plan equality groups ignore person_name Role, letting an FK pair mask two roles alike → done
+- T-0294 [done] E9 · plan-time DEFAULT rewrite for a person_name column ignores Role → done
 - T-0083 [done] E5 · Target type registration for CopyFrom: no owner since internal/load shipped → done
 - T-0170 [done] E9 · torture regression 013 (json-object-key-email) fails on main → done
 - T-0197 [done] E5 · R2-05/A10 residual: a name in a language names.txt does not carry still reports "no name or value signal" as a clean bill of health → done
@@ -133,5 +134,3 @@
 - T-0232 [cancelled] E9 · Curate --unmask flags for gitlab, odoo, discourse and supabase-auth under T-0198's broadened DDL-literal rule → cancelled
 - T-0238 [done] E5 · mask.Apply never returns a foreign error object: a masker's error is rebuilt by the module with only its identity carried across → done
 - T-0239 [done] E5 · The certain-neighbour rail no longer skips a column declared shorter than sixteen characters: it masks under a generator that fits or refuses → done
-- T-0240 [done] E5 · National-identifier corroboration counts a masked personal neighbour at any confidence and outranks the dense-sequence exemption; character-family identifiers get the same path → done
-- T-0241 [done] E5 · A streaming standby as source, with the target on its own primary, is refused: a start-time disagreement without the system identifier is unknown, a standby source is announced, and a headless run with no --target refuses on a standby → done
