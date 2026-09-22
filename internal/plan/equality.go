@@ -103,6 +103,10 @@ func (p *run) maskedMembers() []groupMember {
 			}
 			c.Unique = d.UniqueIndex
 			c.Rows = rows
+			// Role shapes what person_name emits (T-0287): one given name, one
+			// surname, or both. transform masks each column under its own
+			// decision's Role, so the choice below has to see it (T-0293).
+			c.Role = d.Role
 			out = append(out, groupMember{
 				cref: cref,
 				tbl:  t.Ref,

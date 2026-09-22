@@ -199,6 +199,7 @@ func (e emitter) columnConfig(col ref.ColumnRef, d pipeline.Decision) pipeline.C
 		Reason:     d.Reason,
 		Unique:     d.UniqueIndex,
 		TypeFP:     d.TypeFP,
+		Role:       d.Role,
 	}
 	if d.Masked {
 		cc.Masker = d.Masker

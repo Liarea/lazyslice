@@ -566,6 +566,24 @@ was chosen and is recorded here rather than only in a comment.
     no `free_text`; it now says the wrong thing in both directions and should
     name the dictionary rule instead** — that file is not in this task's paths
     and the edit is reported in T-0055's return value.
+  - **T-0287 (2026-09-22) makes the one-word gap above materially worse, and
+    it is decided not to patch it here.** `RoleGiven`/`RoleFamily`
+    (`mask/CLAUDE.md`'s own T-0287 section) make a *correctly masked*
+    `first_name`/`last_name` column's own output one word per row — so a real,
+    unmasked `forename` column this net still misses now reads exactly like
+    the tool's own correct masked output, where before it merely looked like
+    an ordinary short string. Scoring `textsig.Dict.LooksLikeName` at the
+    ordinary ratio would close it and also reopen the false positive
+    `NameShape` was narrowed to avoid in the first place: `product.colour` is
+    100% "person_name" under `LooksLikeName`, because black, brown, hill,
+    green and wood are all surnames (the T-0055 review, above). A safe version
+    needs the same corroboration gate `validators.go`'s national_id digits
+    entry uses (`requiresCorroboration`/`corroborated`) or a narrower signal
+    built for this shape specifically, and a precision/recall measurement
+    against a real fixture before it can be trusted not to turn an ordinary
+    one-word column into a refusal nobody can act on — the same bar this
+    file's own top rule sets for any recall-affecting scoring change. **T-0295**
+    carries the design and the measurement; it is not decided here.
   - `TestTheDictionaryRule` pins every half of it without a database: the four
     columns that must not fail on a word (single dictionary words, two-word
     street names, compound colours, and business prose whose only dictionary

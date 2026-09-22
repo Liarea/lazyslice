@@ -148,6 +148,12 @@ func (t transformer) plan(
 		if d.UniqueIndex {
 			plans[i].shape.constraints.Unique = true
 		}
+		// Role reaches the masker the way Unique above does: a Decision field
+		// mask.Constraints has its own field for (T-0287). d.Role is mask.RoleFull
+		// for every category but person_name, which is Constraints.Role's own
+		// zero value, so this is unconditional rather than gated the way Unique
+		// is above.
+		plans[i].shape.constraints.Role = d.Role
 		if plans[i].id == "" {
 			return nil, &Refusal{
 				Code: CodeMasker, Exit: exitTransform, Col: col,

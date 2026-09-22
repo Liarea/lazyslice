@@ -771,6 +771,9 @@ func (p *run) columnDefault(
 		return nil
 	}
 	c.Unique = uniqueColumn(t, col.Name) || d.UniqueIndex
+	// The column's rows are masked under its role (T-0287), so its default is
+	// too: a first_name default becomes one given name, not a full name (T-0294).
+	c.Role = d.Role
 
 	var failed error
 	out, ok := pipeline.RewriteLiterals(def, func(lit pipeline.Literal) (string, bool) {

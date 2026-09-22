@@ -906,6 +906,14 @@ The rule that replaces it:
 
 Equality is what a foreign key is, and `h` is a function of the category and the canonical value alone, so two columns holding one value mask alike exactly when they agree on both the category and the generator. `internal/transform` is unchanged: it masks with `Decision.Masker`, so once the decisions agree the values do. `internal/plan/equality.go` is the implementation and `testdata/regressions/010-fk-connected-columns-mask-differently.sql` is the guard. Three bounds are recorded rather than papered over: the inferred edges of §3.2 (`virtual_fks:`, the polymorphic pairs) are not group edges, because nothing downstream carries them as a constraint (tracker T-0154); the declared-value comparison is made over the `CHECK` text rather than the parsed label list, because that parser is unexported inside the `mask` module, so a group whose ends spell one list two ways is refused although it would have worked (T-0158); and the members' type *families* are not compared at all, so two ends of different families whose generators branch on the tag (`inet` and `cidr`, `date` and `timestamp`) can still disagree (T-0159).
 
+**§5 amendment (2026-09-22, T-0287): a person_name column carries a role.**
+
+`person_name`'s masker emitted "Given Family" for every column in the category, whatever the column was named, so a `first_name` column held two words and a `last_name` column held a stray surname — visible to a stranger in the first ten seconds of `docs/media/first-run.gif`. The masker now reads `mask.Constraints.Role`, one of `RoleGiven`, `RoleFamily` or the zero value `RoleFull`: `RoleGiven` emits a given name only, `RoleFamily` a surname only, and `RoleFull` is the original pair, unchanged, so a caller built before this field existed sees no difference.
+
+The role is decided at classify time, from the column's own name alone, and travels the way `UniqueIndex` above already does: `internal/classify` matches the normalised column name against two small patterns — `first`/`given`/`forename`/`fname` for `RoleGiven`, `last`/`family`/`surname`/`lname` for `RoleFamily`, and anything else (`name`, `full_name` among them) for `RoleFull` — and carries the result on `Decision.Role` beside `Category`, for every `person_name` column whether or not it is masked. `internal/transform` copies it onto `mask.Constraints.Role` the way it copies `UniqueIndex` onto `Constraints.Unique`; `internal/emit` writes it under a column's `role:` key and reads it back the same way it round-trips `type:`.
+
+Determinism is unchanged by this: `Canonical`'s person_name branch does not read `Constraints`, so the digest `h` a column's value hashes to is exactly what it was before this amendment, and only the generator's choice of branch depends on `Role`. A role change is therefore a category change for verify's purposes and nothing else — the residual scan still compares canonical equality, unaffected by which word `Mask` chose to emit from which list.
+
 
 ## 6. The residual scan and the second net
 
@@ -1180,12 +1188,14 @@ columns:
     confidence: certain
     reason: "name matches first_name; 196/200 samples in name dictionary"
     masker: person_name
+    role: given                      # given | family | "" (a full "Given Family" pair); §5's 2026-09-22 amendment
     type: 3e51a0c2                   # type fingerprint at decision time
   public.customer.last_name:
     category: person_name
     confidence: certain
     reason: "name matches last_name; 189/200 samples in name dictionary"
     masker: person_name
+    role: family
     type: 3e51a0c2
   public.customer.email:
     category: email

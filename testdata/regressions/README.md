@@ -221,6 +221,66 @@ naming both `reg037_members.linkval` and `reg037_profiles.dob`, with
 `TestFKPairIsRefusedAtPlan` pins the same shape at the unit level, driving a
 hand-built `Decision` through the planner directly.
 
+**038 is a twenty-second**, from tracker **T-0287** rather than from a
+torture schema: `docs/media/first-run.gif`'s own last frame read back
+`public.customer.first_name` as `Emma Popescu` and `last_name` as
+`Oscar Adler`, because `personNameMasker` (`mask/gen_text.go`) never read
+which column it was filling and always emitted "Given Family" — right for a
+`full_name` column, wrong for `first_name` (two words instead of one) and
+`last_name` (a whole name instead of a surname). Fixed by `mask.Role`
+(`RoleGiven`, `RoleFamily`, the zero-value `RoleFull`), decided at classify
+time from the column's own name (`internal/classify/classify.go`'s
+`roleForColumn`: `first`/`given`/`forename`/`fname` decide `RoleGiven`,
+`last`/`family`/`surname`/`lname` decide `RoleFamily`, everything else —
+`name`, `full_name` among them — keeps `RoleFull`) and carried on
+`Decision.Role` beside `Category` the same route `Decision.UniqueIndex`
+already takes to `mask.Constraints.Unique`: `internal/transform` sets
+`Constraints.Role` from the Decision, `internal/emit` writes and reads it
+back under `role:`, and `personNameMasker.Mask`/`.Domain` branch on it — a
+given name only for `RoleGiven`, a surname only for `RoleFamily`. This file's
+three columns pin the three roles side by side, and `not-copied:` proves none
+of the five source rows' own words survive; the shape of what *did* land —
+one word for `first_name`, one for `last_name`, two for `full_name` — is
+`mask/role_test.go`'s `TestPersonNameRoleShape` and
+`internal/classify/role_test.go`'s `TestPersonNameRoleFromColumnName`, since
+`not-copied:` alone cannot tell a correctly shaped fake from a differently
+wrong one. **Neither of those two proofs alone covers the path between
+them** (the fix round that followed this task's own review): the first calls
+`personNameMasker.Mask` directly and the second checks only
+`Decision.Role`, so nothing before `internal/transform`'s own
+`TestPersonNameRoleReachesTheMasker` asserted that `internal/transform`'s
+`plan()` actually carries `Decision.Role` onto `mask.Constraints.Role` —
+deleting that one assignment would have passed this file, `make check` and
+`make torture` alike, dropping every `person_name` column silently back to
+`RoleFull`.
+
+**039 is a twenty-third**, from the fix-round review that followed `038`
+rather than from a torture schema: that round's own comment on
+`roleGivenWords`/`roleFamilyWords` (`mask/words.go`) claimed the two lists
+"never drawn from a real-name dictionary and disjoint from"
+`givenWords`/`surnameWords` "by construction", which is true of the
+*generation* method (a consonant-vowel syllable grammar) and was false as a
+claim about the *result*: a reviewer measured 34 of the two lists' 900
+entries each as literal entries of `internal/textsig/names.txt`, and
+materially more again as ordinary common given names, surnames or English
+words the dictionary does not carry. The residual scan checks every masked
+value against the whole source column, so an ordinary `first_name`/
+`last_name` column of a few thousand rows had a real chance of exit 9's own
+confirmed-hit refusal on the very demo `038` fixed. Fixed by filtering both
+lists against `internal/textsig/names.txt`, a census-style name corpus and
+the system English dictionary (`mask/CLAUDE.md`'s T-0287 section has the
+full account), narrowing them from 900 entries each to 780 and 863. This
+file seeds `first_name`/`last_name` with exactly the common real names the
+review found colliding, so a reintroduced overlap fails here rather than on
+a stranger's production table; `mask/role_test.go`'s
+`TestRoleWordsExcludeKnownRealNames` and
+`TestRoleWordsDisjointFromSharedNameLists`, and
+`internal/classify/role_test.go`'s
+`TestRoleWordsExcludeCurrentNameDictionary`, pin the same finding at the
+unit level, the last of the three checking the role lists against the
+project's live name dictionary directly (something `mask/role_test.go`
+cannot do itself, since `mask` may import nothing under `internal/`).
+
 The files are loaded and run by `make torture` (`internal/invariants`'s
 `TestTortureRegressions`, behind the `integration` and `torture` build tags), so
 a regression that comes back fails a build rather than being rediscovered by the
@@ -405,6 +465,7 @@ until T-0221. It is what 025 sets.
 | `033-national-id-in-a-bigint-beside-a-name-matched-phone.sql` | the 2026-09-15 red team round 4, the A9b dense bigint replay | **the same corroboration gap, and the dense exemption's own blind spot**: a dense national identifier stored as `bigint`, beside the identical name-matched, value-unconfirmed `msisdn`, crossed verbatim under exit 0 because the same `ConfLikely` floor missed the neighbour and, even once it did not, `digitRange.dense()`'s own exemption fired before corroboration was ever asked — the one combination `020`, `022` and `023` do not test together |
 | `034-dense-business-number-beside-a-tsvector-is-not-corroborated.sql` | the T-0240 review round (2026-09-17), high finding | **a false refusal the T-0240 fix itself introduced**: `TableHasLikelyPersonalColumn` counts a neighbour at `ConfLikely` or above under any category, with no `identifiesAPerson` test, and a `tsvector` is `derived_text` at `ConfCertain` by its type alone — so a search-index column beside an ordinary, non-key, dense business-number column cancelled that column's own sequence exemption on the strength of a neighbour that is not personal data, and the run refused at exit 9 with nothing wrong in it; fixed by `corroboratedForSequence`, read only for the dense-sequence override, which answers with `NameMatchedNationalID` and `TableHasMaskedPersonalColumn` alone and never `TableHasLikelyPersonalColumn` — `requiresCorroboration`'s own three-signal `corroborated` is unchanged, so `032` and `033` still refuse |
 | `037-fk-pair-partner-carries-a-type-conflict.sql` | tracker T-0257, not a torture-schema reduction — see this file's own prose above | **the residual `035`/`036` left open, now a refusal instead of a copy**: a validated foreign key's parent already carries a decision ARCHITECTURE.md §4 forbids overriding (a `citext` `dob` column, name-matched to `person_date`, type-conflicted at `low`), so `fkPairs` refuses to raise either end rather than mask the child alone and leave the parent copied — before `internal/plan/fkpair.go`'s `checkFKPairRefusal` read that signal (`Decision.Refused`, `Decision.RefusedPartner`), both columns loaded copied verbatim under exit 0; now the run refuses at exit 12, naming both columns with `--unmask` for each |
+| `038-person-name-role-from-column-name.sql` | tracker T-0287, not a torture-schema reduction — see this file's own prose above | **the shape a stranger sees in the README's own landing image**: `person_name`'s masker emitted the same "Given Family" pair for every column in the category, so a `first_name` column held two words and a `last_name` column held a stray surname; fixed by `mask.Role`, decided at classify time from the column's own name and carried on `Decision.Role` beside `Category` the way `UniqueIndex` reaches `mask.Constraints.Unique` — `first_name`/`last_name`/`full_name` here pin the three roles side by side. `not-copied:` cannot tell a correctly shaped fake from a differently wrong one, so the real end-to-end proof that a role reaches the masker is `internal/transform`'s own `TestPersonNameRoleReachesTheMasker`, added in the fix round that followed T-0287, which asserts the one/one/two word shape directly against `transformer.plan`'s output |
 
 009's header now says `ok`. It did not always: `arrayArrivesAsLiteral` in
 `internal/plan/writeback.go` was written as a stand-in for the element-wise

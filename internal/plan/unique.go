@@ -92,6 +92,7 @@ func (p *run) checkUniqueDomain() error {
 // masks every member identically".
 func (p *run) chooseGroupMasker(g []groupMember) error {
 	cat := g[0].cat
+	p.agreeOnRole(g)
 	needed := make([]mask.ID, 0, len(g))
 	for _, m := range g {
 		id, err := mask.Pick(cat, m.cons)
@@ -151,6 +152,34 @@ func (p *run) chooseGroupMasker(g []groupMember) error {
 		p.cls.Decisions[m.cref] = d
 	}
 	return nil
+}
+
+// agreeOnRole brings a group whose members disagree on the person_name role
+// (T-0287) to mask.RoleFull, on the members and on their decisions (T-0293).
+// A foreign key joining a first-name column to a full-name one carries equal
+// values at both ends, and a given-name-only masker at one end and a full-name
+// masker at the other would turn them into different values and break the key
+// at load (exit 8). Refusing instead would leave the operator no escape, since
+// no flag sets a role; a full name in a first-name column is cosmetic, and
+// every member is still masked. A group that agrees, and every group of one,
+// is left alone.
+func (p *run) agreeOnRole(g []groupMember) {
+	agree := true
+	for _, m := range g[1:] {
+		if m.cons.Role != g[0].cons.Role {
+			agree = false
+			break
+		}
+	}
+	if agree {
+		return
+	}
+	for i := range g {
+		g[i].cons.Role = mask.RoleFull
+		d := p.cls.Decisions[g[i].cref]
+		d.Role = mask.RoleFull
+		p.cls.Decisions[g[i].cref] = d
+	}
 }
 
 // equalityNote is what a per-column refusal has to add when the column is not

@@ -10,6 +10,7 @@ import (
 	"github.com/Liarea/lazyslice/internal/dsn"
 	"github.com/Liarea/lazyslice/internal/pipeline"
 	"github.com/Liarea/lazyslice/internal/ref"
+	"github.com/Liarea/lazyslice/mask"
 )
 
 // MappingFileError is returned by Read (through document.config) when a yml
@@ -138,6 +139,11 @@ type columnDoc struct {
 	TypeFP      string     `yaml:"type,omitempty"`
 	MappingFile string     `yaml:"mapping_file,omitempty"`
 	Unmask      *unmaskDoc `yaml:"unmask,omitempty"`
+	// Role is Decision.Role (T-0287): "given" or "family" for a person_name
+	// column whose name says so, omitted for mask.RoleFull -- the zero value
+	// and every other category's own, unset field -- the same way Masker is
+	// omitted for a column this run did not mask.
+	Role string `yaml:"role,omitempty"`
 }
 
 type unmaskDoc struct {
@@ -219,6 +225,7 @@ func toDocument(c *pipeline.Config) document {
 			// mapping_file is never written (ADR-012): pipeline.ColumnConfig
 			// carries no field for it.
 			Unmask: unmaskOf(cc.Unmask),
+			Role:   string(cc.Role),
 		}
 	}
 	d.Types = map[string]typeAllowDoc{}
@@ -355,6 +362,7 @@ func (d document) config() (*pipeline.Config, error) {
 			Masker:     maskerID(cd.Masker),
 			Unique:     cd.Unique,
 			TypeFP:     cd.TypeFP,
+			Role:       mask.Role(cd.Role),
 		}
 		if cd.Unmask != nil {
 			cc.Unmask = &pipeline.Unmask{
