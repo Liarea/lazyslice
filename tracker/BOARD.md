@@ -7,16 +7,15 @@
 | E2 Architecture | 2 | 0 | 0 | 4 | 1 | 0 |
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
-| E5 Hardening | 5 | 1 | 0 | 107 | 0 | 0 |
-| E6 Launch | 6 | 3 | 0 | 14 | 0 | 0 |
-| E9 Later | later | 96 | 0 | 34 | 7 | 0 |
+| E5 Hardening | 5 | 0 | 0 | 108 | 0 | 0 |
+| E6 Launch | 6 | 17 | 0 | 14 | 0 | 0 |
+| E9 Later | later | 99 | 0 | 34 | 7 | 0 |
 
 ## Open and in progress
 
 - T-0019 [open] E9 · Go vs Python COPY throughput benchmark to validate ADR-001 (opus)
 - T-0031 [open] E9 · Licence for the lazyslice.yml schema and docs; confirm copyright holder statement (fable)
 - T-0048 [open] E9 · Explicit --key on an uncomparable column type surfaces a raw pgx error instead of a refusal (opus)
-- T-0064 [open] E5 · Dogfood: two sessions against a real project of the maintainer's choosing, logged in docs/DOGFOOD_LOG.md (human)
 - T-0087 [open] E9 · internal/classify's JSON leaf signal never consults the name dictionary, so verify's second net cannot score person_name or free_text over document leaves ()
 - T-0102 [open] E9 · A text column holding a JSON document is invisible to ARCHITECTURE.md 4's JSON rule ()
 - T-0124 [open] E9 · testdata/regressions covers plan.refused.unique_domain no longer ()
@@ -113,9 +112,27 @@
 - T-0308 [open] E9 · internal/textsig/names.txt's English section could be regenerated from the Census CSVs (sonnet)
 - T-0309 [open] E9 · tools/names: assert no duplicate rows, a filled cut, and a real drops test (sonnet)
 - T-0310 [open] E9 · A minimal docs site (mkdocs-material on GitHub Pages) once the first ten issues show what strangers look for (sonnet)
+- T-0311 [open] E6 · The neighbouring-column sweep spares enum-like, identifier-shaped and unique-indexed columns (opus)
+- T-0312 [open] E6 · The same-column-name rule does not propagate a decision that was itself only a neighbour sweep (sonnet)
+- T-0313 [open] E6 · A bare 'name' column and a '*_file_name' column are not a person's name without corroboration (opus)
+- T-0314 [open] E6 · Framework metadata tables are copied whole and never masked (schema_migrations, ar_internal_metadata and their kin) (sonnet)
+- T-0315 [open] E6 · The entropy validator does not read filenames, hex digests, namespaced class names or a handful of samples as secrets (sonnet)
+- T-0316 [open] E6 · The Luhn check needs a card length and issuer prefix before it masks an id, number or version column (sonnet)
+- T-0317 [open] E6 · A four-part version string is not an IP address, and a digit-only license key is not a phone number (sonnet)
+- T-0318 [open] E6 · The plan reports every refusal in one run, and a no-identity hint names the columns (sonnet)
+- T-0319 [open] E6 · After a second-net refusal the operator can mask the column: --mask, and every failing column reported at once (opus)
+- T-0320 [open] E6 · A green run prints one verify summary line and how to reach the target (sonnet)
+- T-0321 [open] E6 · The reasons dump and the plan end with a summary, and a re-run from a committed yml is quiet (sonnet)
+- T-0322 [open] E9 · Infer foreign keys from naming conventions as virtual_fks candidates, so a Rails schema is reachable (opus)
+- T-0323 [open] E9 · Decide the free_text masker's length policy for short enum-like values (human)
+- T-0324 [open] E9 · Geo leaves inside JSON get in-range numbers (sonnet)
+- T-0325 [open] E6 · --unmask on a first run must not put it on the re-run path; the drift message names the real decision (sonnet)
+- T-0326 [open] E6 · A stray positional argument is a usage error, not 'the source did not report a server version' (sonnet)
+- T-0327 [open] E6 · A committed yml whose target is a container lazyslice created reconnects or re-provisions, and says which (opus)
 
 ## Recently closed
 
+- T-0064 [done] E5 · Dogfood: two sessions against a real project of the maintainer's choosing, logged in docs/DOGFOOD_LOG.md → done
 - T-0283 [done] E6 · Decide whether v0.2.0 ships a docs site (mkdocs-material on GitHub Pages) or the in-repo docs stay the docs → done
 - T-0303 [done] E6 · tools/names regenerates the masker's name lists from the 2020 Census top-1000 files (public domain), checked in CI → done
 - T-0065 [done] E6 · 20-second VHS GIF of the first run on Pagila → done
@@ -140,4 +157,3 @@
 - T-0170 [done] E9 · torture regression 013 (json-object-key-email) fails on main → done
 - T-0197 [done] E5 · R2-05/A10 residual: a name in a language names.txt does not carry still reports "no name or value signal" as a clean bill of health → done
 - T-0198 [done] E5 · special_category has no value validator; a digit/name-free special-category sentence still crosses unseen → done
-- T-0212 [done] E5 · renderSafe redacts by default, and prints a transform refusal's reason under the values flag → done

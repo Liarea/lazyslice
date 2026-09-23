@@ -1,0 +1,43 @@
+# Dogfood log
+
+Two sessions against a real project of the maintainer's choosing (T-0064, a gate-4 item carried to phase 6). The rule for this file: it records what the tool did and what was confusing, never the data. The database is a production system under the maintainer's access controls; every value stayed inside two local containers, the tool itself prints no values, and the schema is described here by shape, not by name. Column names below are the generic ones a reader will recognise from any Rails application (`role`, `type`, `uuid`, `filename`); the application's own names are not in this repository.
+
+## Session 1, 2026-09-23: first run against a production dump
+
+**Setup.** A production Rails application: 143 tables, 1,845 columns, 88 declared foreign keys, about a million rows, 300 MB, restored from a `pg_dump` into a local PostgreSQL 16 container (the dump was written by a newer `pg_dump`, so PG16's own `pg_restore` refused its format and a PG18 client restored it into the PG16 server). The binary was the v0.2.0 `brew install`, the one a stranger gets. The runs were headless (no terminal), so the two questions a terminal run asks (start a target container? which root table?) were answered by flags; that path is still owed a session with a person at the keyboard.
+
+**What it took to reach a green verify: nine runs, two `--key` flags and fifteen `--unmask` flags.** The green run copied 29 tables and 76,750 rows in 19 seconds, verified them, and wrote a 10,000-line `lazyslice.yml`.
+
+1. `--source` alone: exit 4, "no local postgres found to load into: pass --create-target". Clear; discovery listed the two stopped containers on the machine and why they did not qualify.
+2. `--create-target`: the tool started its own PostgreSQL 16 container, printed the read-only-role recipe (the dump's role was a superuser), printed 1,845 reason lines, and refused the plan at exit 12 on one join table with no primary key (a Rails `has_and_belongs_to_many` table: two columns, no key, no foreign keys). A second identical table was not named.
+3. `--key` for both join tables: exit 12 again, on a text `uuid` column under a unique index that the classifier had masked as free text. Ten such columns existed; each run named one.
+4. Ten `--unmask` flags: plan and load passed, verify refused at exit 9: the second net found URLs in a copied column holding cached HTTP response bodies, and emptied the target (139 "dropping object" lines). `--skip-table` on that table was refused because the slice needs it as a parent. The only remaining path was `--unmask` on the column the net had just flagged. Two more runs named two more columns of the same kind, one per run, before the ninth run passed.
+
+**What the copy looked like.** Correct and useful in most of it: emails, logins, names, phone numbers, IP addresses, API keys, tokens and password hashes were all replaced, foreign keys held, and the run was fast. Three things would stop the application from booting against it, and they are the session's findings that matter most:
+
+- **State and enum columns masked as free text.** A table with one column the classifier is certain about (an email, an IP address) had every signal-less string column swept into masking: a users table's `role` and `ui_mode`, a devices table's `os_type`, `state`, `log_level`, `timezone`, `serial_number` and a text `uuid`. In the copy each became a 255-character string of random words; a `role` column with three distinct values became three distinct paragraphs. The same-column-name rule then carried `uuid` and `state` into five other tables each. T-0311, T-0312, T-0323.
+- **Framework tables emptied or masked.** `schema_migrations` had no foreign key reaching it, so it was schema-only and empty in the copy (Rails would re-run every migration), and its version column had been masked because timestamp-shaped digit strings pass the Luhn check. T-0314, T-0316.
+- **Configuration JSON destroyed.** JSON is masked leaf by leaf with keys kept, which is right for a location document; for an AI model's settings, an ad server's configuration or a trigger's action, every string leaf became word salad and a latitude became 573. T-0143 and T-0272 carry the evidence; T-0324 the out-of-range numbers.
+
+**Other classifier findings, by shape.** Every column named `name` (38 of them: tags, folders, playlists, widgets, languages) and every `*_file_name` column was masked as a person's name (T-0313). Six filename columns, four MD5 columns, two file-fingerprint columns and three Rails single-table-inheritance `type` columns were masked as credentials because their values "look like secrets", and the fixed `$lazyslice$invalid` value in a `type` column raises on every row an app loads; the real secrets in the same category were caught correctly and must stay caught (T-0315). Four-part version strings parsed as IP addresses and a digit-only license key as phone numbers (T-0317). Eight external account and invoice identifiers passed the Luhn check by chance (T-0316).
+
+**Reachability.** 82 of the 143 tables have no foreign key at all, and 120 `*_id` columns point at a table by Rails naming with no declared key, so the users-root slice reached 29 tables and left 114 empty, including the tenants table. Virtual foreign keys are hand-declared today; inferring them from the convention is T-0322.
+
+**Run mechanics.** Refusals came one per run (T-0318, T-0319); the reasons dump had no summary line and the plan listed 114 unreachable tables one per line (T-0321); a green run printed no verify result at all and never said how to connect to the target it had created (T-0320); `--unmask` on a first run put it on the re-run path and printed 1,835 drift warnings against a file that did not exist (T-0325); a stray positional argument was accepted and reported as a source problem (T-0326).
+
+**ADR reversal conditions.** ADR-008, Q1's default: the sessions passed `--create-target` explicitly, so Q1 was never asked and the container it created was wanted; no evidence either way. ADR-008, the Docker socket and the `working_dir` filter: the default context answered, and with no compose project in the directory the tool listed every PostgreSQL container, which is the documented fallback and worked. ADR-002, whether users find `?`: not exercised; the runs had no terminal.
+
+## Session 2, 2026-09-23: a second dump of the same application, from the committed yml
+
+**Setup.** A second dump of the same application with its audit tables populated (500 MB, the same 143 tables), restored into a second container. The session-1 `lazyslice.yml` and secret were copied into a fresh directory, and the run was given only `--source`, which is the file's promise: "re-running with this file asks no questions".
+
+**Verdict against the gate's wording, "the second needed nothing looked up": failed, on two counts.**
+
+1. The yml records the target as the container lazyslice created in session 1, by host, port and user; the password lives only in that container's environment, and the tool does not read it for a yml-recorded target. Exit 4 with a raw `SQLSTATE 28P01` and no hint. `--create-target` did not override the recorded target (same failure). `--target` with the password, read out of the container by hand, reached the gate, which correctly refused the target as lazyslice's copy of a *different* source, with a message that rendered a literal `{table}` placeholder and said "not empty" instead of why. A fresh database in the same container got past it: four runs to reach the plan. T-0327.
+2. The plan reached 34 tables and 97,719 rows (the audit log came in as a child of users, and its JSON change log was replaced whole under the log-shaped-table rule), loaded, and the second net refused on one value, in one column the first dump had not exercised. One more `--unmask`, and the fifth run was green in 22 seconds. T-0319 is the missing `--mask`.
+
+The re-run also printed all 1,806 reason lines again, drift 0 (T-0321).
+
+## What the two sessions say
+
+The pipeline is fast and the safety rails do fire: nothing personal reached the target in either session, and the second net caught three columns the classifier had copied. The cost of "when in doubt, mask" on a real Rails schema is that the copy does not boot: state columns, framework tables and configuration documents are masked as if they were personal data, and the operator has no way to say "mask this" or "this is an enum", only "this is not personal". The next release's work is precision without losing recall (T-0311 to T-0317), every refusal in one run (T-0318, T-0319), and a copy an application can start against (T-0314, T-0322, T-0323, and the JSON policy in T-0143).

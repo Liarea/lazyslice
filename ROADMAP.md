@@ -24,7 +24,7 @@ Phase 4 closed 2026-09-08. Evidence: all eleven packages merged; `make integrati
 
 - [x] Pagila, 200 customers, container to container, under 60 seconds, one flag beyond the root.
 - [x] All six invariants pass on both fixtures in CI.
-- [ ] Two dogfood sessions logged (needs a real project; owner human).
+- [x] (2026-09-23, docs/DOGFOOD_LOG.md: two sessions against a production Rails application of the maintainer's, 143 tables; nine runs to the first green verify, five to the second; findings filed as T-0311 to T-0327) Two dogfood sessions logged (needs a real project; owner human).
 - [ ] A 20-second GIF exists (E6, launch).
 
 ### Phase 3 gate, for the record
@@ -46,7 +46,7 @@ Gate 4 · the demo gate:
 
 - [ ] Pagila, 200 customers, from one Docker container to another, in under 60 seconds, with zero flags beyond the root table.
 - [ ] All six invariants pass on both fixtures in CI.
-- [ ] Two dogfood sessions logged, and the second needed nothing looked up.
+- [x] (2026-09-23, docs/DOGFOOD_LOG.md) Two dogfood sessions logged; the second did NOT meet "needed nothing looked up": it took four runs to reach the recorded target (T-0327) and one new flag for one new value (T-0319). The sessions are the evidence; the criterion is carried into the phase-6 work those tasks name.
 - [ ] A 20-second GIF exists that shows the whole thing. If it is not impressive, the product is not done.
 
 Not in this phase:
