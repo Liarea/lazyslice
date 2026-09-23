@@ -48,6 +48,35 @@ func (s *state) scanColumn(ctx context.Context, t ref.TableRef, column string, f
 	return nil
 }
 
+// scanRows hands every row of several columns of one target table to fn, one
+// row at a time, in the order cols names them. It is scanColumn over more than
+// one column, for the identity columns ADR-015's row check reads beside a
+// masked one (explain.go).
+func (s *state) scanRows(ctx context.Context, t ref.TableRef, cols []string, fn func([]any) error) error {
+	rows, err := s.target.Query(ctx, scanRowsSQL(t, cols))
+	if err != nil {
+		return fmt.Errorf("verify: reading %s in the target: %w", t, err)
+	}
+	defer rows.Close()
+	dest := make([]any, len(cols))
+	for rows.Next() {
+		row := make([]any, len(cols))
+		for i := range row {
+			dest[i] = &row[i]
+		}
+		if err := rows.Scan(dest...); err != nil {
+			return fmt.Errorf("verify: reading %s in the target: %w", t, err)
+		}
+		if err := fn(row); err != nil {
+			return err
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("verify: reading %s in the target: %w", t, err)
+	}
+	return nil
+}
+
 // one runs a statement that returns one row and scans it into dest.
 func (s *state) one(ctx context.Context, q targetReader, sql string, dest ...any) error {
 	rows, err := q.Query(ctx, sql)
