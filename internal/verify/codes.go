@@ -66,6 +66,15 @@ const (
 	// and counted, never failed (ARCHITECTURE.md section 6 item 3).
 	CodeUnconfirmed event.Code = "verify.residual.unconfirmed"
 
+	// CodeResidualExplained reports, once per column and as a count only, the
+	// residual hits ADR-015 explains rather than probes: masked values of a
+	// column whose masker has a vocabulary (mask.Emits) that equal a real value
+	// elsewhere in the column, that the masker's own list contains, that the
+	// target holds no more often than internal/transform emitted them, and
+	// that no source row still holds in its own row. It is printed and
+	// counted, never failed, and it never carries a value.
+	CodeResidualExplained event.Code = "verify.residual.explained"
+
 	// CodeSampleDiffers reports sampled rows whose unmasked columns differ from
 	// the source. The short transaction sees a newer snapshot than extract did,
 	// so this is reported and counted, never failed (section 6 item 5).

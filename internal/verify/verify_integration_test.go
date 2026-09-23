@@ -7,6 +7,7 @@ package verify
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -137,11 +138,23 @@ func introspectAndPlanShapes() []pg.Shape {
 // snapshot and returns everything Verify is given.
 func pipelineRun(ctx context.Context, t *testing.T) *run {
 	t.Helper()
+	return pipelineRunOver(ctx, t, testutil.LoadPagila, rootTable, take, nil)
+}
+
+// pipelineRunOver is pipelineRun over any fixture: fill loads the source,
+// root and take are the slice, and tweak, when it is not nil, edits the
+// classification after the plan is made and before a row moves — which is how
+// a case runs a different masker on a column.
+func pipelineRunOver(
+	ctx context.Context, t *testing.T, fill func(context.Context, string) error,
+	root ref.TableRef, take int, tweak func(*pipeline.Classification),
+) *run {
+	t.Helper()
 	testutil.SkipWithoutDocker(ctx, t)
 
 	sourceURL := testutil.Postgres(ctx, t, "")
-	if err := testutil.LoadPagila(ctx, sourceURL); err != nil {
-		t.Fatalf("loading pagila: %v", err)
+	if err := fill(ctx, sourceURL); err != nil {
+		t.Fatalf("loading the fixture: %v", err)
 	}
 	targetURL := testutil.Postgres(ctx, t, "")
 
@@ -185,10 +198,15 @@ func pipelineRun(ctx context.Context, t *testing.T) *run {
 	if err != nil {
 		t.Fatalf("classifying: %v", err)
 	}
-	root := rootTable
 	p, err := plan.New().Plan(ctx, reader, schema, cls, pipeline.PlanRequest{Root: &root, Take: take})
 	if err != nil {
 		t.Fatalf("planning: %v", err)
+	}
+	// After the plan, because the plan writes its own masker choice onto every
+	// masked column's decision (internal/plan/unique.go's chooseGroupMasker),
+	// and a case that means to run a different one has to run it.
+	if tweak != nil {
+		tweak(cls)
 	}
 
 	var extra []pg.Shape
@@ -849,6 +867,113 @@ func TestVerifyFailsOnASequenceTheTargetDoesNotHave(t *testing.T) {
 	}
 	if _, ok := checkNamed(report, checkSequences); !ok {
 		t.Error("the report carries no failing sequences check")
+	}
+	noCheckBothWays(t, report)
+}
+
+// ADR-015 end to end. A few hundred people whose given names and surnames are
+// drawn from the masker's own role lists, so that on a correct run a large
+// share of masked names equal some other person's real name — the coincidence
+// the residual scan now explains instead of refusing. One table has a primary
+// key and a twin has none (its identity is the planner's pseudo-key over its
+// foreign key, which the row check does not use, so the twin is explained by
+// the count check alone), and both pass at exit 0 with the explained counts
+// above zero and no confirmation probe: an explained hit spends none, and a
+// row-check statement does not spend --residual-probe-cap.
+func namesFixture(rows int) func(context.Context, string) error {
+	return func(ctx context.Context, url string) error {
+		given, family := mask.RoleWords(mask.RoleGiven), mask.RoleWords(mask.RoleFamily)
+		var b strings.Builder
+		b.WriteString(`CREATE TABLE public.people (
+			id bigint PRIMARY KEY,
+			first_name text NOT NULL,
+			last_name text NOT NULL,
+			email text NOT NULL);
+		CREATE TABLE public.people_twin (
+			person_id bigint NOT NULL REFERENCES public.people (id),
+			first_name text NOT NULL,
+			last_name text NOT NULL);
+		`)
+		title := func(s string) string { return strings.ToUpper(s[:1]) + s[1:] }
+		for i := range rows {
+			g, f := title(given[(i*7)%len(given)]), title(family[(i*11)%len(family)])
+			fmt.Fprintf(&b, "INSERT INTO public.people VALUES (%d, '%s', '%s', 'p%d@realcorp.example');\n", i+1, g, f, i)
+			fmt.Fprintf(&b, "INSERT INTO public.people_twin VALUES (%d, '%s', '%s');\n", i+1, g, f)
+		}
+		conn, err := pgx.Connect(ctx, url)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
+		_, err = conn.Exec(ctx, b.String())
+		return err
+	}
+}
+
+var peopleTable = ref.TableRef{Schema: "public", Name: "people"}
+
+func TestVerifyExplainsNameListCoincidences(t *testing.T) {
+	ctx := context.Background()
+	r := pipelineRunOver(ctx, t, namesFixture(300), peopleTable, 300, nil)
+	for _, table := range []string{"people", "people_twin"} {
+		for _, column := range []string{"first_name", "last_name"} {
+			c := ref.ColumnRef{Table: ref.TableRef{Schema: "public", Name: table}, Column: column}
+			if d := r.cls.Decisions[c]; !d.Masked || d.Category != pipeline.CatPersonName {
+				t.Fatalf("%s decided %s masked=%v, want person_name masked: the fixture tests nothing", c, d.Category, d.Masked)
+			}
+		}
+	}
+
+	report, err := r.verify(ctx)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if report.ExitCode != 0 {
+		t.Fatalf("a correct run over real-list names exits %d", report.ExitCode)
+	}
+	explained := map[string]int64{}
+	for _, c := range report.Checks {
+		if c.Code == CodeResidualExplained {
+			explained[c.Table.Name+"."+c.Column] = c.Count
+		}
+	}
+	for _, want := range []string{"people.first_name", "people.last_name", "people_twin.first_name", "people_twin.last_name"} {
+		if explained[want] == 0 {
+			t.Errorf("no explained line for %s (explained: %v); the fixture produced no coincidence to explain", want, explained)
+		}
+	}
+	if report.Probes != 0 {
+		t.Errorf("%d probes, want 0: no column probe, and a row check spends none", report.Probes)
+	}
+	t.Logf("explained=%v probes=%d", explained, report.Probes)
+}
+
+// The same fixture with the given-name column masked by a masker registered
+// under person_name from outside package mask, drawing from the same list: it
+// has no vocabulary, so its coincidences are confirmed by the column probe and
+// the run is exit 9 naming the column.
+func TestVerifyRefusesTheSameCoincidencesFromACustomMasker(t *testing.T) {
+	ctx := context.Background()
+	col := ref.ColumnRef{Table: peopleTable, Column: "first_name"}
+	r := pipelineRunOver(ctx, t, namesFixture(300), peopleTable, 300, func(cls *pipeline.Classification) {
+		d := cls.Decisions[col]
+		d.Masker = listNamesMasker
+		cls.Decisions[col] = d
+	})
+	report, err := r.verify(ctx)
+	if report == nil {
+		t.Fatalf("Verify returned no report: %v", err)
+	}
+	if report.ExitCode != 9 {
+		t.Fatalf("exit code %d, want 9", report.ExitCode)
+	}
+	var refusal *Refusal
+	if !errors.As(err, &refusal) {
+		t.Fatalf("Verify returned %v, want a *Refusal", err)
+	}
+	if refusal.Code != CodeRefusedResidual || refusal.Table != col.Table || refusal.Column != col.Column {
+		t.Errorf("refusal %s on %s.%s, want %s on %s", refusal.Code, refusal.Table, refusal.Column,
+			CodeRefusedResidual, col)
 	}
 	noCheckBothWays(t, report)
 }

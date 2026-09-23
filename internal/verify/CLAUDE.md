@@ -89,10 +89,13 @@ statement allowlist this stage needs registered before `Verify` runs, as
 
 - `verify.go` — `Options`, `New`, `Verify`, the `state` one call carries, the
   order the checks run in and the exit code the report ends with.
-- `codes.go` — the nineteen `event.Code`s this stage renders and the `Refusal`
+- `codes.go` — the twenty-two `event.Code`s this stage renders and the `Refusal`
   that carries a failing one. Each has a row in `internal/event/catalogue.yml`.
 - `reasons.go` — the fixed phrases a `Refusal.Reason` may hold.
 - `residual.go` — §6 items 1 to 3: the scan, the hit, the two probes, the cap.
+- `explain.go` — ADR-015's amendment to item 3 (T-0302): the tally of hits
+  inside a vocabulary masker's list, the count check against
+  `Residual.Emitted`, the row check by identity, and the explained line.
 - `secondnet.go`, `validators.go` — §6 item 4: the scan and the scoring, and
   the twelve validators attached to their categories, in fifteen entries here
   (T-0136 split Luhn and IBAN back apart, then split Luhn again by family —
@@ -111,6 +114,59 @@ statement allowlist this stage needs registered before `Verify` runs, as
 
 ARCHITECTURE.md §6 is silent on each of these; the simplest correct behaviour
 was chosen and is recorded here rather than only in a comment.
+
+- **A residual hit inside the name masker's own vocabulary is explained, not
+  probed** (`explain.go`, ADR-015 proposed, T-0302). The column probe asks
+  whether the source *column* holds a value anywhere, which a real-name list
+  makes true of a correct run: a masked "Mary" is some other customer's real
+  "Mary". For a column whose masker has a vocabulary (`mask.Emitting` —
+  `person_name` only, decided under the column's family, length, CHECKs and
+  role, never for an enum or a document), a hit `mask.Emits` accepts is
+  tallied per canonical value (T_v, one retained target value, the row's
+  identity tuple) and the column is judged at its end. (1) A value with
+  T_v > `Residual.Emitted(v)` — a copy the masker did not make — goes through
+  `handle` on its retained value, and a confirmed probe is exit 9 with
+  `reasonOverCount`. (2) Where the step has a usable identity
+  (`Identity.Columns` of an `IdentityPK` or `IdentityUnique` step — never
+  `IdentityPseudo`, whose duplicates would compare one row against another —
+  or `Table.PK` for a lookup step; each unmasked by `identityMasked`, not
+  generated, joinable by `joinCasts`), the rows holding a tallied value are
+  fetched from the source through `Source.Short` with `rowCheckSQL` — the
+  sample join under the alias `r`, so the trace names it
+  `verify.rowcheck.<table>` — at most 1,000 identities a statement, each batch
+  sent as it fills during the scan so the stage holds one batch per column,
+  and every target row an identity maps to is compared, never only the last.
+  A row-check statement binds no candidate value and does not spend
+  `--residual-probe-cap` (T-0302's review round: sharing it refused a
+  500,000-row table with two name columns); a row whose source value is
+  canonical-equal or `mask.FoldEqual` to its own target value is exit 9 with
+  `reasonSameRow`. The identities travel as typed arrays in `internal/plan`'s
+  key encoding (`int8[]`, `text[]` with bpchar trimmed, `uuid[]`, `text[]`
+  cast back); the candidate value is never bound. (3) What survives is one
+  `CodeResidualExplained` line per column, `Passed` true, a count and never a
+  value. A row check that cannot run — `Source.Short` will not open, the
+  statement errors — is exit 9
+  `CodeRefusedUnconfirmable` like any unconfirmable hit; an absent row, or an
+  identity with a NULL part, learns nothing and never falls back to the
+  column probe, because that fallback is what would refuse a correct run. A
+  text[] column is counted per element and never row-checked. Everything else
+  keeps the probe at once, unchanged: every other category, a value off the
+  list, a closed column, a custom, unknown or `fixed:` masker, every JSON
+  leaf and key. `Shapes` registers the row check for a loaded step with an
+  emitting masked column and an all-unmasked PK or unique identity, or a lookup — a
+  superset of what is sent, since it has no schema to read a primary key or a
+  generated flag from. `verify.refused.residual`'s catalogue message now
+  renders `{reason}`, so the three ways it fails read apart.
+- **The second net skips the dictionary rule on a generated column over masked
+  columns only** (`secondnet.go`'s `generatedFromMasked`, ADR-015). A
+  `full_name GENERATED ALWAYS AS (first_name || ' ' || last_name)` over two
+  masked name columns is computed by the target from the masker's own words,
+  so under a real-name list it is a NameShape on every row and would refuse
+  every run. The expression (`pg_get_expr`'s deparse) is read for
+  identifiers — quoted exact, bare folded, string literals skipped — and the
+  skip applies only when it names at least one column of its own table and
+  every one it names is masked. Every validator that carries a parse still
+  runs over the column; anything else is scanned as it always was.
 
 - **Verify asks the `Writer` for a `Query` method and refuses without one.**
   §2's `pipeline.Writer` has `Exec`, `CopyFrom` and `Begin`, and every check in
@@ -790,7 +846,9 @@ residual hit as anything but exit 9; skip the cap on confirmation probes; treat
 a source-changed mismatch as a pass; let a value reach a refusal, a check or an
 event; scan a masked array column that arrived as a text literal as one string,
 or let a literal this stage cannot split be anything but exit 9 naming the
-column.
+column; let a hit outside `mask.Emits` skip the column probe; read an
+unanswered row check as a coincidence; fall back from the row check to the
+column probe.
 
 ## The 2026-09-15 red team, round 2 (T-0187)
 

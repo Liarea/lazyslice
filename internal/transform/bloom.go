@@ -88,6 +88,23 @@ type bloom struct {
 	// than written, from both goroutines above, which is what a sync.Map is
 	// for.
 	colCache sync.Map // pipeline.ColumnRef -> [3][]byte
+
+	// emitted is ADR-015's count: for every masked cell of a column whose
+	// masker has a vocabulary (mask.Emitting), how many cells transform gave
+	// each output value. It is keyed by the first 64 bits of HMAC(runKey,
+	// Encode("emitted", schema, table, column, path, canonical(output))) and
+	// stores a count, never a value, so it answers "how often did the masker
+	// produce this" for a value the caller already holds and nothing else. It
+	// has its own lock because Add and AddEmitted are called for the same
+	// cell and the filter's lock is held only for the word write.
+	//
+	// A 64-bit truncation can merge two outputs' counts, which only ever
+	// raises a count; verify reads a count at least as large as the one it
+	// needs to explain a hit, and a merged count is two distinct masker
+	// outputs of one column colliding in 2^64, not a direction an attacker
+	// controls (the key is random per run).
+	emittedMu sync.Mutex
+	emitted   map[uint64]int64
 }
 
 // NewResidual returns the residual filter, sized for the number of masked cells
@@ -109,7 +126,7 @@ func NewResidual(cells int64) pipeline.Residual {
 	bits = min(bits, maxBits)
 	// Round up to a whole word, so no bit position is unreachable.
 	words := (bits + 63) / 64
-	b := &bloom{words: make([]uint64, words), bits: words * 64}
+	b := &bloom{words: make([]uint64, words), bits: words * 64, emitted: map[uint64]int64{}}
 	// crypto/rand.Read does not fail: since Go 1.24 it panics rather than
 	// returning an error, and a filter without a key would be a filter anyone
 	// holding a snapshot could test a guess against (T13's oracle, one level
@@ -152,6 +169,46 @@ func (b *bloom) MayContain(col pipeline.ColumnRef, path string, canonical []byte
 	}
 	return true
 }
+
+// AddEmitted records one masked cell's *output* for a column whose masker has
+// a vocabulary (ADR-015). canonical is the output's canonical form under the
+// column's category, the form verify reads the target's value back into.
+func (b *bloom) AddEmitted(col pipeline.ColumnRef, path string, canonical []byte) {
+	k := b.emittedKey(col, path, canonical)
+	b.emittedMu.Lock()
+	defer b.emittedMu.Unlock()
+	b.emitted[k]++
+}
+
+// Emitted is how many cells of this column and path transform gave this
+// output, zero for one it never produced.
+func (b *bloom) Emitted(col pipeline.ColumnRef, path string, canonical []byte) int64 {
+	k := b.emittedKey(col, path, canonical)
+	b.emittedMu.Lock()
+	defer b.emittedMu.Unlock()
+	return b.emitted[k]
+}
+
+// emittedKey is the first 64 bits of HMAC(runKey, Encode("emitted", column,
+// path, canonical)). The leading field keeps it apart from the filter's own
+// positions, which are the same HMAC over the same fields without it.
+func (b *bloom) emittedKey(col pipeline.ColumnRef, path string, canonical []byte) uint64 {
+	mac, ok := b.macPool.Get().(hash.Hash)
+	if !ok {
+		// See positions: unreachable, and loud rather than a nil panic.
+		panic("transform: bloom's mac pool held something other than a hash.Hash")
+	}
+	mac.Reset()
+	schema, table, column := b.columnParts(col)
+	_, _ = mac.Write(mask.Encode([]byte(emittedField), schema, table, column, []byte(path), canonical))
+	var buf [sha256.Size]byte
+	sum := mac.Sum(buf[:0])
+	b.macPool.Put(mac)
+	return binary.BigEndian.Uint64(sum[0:8])
+}
+
+// emittedField is the first field of an emitted count's key.
+const emittedField = "emitted"
 
 // Cells is how many entries were added, which the plan's estimate is checked
 // against and the report prints.

@@ -16,9 +16,20 @@ import "github.com/Liarea/lazyslice/mask"
 //
 // Implemented in internal/transform/bloom.go, stdlib only: it is about a hundred
 // lines, which is less than a dependency costs (ARCHITECTURE.md section 13).
+//
+// AddEmitted and Emitted are ADR-015's count (ARCHITECTURE.md section 2, "Type
+// additions recorded after implementation"): for every masked cell of a column
+// whose masker has a vocabulary (mask.Emitting) — scalars and array elements,
+// never a JSON leaf — transform records one count against HMAC(runKey,
+// Encode("emitted", column, path, canonical(output))), and verify reads the
+// count back for a residual hit inside that vocabulary: a value the target
+// holds more often than the masker produced it is probed as any other hit.
+// The key is truncated to 64 bits and nothing stores a value.
 type Residual interface {
 	Add(col ColumnRef, path string, canonical []byte)
 	MayContain(col ColumnRef, path string, canonical []byte) bool
+	AddEmitted(col ColumnRef, path string, canonical []byte)
+	Emitted(col ColumnRef, path string, canonical []byte) int64
 	Cells() int64
 	Bytes() int64
 }

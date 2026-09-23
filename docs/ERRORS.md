@@ -55,13 +55,14 @@ One row per code in the catalogue, in the file's own order. Exit is only meaning
 | `target.schema.not_recreatable.function` | plan | 13 | {table}.{column} depends on {reason}, a function lazyslice does not recreate in the target |
 | `target.schema.not_recreatable.collation` | plan | 13 | {table}.{column} uses the collation {reason}, which lazyslice does not recreate in the target |
 | `verify.refused.fk` | verify | 8 | the foreign key {column} on {table} does not hold: {count} rows reference a parent row the target does not have |
-| `verify.refused.residual` | verify | 9 | a value in {table}.{column} is in the target as the source holds it: the run masked that column and the source still has that value |
+| `verify.refused.residual` | verify | 9 | a value in {table}.{column} is in the target as the source holds it: {reason} |
 | `verify.refused.residual_unconfirmable` | verify | 9 | residual hits in {table}.{column} could not be confirmed: {reason} |
 | `verify.refused.second_net` | verify | 9 | {table}.{column} is not masked and {count} of its values validate as {reason} |
 | `verify.refused.catalog_literal` | verify | 9 | the target's schema carries a literal that parses as personal data in {table}.{column}: {reason} |
 | `verify.refused.row_count` | verify | 7 | {table} holds {count} rows in the target: {reason} |
 | `verify.refused.sequence` | verify | 7 | the sequence behind {table}.{column} was not reset: {reason} |
 | `verify.residual.unconfirmed` | verify | - | {count} residual hits in {table}.{column} are absent from the source: a filter false positive, or the source changed since the snapshot |
+| `verify.residual.explained` | verify | - | {count} masked values in {table}.{column} equal a real value elsewhere in this column: the name list contains it, the masker produced every copy, and no row kept its own |
 | `verify.sample.differs` | verify | - | {count} sampled rows of {table} differ from the source in a column the run did not mask: the source changed since the snapshot |
 | `verify.sample.absent` | verify | - | {count} sampled rows of {table} are no longer in the source |
 | `verify.row_count.reported` | verify | - | {table} holds {count} rows and the plan gives it no count to check: it is schema-only, or a lookup with no rows in the source |
