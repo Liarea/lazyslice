@@ -56,7 +56,7 @@ func (s *state) residualScan(ctx context.Context) error {
 				continue
 			}
 			d, _ := s.decision(col)
-			n, stop, err := s.scanMasked(ctx, step, col, column, d)
+			n, stop, err := s.scanMasked(ctx, col, column, d)
 			tested += n
 			if err != nil {
 				return err
@@ -81,16 +81,8 @@ func (s *state) residualScan(ctx context.Context) error {
 // scanMasked streams one masked column and tests every value against the
 // filter. It reports how many values it tested and whether the scan stopped on
 // a failing hit.
-//
-// A column whose masker has a vocabulary (mask.Emitting, ADR-015) is scanned
-// the same way, and a hit inside that vocabulary is tallied rather than
-// probed; explain.go decides at the end of the column what the tally proves.
-// Every other hit — any hit in any other column, and a hit mask.Emits rejects
-// in this one — takes section 6 item 3's column probe at once, as it always
-// has.
 func (s *state) scanMasked(
 	ctx context.Context,
-	step pipeline.Step,
 	col ref.ColumnRef,
 	column pipeline.Column,
 	d pipeline.Decision,
@@ -99,9 +91,8 @@ func (s *state) scanMasked(
 	tested := int64(0)
 	stopped := false
 	before := s.unconfirmed
-	ex := s.newExplainer(step, col, column, d, family, array)
 
-	visit := func(v any, ids []any) error {
+	err := s.scanColumn(ctx, col.Table, col.Column, func(v any) error {
 		if v == nil {
 			return nil
 		}
@@ -134,13 +125,6 @@ func (s *state) scanMasked(
 		}
 		tested++
 		for _, h := range hits {
-			if ex.tally(h, ids) {
-				if ex.flushFull(ctx) {
-					stopped = true
-					return errStop
-				}
-				continue
-			}
 			done, err := s.handle(ctx, col, h)
 			if err != nil {
 				return err
@@ -151,25 +135,9 @@ func (s *state) scanMasked(
 			}
 		}
 		return nil
-	}
-
-	var err error
-	if ex.identified() {
-		n := len(ex.idCols)
-		err = s.scanRows(ctx, col.Table, append(append([]string{}, ex.idCols...), col.Column),
-			func(row []any) error { return visit(row[n], row[:n]) })
-	} else {
-		err = s.scanColumn(ctx, col.Table, col.Column, func(v any) error { return visit(v, nil) })
-	}
+	})
 	if err != nil && !errors.Is(err, errStop) {
 		return tested, stopped, err
-	}
-	if !stopped {
-		done, err := ex.finish(ctx)
-		if err != nil {
-			return tested, stopped, err
-		}
-		stopped = done
 	}
 	// One line per column, not one per hit: a false-positive rate of 10^-6 over
 	// a large column is still a handful of hits, and a report is read by a
@@ -185,10 +153,6 @@ type hit struct {
 	// value is the value as the target holds it, bound as the confirmation
 	// probe's parameter. It never reaches an event, a report or an error.
 	value any
-	// canon is value's canonical bytes under the column's category, the bytes
-	// the filter was tested with. It is empty for a document hit, which ADR-015
-	// never explains, and is what explain.go tallies a scalar or an element by.
-	canon []byte
 	// leaf is true when the value came from inside a document, in which case
 	// neither probe of section 6 can express the question.
 	leaf bool
@@ -206,7 +170,7 @@ func (s *state) scalarHits(col ref.ColumnRef, cat pipeline.Category, v any) []hi
 	if !s.res.MayContain(col, "", canon) {
 		return nil
 	}
-	return []hit{{value: v, canon: canon}}
+	return []hit{{value: v}}
 }
 
 // arrayHits tests each element of an array column, which internal/transform
@@ -363,20 +327,13 @@ func strongKeyCategory(name string) (pipeline.Category, bool) {
 // nothing more to learn, and every further probe is another candidate value in
 // the source's log (THREAT_MODEL.md T4).
 func (s *state) handle(ctx context.Context, col ref.ColumnRef, h hit) (bool, error) {
-	return s.handleAs(ctx, col, h, reasonStillHolds)
-}
-
-// handleAs is handle with the fixed phrase a confirmed hit is refused under:
-// reasonStillHolds for an ordinary hit, reasonOverCount for a value ADR-015's
-// count check sent back to the column probe (explain.go).
-func (s *state) handleAs(ctx context.Context, col ref.ColumnRef, h hit, whenConfirmed string) (bool, error) {
 	verdict, reason := s.confirm(ctx, col, h)
 	switch verdict {
 	case confirmed:
 		s.fail(&Refusal{
 			Code: CodeRefusedResidual, Exit: exitResidual, Check: checkResidual,
 			Table: col.Table, Column: col.Column, Count: 1,
-			Reason: whenConfirmed,
+			Reason: "the source still holds this value in this column",
 		})
 		return true, nil
 	case untestable:

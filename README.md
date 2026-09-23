@@ -166,9 +166,7 @@ $ psql postgres://ls:pw@127.0.0.1:55701/shop \
 The run above exited `0`, which is the green verify: `lazyslice_meta.status`
 is written `complete` only once every check in ARCHITECTURE.md section 6 has
 passed — foreign keys resolve, row counts and sequences match the plan, and a
-residual scan finds no source value left in a masked column. A masked name
-can equal some other row's real name, because names are drawn from a list;
-the scan counts those and checks that no row kept its own.
+residual scan finds no source value left in a masked column.
 
 ```sh
 $ psql postgres://ls:pw@127.0.0.1:55702/shop_dev -c "select status from lazyslice_meta"

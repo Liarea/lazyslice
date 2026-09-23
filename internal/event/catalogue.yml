@@ -611,8 +611,8 @@
   kind: error
   stage: verify
   exit: 9
-  message: "a value in {table}.{column} is in the target as the source holds it: {reason}"
-  args: [table, column, reason]
+  message: "a value in {table}.{column} is in the target as the source holds it: the run masked that column and the source still has that value"
+  args: [table, column]
 
 - code: verify.refused.residual_unconfirmable
   kind: error
@@ -659,15 +659,6 @@
   kind: warn
   stage: verify
   message: "{count} residual hits in {table}.{column} are absent from the source: a filter false positive, or the source changed since the snapshot"
-  args: [table, column, count]
-
-# ADR-015: a masked person name that equals a real name elsewhere in its column,
-# that the masker's own list contains, that the masker produced every copy of,
-# and that no source row still holds in its own row. A count, never a value.
-- code: verify.residual.explained
-  kind: info
-  stage: verify
-  message: "{count} masked values in {table}.{column} equal a real value elsewhere in this column: the name list contains it, the masker produced every copy, and no row kept its own"
   args: [table, column, count]
 
 - code: verify.sample.differs

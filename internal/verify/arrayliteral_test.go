@@ -131,10 +131,8 @@ func (r *askingResidual) MayContain(_ ref.ColumnRef, path string, canonical []by
 	r.asked = append(r.asked, path+"|"+string(canonical))
 	return r.yes[string(canonical)]
 }
-func (r *askingResidual) AddEmitted(ref.ColumnRef, string, []byte)    {}
-func (r *askingResidual) Emitted(ref.ColumnRef, string, []byte) int64 { return 0 }
-func (r *askingResidual) Cells() int64                                { return 0 }
-func (r *askingResidual) Bytes() int64                                { return 0 }
+func (r *askingResidual) Cells() int64 { return 0 }
+func (r *askingResidual) Bytes() int64 { return 0 }
 
 // entry is one residual-filter entry as internal/transform spells it for an
 // array column: the column's empty path, and the element's canonical bytes.

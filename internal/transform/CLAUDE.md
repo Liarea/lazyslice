@@ -8,9 +8,8 @@ propagation, and the residual Bloom filter (`bloom.go`). The masking
 
 **Contract.** ARCHITECTURE.md §2 "extract, transform, load":
 `Transformer.Transform(b RowBatch, *Classification, *mask.Key, Residual)
-(RowBatch, error)`; `Residual` (`Add`/`MayContain`/`AddEmitted`/`Emitted`/
-`Cells`/`Bytes`) is implemented in `bloom.go` per ARCHITECTURE.md §6 and its
-2026-09-23 amendment (ADR-015).
+(RowBatch, error)`; `Residual` (`Add`/`MayContain`/`Cells`/`Bytes`) is
+implemented in `bloom.go` per ARCHITECTURE.md §6.
 
 The masker contract this package calls into is `mask`'s, not its own
 (ARCHITECTURE.md §5, ADR-006), and it is fixed:
@@ -31,7 +30,7 @@ small for a unique column was already refused at plan, so this package never
 sees that case and must not paper over it with a retry.
 
 **Rules.**
-- `Transform` is pure apart from `Residual.Add` and `Residual.AddEmitted` — same key, same
+- `Transform` is pure apart from `Residual.Add` — same key, same
   classification, same input, same output, every time. This is what invariant
   I3 (two runs, byte-identical targets) rests on; do not introduce
   non-determinism (a clock read, a random source outside `mask.Key`) here.
@@ -64,29 +63,6 @@ sees that case and must not paper over it with a retry.
   report calls masked is exactly T12.
 
 **Decisions made during implementation.**
-- **An emitting column is counted by its output** (`colPlan.emits`,
-  `addEmitted`, `bloom.go`'s `AddEmitted`/`Emitted`; ADR-015 proposed,
-  T-0302). For a masked column whose masker has a vocabulary under the
-  column's own constraints (`mask.Emitting`, decided once per column and per
-  batch after `Role` and `Unique` are set; only `person_name` today, and
-  never a closed column or a document), every masked scalar cell and every
-  masked array element — as a slice or a literal, through `maskScalar` — adds
-  one to a count keyed by the first 64 bits of `HMAC(runKey,
-  Encode("emitted", schema, table, column, path, canonical(output)))`, where
-  `canonical(output)` is `mask.Canonical` of the masker's output under the
-  column's category and empty constraints — the bytes `internal/verify`'s
-  `canonicalOf` reproduces from the target. The map is mutex-guarded, holds
-  counts and no value, and uses the filter's own pooled HMAC with a leading
-  `"emitted"` field so it never aliases a filter position. A JSON leaf is
-  never counted: it is masked under its own category and never explained.
-  `internal/verify` reads the count to tell a masked name that equals some
-  other row's real name (explained) from a copy the masker did not make
-  (probed); `internal/plan` counts 16 bytes per distinct output, bounded by
-  the vocabulary, against `--memory-budget`. `Bytes()` still reports the
-  filter alone. **Owed outside these paths:** `internal/core/core_test.go`'s
-  `recorder` is a `pipeline.Residual` double and needs the two new methods to
-  compile (**T-0329**); `internal/core/run.go`'s `smallDomainAware` embeds the
-  interface and forwards both already.
 - **This package now imports `internal/textsig`** (`json.go`'s `keyCategory`,
   T-0137). ARCHITECTURE.md §2 and §12 document `textsig` as shared by
   `classify` and `verify` only ("so classify and verify share one
@@ -255,7 +231,6 @@ package, so this is the whole of what it may assume. A JSON path is spelled
 | a boolean leaf | — | **not recorded** (a two-valued domain) |
 | a `null` leaf | — | **not recorded** (not masked) |
 | a leaf of a collapsed document | — | **not recorded** (no per-leaf masker ran) |
-| an emitted count (ADR-015): a masked scalar cell or array element of an emitting column | `""` | `mask.Canonical(category, masker's output, {})` into `AddEmitted`, not `Add`; never a leaf |
 | a masked object key (email, phone or credit-card shaped, T-0137) | the key's own path in the *target* (`path+"."+maskedName`) | `mask.Canonical(the matched category, the key text)` — `mask.Apply`'s own `Result.Canonical`, not `free_text`: the category is whichever of the three strong validators the key matched |
 
 Every leaf entry goes through one function, `addLeaf`, so the table above has

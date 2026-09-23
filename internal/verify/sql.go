@@ -67,18 +67,6 @@ func scanSQL(t ref.TableRef, column string) string {
 	return "SELECT " + quoteIdent(column) + " FROM " + quoteTable(t)
 }
 
-// scanRowsSQL reads several columns of one target table, whole: the identity
-// columns and the masked column beside them, for a column whose residual hits
-// ADR-015 may explain by row identity (explain.go). It is a target read like
-// scanSQL, unordered for the same reason.
-func scanRowsSQL(t ref.TableRef, cols []string) string {
-	parts := make([]string, len(cols))
-	for i, c := range cols {
-		parts[i] = quoteIdent(c)
-	}
-	return "SELECT " + strings.Join(parts, ", ") + " FROM " + quoteTable(t)
-}
-
 // maxSQL is the maximum of one column of one target table, which is the value a
 // sequence must have been reset to. The cast is to the type a sequence counts
 // in: a sequence's column is an integer of some width, and reading them all
@@ -174,27 +162,6 @@ func sampleSQL(t ref.TableRef, cols, idCols, casts []string, ch pipeline.Chunk) 
 	b.WriteString(" FROM " + quoteTable(t) + " t")
 	b.WriteString(" JOIN " + unnestFrom(ch, len(idCols)) + " ON " + joinOn("t", idCols, casts))
 	b.WriteString(" ORDER BY " + columnList("t", idCols))
-	return b.String()
-}
-
-// rowCheckSQL is ADR-015's row check (explain.go): the same chunked typed
-// unnest join sampleSQL is, over identity tuples the target holds verbatim,
-// selecting the identity columns and the one masked column, ordered by the
-// identity. It is sent to the source only, through Source.Short, and each
-// statement counts as one probe against --residual-probe-cap.
-//
-// The table's alias is `r` and not sampleSQL's `t`, so that the two statements
-// match two different registered shapes (shapes.go) and the source's trace
-// names a row check as one.
-//
-// Only identifiers the target already holds travel: the identity values are
-// bound as typed arrays, and the candidate value itself is never bound.
-func rowCheckSQL(t ref.TableRef, cols, idCols, casts []string, ch pipeline.Chunk) string {
-	var b strings.Builder
-	b.WriteString("SELECT " + columnList("r", cols))
-	b.WriteString(" FROM " + quoteTable(t) + " r")
-	b.WriteString(" JOIN " + unnestFrom(ch, len(idCols)) + " ON " + joinOn("r", idCols, casts))
-	b.WriteString(" ORDER BY " + columnList("r", idCols))
 	return b.String()
 }
 

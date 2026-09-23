@@ -302,8 +302,6 @@ type noResidual struct{}
 
 func (noResidual) Add(ref.ColumnRef, string, []byte)             {}
 func (noResidual) MayContain(ref.ColumnRef, string, []byte) bool { return false }
-func (noResidual) AddEmitted(ref.ColumnRef, string, []byte)      {}
-func (noResidual) Emitted(ref.ColumnRef, string, []byte) int64   { return 0 }
 func (noResidual) Cells() int64                                  { return 0 }
 func (noResidual) Bytes() int64                                  { return 0 }
 

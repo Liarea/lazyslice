@@ -126,12 +126,6 @@ issue.
 11. Quasi-identifier combinations, and frequency or prefix leaks in unmasked
     columns.
 12. A masked value that happens to coincide with another row's real value.
-    For a person's name this is expected rather than rare, because the masker
-    draws real words from a list: the residual scan explains such a match
-    (the list contains the value, the masker produced every copy, and, on a
-    table with a primary or unique key, no row kept its own) and reports it
-    as a count. A masked person name never equals
-    its own source value, which reveals about 1/500 of a bit per value.
 13. Values that were already fake in the source.
 
 ## Disclosure

@@ -27,14 +27,6 @@ error)`.
   the two `Bytes()` formulas do not describe. A key set holds a `[]int64` or a
   slab and a span index, and nothing else (`keyset.go`); a dedup map beside
   them would make the budget's number smaller than the process's.
-- **The memory budget also counts the residual filter's emitted count**
-  (`emittedMemory`, `plan.go`; ADR-015 proposed, T-0302): 16 bytes per
-  distinct output of every masked column whose masker has a vocabulary
-  (`mask.Emitting` under the column's `constraintsOf` and `Decision.Role`),
-  bounded by that vocabulary (`mask.Admissible`) and, for a scalar column, by
-  the table's selected rows. It is checked in `checkBudgets` beside
-  `keyMemory` and `filterMemory` and is not a field of `Estimate`, which is
-  outside this package; at a name list's size it is kilobytes.
 - **Both key sets implement `Chunks(n)`, `EachChunk(n, f)` and
   `FirstChunk(n)`** (T-0050), and the difference between them is memory, not
   taste: a `Chunk` holds its *own* copy of the keys it carries (a fresh typed
