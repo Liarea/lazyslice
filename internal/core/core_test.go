@@ -181,6 +181,13 @@ func TestMarkerTableLeavesTheCatalog(t *testing.T) {
 	}
 }
 
+// AddEmitted and Emitted are pipeline.Residual's ADR-015 additions (T-0302);
+// the recorder records nothing for them, which is what a test that never
+// reads an explained hit needs (T-0329).
+func (recorder) AddEmitted(ref.ColumnRef, string, []byte) {}
+
+func (recorder) Emitted(ref.ColumnRef, string, []byte) int64 { return 0 }
+
 // A domain that is "small" by section 5's ratio and large in absolute terms is
 // not exempt from the residual filter (smallDomainCeiling, domain.go). The
 // ratio alone had no upper bound, so a three-hundred-label enum with two hundred

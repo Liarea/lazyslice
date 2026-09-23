@@ -7,6 +7,7 @@ import (
 
 	"github.com/Liarea/lazyslice/internal/pipeline"
 	"github.com/Liarea/lazyslice/internal/ref"
+	"github.com/Liarea/lazyslice/mask"
 )
 
 // The statement shapes verify sends to the source. Every statement built in
@@ -40,6 +41,17 @@ func sampleShapeFor(t ref.TableRef) Statement {
 	}
 }
 
+// rowCheckShapeFor is ADR-015's row check of one table (rowCheckSQL): the
+// sample's chunked typed unnest join under the alias `r`, named per table for
+// the reason sampleShapeFor is.
+func rowCheckShapeFor(t ref.TableRef) Statement {
+	return Statement{
+		Name: "verify.rowcheck." + t.String(),
+		SQL: `SELECT {selectlist} FROM ` + quoteTable(t) +
+			` r JOIN unnest({casts}) AS k({idents}) ON {keypred} ORDER BY {idents}`,
+	}
+}
+
 // probeShapesFor are section 6 item 3's two confirmation probes for one masked
 // column, indexable form first. Both name the column: a probe is built only for
 // a column the classification says was masked, and a shape that named neither
@@ -53,8 +65,10 @@ func probeShapesFor(c ref.ColumnRef) []Statement {
 }
 
 // Shapes is every statement shape this package sends to the source for one plan
-// and one classification: a sample read per keyed step, and the two
-// confirmation probes for every masked column of a loaded table.
+// and one classification: a sample read per keyed step, the two confirmation
+// probes for every masked column of a loaded table, and ADR-015's row check
+// for every loaded table with a masked column whose masker has a vocabulary
+// and a row identity the row check can use.
 //
 // A nil plan yields nothing, because every statement here is built from a step.
 func Shapes(plan *pipeline.Plan, cls *pipeline.Classification) []Statement {
@@ -69,11 +83,50 @@ func Shapes(plan *pipeline.Plan, cls *pipeline.Classification) []Statement {
 		if s.Keys != nil && s.Keys.Len() > 0 {
 			out = append(out, sampleShapeFor(s.Table))
 		}
-		for _, col := range maskedColumns(cls, s.Table) {
+		masked := maskedColumns(cls, s.Table)
+		for _, col := range masked {
 			out = append(out, probeShapesFor(col)...)
+		}
+		if rowCheckEligible(s, cls, masked) {
+			out = append(out, rowCheckShapeFor(s.Table))
 		}
 	}
 	return out
+}
+
+// rowCheckEligible is the part of explain.go's eligibility Shapes can decide
+// from a plan and a classification alone, before any schema or value is read:
+// a masked column whose masker has a vocabulary (mask.Emitting, asked without
+// the column's labels, which only ever narrow it), and a step whose identity
+// is a primary key or unique rung (uniqueIdentity; never a pseudo-key) with
+// every column unmasked — or a lookup step, whose identity is its table's
+// primary key and is judged at verify time. It is a superset of what verify
+// sends, never a subset: a shape registered for a statement that is never sent
+// admits nothing that runs, and a statement sent without a shape is refused.
+func rowCheckEligible(s pipeline.Step, cls *pipeline.Classification, masked []ref.ColumnRef) bool {
+	emitting := false
+	for _, col := range masked {
+		d := cls.Decisions[col]
+		if mask.Emitting(d.Masker, mask.Constraints{Role: d.Role}) {
+			emitting = true
+			break
+		}
+	}
+	if !emitting {
+		return false
+	}
+	if s.Mode == pipeline.Lookup {
+		return true
+	}
+	if !uniqueIdentity(s.Identity) {
+		return false
+	}
+	for _, c := range s.Identity.Columns {
+		if d, ok := cls.Decisions[ref.ColumnRef{Table: s.Table, Column: c}]; ok && d.Masked {
+			return false
+		}
+	}
+	return true
 }
 
 // maskedColumns is every column of one table the classification says was

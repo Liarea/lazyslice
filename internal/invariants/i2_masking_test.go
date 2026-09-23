@@ -7,13 +7,18 @@ package invariants
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/goccy/go-yaml"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/Liarea/lazyslice/mask"
 )
 
 // TestI2NothingFlaggedSurvives is invariant I2: no flagged column in the
@@ -91,7 +96,8 @@ func TestI2NothingFlaggedSurvives(t *testing.T) {
 			})
 			t.Run("values", func(t *testing.T) {
 				assertMaskedValuesAreNew(t, f.name, sourceCells, targetCells, scope,
-					admissibleDomains(ctx, t, source))
+					admissibleDomains(ctx, t, source),
+					emittingColumns(ctx, t, db.configPath(), source, target))
 			})
 		})
 	}
@@ -279,22 +285,28 @@ func assertTargetHoldsMaskedRows(t *testing.T, fixture string, sourceCells, targ
 // the run; it is a `lazyslice verify` assertion for phase 4, not one this
 // suite can make.
 //
-// One way this can still fail on a correct run: §6 item 6 lists "a masked value
+// One way this could fail on a correct run: §6 item 6 lists "a masked value
 // coinciding with another row's real value" as a stated false negative of the
 // residual scan, and a generator drawing from an embedded word list can emit a
-// name that is genuinely in the source. That is a finding about the generator
-// or the fixture, not a reason to delete this check — the grep half already
-// takes the same position for every email and phone in the source.
+// name that is genuinely in the source. ADR-015 makes that a property of the
+// masker rather than of the fixture: for a column whose masker has a
+// vocabulary (mask.Emitting — person_name), this half holds the column to what
+// that masker promises instead of to disjointness. Every masked value must be
+// one mask.Emits accepts, and no row may hold its own source value (equal over
+// letters and digits, by primary key); a masked value equal to another row's
+// value is logged, because on a correct run it is expected. Every other column
+// keeps the disjointness rule, and the grep half keeps its position for every
+// email and phone in the source.
 func assertMaskedValuesAreNew(
 	t *testing.T, fixture string, sourceCells, targetCells []cell, scope columnScope,
-	domains map[columnRef]int64,
+	domains map[columnRef]int64, emitting map[columnRef]emittingColumn,
 ) {
 	t.Helper()
 
 	sourceValues := valuesByColumn(sourceCells, scope.masked)
 	targetValues := valuesByColumn(targetCells, scope.masked)
 
-	var survived, excluded []string
+	var survived, excluded, overlapped []string
 	compared := 0
 	for _, ref := range scope.maskedColumns() {
 		want := sourceValues[ref]
@@ -306,6 +318,20 @@ func assertMaskedValuesAreNew(
 			continue
 		}
 		compared++
+
+		if e, ok := emitting[ref]; ok {
+			// ADR-015: a column whose masker draws real words from a list is
+			// held to what that masker promises — every masked value is one it
+			// could have produced, and no row keeps its own source value — and
+			// a masked value equal to *another* row's real value is logged, not
+			// failed, because on a correct run it is expected.
+			survived = append(survived, e.failures...)
+			if n := overlapCount(want, targetValues[ref]); n > 0 {
+				overlapped = append(overlapped, ref.String()+": "+strconv.Itoa(n)+" of "+
+					strconv.Itoa(len(targetValues[ref]))+" distinct masked value(s) equal another row's value")
+			}
+			continue
+		}
 
 		var kept, example = 0, ""
 		for value := range targetValues[ref] {
@@ -325,6 +351,13 @@ func assertMaskedValuesAreNew(
 			"column in the source; one of them is "+truncate(example))
 	}
 
+	if len(overlapped) > 0 {
+		sort.Strings(overlapped)
+		t.Logf("I2: %d masked column(s) of the %s target draw from a name list (ADR-015) and hold a name that "+
+			"is also a real value elsewhere in the column; no row kept its own and every value is on the list, "+
+			"so this is the coincidence the residual scan explains, not a copy:\n  %s",
+			len(overlapped), fixture, strings.Join(overlapped, "\n  "))
+	}
 	if len(excluded) > 0 {
 		sort.Strings(excluded)
 		t.Logf("I2: %d masked column(s) of the %s target are outside this comparison because §5 requires "+
@@ -735,3 +768,183 @@ func tableField(raw json.RawMessage) string {
 		return ""
 	}
 }
+
+// emittingColumn is one masked column of the emitted yml whose masker has a
+// vocabulary (mask.Emitting, ADR-015), and what holding it to that vocabulary
+// found.
+type emittingColumn struct {
+	id       mask.ID
+	role     mask.Role
+	failures []string
+}
+
+// emittingColumns reads the emitted yml's masker and role for every masked
+// column, keeps the ones whose masker has a vocabulary, and checks each against
+// both databases (assertEmittingColumn). The yml is read here rather than in
+// readColumnScope because the role is ADR-015's alone and nothing else in this
+// suite reads it.
+func emittingColumns(
+	ctx context.Context, t *testing.T, configPath string, source, target *pgx.Conn,
+) map[columnRef]emittingColumn {
+	t.Helper()
+
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("I2: reading %s: %v", configPath, err)
+	}
+	var cfg struct {
+		Columns map[string]struct {
+			Masker string         `yaml:"masker"`
+			Role   string         `yaml:"role"`
+			Unmask map[string]any `yaml:"unmask"`
+		} `yaml:"columns"`
+	}
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("I2: parsing %s: %v", configPath, err)
+	}
+	out := map[columnRef]emittingColumn{}
+	for name, col := range cfg.Columns {
+		if col.Masker == "" || col.Unmask != nil {
+			continue
+		}
+		ref, ok := parseColumnRef(name)
+		if !ok {
+			continue
+		}
+		id, role := mask.ID(col.Masker), mask.Role(col.Role)
+		if !mask.Emitting(id, mask.Constraints{Role: role}) {
+			continue
+		}
+		e := emittingColumn{id: id, role: role}
+		e.failures = assertEmittingColumn(ctx, t, source, target, ref, e)
+		out[ref] = e
+	}
+	return out
+}
+
+// assertEmittingColumn is ADR-015's two promises for one column, as findings:
+// every distinct masked value (every element, for an array) is one mask.Emits
+// accepts for the column's masker and role; and, for a scalar column of a table
+// with a primary key, no target row holds a value equal over its letters and
+// digits to its own source row's value (mask.FoldEqual, the comparison the
+// masker's redraw guarantees against). A value is never printed, only counts.
+func assertEmittingColumn(
+	ctx context.Context, t *testing.T, source, target *pgx.Conn, ref columnRef, e emittingColumn,
+) []string {
+	t.Helper()
+
+	ident := pgx.Identifier{ref.Column}.Sanitize()
+	var isArray bool
+	if err := target.QueryRow(ctx, `SELECT t.typcategory = 'A'
+	      FROM pg_attribute a JOIN pg_type t ON t.oid = a.atttypid
+	     WHERE a.attrelid = $1::regclass AND a.attname = $2 AND NOT a.attisdropped`,
+		ref.Table.quoted(), ref.Column).Scan(&isArray); err != nil {
+		t.Fatalf("I2: reading %s's type in the target: %v", ref, err)
+	}
+
+	var failures []string
+	q := fmt.Sprintf(`SELECT DISTINCT %s::text FROM %s WHERE %s IS NOT NULL`, ident, ref.Table.quoted(), ident)
+	if isArray {
+		q = fmt.Sprintf(`SELECT DISTINCT e::text FROM %s, unnest(%s) AS e WHERE e IS NOT NULL`,
+			ref.Table.quoted(), ident)
+	}
+	off := 0
+	for _, v := range stringsOf(ctx, t, target, q) {
+		if v == "" {
+			continue
+		}
+		if !mask.Emits(e.id, mask.Value{Text: v}, mask.Constraints{Role: e.role}) {
+			off++
+		}
+	}
+	if off > 0 {
+		failures = append(failures, ref.String()+": "+strconv.Itoa(off)+" distinct masked value(s) are not "+
+			"in the vocabulary of masker "+string(e.id)+", so something other than that masker wrote them")
+	}
+	if isArray {
+		return failures
+	}
+
+	pk := stringsOf(ctx, t, target, fmt.Sprintf(`SELECT a.attname::text
+	      FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY (i.indkey)
+	     WHERE i.indrelid = %s::regclass AND i.indisprimary
+	     ORDER BY array_position(i.indkey::int2[], a.attnum)`, quoteLiteral(ref.Table.quoted())))
+	if len(pk) == 0 {
+		t.Logf("I2: %s has no primary key, so only its vocabulary is checked here; the residual scan's "+
+			"count check is what stands for its rows", ref)
+		return failures
+	}
+	keyExpr := make([]string, len(pk))
+	for i, c := range pk {
+		keyExpr[i] = pgx.Identifier{c}.Sanitize() + "::text"
+	}
+	rowsQ := fmt.Sprintf(`SELECT concat_ws(chr(31), %s), %s::text FROM %s WHERE %s IS NOT NULL`,
+		strings.Join(keyExpr, ", "), ident, ref.Table.quoted(), ident)
+	src := pairsOf(ctx, t, source, rowsQ)
+	kept := 0
+	for key, v := range pairsOf(ctx, t, target, rowsQ) {
+		if s, ok := src[key]; ok && v != "" && mask.FoldEqual(s, v) {
+			kept++
+		}
+	}
+	if kept > 0 {
+		failures = append(failures, ref.String()+": "+strconv.Itoa(kept)+" row(s) hold their own source value "+
+			"(equal over letters and digits), which the masker's redraw makes impossible for a masked value")
+	}
+	return failures
+}
+
+// overlapCount is how many distinct target values are also source values.
+func overlapCount(source, target map[string]bool) int {
+	n := 0
+	for v := range target {
+		if source[v] {
+			n++
+		}
+	}
+	return n
+}
+
+func stringsOf(ctx context.Context, t *testing.T, conn *pgx.Conn, q string) []string {
+	t.Helper()
+	rows, err := conn.Query(ctx, q)
+	if err != nil {
+		t.Fatalf("I2: %v", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var v string
+		if err := rows.Scan(&v); err != nil {
+			t.Fatalf("I2: %v", err)
+		}
+		out = append(out, v)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("I2: %v", err)
+	}
+	return out
+}
+
+func pairsOf(ctx context.Context, t *testing.T, conn *pgx.Conn, q string) map[string]string {
+	t.Helper()
+	rows, err := conn.Query(ctx, q)
+	if err != nil {
+		t.Fatalf("I2: %v", err)
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var k, v string
+		if err := rows.Scan(&k, &v); err != nil {
+			t.Fatalf("I2: %v", err)
+		}
+		out[k] = v
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("I2: %v", err)
+	}
+	return out
+}
+
+func quoteLiteral(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }

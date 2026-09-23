@@ -452,9 +452,47 @@ func maskCell(m Masker, cat Category, id ID, h [32]byte, in Value, canon Value, 
 		// column with a message about a masker bug that is not there. The
 		// residual scan is the check on a coincidence; this guard is the check
 		// on a generator that is not a function of h alone.
+		//
+		// Except for a vocabulary masker (vocab.go, ADR-015): the residual scan
+		// explains a hit inside its vocabulary instead of probing it, so it can
+		// no longer be the check on this coincidence, and the masker is
+		// redrawn until its output no longer reads as its input. The redraw is
+		// here, after tracksItsInput has answered, and never before it: a
+		// masker that follows its input — wholly, or only for some h — has
+		// already been refused above, and a redraw ahead of that question
+		// would launder it instead.
+		if vm, ok := m.(vocabularyMasker); ok {
+			return redraw(vm, cat, id, h, in, canon, c, out)
+		}
 		return out, nil
 	}
 	return Value{}, fmt.Errorf("%w: category %s: masker %s", ErrPassthrough, cat, id)
+}
+
+// redraw calls a vocabulary masker again under h_i = SHA-256(h ||
+// "lazyslice/redraw" || i), i = 1..8 (redrawDigest), until its output no
+// longer reads as its input under looksLikeItsInput. It is reached only from
+// maskCell, after the post-condition has cleared the masker of following its
+// input, so every call here is the generator's own code under maskCell's
+// recover.
+//
+// After eight redraws the last output is returned as it stands, which is what
+// maskCell returned before the redraw existed: a column so narrow that one or
+// two words fit it has no other value to give, and the residual scan's count
+// and row checks still stand behind it. At a list of a few hundred words the
+// chance of reaching the ninth draw is about one in 10^21.
+func redraw(m vocabularyMasker, cat Category, id ID, h [32]byte, in, canon Value, c Constraints, out Value) (Value, error) {
+	for i := byte(1); i <= redraws; i++ {
+		next, err := m.Mask(redrawDigest(h, i), in, c)
+		if err != nil {
+			return Value{}, wrapMaskerError(cat, id, c, err)
+		}
+		out = next
+		if !looksLikeItsInput(out, in, canon) {
+			return out, nil
+		}
+	}
+	return out, nil
 }
 
 // panicKind names the type of a recovered panic value, or of a masker's

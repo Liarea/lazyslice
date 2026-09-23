@@ -24,11 +24,13 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/Liarea/lazyslice/internal/event"
 	"github.com/Liarea/lazyslice/internal/pipeline"
 	"github.com/Liarea/lazyslice/internal/ref"
+	"github.com/Liarea/lazyslice/mask"
 )
 
 // The defaults ARCHITECTURE.md §3 states. A PlanRequest field left at zero
@@ -84,6 +86,13 @@ const lookupApproxCeiling = 10_000
 // the memory budget and prints it in the estimate; internal/transform builds
 // the filter itself.
 const residualBitsPerCell = 29
+
+// emittedBytesPerValue is the cost of one entry of the residual filter's
+// emitted count (ADR-015, internal/transform/bloom.go): a 64-bit key and a
+// 64-bit count per distinct output of a column whose masker has a vocabulary.
+// Map overhead is not in it; the count is bounded by the vocabulary, which is
+// what keeps it small, and the bound is what this figure is for.
+const emittedBytesPerValue = 16
 
 type planner struct{}
 
@@ -160,6 +169,9 @@ type run struct {
 	lookups     map[ref.TableRef]bool
 	lookupRows  map[ref.TableRef]int64
 	cellsPerRow map[ref.TableRef]int
+	// emitting is, per table, the vocabulary size of every masked column whose
+	// masker has one (mask.Emitting), for the emitted count's memory.
+	emitting    map[ref.TableRef][]emittingColumn
 	selected    map[ref.TableRef]*keys
 	label       map[ref.TableRef]pipeline.Mode
 	why         map[ref.TableRef]string
@@ -337,6 +349,7 @@ func (p *run) build() {
 	p.lookups = map[ref.TableRef]bool{}
 	p.lookupRows = map[ref.TableRef]int64{}
 	p.cellsPerRow = map[ref.TableRef]int{}
+	p.emitting = map[ref.TableRef][]emittingColumn{}
 	p.selected = map[ref.TableRef]*keys{}
 	p.label = map[ref.TableRef]pipeline.Mode{}
 	p.why = map[ref.TableRef]string{}
@@ -344,7 +357,46 @@ func (p *run) build() {
 	p.capOf = map[ref.TableRef]int{}
 	for _, t := range p.tables {
 		p.cellsPerRow[t.Ref] = p.maskedCellsPerRow(t)
+		p.emitting[t.Ref] = p.emittingColumns(t)
 	}
+}
+
+// emittingColumn is one masked column whose masker has a vocabulary: how many
+// distinct values it can emit, and whether the column is an array, whose
+// element count per row the plan does not know.
+type emittingColumn struct {
+	vocabulary int64
+	array      bool
+}
+
+// emittingColumns lists a table's masked columns whose masker has a
+// vocabulary under the column's own constraints (ADR-015). transform counts
+// every cell of such a column by its output, one map entry per distinct
+// output, and the memory budget has to see that map as it sees the filter.
+func (p *run) emittingColumns(t pipeline.Table) []emittingColumn {
+	if p.cls == nil {
+		return nil
+	}
+	var out []emittingColumn
+	for _, c := range t.Columns {
+		d, ok := p.cls.Decisions[ref.ColumnRef{Table: t.Ref, Column: c.Name}]
+		if !ok || !d.Masked {
+			continue
+		}
+		cons, judged := p.constraintsOf(c)
+		if !judged {
+			continue
+		}
+		cons.Role = d.Role
+		if !mask.Emitting(d.Masker, cons) {
+			continue
+		}
+		out = append(out, emittingColumn{
+			vocabulary: mask.Admissible(d.Masker, cons),
+			array:      strings.HasSuffix(strings.TrimSpace(c.TypeName), "[]"),
+		})
+	}
+	return out
 }
 
 // maskedCellsPerRow is how many residual-filter entries one row of a table
@@ -844,7 +896,7 @@ func (p *run) checkBudgets(t ref.TableRef) error {
 				event.ArgFlag:  "--row-budget",
 			})
 	}
-	mem := p.keyMemory() + p.filterMemory()
+	mem := p.keyMemory() + p.filterMemory() + p.emittedMemory()
 	if mem > p.req.MemoryBudget {
 		return refuse(CodeMemoryBudget, exitBudget, t,
 			fmt.Sprintf("%s takes the estimated key and filter memory past the budget of %d bytes: "+
@@ -881,6 +933,32 @@ func (p *run) filterMemory() int64 {
 		cells += int64(ks.Len()) * int64(p.cellsPerRow[t.Ref])
 	}
 	return cells * residualBitsPerCell / 8
+}
+
+// emittedMemory is the residual filter's emitted count (ADR-015) at
+// emittedBytesPerValue per distinct output: per emitting column, the smaller of
+// its vocabulary and its selected rows, and the vocabulary alone for an array,
+// whose elements per row are not known here. It is counted against the memory
+// budget beside the filter and not printed apart from it: Estimate has no field
+// for it, and at a few hundred to a few tens of thousands of names per column it
+// is kilobytes beside a budget of hundreds of megabytes.
+func (p *run) emittedMemory() int64 {
+	var total int64
+	for _, t := range p.tables {
+		ks := p.selected[t.Ref]
+		if ks == nil {
+			continue
+		}
+		rows := int64(ks.Len())
+		for _, c := range p.emitting[t.Ref] {
+			n := c.vocabulary
+			if !c.array && rows < n {
+				n = rows
+			}
+			total += n * emittedBytesPerValue
+		}
+	}
+	return total
 }
 
 // rootWhy is the root table's own Why (T-0288, ARCHITECTURE.md §3.7): when

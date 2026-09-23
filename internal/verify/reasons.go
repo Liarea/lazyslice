@@ -29,6 +29,21 @@ const (
 	// THREAT_MODEL.md T12).
 	reasonArrayLiteral = "a value in this array column is not a Postgres array literal, so its elements cannot be tested one by one"
 
+	// reasonStillHolds is a confirmed residual hit: the column probe found the
+	// value in the source column.
+	reasonStillHolds = "the source still holds this value in this column"
+	// reasonOverCount is ADR-015's count check: a value inside the masker's
+	// own vocabulary that the target holds more often than internal/transform
+	// emitted it, and that the column probe then confirmed in the source. A
+	// copy the masker never produced came from somewhere else.
+	reasonOverCount = "the target holds this value more often than the masker produced it"
+	// reasonSameRow is ADR-015's row check: the source row a target row was
+	// copied from, matched on the row identity both sides hold verbatim, holds
+	// the target row's masked value in this column, canonical-equal or equal
+	// over its letters and digits. The masker is redrawn until its output never
+	// reads as its own input (mask.maskCell), so only a bypass puts it there.
+	reasonSameRow = "the source row this row was copied from still holds this value in this column"
+
 	// The things section 6 item 5 reports rather than fails — a schema-only
 	// step, a lookup with no source rows, a sequence owned by no column, a step
 	// with no keys to sample by — carry no reason: pipeline.Check has no field
