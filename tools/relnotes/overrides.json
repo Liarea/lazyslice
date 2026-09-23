@@ -11,5 +11,14 @@
  "930c9b1": [
   "Research doc: the Hacker News comment is dated precisely, seven weeks after the Snaplet shutdown (31 August 2024 to 17 October 2024), not a year.",
   "Research doc: the npm figures are for the dated week 23-29 August 2026 (@snaplet/copycat 121,478, @snaplet/snapshot 9,808, more than twelve times), linked to npm's dated range endpoints so the links keep backing the numbers."
+ ],
+ "e7de57b": [
+  "No user-visible change: part of re-landing the entry above in two steps so a release and go install build against the published mask module."
+ ],
+ "0011c26": [
+  "No user-visible change: the mask module's test data is checked out byte for byte on every platform."
+ ],
+ "eb4657b": [
+  "No user-visible change beyond the entry above, which this commit re-lands on the published mask/v0.3.0; the tool now requires mask v0.3.0."
  ]
 }

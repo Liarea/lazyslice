@@ -5,7 +5,7 @@
 Point it at a production Postgres database and get a small, referentially
 complete, pseudonymised copy in a local database — one command, no config.
 
-## Status: v0.2.0, pre-release, PostgreSQL only
+## Status: v0.3.0, pre-release, PostgreSQL only
 
 The pipeline runs end to end against PostgreSQL 14 to 18: it discovers a
 source and a target, refuses a target that is not empty or not its own,
@@ -15,9 +15,9 @@ residual scan of the target against the source). Hardening is done: the
 defects an independent review found on 2026-09-09 and six rounds of an
 adversarial red team have landed in the open ([docs/reviews/](docs/reviews/)),
 and what remains is tracked as
-[issues](https://github.com/Liarea/lazyslice/issues). `v0.2.0` is a
-pre-release, like `v0.1.0` before it (the first version a stranger may
-install): the `lazyslice.yml` schema, the flags and the exit codes may
+[issues](https://github.com/Liarea/lazyslice/issues). `v0.3.0` is a
+pre-release, like `v0.1.0` (the first version a stranger may install) and
+`v0.2.0` before it: the `lazyslice.yml` schema, the flags and the exit codes may
 still change between `0.x` minors, with every such change named in the
 release notes; a `0.x.y` patch never changes them.
 
@@ -261,7 +261,7 @@ in the TUI.
 
 Every cell about another tool is that tool's own documentation, fetched
 2026-09-22; a cell nothing found could confirm says "not stated" instead of
-guessing. lazyslice's own cells describe `v0.2.0` exactly as installed above.
+guessing. lazyslice's own cells describe `v0.3.0` exactly as installed above.
 
 | | lazyslice | Greenmask | PostgreSQL Anonymizer | Tonic Structural |
 |---|---|---|---|---|
