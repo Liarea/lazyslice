@@ -430,6 +430,11 @@ jobs:
           cache: true
       - name: docs/FLAGS.md, docs/KEYBINDINGS.md, docs/ERRORS.md and README.md's flag table match tools/docgen
         run: make docs-check
+      # T-0303: mask/words_corpus.go is generated from the two Census CSVs
+      # tools/names/ already carries, so this needs no network the same way
+      # docs-check above does not — offline, like the rest of this job.
+      - name: mask/words_corpus.go matches tools/names
+        run: make names-check
 
   # CONCEPT.md's enforcement list, ARCHITECTURE.md section 8: the registered
   # flag set — not source identifiers, which `forbidden` above already covers

@@ -38,7 +38,7 @@ LDFLAGS := -s -w \
 	-X main.commit=$(COMMIT) \
 	-X main.date=$(DATE)
 
-.PHONY: all build test lint integration egress torture vet-tagged forbidden unsafe-flags spdx fmt check install-proof tools clean help docs docs-check vulncheck bench relnotes bench-compare tools-test tag gif
+.PHONY: all build test lint integration egress torture vet-tagged forbidden unsafe-flags spdx fmt check install-proof tools clean help docs docs-check names names-check vulncheck bench relnotes bench-compare tools-test tag gif
 
 ## build: compile the binary into bin/
 build:
@@ -617,6 +617,30 @@ docs-check:
 	fi; \
 	echo "==> docs-check: docs/FLAGS.md, docs/KEYBINDINGS.md, docs/ERRORS.md and README.md's flag table match tools/docgen"
 
+## names: regenerate mask/words_corpus.go from the checked-in 2020 Census
+## top-1000 CSVs
+##
+## tools/names reads only tools/names/census2020_first_names_sex_top1000.csv
+## and tools/names/census2020_last_names_top1000.csv -- both already
+## extracted and committed, tools/names/README.md records the fetch -- so
+## this is offline; nothing is downloaded here or by `names-check` below.
+## Never hand-edit mask/words_corpus.go (its own "Code generated" header).
+names:
+	go run ./tools/names -given-per-sex 500 -surnames 1000
+	@echo "==> names: wrote mask/words_corpus.go"
+
+## names-check: fail when mask/words_corpus.go differs from a fresh `make
+## names`
+##
+## Regenerates into memory rather than overwriting the tree, the same shape
+## docs-check above uses for its own generated files, and is offline for the
+## same reason `names` is: both CSVs it reads are already checked in.
+names-check:
+	@if ! go run ./tools/names -given-per-sex 500 -surnames 1000 -check; then \
+		echo "names-check: run 'make names' and commit the result."; \
+		exit 1; \
+	fi
+
 ## vulncheck: govulncheck over both modules (THREAT_MODEL.md T10)
 vulncheck:
 	@if [ -z "$(GOVULNCHECK)" ]; then \
@@ -654,15 +678,17 @@ tools-test:
 	python3 -m unittest discover -s tools -p 'test_*.py' -v
 
 ## check: lint, the forbidden-name grep, the unsafe-flags check, the docs-drift
-## check, tools-test, then test. release.yml runs this target — and only this
-## target — before a tag publishes, so anything CLAUDE.md's hardest rule
-## depends on has to be a prerequisite here, not only a ci.yml job: a tag is
-## not required to point at a commit ci.yml ever ran. vulncheck stays out on
-## purpose, because it is a network call and this target is also the local
-## default; run it separately (`make vulncheck`) or add it to release.yml if
-## the release path should block on it too. tools-test needs no network
-## either — it is a fake gh — so it belongs here and not with vulncheck.
-check: lint forbidden unsafe-flags docs-check vet-tagged tools-test test
+## check, the names-drift check, tools-test, then test. release.yml runs this
+## target — and only this target — before a tag publishes, so anything
+## CLAUDE.md's hardest rule depends on has to be a prerequisite here, not only
+## a ci.yml job: a tag is not required to point at a commit ci.yml ever ran.
+## vulncheck stays out on purpose, because it is a network call and this
+## target is also the local default; run it separately (`make vulncheck`) or
+## add it to release.yml if the release path should block on it too.
+## tools-test needs no network either — it is a fake gh — so it belongs here
+## and not with vulncheck. names-check needs no network either, for the same
+## reason docs-check does not: both CSVs tools/names reads are checked in.
+check: lint forbidden unsafe-flags docs-check names-check vet-tagged tools-test test
 
 ## install-proof: build the root module the way `go install` would — from a
 ## copy of the working tree with mask/ and go.work removed, and a fresh
