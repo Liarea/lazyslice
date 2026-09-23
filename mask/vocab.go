@@ -143,16 +143,18 @@ func (w *wordList) holds(s string, budget int) bool {
 }
 
 // vocabulary is personNameMasker's answer, over exactly the lists Mask draws
-// from: roleGivenNames for RoleGiven, roleFamilyNames for RoleFamily, and for
-// RoleFull a "given surname" pair off givenNames and surnames or a single
-// given name — both of RoleFull's forms, whichever the column's width would
-// have chosen, because the count check behind this gate (internal/verify)
-// refuses a value transform never emitted whatever this answers.
+// from: givenNames for RoleGiven, surnames for RoleFamily, and for RoleFull a
+// "given surname" pair off the same two lists or a single given name — both
+// of RoleFull's forms, whichever the column's width would have chosen,
+// because the count check behind this gate (internal/verify) refuses a value
+// transform never emitted whatever this answers.
 //
 // The test is on the canonical form (Canonical's fold), so "MARY", "mary" and
-// " Mary " are all the word "mary". A full name in a given-name column, a
-// given name in a family-name column and a word off the shared lists in a role
-// column are all outside it.
+// " Mary " are all the word "mary". A full name in a given-name column and a
+// word that is only a surname in a given-name column (or only a given name in
+// a family-name column) are outside it. A word both lists carry — the Census
+// has "allen" as both — is inside both roles, because Mask can emit it under
+// either.
 func (personNameMasker) vocabulary(v Value, c Constraints) bool {
 	s := fold(v.Text)
 	if s == "" {
@@ -161,9 +163,9 @@ func (personNameMasker) vocabulary(v Value, c Constraints) bool {
 	budget := room(c)
 	switch c.Role {
 	case RoleGiven:
-		return roleGivenNames.holds(s, budget)
+		return givenNames.holds(s, budget)
 	case RoleFamily:
-		return roleFamilyNames.holds(s, budget)
+		return surnames.holds(s, budget)
 	default:
 		if givenNames.holds(s, budget) {
 			return true

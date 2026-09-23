@@ -1,6 +1,6 @@
 # lazyslice
 
-![lazyslice's first run against the Pagila fixture: one command names the source and the target, every column's masking decision prints with its reason, the plan and the load follow, and three customer rows read back from the target with invented names and addresses](docs/media/first-run.gif)
+![lazyslice's first run against the Pagila fixture: one command names the source and the target, every column's masking decision prints with its reason, the plan and the load follow, and three customer rows read back from the target with masked names and email addresses: real, common names that are not the customers' own](docs/media/first-run.gif)
 
 Point it at a production Postgres database and get a small, referentially
 complete, pseudonymised copy in a local database — one command, no config.
@@ -167,8 +167,9 @@ The run above exited `0`, which is the green verify: `lazyslice_meta.status`
 is written `complete` only once every check in ARCHITECTURE.md section 6 has
 passed — foreign keys resolve, row counts and sequences match the plan, and a
 residual scan finds no source value left in a masked column. A masked name
-can equal some other row's real name, because names are drawn from a list;
-the scan counts those and checks that no row kept its own.
+can equal some other row's real name, because masked names are real, common
+names drawn from the 2020 U.S. Census lists; the scan counts those and checks
+that no row kept its own.
 
 ```sh
 $ psql postgres://ls:pw@127.0.0.1:55702/shop_dev -c "select status from lazyslice_meta"

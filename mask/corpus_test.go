@@ -25,8 +25,11 @@ func corpus() []tcase {
 		{"email text", CatEmail, MaskerEmail, "b@c.example", Constraints{TypeTag: famText}},
 		{"name varchar", CatPersonName, MaskerPersonName, "Zoë Müller",
 			Constraints{TypeTag: famVarchar, MaxLen: 45}},
+		// Five bytes fit 22 pairs off the Census lists (Jo Li), below
+		// nameDomainFloor, and 413 given names, above it, so it draws one given
+		// name.
 		{"name narrow", CatPersonName, MaskerPersonName, "Zoë Müller",
-			Constraints{TypeTag: famVarchar, MaxLen: 6}},
+			Constraints{TypeTag: famVarchar, MaxLen: 5}},
 		{"name given role", CatPersonName, MaskerPersonName, "Zoë Müller",
 			Constraints{TypeTag: famVarchar, MaxLen: 45, Role: RoleGiven}},
 		{"name family role", CatPersonName, MaskerPersonName, "Zoë Müller",

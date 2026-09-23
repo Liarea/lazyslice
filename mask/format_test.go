@@ -26,7 +26,7 @@ func TestFormatPreservationPerCategory(t *testing.T) {
 		"email unique":       wantMatch(`^[a-z]+\.[a-z]+\.[a-z2-7]{13}@example\.(com|net|org)$`),
 		"email text":         wantMatch(`^[a-z]+\.[a-z]+@example\.(com|net|org)$`),
 		"name varchar":       wantMatch(`^[A-Z][a-z]+ [A-Z][a-z]+$`),
-		"name narrow":        wantMatch(`^[A-Z][a-z]{0,5}$`),
+		"name narrow":        wantMatch(`^[A-Z][a-z]{1,4}$`),
 		"name given role":    wantMatch(`^[A-Z][a-z]+$`),
 		"name family role":   wantMatch(`^[A-Z][a-z]+$`),
 		"phone text":         wantValidNANPFiction,

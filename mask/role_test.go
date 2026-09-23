@@ -4,6 +4,7 @@ package mask
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -38,8 +39,8 @@ func TestPersonNameRoleShape(t *testing.T) {
 		role Role
 		want *wordList
 	}{
-		{"given", RoleGiven, roleGivenNames},
-		{"family", RoleFamily, roleFamilyNames},
+		{"given", RoleGiven, givenNames},
+		{"family", RoleFamily, surnames},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -105,68 +106,150 @@ func TestPersonNameRoleDeterministic(t *testing.T) {
 	}
 }
 
-// TestRoleWordsExcludeKnownRealNames is the fix-round review's own regression
-// (T-0287, high finding 1): a review measured that roleGivenWords' and
-// roleFamilyWords' original 900 entries each collided with real names on two
-// counts -- 34 were literal entries of internal/textsig/names.txt, and
-// materially more again were ordinary common given names, surnames or
-// English words the dictionary does not carry -- while the comment above the
-// two lists claimed them disjoint from real names "by construction". This
-// pins the exact tokens the review's own finding named as evidence, on both
-// lists, as a permanent guard: any of them reappearing means the filtering
-// mask/words.go's comment now describes has regressed. It cannot re-run the
-// filtering itself (that needs internal/textsig's dictionary and a corpus
-// outside this module, which mask may import neither of), so
-// internal/classify/role_test.go's TestRoleWordsExcludeCurrentNameDictionary
-// carries the fuller, live check.
-func TestRoleWordsExcludeKnownRealNames(t *testing.T) {
-	// Exactly the tokens the review's finding cited as evidence (mask/CLAUDE.md's
-	// T-0287 section and words.go's own comment have the fuller account), given
-	// names and surnames mixed without regard to which role list they came from
-	// in real life: the point is that neither role list may contain any of them,
-	// whichever position a real person carries it in.
-	knownRealNames := []string{
-		// from internal/textsig/names.txt
-		"siri", "nero", "leni", "mena", "nela", "risa", "sona", "sosa", "rumi",
-		"sibel", "geri", "veli", "vesa", "rola", "tani", "sama", "nuno", "runo",
-		"gema", "tunes",
-		// common real given names and surnames the dictionary does not carry
-		"gale", "sage", "bela", "mari", "manu", "mano", "rani", "nori", "sade",
-		"rima", "levon", "deron", "lorin", "daven", "boris", "titus", "juli",
-		"kota", "mati", "mako", "koda",
-	}
-	for _, name := range knownRealNames {
-		if inWordList(t, roleGivenNames, name) {
-			t.Errorf("roleGivenNames still contains the known real name %q", name)
+// TestRoleWordsExcludeKnownRealNames and TestRoleWordsDisjointFromSharedNameLists
+// are retired (T-0304). They pinned T-0287's synthetic RoleGiven/RoleFamily
+// lists as containing no real name and sharing no word with the hand-curated
+// RoleFull lists, because a real name in a masked first_name column was a
+// residual hit the scan refused at exit 9. ADR-015 inverted that premise: the
+// residual scan now explains a masked name that equals some other row's real
+// name (the list contains it, transform emitted every copy, no row kept its
+// own), so the lists ARE real names -- the 2020 Census given names and
+// surnames, one pair for every role and for email local parts. What replaces
+// the two tests is below: every list word is in Emits for its role, no list
+// holds two words that fold alike, Domain reports the Census counts, and the
+// small_domain rule stays quiet over an ordinary name sample. The redraw's
+// half -- Apply over every list word, in every role and three spellings,
+// never reads as its input -- is vocab_test.go's
+// TestListWordsNeverMaskToThemselves, which walks these same lists.
+
+// spellings is a list word as a column might hold it: lower case, title case
+// and upper case.
+func spellings(w string) []string { return []string{w, titleASCII(w), strings.ToUpper(w)} }
+
+// TestEveryListWordIsEmittedForItsRole is ADR-015's vocabulary gate over the
+// whole of both lists: every word Mask can draw for a role is a word Emits
+// accepts for that role, in each of three spellings. A word Emits missed would
+// send a correct run's coincidence to the column probe and refuse it at exit 9.
+func TestEveryListWordIsEmittedForItsRole(t *testing.T) {
+	text := Constraints{TypeTag: famText}
+	with := func(r Role) Constraints { c := text; c.Role = r; return c }
+	for _, w := range givenNames.words {
+		for _, in := range spellings(w) {
+			if !Emits(MaskerPersonName, Value{Text: in}, with(RoleGiven)) {
+				t.Errorf("given name %q is not in Emits for RoleGiven", in)
+			}
+			// RoleFull's narrow form draws one given name.
+			if !Emits(MaskerPersonName, Value{Text: in}, with(RoleFull)) {
+				t.Errorf("given name %q is not in Emits for RoleFull", in)
+			}
 		}
-		if inWordList(t, roleFamilyNames, name) {
-			t.Errorf("roleFamilyNames still contains the known real name %q", name)
+	}
+	for _, w := range surnames.words {
+		for _, in := range spellings(w) {
+			if !Emits(MaskerPersonName, Value{Text: in}, with(RoleFamily)) {
+				t.Errorf("surname %q is not in Emits for RoleFamily", in)
+			}
+		}
+	}
+	// RoleFull's wide form: every given name once and every surname once, each
+	// paired with a word of the other list, in three spellings.
+	n := max(len(givenNames.words), len(surnames.words))
+	for i := 0; i < n; i++ {
+		g := givenNames.words[i%len(givenNames.words)]
+		sn := surnames.words[i%len(surnames.words)]
+		for _, in := range []string{g + " " + sn, titleASCII(g) + " " + titleASCII(sn), strings.ToUpper(g + " " + sn)} {
+			if !Emits(MaskerPersonName, Value{Text: in}, with(RoleFull)) {
+				t.Errorf("pair %q is not in Emits for RoleFull", in)
+			}
 		}
 	}
 }
 
-// TestRoleWordsDisjointFromSharedNameLists checks, rather than merely
-// comments, the one claim words.go's "by construction" language happened to
-// get right: roleGivenWords and roleFamilyWords never share a token with
-// givenWords or surnameWords, the lists RoleFull and emailMasker read. This
-// is the narrow, self-contained half of the review's ask that this module can
-// verify on its own, with no corpus outside it.
-func TestRoleWordsDisjointFromSharedNameLists(t *testing.T) {
-	shared := make(map[string]bool, len(givenNames.words)+len(surnames.words))
-	for _, w := range givenNames.words {
-		shared[w] = true
-	}
-	for _, w := range surnames.words {
-		shared[w] = true
-	}
-	for _, w := range roleGivenNames.words {
-		if shared[w] {
-			t.Errorf("roleGivenNames contains %q, which is also in givenWords/surnameWords", w)
+// TestNameListsHaveNoFoldDuplicates: two words of one list that fold alike
+// would be one output drawn twice as often, and Domain would count it twice --
+// a Domain above what the generator emits, which mask/CLAUDE.md forbids.
+func TestNameListsHaveNoFoldDuplicates(t *testing.T) {
+	for _, l := range []struct {
+		name string
+		w    *wordList
+	}{{"givenNames", givenNames}, {"surnames", surnames}} {
+		seen := make(map[string]string, len(l.w.words))
+		for _, w := range l.w.words {
+			k := fold(titleASCII(w))
+			if prev, ok := seen[k]; ok {
+				t.Errorf("%s: %q and %q fold to the same word", l.name, prev, w)
+			}
+			seen[k] = w
 		}
 	}
-	for _, w := range roleFamilyNames.words {
-		if shared[w] {
-			t.Errorf("roleFamilyNames contains %q, which is also in givenWords/surnameWords", w)
+}
+
+// TestPersonNameDomainIsTheCensusLists pins what Domain reports now that the
+// three roles draw from the 2020 Census lists (958 given names, 1,000
+// surnames), and that the unique-index rule is unchanged in effect.
+//
+// A unique single-name column was refused at plan before T-0304 -- RoleGiven
+// had 780 words and RoleFamily 863, against d_required = n^2/2e = 500,000 at
+// one row -- and it still is: 958 and 1,000 are as far below 500,000, and
+// MaxRows is 0 either way, so the refusal names no --take that would work. A
+// unique full-name column moves from 141 x 145 = 20,445 pairs (MaxRows 0) to
+// 958,000 (MaxRows 1): still refused at any real row count.
+func TestPersonNameDomainIsTheCensusLists(t *testing.T) {
+	m, _ := Get(MaskerPersonName)
+	cases := []struct {
+		role Role
+		want int64
+	}{
+		{RoleGiven, 958},
+		{RoleFamily, 1000},
+		{RoleFull, 958 * 1000},
+	}
+	for _, tc := range cases {
+		c := Constraints{TypeTag: famText, Role: tc.role}
+		if got := m.Domain(c); got != tc.want {
+			t.Errorf("role %q: Domain = %d, want %d", tc.role, got, tc.want)
+		}
+
+		c.Unique = true
+		c.Rows = 2
+		_, err := Pick(CatPersonName, c)
+		var de *DomainError
+		if !errors.As(err, &de) {
+			t.Fatalf("role %q: a unique name column of 2 rows: Pick err = %v, want a *DomainError", tc.role, err)
+		}
+		if de.Domain != tc.want || de.Required != Required(2) {
+			t.Errorf("role %q: refusal says d=%d, d_required=%d; want %d and %d",
+				tc.role, de.Domain, de.Required, tc.want, Required(2))
+		}
+	}
+	for _, role := range []Role{RoleGiven, RoleFamily} {
+		c := Constraints{TypeTag: famText, Role: role, Unique: true, Rows: 1}
+		if _, err := Pick(CatPersonName, c); err == nil {
+			t.Errorf("role %q: a unique single-name column of one row was accepted", role)
+		}
+		if got := MaxRows(m.Domain(c)); got != 0 {
+			t.Errorf("role %q: MaxRows = %d, want 0", role, got)
+		}
+	}
+}
+
+// TestNameColumnIsNotSmallDomain is ADR-015's floor on the lists' size: at
+// least 400 words each, so that an ordinary name column never trips section
+// 5's small_domain rule (d < 2 x distinct samples) over a 200-row sample in
+// which every sampled name is distinct. Listing it there would take it out of
+// the residual filter and out of invariant I2 for a reason that is not true.
+// Small is this module's statement of the rule over the generator's own
+// domain; the parent's markSmallDomains (internal/core) applies only its
+// catalog half today, which a text column never trips, so this pins the half
+// that would list a name column if it did fire.
+func TestNameColumnIsNotSmallDomain(t *testing.T) {
+	for _, role := range []Role{RoleGiven, RoleFamily, RoleFull} {
+		c := Constraints{TypeTag: famText, Role: role, Distinct: 200}
+		if d := Admissible(MaskerPersonName, c); d < 400 {
+			t.Errorf("role %q: admissible domain %d is below 400", role, d)
+		}
+		if Small(MaskerPersonName, c) {
+			t.Errorf("role %q: a 200-row sample of distinct names reads as a small domain", role)
 		}
 	}
 }
