@@ -8,8 +8,8 @@
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 1 | 0 | 107 | 0 | 0 |
-| E6 Launch | 6 | 2 | 0 | 12 | 0 | 0 |
-| E9 Later | later | 90 | 0 | 34 | 7 | 0 |
+| E6 Launch | 6 | 5 | 0 | 12 | 0 | 0 |
+| E9 Later | later | 94 | 0 | 34 | 7 | 0 |
 
 ## Open and in progress
 
@@ -106,6 +106,13 @@
 - T-0299 [open] E9 · internal/classify: two stale anyMatched comments and a Pagila test that no longer proves the samples look like secrets (sonnet)
 - T-0300 [open] E9 · A name column whose values carry digits is masked as an address (sonnet)
 - T-0301 [open] E9 · A go install build prints 'lazyslice dev' instead of its module version (sonnet)
+- T-0302 [open] E6 · The residual scan explains a name-list coincidence by vocabulary, count and row identity, and still refuses every passthrough (ADR-015, verify half) (opus)
+- T-0303 [open] E6 · tools/names regenerates the masker's name lists from the 2020 Census top-1000 files (public domain), checked in CI (sonnet)
+- T-0304 [open] E6 · Masked given names, surnames, full names and email local parts draw from the Census lists (ADR-015, mask half; mask/v0.3.0) (opus)
+- T-0305 [open] E9 · person_date refuses correct runs by cross-row coincidence and by the keyed self-draw (opus)
+- T-0306 [open] E9 · A masked enum with more than 128 labels reaches the residual filter and refuses on a true statement about its domain (sonnet)
+- T-0307 [open] E9 · A second name corpus (INSEE, ONS) and a run-time locale choice for masked names (sonnet)
+- T-0308 [open] E9 · internal/textsig/names.txt's English section could be regenerated from the Census CSVs (sonnet)
 
 ## Recently closed
 

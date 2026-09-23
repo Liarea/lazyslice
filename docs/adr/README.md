@@ -34,6 +34,7 @@ Phase gates check that every ADR has a stated reversal condition (docs/BUILD_PLA
 | [008](008-first-run.md) | First-run experience: the discovery ladder, the one-question rule and the question catalogue | accepted 2026-09-08 |
 | [013](013-headless-target-never-on-the-source-cluster.md) | A headless run's target is never chosen on the source's own cluster | accepted 2026-09-22 |
 | [014](014-question-mark-at-q2-prints-and-tui-stays-a-flag.md) | `?` at the root-table question prints the ranked candidates; `--tui` stays the only way into the two screens | accepted 2026-09-22 |
+| [015](015-residual-hit-in-the-name-vocabulary-is-explained-not-probed.md) | A residual hit inside the name masker's own vocabulary is explained by count and row identity, not confirmed by a column probe | proposed 2026-09-22 |
 
 ## Numbering note
 
