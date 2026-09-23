@@ -654,9 +654,8 @@ type add struct {
 }
 
 type recorder struct {
-	inner   pipeline.Residual
-	adds    []add
-	emitted []add
+	inner pipeline.Residual
+	adds  []add
 }
 
 var _ pipeline.Residual = (*recorder)(nil)
@@ -668,14 +667,6 @@ func (r *recorder) Add(c ref.ColumnRef, path string, canonical []byte) {
 
 func (r *recorder) MayContain(c ref.ColumnRef, path string, canonical []byte) bool {
 	return r.inner.MayContain(c, path, canonical)
-}
-func (r *recorder) AddEmitted(c ref.ColumnRef, path string, canonical []byte) {
-	r.emitted = append(r.emitted, add{c, path, string(canonical)})
-	r.inner.AddEmitted(c, path, canonical)
-}
-
-func (r *recorder) Emitted(c ref.ColumnRef, path string, canonical []byte) int64 {
-	return r.inner.Emitted(c, path, canonical)
 }
 func (r *recorder) Cells() int64 { return r.inner.Cells() }
 func (r *recorder) Bytes() int64 { return r.inner.Bytes() }
