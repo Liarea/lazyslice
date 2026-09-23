@@ -8,7 +8,7 @@
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 0 | 0 | 108 | 0 | 0 |
-| E6 Launch | 6 | 17 | 0 | 14 | 0 | 0 |
+| E6 Launch | 6 | 16 | 0 | 15 | 0 | 0 |
 | E9 Later | later | 98 | 0 | 35 | 7 | 0 |
 
 ## Open and in progress
@@ -104,7 +104,6 @@
 - T-0299 [open] E9 · internal/classify: two stale anyMatched comments and a Pagila test that no longer proves the samples look like secrets (sonnet)
 - T-0300 [open] E9 · A name column whose values carry digits is masked as an address (sonnet)
 - T-0301 [open] E9 · A go install build prints 'lazyslice dev' instead of its module version (sonnet)
-- T-0302 [open] E6 · The residual scan explains a name-list coincidence by vocabulary, count and row identity, and still refuses every passthrough (ADR-015, verify half) (opus)
 - T-0304 [open] E6 · Masked given names, surnames, full names and email local parts draw from the Census lists (ADR-015, mask half; mask/v0.3.0) (opus)
 - T-0305 [open] E9 · person_date refuses correct runs by cross-row coincidence and by the keyed self-draw (opus)
 - T-0306 [open] E9 · A masked enum with more than 128 labels reaches the residual filter and refuses on a true statement about its domain (sonnet)
@@ -133,6 +132,7 @@
 
 - T-0064 [done] E5 · Dogfood: two sessions against a real project of the maintainer's choosing, logged in docs/DOGFOOD_LOG.md → done
 - T-0283 [done] E6 · Decide whether v0.2.0 ships a docs site (mkdocs-material on GitHub Pages) or the in-repo docs stay the docs → done
+- T-0302 [done] E6 · The residual scan explains a name-list coincidence by vocabulary, count and row identity, and still refuses every passthrough (ADR-015, verify half) → done
 - T-0303 [done] E6 · tools/names regenerates the masker's name lists from the 2020 Census top-1000 files (public domain), checked in CI → done
 - T-0323 [done] E9 · Decide the free_text masker's length policy for short enum-like values → done
 - T-0065 [done] E6 · 20-second VHS GIF of the first run on Pagila → done
@@ -155,4 +155,3 @@
 - T-0298 [cancelled] E9 · Add a digit-run/phone-without-plus signal so plain 10-12 digit columns are not left to Luhn chance → cancelled
 - T-0083 [done] E5 · Target type registration for CopyFrom: no owner since internal/load shipped → done
 - T-0170 [done] E9 · torture regression 013 (json-object-key-email) fails on main → done
-- T-0197 [done] E5 · R2-05/A10 residual: a name in a language names.txt does not carry still reports "no name or value signal" as a clean bill of health → done
