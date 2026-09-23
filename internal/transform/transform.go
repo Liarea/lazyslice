@@ -3,9 +3,9 @@
 // Package transform applies the classification to every batch on its way from
 // extract to load, and records what it masked in the residual filter.
 //
-// Transform is pure apart from Residual.Add: same key, same classification, same
-// input, same output, which is what invariant I3 (two runs, byte-identical
-// targets) rests on. Nothing here reads a clock, a random source or an
+// Transform is pure apart from Residual.Add and Residual.AddEmitted: same key,
+// same classification, same input, same output, which is what invariant I3
+// (two runs, byte-identical targets) rests on. Nothing here reads a clock, a random source or an
 // environment; the only variation a generator gets is h, and h comes from the
 // run key, the category and the canonical value (ARCHITECTURE.md §5).
 //
@@ -63,6 +63,13 @@ type colPlan struct {
 	// document is true for a json, jsonb or hstore column, which §4 masks whole
 	// rather than as a scalar.
 	document bool
+	// emits is true for a column whose masker has a vocabulary under this
+	// column's constraints (mask.Emitting, ADR-015): every masked scalar and
+	// array element of it is counted by its output (Residual.AddEmitted), so
+	// that verify can tell a masked name that equals some other row's real
+	// name from one the masker never produced. Never for a document: a JSON
+	// leaf is masked under its own category and is never explained.
+	emits bool
 }
 
 // Transform masks the batch in place and returns it.
@@ -154,6 +161,10 @@ func (t transformer) plan(
 		// zero value, so this is unconditional rather than gated the way Unique
 		// is above.
 		plans[i].shape.constraints.Role = d.Role
+		// Decided once per column and per batch, after every constraint the
+		// masker reads is in place: a closed column (an enum, a CHECK list)
+		// has no vocabulary, whatever its masker.
+		plans[i].emits = !plans[i].document && mask.Emitting(plans[i].id, plans[i].shape.constraints)
 		if plans[i].id == "" {
 			return nil, &Refusal{
 				Code: CodeMasker, Exit: exitTransform, Col: col,
@@ -282,6 +293,9 @@ func (t transformer) maskScalar(p colPlan, v any, key mask.Key, res pipeline.Res
 		// path here through mask.Apply that skipped this would be a masked cell
 		// verify can never test (§6 item 1).
 		res.Add(p.col, "", r.Canonical)
+		if p.emits {
+			t.addEmitted(p, r.Out, res)
+		}
 	}
 	out, err := coerce(r.Out, v)
 	if err != nil {
@@ -291,6 +305,31 @@ func (t transformer) maskScalar(p colPlan, v any, key mask.Key, res pipeline.Res
 		}
 	}
 	return out, nil
+}
+
+// addEmitted counts one masked cell of an emitting column by its output, in the
+// canonical form verify reads the target's value back into (ADR-015). The
+// canonical form is the category's own — for person_name the fold — so "Mary"
+// in the target is counted against the "mary" transform recorded here.
+//
+// An output with no canonical bytes is not counted: verify tests nothing for a
+// value it cannot canonicalise either (internal/verify/value.go).
+func (t transformer) addEmitted(p colPlan, out mask.Value, res pipeline.Residual) {
+	if out.Null || out.Empty() {
+		return
+	}
+	canon, _, err := mask.Canonical(mask.Category(p.cat), out, mask.Constraints{})
+	if err != nil {
+		return
+	}
+	b := []byte(canon.Text)
+	if len(canon.Bytes) > 0 {
+		b = canon.Bytes
+	}
+	if len(b) == 0 {
+		return
+	}
+	res.AddEmitted(p.col, "", b)
 }
 
 // isDocument reports the families §4 masks whole rather than as a scalar.

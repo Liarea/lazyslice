@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"math/big"
+	"strings"
 
 	"github.com/Liarea/lazyslice/internal/pipeline"
 	"github.com/Liarea/lazyslice/internal/ref"
@@ -161,6 +162,15 @@ type netMode struct {
 	// internal/classify's leaf signal ever looked inside it. A `payload text`
 	// holding JSON is one of the commonest shapes in a real schema.
 	maybeDocument bool
+	// derivedFromMasked is true for a generated column whose expression names
+	// at least one column of its own table and only masked ones (ADR-015's
+	// second-net clause, generatedFromMasked). Its value is computed by the
+	// target from values the run already masked, so a dictionary shape in it
+	// is the masker's own vocabulary — `full_name GENERATED ALWAYS AS
+	// (first_name || ' ' || last_name)` over masked names is a given name and
+	// a surname by construction — and the dictionary rule is skipped for it.
+	// Every validator that carries a parse still runs over it.
+	derivedFromMasked bool
 }
 
 func (s *state) netMode(col ref.ColumnRef, c pipeline.Column) (netMode, bool) {
@@ -179,7 +189,10 @@ func (s *state) netMode(col ref.ColumnRef, c pipeline.Column) (netMode, bool) {
 	case has && d.Masked:
 		return netMode{}, false
 	case netText(family):
-		return netMode{array: array, text: true, maybeDocument: character(family)}, true
+		return netMode{
+			array: array, text: true, maybeDocument: character(family),
+			derivedFromMasked: s.generatedFromMasked(col.Table, c.Generated),
+		}, true
 	case family == famBytea:
 		return netMode{array: array, text: true, bytea: true, maybeDocument: true}, true
 	case numeric(family):
@@ -439,6 +452,12 @@ func (s *state) netColumn(ctx context.Context, col ref.ColumnRef, mode netMode) 
 	neverMasked := s.neverMasked(col)
 	for i, val := range validators {
 		if !applies(val, mode) {
+			continue
+		}
+		if val.dict && mode.derivedFromMasked {
+			// ADR-015: a generated column over masked columns only holds the
+			// masker's own words, and a dictionary shape there is not evidence
+			// about the source (netMode.derivedFromMasked).
 			continue
 		}
 		if val.sequenceExempt && dense && (neverMasked || !corroboratedForSeq) {
@@ -830,4 +849,104 @@ func (s *state) count(text string, fromLeaf bool, mode netMode, hits []int64, di
 			d[sha256.Sum256([]byte(text))] = struct{}{}
 		}
 	}
+}
+
+// generatedFromMasked reports a generated column whose expression names at
+// least one column of its own table and only columns the run masked (ADR-015).
+// Anything else — an ordinary column, an expression over an unmasked column, an
+// expression that names no column of its table at all, a table this stage does
+// not know — is scanned as it always was.
+//
+// The expression is pg_get_expr's own deparse, so an identifier in it is
+// either quoted (and exact) or bare (and folded to lower case, as the server
+// folded it), and a string literal is skipped whole. A bare word that names no
+// column of the table — a type name after `::`, a function name — is ignored;
+// one that does name a column counts, so a table with a column named `text`
+// beside an expression casting `::text` reads that column as referenced, and
+// the direction that mistake fails in is the strict one.
+func (s *state) generatedFromMasked(t ref.TableRef, expr string) bool {
+	if strings.TrimSpace(expr) == "" {
+		return false
+	}
+	table := s.tables[t]
+	if table == nil {
+		return false
+	}
+	names := make(map[string]bool, len(table.Columns))
+	for _, c := range table.Columns {
+		names[c.Name] = true
+	}
+	refs := 0
+	for _, id := range exprIdentifiers(expr) {
+		if !names[id] {
+			continue
+		}
+		refs++
+		d, ok := s.decision(ref.ColumnRef{Table: t, Column: id})
+		if !ok || !d.Masked {
+			return false
+		}
+	}
+	return refs > 0
+}
+
+// exprIdentifiers lists the identifiers of a deparsed SQL expression: every
+// double-quoted identifier as written ("" read as one quote), and every bare
+// word folded to lower case, with string literals (a doubled single quote
+// read as one) skipped.
+func exprIdentifiers(expr string) []string {
+	var out []string
+	for i := 0; i < len(expr); {
+		c := expr[i]
+		switch {
+		case c == '\'':
+			i++
+			for i < len(expr) {
+				if expr[i] == '\'' {
+					if i+1 < len(expr) && expr[i+1] == '\'' {
+						i += 2
+						continue
+					}
+					i++
+					break
+				}
+				i++
+			}
+		case c == '"':
+			i++
+			var b strings.Builder
+			for i < len(expr) {
+				if expr[i] == '"' {
+					if i+1 < len(expr) && expr[i+1] == '"' {
+						b.WriteByte('"')
+						i += 2
+						continue
+					}
+					i++
+					break
+				}
+				b.WriteByte(expr[i])
+				i++
+			}
+			out = append(out, b.String())
+		case isIdentStart(c):
+			j := i
+			for j < len(expr) && isIdentPart(expr[j]) {
+				j++
+			}
+			out = append(out, strings.ToLower(expr[i:j]))
+			i = j
+		default:
+			i++
+		}
+	}
+	return out
+}
+
+func isIdentStart(c byte) bool {
+	return c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c >= 0x80
+}
+
+func isIdentPart(c byte) bool {
+	return isIdentStart(c) || (c >= '0' && c <= '9') || c == '$'
 }

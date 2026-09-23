@@ -30,6 +30,13 @@ func titleASCII(s string) string {
 // single given name that fits. A column too narrow for any name at all has a
 // domain of 0 and is refused at plan rather than truncated here, because a
 // truncated name keeps a length.
+//
+// It is the one vocabulary masker (vocab.go, ADR-015): its vocabulary method
+// answers, over exactly these lists, whether a value is one Mask could have
+// produced, which is what lets the residual scan explain a masked name that
+// equals some other row's real name; and maskCell redraws it whenever its
+// output reads as its own input, so a masked name never equals its own
+// source value.
 type personNameMasker struct{}
 
 func (personNameMasker) Domain(c Constraints) int64 {

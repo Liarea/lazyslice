@@ -4,8 +4,10 @@ package verify
 
 import (
 	"context"
+	"strings"
 	"testing"
 
+	"github.com/Liarea/lazyslice/internal/event"
 	"github.com/Liarea/lazyslice/internal/pipeline"
 	"github.com/Liarea/lazyslice/internal/ref"
 )
@@ -177,6 +179,76 @@ func TestRedTeamTextDocumentLeavesAreOutsideTheDictionaryRule(t *testing.T) {
 		if f.Reason == "person_name" || f.Reason == "free_text" {
 			t.Fatalf("the net refused the target as %q over a document's leaves; "+
 				"internal/classify cannot see that evidence and there is no green path", f.Reason)
+		}
+	}
+}
+
+// ADR-015's two new refusals and its explained line are value-free by the same
+// rule every other line of this stage is (THREAT_MODEL.md T4): a refusal
+// carries a fixed phrase from reasons.go, the explained line carries a count,
+// and the catalogue template each renders through substitutes identifiers and
+// that count and nothing else. The fixture's values are real-looking list
+// names, the very thing a leak here would print.
+func TestRedTeamExplainedLineAndItsRefusalsAreValueFree(t *testing.T) {
+	fixed := map[string]bool{
+		reasonStillHolds: true, reasonOverCount: true, reasonSameRow: true,
+		reasonProbeCap: true, reasonProbeFailed: true, reasonSourceClosed: true,
+	}
+	names := givenWords(t, 6)
+
+	scenes := map[string]func() (*scene, *fakeTable){
+		"explained": func() (*scene, *fakeTable) {
+			ft, plan, cls := people(t, names)
+			return newScene(ft, plan, cls), ft
+		},
+		"same row": func() (*scene, *fakeTable) {
+			ft, plan, cls := people(t, names)
+			ft.target[2][1] = names[2]
+			ft.target[1][1] = names[0]
+			return newScene(ft, plan, cls), ft
+		},
+		"over count": func() (*scene, *fakeTable) {
+			ft, plan, cls := people(t, names)
+			sc := newScene(ft, plan, cls)
+			ft.target[4][1] = names[0]
+			return sc, ft
+		},
+	}
+	for name, build := range scenes {
+		t.Run(name, func(t *testing.T) {
+			sc, ft := build()
+			s := sc.run(t)
+			assertValueFree(t, s, ft)
+			for _, f := range s.failures {
+				if !fixed[f.Reason] {
+					t.Errorf("a refusal carries a reason outside reasons.go's fixed set: %q", f.Reason)
+				}
+			}
+			for _, c := range s.checks {
+				if c.Code == CodeResidualExplained && (c.Column == "" || c.Count == 0) {
+					t.Errorf("the explained line %+v names no column or counts nothing", c)
+				}
+			}
+		})
+	}
+
+	// The catalogue rows: the explained line and the residual refusal render
+	// only identifiers, a count and a fixed reason.
+	cat := string(event.Catalogue())
+	for code, args := range map[event.Code]string{
+		CodeResidualExplained: "args: [table, column, count]",
+		CodeRefusedResidual:   "args: [table, column, reason]",
+	} {
+		i := strings.Index(cat, "- code: "+string(code)+"\n")
+		if i < 0 {
+			t.Fatalf("the catalogue has no row for %s", code)
+		}
+		row := cat[i:]
+		if j := strings.Index(row[1:], "\n- code: "); j >= 0 {
+			row = row[:j+1]
+		}
+		if !strings.Contains(row, args) {
+			t.Errorf("%s renders %q, want exactly %s", code, row, args)
 		}
 	}
 }

@@ -281,6 +281,20 @@ unit level, the last of the three checking the role lists against the
 project's live name dictionary directly (something `mask/role_test.go`
 cannot do itself, since `mask` may import nothing under `internal/`).
 
+**040 is a twenty-fourth**, from ADR-015 (tracker **T-0302**) rather than
+from a torture schema, and it is the case `039`'s filtering could only make
+rarer: a masked name equal to *another* row's real name in the same column.
+The residual scan confirmed a hit by asking whether the source column held
+the value anywhere, so any real-name list over any real name column refused a
+correct run at exit 9. This file seeds `first_name`/`last_name` with words of
+the masker's own current role lists, so such coincidences happen on every
+run by construction, in a table with a primary key and in a twin without one.
+Since T-0302 the scan explains a hit inside the masker's vocabulary by count
+and row identity instead of probing it, and prints
+`verify.residual.explained`; both tables must load at exit 0. It carries no
+`not-copied:` key on purpose — that key greps the whole target for every
+source value, and here a match is the correct outcome.
+
 The files are loaded and run by `make torture` (`internal/invariants`'s
 `TestTortureRegressions`, behind the `integration` and `torture` build tags), so
 a regression that comes back fails a build rather than being rediscovered by the
@@ -466,6 +480,7 @@ until T-0221. It is what 025 sets.
 | `034-dense-business-number-beside-a-tsvector-is-not-corroborated.sql` | the T-0240 review round (2026-09-17), high finding | **a false refusal the T-0240 fix itself introduced**: `TableHasLikelyPersonalColumn` counts a neighbour at `ConfLikely` or above under any category, with no `identifiesAPerson` test, and a `tsvector` is `derived_text` at `ConfCertain` by its type alone — so a search-index column beside an ordinary, non-key, dense business-number column cancelled that column's own sequence exemption on the strength of a neighbour that is not personal data, and the run refused at exit 9 with nothing wrong in it; fixed by `corroboratedForSequence`, read only for the dense-sequence override, which answers with `NameMatchedNationalID` and `TableHasMaskedPersonalColumn` alone and never `TableHasLikelyPersonalColumn` — `requiresCorroboration`'s own three-signal `corroborated` is unchanged, so `032` and `033` still refuse |
 | `037-fk-pair-partner-carries-a-type-conflict.sql` | tracker T-0257, not a torture-schema reduction — see this file's own prose above | **the residual `035`/`036` left open, now a refusal instead of a copy**: a validated foreign key's parent already carries a decision ARCHITECTURE.md §4 forbids overriding (a `citext` `dob` column, name-matched to `person_date`, type-conflicted at `low`), so `fkPairs` refuses to raise either end rather than mask the child alone and leave the parent copied — before `internal/plan/fkpair.go`'s `checkFKPairRefusal` read that signal (`Decision.Refused`, `Decision.RefusedPartner`), both columns loaded copied verbatim under exit 0; now the run refuses at exit 12, naming both columns with `--unmask` for each |
 | `038-person-name-role-from-column-name.sql` | tracker T-0287, not a torture-schema reduction — see this file's own prose above | **the shape a stranger sees in the README's own landing image**: `person_name`'s masker emitted the same "Given Family" pair for every column in the category, so a `first_name` column held two words and a `last_name` column held a stray surname; fixed by `mask.Role`, decided at classify time from the column's own name and carried on `Decision.Role` beside `Category` the way `UniqueIndex` reaches `mask.Constraints.Unique` — `first_name`/`last_name`/`full_name` here pin the three roles side by side. `not-copied:` cannot tell a correctly shaped fake from a differently wrong one, so the real end-to-end proof that a role reaches the masker is `internal/transform`'s own `TestPersonNameRoleReachesTheMasker`, added in the fix round that followed T-0287, which asserts the one/one/two word shape directly against `transformer.plan`'s output |
+| `040-person-name-list-coincidence-is-explained.sql` | ADR-015, tracker T-0302, not a torture-schema reduction — see this file's own prose above | a masked name equal to *another* row's real name in the same column was confirmed by the column probe and refused a correct run at exit 9; the residual scan now explains a hit inside the masker's own vocabulary by the count transform emitted and a row check by identity, and reports `verify.residual.explained` — here over a table with a primary key and a twin without one, both at `expect: ok` |
 
 009's header now says `ok`. It did not always: `arrayArrivesAsLiteral` in
 `internal/plan/writeback.go` was written as a stand-in for the element-wise

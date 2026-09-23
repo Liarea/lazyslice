@@ -109,6 +109,70 @@ committed, generated, tested (`mask/words_corpus_test.go` pins its counts,
 character class and length bound) and otherwise inert: nothing a masker
 emits changes because this file exists.
 
+## The vocabulary gate and the redraw (ADR-015, T-0302)
+
+ADR-015 (proposed) lets `internal/verify` explain a residual hit — a masked
+value that equals a real value elsewhere in its column — instead of refusing
+it, for the one category where that is a correct run's normal state: a
+person's name drawn from a list. Three pieces live here (`vocab.go`,
+`mask.go`'s `maskCell`).
+
+- **`Emits(id, value, constraints)`** answers whether the masker registered
+  under `id` could have produced `value` for a column with `constraints`. It
+  is backed by an *unexported* method, `vocabulary`, so only a masker inside
+  this package can answer yes: a custom masker registered from outside —
+  even one drawing from `RoleWords`, even one registered under the
+  `person_name` category — cannot claim a vocabulary, and its column keeps
+  the column probe. It is false for an unknown id, a `fixed:` id, a masker
+  without the method, a closed column (`labels(c)` non-empty: an enum or a
+  CHECK value list) and a NULL, empty or bytea value. Only
+  `personNameMasker` implements it, over exactly the lists `Mask` draws from
+  (`roleGivenNames` for `RoleGiven`, `roleFamilyNames` for `RoleFamily`, and
+  for `RoleFull` a `givenNames`/`surnames` pair or a single given name),
+  after the category's canonical fold. `Emitting(id, constraints)` is its
+  value-free half, for a caller deciding once per column
+  (`internal/transform`'s count, `internal/verify`'s allowlist), and
+  `FoldEqual` is `foldEqual` exported so the row check asks the redraw's own
+  question. `TestOnlyTheseMaskersEmit` pins the set to `{person_name}`.
+- **The fold-faithful criterion.** A masker may implement `vocabulary` only
+  if canonical equality of anything it emits with an input implies
+  letters-and-digits fold equality with that input's canonical form. That is
+  what makes the redraw below — which fires on the fold — cover every value
+  the residual scan would call equal under the canonical form.
+  `person_name`'s words are lower-case ASCII letters and `fold` changes
+  nothing over them but case and spacing, so it qualifies;
+  `TestVocabularyIsFoldFaithful` walks every entry and every pair. phone,
+  date, national identifiers and email do not: their canonical forms parse,
+  reorder or drop characters. A new list word that `fold` changes beyond
+  case — a ligature, an `ß` — fails that test, and the answer is to leave it
+  off the list, not to relax the test.
+- **The redraw.** In `maskCell`, when `looksLikeItsInput` fires,
+  `nothingToMask` is false, **and `tracksItsInput` has run and answered
+  false**, a vocabulary masker is called again under
+  `h_i = SHA-256(h || "lazyslice/redraw" || i)`, i = 1..8 (one byte), until
+  its output no longer reads as its input; after eight the last output is
+  returned as it always was. `h_i` is a function of `h`, so output stays a
+  pure function of the key, the category, the canonical value and the
+  constraints — determinism, FK equality groups and I3 hold. It changes only
+  values that used to self-map: `testdata/person_name_redraw.golden` lists
+  exactly those under the fixed test key (`-update-redraw` rewrites it), and
+  a change to that file is a change to masked values. After it, a masked name
+  never equals its own row's source value, which reveals about 1/500 of a bit
+  per value (THREAT_MODEL.md T12).
+- **Why the sentinel test is unaffected.** `tracksItsInput` asks its
+  question — does the generator's output follow a sentinel input under the
+  same `h`? — before the redraw exists for the cell, and the redraw never
+  runs on the sentinel call. A masker that follows its input, wholly or only
+  for some `h`, returns the sentinel, is `ErrPassthrough` there, and never
+  reaches a redraw that would otherwise launder it into a plausible name
+  (`TestTheRedrawNeverLaundersAPassthrough`). A masker that ignores its
+  input — every generator here — returns the same value for the sentinel as
+  for the cell, so the answer is the same as before. ADR-015's option (A)
+  put the redraw ahead of this question and was refuted for exactly that.
+- **Owed outside this module:** `internal/invariants/CLAUDE.md`'s contract
+  still says the suite imports only `internal/testutil` of ours, and its I2
+  now imports this module for `Emitting`/`Emits`/`FoldEqual` (**T-0332**).
+
 ## Workspace and release (T-0285)
 
 The repo root's `go.work` (`use ./ ./mask`) is how a change here reaches the
@@ -674,4 +738,6 @@ names without amending that ADR; make a generator read the clock, a global
 seed or the input's length; add a masker that can be selected by a file path
 or an expression; let a masked value keep any part of the original; add a
 `Domain()` that reports more than the generator can actually emit — the
-planner's refusal is only as honest as that number.
+planner's refusal is only as honest as that number; give a masker the
+`vocabulary` method without passing the fold-faithful criterion; move the
+redraw ahead of `tracksItsInput`.
