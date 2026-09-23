@@ -6,7 +6,7 @@ personal data unmasked is not a cosmetic defect: it is the failure the tool was
 built to prevent.
 
 **lazyslice is pre-release.** The pipeline runs end to end against PostgreSQL;
-`v0.1.0` was the first version a stranger may install; `v0.2.0` is the
+`v0.1.0` was the first version a stranger may install; `v0.3.0` is the
 current release and the one a report is triaged against, and its `lazyslice.yml` schema, flags and exit
 codes may still change between `0.x` minors. The findings of
 the independent review of 2026-09-09
