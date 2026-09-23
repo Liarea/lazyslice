@@ -254,6 +254,10 @@ func TestRedrawChangesOnlyValuesThatUsedToSelfMap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reading %s (run with -update-redraw to write it): %v", path, err)
 	}
+	// A Windows checkout may hand the golden back with CRLF line endings
+	// (.gitattributes now marks mask/testdata/** -text, and this keeps the
+	// comparison honest either way); the test compares lines, not bytes.
+	want = []byte(strings.ReplaceAll(string(want), "\r\n", "\n"))
 	if string(want) != got {
 		t.Errorf("the redraw changed a different set of values than %s records:\ngot:\n%swant:\n%s",
 			path, got, want)
