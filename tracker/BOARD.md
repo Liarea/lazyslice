@@ -9,7 +9,7 @@
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 0 | 0 | 108 | 0 | 0 |
 | E6 Launch | 6 | 17 | 0 | 14 | 0 | 0 |
-| E9 Later | later | 99 | 0 | 34 | 7 | 0 |
+| E9 Later | later | 98 | 0 | 35 | 7 | 0 |
 
 ## Open and in progress
 
@@ -124,7 +124,6 @@
 - T-0320 [open] E6 · A green run prints one verify summary line and how to reach the target (sonnet)
 - T-0321 [open] E6 · The reasons dump and the plan end with a summary, and a re-run from a committed yml is quiet (sonnet)
 - T-0322 [open] E9 · Infer foreign keys from naming conventions as virtual_fks candidates, so a Rails schema is reachable (opus)
-- T-0323 [open] E9 · Decide the free_text masker's length policy for short enum-like values (human)
 - T-0324 [open] E9 · Geo leaves inside JSON get in-range numbers (sonnet)
 - T-0325 [open] E6 · --unmask on a first run must not put it on the re-run path; the drift message names the real decision (sonnet)
 - T-0326 [open] E6 · A stray positional argument is a usage error, not 'the source did not report a server version' (sonnet)
@@ -135,6 +134,7 @@
 - T-0064 [done] E5 · Dogfood: two sessions against a real project of the maintainer's choosing, logged in docs/DOGFOOD_LOG.md → done
 - T-0283 [done] E6 · Decide whether v0.2.0 ships a docs site (mkdocs-material on GitHub Pages) or the in-repo docs stay the docs → done
 - T-0303 [done] E6 · tools/names regenerates the masker's name lists from the 2020 Census top-1000 files (public domain), checked in CI → done
+- T-0323 [done] E9 · Decide the free_text masker's length policy for short enum-like values → done
 - T-0065 [done] E6 · 20-second VHS GIF of the first run on Pagila → done
 - T-0155 [done] E5 · v0.0.1 proves the release pipeline end to end: goreleaser, the tap cask, brew install prints a version → done
 - T-0196 [done] E5 · Migrate the tracker to GitHub Issues and Projects behind the existing tools/tracker.py command surface → done
@@ -156,4 +156,3 @@
 - T-0083 [done] E5 · Target type registration for CopyFrom: no owner since internal/load shipped → done
 - T-0170 [done] E9 · torture regression 013 (json-object-key-email) fails on main → done
 - T-0197 [done] E5 · R2-05/A10 residual: a name in a language names.txt does not carry still reports "no name or value signal" as a clean bill of health → done
-- T-0198 [done] E5 · special_category has no value validator; a digit/name-free special-category sentence still crosses unseen → done
