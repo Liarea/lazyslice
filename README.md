@@ -48,7 +48,7 @@ Or with `go install`, once Go's own module cache and `$GOPATH/bin` are on
 your `PATH`:
 
 ```sh
-go install github.com/Liarea/lazyslice/cmd/lazyslice@v0.2.0
+go install github.com/Liarea/lazyslice/cmd/lazyslice@v0.3.0
 lazyslice --version
 ```
 
