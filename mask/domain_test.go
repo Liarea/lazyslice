@@ -128,7 +128,11 @@ func TestATooSmallColumnHasNoDomainAndRefuses(t *testing.T) {
 		c  Constraints
 	}{
 		{MaskerEmail, Constraints{TypeTag: famVarchar, MaxLen: 12}},
+		// The Census lists' shortest names are two letters (Jo, Ty; Do, Li,
+		// Wu and more), but a varchar(2) fits two given names and a
+		// varchar(4) 177, under nameDomainFloor, so each is refused.
 		{MaskerPersonName, Constraints{TypeTag: famVarchar, MaxLen: 2}},
+		{MaskerPersonName, Constraints{TypeTag: famVarchar, MaxLen: 4, Role: RoleGiven}},
 		{MaskerPhone, Constraints{TypeTag: famVarchar, MaxLen: 9}},
 		{MaskerGeo, Constraints{TypeTag: famVarchar, MaxLen: 3}},
 		{MaskerIPUnique, Constraints{TypeTag: famVarchar, MaxLen: 20}},

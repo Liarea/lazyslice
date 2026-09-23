@@ -7,7 +7,6 @@ import (
 
 	"github.com/Liarea/lazyslice/internal/pipeline"
 	"github.com/Liarea/lazyslice/internal/ref"
-	"github.com/Liarea/lazyslice/internal/textsig"
 	"github.com/Liarea/lazyslice/mask"
 )
 
@@ -61,43 +60,16 @@ func TestPersonNameRoleFromColumnName(t *testing.T) {
 	}
 }
 
-// TestRoleWordsExcludeCurrentNameDictionary is the fuller half of the
-// fix-round review's finding 1 (T-0287, high): mask/role_test.go's own
-// TestRoleWordsExcludeKnownRealNames and TestRoleWordsDisjointFromSharedNameLists
-// pin the exact tokens the review found and the mask module's own two
-// shared lists, but mask may not import internal/textsig at all
-// (mask/CLAUDE.md's "Never" list: "Import anything under internal/"), so
-// neither test there can check roleGivenWords/roleFamilyWords against the
-// project's actual, current, multilingual name dictionary
-// (internal/textsig/names.txt) -- the corpus the review's finding named
-// first and the one most likely to gain an entry that collides with a role
-// word in the future. This package already imports both mask and textsig
-// (classify.go, validators.go), so the cross-check runs here: every word in
-// mask.RoleWords(mask.RoleGiven) and mask.RoleWords(mask.RoleFamily) is
-// checked with textsig.Dictionary().LooksLikeName, the same one-word name
-// test internal/classify's own signals use to decide a first_name column in
-// the first place. A hit here means a name added to names.txt (or a
-// multilingual population added to it, T-0187's own kind of change) has
-// collided with a synthetic role token, which is exactly the residual risk
-// mask/words.go's own comment on roleGivenWords/roleFamilyWords states
-// rather than hides.
-func TestRoleWordsExcludeCurrentNameDictionary(t *testing.T) {
-	dict := textsig.Dictionary()
-	cases := []struct {
-		role  mask.Role
-		words []string
-	}{
-		{mask.RoleGiven, mask.RoleWords(mask.RoleGiven)},
-		{mask.RoleFamily, mask.RoleWords(mask.RoleFamily)},
-	}
-	for _, tc := range cases {
-		if len(tc.words) == 0 {
-			t.Fatalf("mask.RoleWords(%q) returned no words", tc.role)
-		}
-		for _, w := range tc.words {
-			if dict.LooksLikeName(w) {
-				t.Errorf("role %q word %q is in internal/textsig's current name dictionary", tc.role, w)
-			}
-		}
-	}
-}
+// TestRoleWordsExcludeCurrentNameDictionary is retired (T-0304). It checked
+// every word of mask.RoleWords(RoleGiven/RoleFamily) against
+// internal/textsig's name dictionary, because a real name in a masked
+// first_name or last_name column was a residual hit the scan confirmed and
+// refused at exit 9. ADR-015 inverted that premise: the residual scan explains
+// a masked name equal to some other row's real name (the list contains it,
+// transform emitted every copy, no row kept its own), so the lists ARE real
+// names now -- the 2020 Census given names and surnames -- and a dictionary
+// hit on one of them is the intended state, not a defect. What replaces it
+// lives in the mask module, beside the lists: mask/role_test.go's
+// TestEveryListWordIsEmittedForItsRole, TestNameListsHaveNoFoldDuplicates,
+// TestPersonNameDomainIsTheCensusLists and TestNameColumnIsNotSmallDomain,
+// and mask/vocab_test.go's TestListWordsNeverMaskToThemselves.

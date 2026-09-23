@@ -17,19 +17,17 @@ func titleASCII(s string) string {
 
 // ---------- person_name ----------
 
-// personNameMasker draws a name from the embedded lists, shaped by
-// Constraints.Role (T-0287). RoleGiven and RoleFamily each draw one word from
-// their own dedicated list (roleGivenNames, roleFamilyNames -- a synthetic,
-// non-dictionary vocabulary disjoint from givenNames/surnames, mask/words.go's
-// own comment on roleGivenWords/roleFamilyWords has the reason: a single word
-// off the shared, real-name lists collides with a real production value in an
-// ordinary first_name or last_name column far too often to be a coincidence
-// the residual scan should have to swallow). The zero value, RoleFull, is the
-// original behaviour -- a column wide enough gets "Given Surname" off the
-// shared givenNames/surnames lists, unchanged, and a narrower one gets a
-// single given name that fits. A column too narrow for any name at all has a
-// domain of 0 and is refused at plan rather than truncated here, because a
-// truncated name keeps a length.
+// personNameMasker draws a name from the module's one pair of name lists,
+// givenNames and surnames (the 2020 Census given names and surnames,
+// words.go), shaped by Constraints.Role (T-0287). RoleGiven draws one given
+// name, RoleFamily one surname. The zero value, RoleFull, gets "Given Surname"
+// when the column is wide enough and a single given name that fits when it is
+// not. A column too narrow for any name at all has a domain of 0 and is
+// refused at plan rather than truncated here, because a truncated name keeps
+// a length; so is one whose width leaves fewer than nameDomainFloor names to
+// draw from (below). Before T-0304 the two single-word roles drew from synthetic
+// syllable lists of their own and RoleFull from a hand-curated list of about
+// 140 names each; mask/CLAUDE.md records why that changed.
 //
 // It is the one vocabulary masker (vocab.go, ADR-015): its vocabulary method
 // answers, over exactly these lists, whether a value is one Mask could have
@@ -39,50 +37,64 @@ func titleASCII(s string) string {
 // source value.
 type personNameMasker struct{}
 
+// nameDomainFloor is the fewest names a person_name column may draw from, and
+// it is ADR-015's floor on each list: at least 400, so that section 5's
+// small_domain rule (d < 2 x distinct samples) never fires over a 200-row
+// sample of a name column. The whole lists clear it (958 and 1,000); a narrow
+// column's fitting subset may not — a varchar(2) fits two given names (Jo,
+// Ty), and the redraw makes that an invertible swap — and the parent does not
+// apply the generator half of that rule (mask/CLAUDE.md, T-0304), so the
+// masker refuses such a column itself: its Domain is 0 and it is refused at
+// plan, as it was before the Census lists brought two-letter names.
+const nameDomainFloor = 400
+
+// personNameForm is the form personNameMasker draws for c and how many values
+// it has: a single given name, a single surname, or (RoleFull) a
+// "Given Surname" pair when enough pairs fit and a single given name when not.
+// n is 0 when no form fitting the column reaches nameDomainFloor.
+func personNameForm(c Constraints) (list *wordList, pair bool, n int64) {
+	budget := room(c)
+	floor := func(l *wordList) (*wordList, bool, int64) {
+		if k := int64(l.count(budget)); k >= nameDomainFloor {
+			return l, false, k
+		}
+		return nil, false, 0
+	}
+	switch c.Role {
+	case RoleGiven:
+		return floor(givenNames)
+	case RoleFamily:
+		return floor(surnames)
+	default:
+		if k := pairCount(givenNames, surnames, 1, budget); k >= nameDomainFloor {
+			return nil, true, k
+		}
+		return floor(givenNames)
+	}
+}
+
 func (personNameMasker) Domain(c Constraints) int64 {
 	if d, ok := labelDomain(c); ok {
 		return d
 	}
-	switch c.Role {
-	case RoleGiven:
-		return int64(roleGivenNames.count(room(c)))
-	case RoleFamily:
-		return int64(roleFamilyNames.count(room(c)))
-	default:
-		if n := pairCount(givenNames, surnames, 1, room(c)); n > 0 {
-			return n
-		}
-		return int64(givenNames.count(room(c)))
-	}
+	_, _, n := personNameForm(c)
+	return n
 }
 
 func (personNameMasker) Mask(h [32]byte, _ Value, c Constraints) (Value, error) {
 	if v, ok := labelValue(h, c); ok {
 		return v, nil
 	}
-	s := newStream(h)
-	budget := room(c)
-	switch c.Role {
-	case RoleGiven:
-		if n := roleGivenNames.count(budget); n > 0 {
-			return Value{Text: titleASCII(roleGivenNames.words[s.intn(int64(n))])}, nil
-		}
-		return Value{}, ErrNoRoom
-	case RoleFamily:
-		if n := roleFamilyNames.count(budget); n > 0 {
-			return Value{Text: titleASCII(roleFamilyNames.words[s.intn(int64(n))])}, nil
-		}
-		return Value{}, ErrNoRoom
-	default:
-		if n := pairCount(givenNames, surnames, 1, budget); n > 0 {
-			g, sn := pairAt(givenNames, surnames, 1, budget, s.intn(n))
-			return Value{Text: titleASCII(g) + " " + titleASCII(sn)}, nil
-		}
-		if n := givenNames.count(budget); n > 0 {
-			return Value{Text: titleASCII(givenNames.words[s.intn(int64(n))])}, nil
-		}
+	list, pair, n := personNameForm(c)
+	if n == 0 {
 		return Value{}, ErrNoRoom
 	}
+	s := newStream(h)
+	if pair {
+		g, sn := pairAt(givenNames, surnames, 1, room(c), s.intn(n))
+		return Value{Text: titleASCII(g) + " " + titleASCII(sn)}, nil
+	}
+	return Value{Text: titleASCII(list.words[s.intn(n)])}, nil
 }
 
 // ---------- address ----------

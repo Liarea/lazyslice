@@ -13,11 +13,11 @@ import (
 // cut, -given-per-sex 500 -surnames 1000 (tools/names/README.md,
 // THIRD_PARTY_NOTICES.md): 958 given names -- the union of the top-500 most
 // common male and top-500 most common female first names, deduped -- and all
-// 1,000 surnames. words_corpus.go is not yet read by any masker (T-0304
-// wires it in, per mask/CLAUDE.md), so this file is the only thing in this
-// module that would notice a silent regeneration with a different cut, a
-// different source file, or a filtering change -- this test is what turns
-// that into a loud failure.
+// 1,000 surnames. Since T-0304 these are the lists every person_name role
+// and every email local part draws from (words.go's givenNames and
+// surnames), so a silent regeneration with a different cut, a different
+// source file or a filtering change would change every masked name; this test
+// turns that into a loud failure before role_test.go's Domain counts do.
 const (
 	wantCensusGivenWordCount   = 958
 	wantCensusSurnameWordCount = 1000

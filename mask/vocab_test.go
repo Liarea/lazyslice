@@ -31,14 +31,15 @@ func roleCases() []roleCase {
 		{"given", Constraints{TypeTag: "text", Role: RoleGiven}},
 		{"family", Constraints{TypeTag: "text", Role: RoleFamily}},
 		{"full", Constraints{TypeTag: "text", Role: RoleFull}},
-		{"full-narrow", Constraints{TypeTag: "varchar", MaxLen: 7, Role: RoleFull}},
+		{"full-narrow", Constraints{TypeTag: "varchar", MaxLen: 5, Role: RoleFull}},
 	}
 }
 
-// everyListWord is every word of every list personNameMasker draws from.
+// everyListWord is every word of every list personNameMasker draws from:
+// since T-0304 the one pair, givenNames and surnames (the 2020 Census lists).
 func everyListWord() []string {
 	var out []string
-	for _, w := range []*wordList{roleGivenNames, roleFamilyNames, givenNames, surnames} {
+	for _, w := range []*wordList{givenNames, surnames} {
 		out = append(out, w.words...)
 	}
 	return out
@@ -61,11 +62,29 @@ func TestVocabularyIsFoldFaithful(t *testing.T) {
 	for _, w := range everyListWord() {
 		check(titleASCII(w))
 	}
-	for _, g := range givenNames.words {
-		for _, s := range surnames.words {
-			check(titleASCII(g) + " " + titleASCII(s))
+	for _, in := range samplePairs() {
+		check(in)
+	}
+}
+
+// samplePairs is a set of "Given Surname" pairs in which every given name and
+// every surname appears, each several times and beside different partners.
+// Every pair of the two lists was walked while they were ~140 words each
+// (20,445 pairs); at the Census lists' 958 x 1,000 that is 958,000 Apply calls
+// and most of a minute under -race, for no more coverage than this: fold and
+// the redraw both act on a pair through its two words and the one space
+// between them, and every word is here in both of its positions' company.
+func samplePairs() []string {
+	n := max(len(givenNames.words), len(surnames.words))
+	var out []string
+	for _, step := range []int{0, 1, 97, 331} {
+		for i := 0; i < n; i++ {
+			g := givenNames.words[i%len(givenNames.words)]
+			sn := surnames.words[(i+i*step)%len(surnames.words)]
+			out = append(out, titleASCII(g)+" "+titleASCII(sn))
 		}
 	}
+	return out
 }
 
 // Only person_name answers the vocabulary question. Adding a second masker to
@@ -92,8 +111,10 @@ func TestOnlyTheseMaskersEmit(t *testing.T) {
 }
 
 func TestEmits(t *testing.T) {
-	given := titleASCII(roleGivenNames.words[0])
-	family := titleASCII(roleFamilyNames.words[0])
+	// "Mary" is only a given name and "Smith" only a surname on the Census
+	// lists, so each is inside one single-word role and outside the other.
+	given := "Mary"
+	family := "Smith"
 	pair := titleASCII(givenNames.words[3]) + " " + titleASCII(surnames.words[5])
 	single := titleASCII(givenNames.words[0])
 	text := Constraints{TypeTag: "text"}
@@ -117,7 +138,9 @@ func TestEmits(t *testing.T) {
 		{"a pair too wide for the column", MaskerPersonName, Value{Text: pair},
 			Constraints{TypeTag: "varchar", MaxLen: len(pair) - 1}, false},
 		{"a name off every list", MaskerPersonName, Value{Text: "Wolfgangina"}, with(RoleGiven), false},
-		{"a shared-list word in a role column", MaskerPersonName, Value{Text: single}, with(RoleGiven), false},
+		{"a given name in a family column", MaskerPersonName, Value{Text: given}, with(RoleFamily), false},
+		{"a word both lists carry, in a given column", MaskerPersonName, Value{Text: "Allen"}, with(RoleGiven), true},
+		{"a word both lists carry, in a family column", MaskerPersonName, Value{Text: "Allen"}, with(RoleFamily), true},
 		{"NULL", MaskerPersonName, Value{Null: true}, with(RoleGiven), false},
 		{"empty", MaskerPersonName, Value{}, with(RoleGiven), false},
 		{"bytes", MaskerPersonName, Value{Bytes: []byte(given)}, with(RoleGiven), false},
@@ -145,9 +168,9 @@ func TestEmits(t *testing.T) {
 func TestACustomNameMaskerDoesNotEmit(t *testing.T) {
 	m := funcMasker{
 		mask: func(h [32]byte, _ Value, _ Constraints) (Value, error) {
-			return Value{Text: titleASCII(roleGivenNames.words[int(h[0])%len(roleGivenNames.words)])}, nil
+			return Value{Text: titleASCII(givenNames.words[int(h[0])%len(givenNames.words)])}, nil
 		},
-		domain: int64(len(roleGivenNames.words)),
+		domain: int64(len(givenNames.words)),
 	}
 	if _, ok := Masker(m).(vocabularyMasker); ok {
 		t.Fatal("a masker written outside personNameMasker answers the vocabulary question")
@@ -175,18 +198,16 @@ func TestListWordsNeverMaskToThemselves(t *testing.T) {
 			}
 		}
 	}
-	// A full name as the input of a full-name column, every pair.
+	// A full name as the input of a full-name column: every given name and
+	// every surname, in pairs (samplePairs).
 	full := roleCases()[2].c
-	for _, g := range givenNames.words {
-		for _, s := range surnames.words {
-			in := titleASCII(g) + " " + titleASCII(s)
-			r, err := Apply(k, CatPersonName, MaskerPersonName, Value{Text: in}, full)
-			if err != nil {
-				t.Fatalf("Apply: %v", err)
-			}
-			if FoldEqual(r.Out.Text, in) {
-				t.Errorf("a full name masked to itself (%d letters)", len(in))
-			}
+	for _, in := range samplePairs() {
+		r, err := Apply(k, CatPersonName, MaskerPersonName, Value{Text: in}, full)
+		if err != nil {
+			t.Fatalf("Apply: %v", err)
+		}
+		if FoldEqual(r.Out.Text, in) {
+			t.Errorf("a full name masked to itself (%d letters)", len(in))
 		}
 	}
 }
@@ -286,7 +307,7 @@ func (p passName) Mask(h [32]byte, in Value, c Constraints) (Value, error) {
 func TestTheRedrawNeverLaundersAPassthrough(t *testing.T) {
 	c := Constraints{TypeTag: "text", Role: RoleGiven}
 	whole := passName{}
-	if _, err := guarded(t, whole, CatPersonName, Value{Text: "Bado"}, c); !errors.Is(err, ErrPassthrough) {
+	if _, err := guarded(t, whole, CatPersonName, Value{Text: "Mary"}, c); !errors.Is(err, ErrPassthrough) {
 		t.Errorf("a vocabulary masker that returns its input: err = %v, want ErrPassthrough", err)
 	}
 
@@ -295,7 +316,7 @@ func TestTheRedrawNeverLaundersAPassthrough(t *testing.T) {
 	partial := passName{partial: true}
 	k := testKey(t)
 	found := false
-	for _, w := range roleGivenNames.words {
+	for _, w := range givenNames.words {
 		in := Value{Text: titleASCII(w)}
 		canon, tag, err := Canonical(CatPersonName, in, c)
 		if err != nil {

@@ -142,7 +142,7 @@ composite's decision to `person_name` before this filter was added, and it is
 the reason a second Wikidata pull backs this file's exclusions rather than a
 hand-typed one.
 
-## `mask/words_corpus.go` — 2020 Census given-name and surname stock (T-0303)
+## `mask/words_corpus.go` — 2020 Census given-name and surname stock (T-0303, T-0304)
 
 `mask/words_corpus.go`'s `censusGivenWords` and `censusSurnameWords` are
 **not** derived from Wikidata or from any of the ten `testdata/torture/`
@@ -179,11 +179,12 @@ male rank 500, male count 6,742) and reaches names more commonly read as
 female by count (`tools/names/README.md` has the full derivation and a
 worked example). From the surnames file it takes all top-1,000 surnames,
 lowercased: **1,000 surnames**. Neither list is filtered against any other
-corpus the way
-`roleGivenWords`/`roleFamilyWords` above are — see `mask/CLAUDE.md`'s note
-on `words_corpus.go` for why that does not yet matter: no masker reads
-either constant as of this task (T-0303 fetches and generates the corpus
-only; T-0304 wires it in, after T-0302 lands).
+corpus. Since T-0304 they are the `mask` module's only person-name lists:
+`mask/words.go` builds `givenNames` and `surnames` from these two constants
+(the constants themselves stay in `mask/words_corpus.go`), and every masked
+given name, surname, full name and email local part is drawn from them. The
+hand-curated lists `mask/words.go` carried before, and T-0287's synthetic
+role tokens, are gone (`mask/CLAUDE.md`, "The name lists").
 
 ## Copyleft summary
 

@@ -255,31 +255,26 @@ deleting that one assignment would have passed this file, `make check` and
 `RoleFull`.
 
 **039 is a twenty-third**, from the fix-round review that followed `038`
-rather than from a torture schema: that round's own comment on
-`roleGivenWords`/`roleFamilyWords` (`mask/words.go`) claimed the two lists
-"never drawn from a real-name dictionary and disjoint from"
-`givenWords`/`surnameWords` "by construction", which is true of the
-*generation* method (a consonant-vowel syllable grammar) and was false as a
-claim about the *result*: a reviewer measured 34 of the two lists' 900
-entries each as literal entries of `internal/textsig/names.txt`, and
-materially more again as ordinary common given names, surnames or English
-words the dictionary does not carry. The residual scan checks every masked
-value against the whole source column, so an ordinary `first_name`/
-`last_name` column of a few thousand rows had a real chance of exit 9's own
-confirmed-hit refusal on the very demo `038` fixed. Fixed by filtering both
-lists against `internal/textsig/names.txt`, a census-style name corpus and
-the system English dictionary (`mask/CLAUDE.md`'s T-0287 section has the
-full account), narrowing them from 900 entries each to 780 and 863. This
-file seeds `first_name`/`last_name` with exactly the common real names the
-review found colliding, so a reintroduced overlap fails here rather than on
-a stranger's production table; `mask/role_test.go`'s
-`TestRoleWordsExcludeKnownRealNames` and
-`TestRoleWordsDisjointFromSharedNameLists`, and
-`internal/classify/role_test.go`'s
-`TestRoleWordsExcludeCurrentNameDictionary`, pin the same finding at the
-unit level, the last of the three checking the role lists against the
-project's live name dictionary directly (something `mask/role_test.go`
-cannot do itself, since `mask` may import nothing under `internal/`).
+rather than from a torture schema, and its premise has since inverted. That
+round's `roleGivenWords`/`roleFamilyWords` (`mask/words.go`) were synthetic
+consonant-vowel tokens, meant to hold no real name, because the residual
+scan confirmed any masked value the source column held anywhere and refused
+the run at exit 9; a reviewer measured real names among them (gale, sage,
+mari, boris, titus and more), and this file was written seeded with exactly
+those so that an overlap would refuse here. ADR-015 (tracker **T-0302**)
+then taught the residual scan to explain a coincidence inside the masker's
+own vocabulary, and **T-0304** made that vocabulary real names: the 2020
+Census top given names and surnames, for every `person_name` role and for
+email local parts. The synthetic lists and the three tests that pinned them
+(`TestRoleWordsExcludeKnownRealNames`,
+`TestRoleWordsDisjointFromSharedNameLists` and `internal/classify`'s
+`TestRoleWordsExcludeCurrentNameDictionary`) are gone. What the file proves
+now is ADR-015's verify rule end to end over a column of real names masked
+to real names: rows 1-12 keep the review's names, rows 13-100 are Census
+names, so some masked `first_name` and `last_name` values equal another
+row's real value on every run, and it must load at `expect: ok` with
+`verify.residual.explained` counting them. Its `not-copied:` names only
+`email`, whose source values can never equal a masked one.
 
 **040 is a twenty-fourth**, from ADR-015 (tracker **T-0302**) rather than
 from a torture schema, and it is the case `039`'s filtering could only make
@@ -287,13 +282,24 @@ rarer: a masked name equal to *another* row's real name in the same column.
 The residual scan confirmed a hit by asking whether the source column held
 the value anywhere, so any real-name list over any real name column refused a
 correct run at exit 9. This file seeds `first_name`/`last_name` with words of
-the masker's own current role lists, so such coincidences happen on every
-run by construction, in a table with a primary key and in a twin without one.
+the masker's own lists (since T-0304 the 2020 Census names; before it, the
+synthetic role tokens), so such coincidences happen on every run by
+construction, in a table with a primary key and in a twin without one.
 Since T-0302 the scan explains a hit inside the masker's vocabulary by count
 and row identity instead of probing it, and prints
 `verify.residual.explained`; both tables must load at exit 0. It carries no
 `not-copied:` key on purpose — that key greps the whole target for every
 source value, and here a match is the correct outcome.
+
+**041 is a twenty-fifth**, from ADR-015's "Consequences" and **T-0304**
+rather than from a torture schema: once masked first and last names are
+real Census names, a `full_name GENERATED ALWAYS AS (first_name || ' ' ||
+last_name)` column is a real given name followed by a real surname in every
+row of the target, which is the shape `internal/verify`'s second net
+refuses at exit 9 as a name left in cleartext. The target recomputes the
+column from the two masked ones, so the second net skips its dictionary rule
+for a generated column whose expression names only masked columns of its own
+table (`generatedFromMasked`), and the run must load at `expect: ok`.
 
 The files are loaded and run by `make torture` (`internal/invariants`'s
 `TestTortureRegressions`, behind the `integration` and `torture` build tags), so
@@ -480,7 +486,9 @@ until T-0221. It is what 025 sets.
 | `034-dense-business-number-beside-a-tsvector-is-not-corroborated.sql` | the T-0240 review round (2026-09-17), high finding | **a false refusal the T-0240 fix itself introduced**: `TableHasLikelyPersonalColumn` counts a neighbour at `ConfLikely` or above under any category, with no `identifiesAPerson` test, and a `tsvector` is `derived_text` at `ConfCertain` by its type alone — so a search-index column beside an ordinary, non-key, dense business-number column cancelled that column's own sequence exemption on the strength of a neighbour that is not personal data, and the run refused at exit 9 with nothing wrong in it; fixed by `corroboratedForSequence`, read only for the dense-sequence override, which answers with `NameMatchedNationalID` and `TableHasMaskedPersonalColumn` alone and never `TableHasLikelyPersonalColumn` — `requiresCorroboration`'s own three-signal `corroborated` is unchanged, so `032` and `033` still refuse |
 | `037-fk-pair-partner-carries-a-type-conflict.sql` | tracker T-0257, not a torture-schema reduction — see this file's own prose above | **the residual `035`/`036` left open, now a refusal instead of a copy**: a validated foreign key's parent already carries a decision ARCHITECTURE.md §4 forbids overriding (a `citext` `dob` column, name-matched to `person_date`, type-conflicted at `low`), so `fkPairs` refuses to raise either end rather than mask the child alone and leave the parent copied — before `internal/plan/fkpair.go`'s `checkFKPairRefusal` read that signal (`Decision.Refused`, `Decision.RefusedPartner`), both columns loaded copied verbatim under exit 0; now the run refuses at exit 12, naming both columns with `--unmask` for each |
 | `038-person-name-role-from-column-name.sql` | tracker T-0287, not a torture-schema reduction — see this file's own prose above | **the shape a stranger sees in the README's own landing image**: `person_name`'s masker emitted the same "Given Family" pair for every column in the category, so a `first_name` column held two words and a `last_name` column held a stray surname; fixed by `mask.Role`, decided at classify time from the column's own name and carried on `Decision.Role` beside `Category` the way `UniqueIndex` reaches `mask.Constraints.Unique` — `first_name`/`last_name`/`full_name` here pin the three roles side by side. `not-copied:` cannot tell a correctly shaped fake from a differently wrong one, so the real end-to-end proof that a role reaches the masker is `internal/transform`'s own `TestPersonNameRoleReachesTheMasker`, added in the fix round that followed T-0287, which asserts the one/one/two word shape directly against `transformer.plan`'s output |
+| `039-person-name-role-word-collides-with-real-names.sql` | the T-0287 fix-round review, inverted by ADR-015 and tracker T-0304 — see this file's own prose above | first a guard that the synthetic role lists held no real name, since a real name there refused a correct run at exit 9; since T-0304 the lists are the 2020 Census names and the file seeds real names, some of them on the list, to prove the residual scan explains the coincidences (`verify.residual.explained`) and the run loads at `expect: ok` |
 | `040-person-name-list-coincidence-is-explained.sql` | ADR-015, tracker T-0302, not a torture-schema reduction — see this file's own prose above | a masked name equal to *another* row's real name in the same column was confirmed by the column probe and refused a correct run at exit 9; the residual scan now explains a hit inside the masker's own vocabulary by the count transform emitted and a row check by identity, and reports `verify.residual.explained` — here over a table with a primary key and a twin without one, both at `expect: ok` |
+| `041-generated-full-name-over-masked-name-columns.sql` | ADR-015, tracker T-0304, not a torture-schema reduction — see this file's own prose above | a generated `full_name` over masked `first_name` and `last_name` holds a real given name and surname in every target row once the lists are real names, which the second net's dictionary rule would refuse at exit 9; it is skipped for a generated column over masked columns only, and the run loads at `expect: ok` |
 
 009's header now says `ok`. It did not always: `arrayArrivesAsLiteral` in
 `internal/plan/writeback.go` was written as a stand-in for the element-wise

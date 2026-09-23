@@ -8,8 +8,8 @@
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 0 | 0 | 108 | 0 | 0 |
-| E6 Launch | 6 | 16 | 0 | 15 | 0 | 0 |
-| E9 Later | later | 98 | 0 | 35 | 7 | 0 |
+| E6 Launch | 6 | 19 | 0 | 14 | 0 | 0 |
+| E9 Later | later | 101 | 0 | 35 | 7 | 0 |
 
 ## Open and in progress
 
@@ -127,12 +127,17 @@
 - T-0325 [open] E6 · --unmask on a first run must not put it on the re-run path; the drift message names the real decision (sonnet)
 - T-0326 [open] E6 · A stray positional argument is a usage error, not 'the source did not report a server version' (sonnet)
 - T-0327 [open] E6 · A committed yml whose target is a container lazyslice created reconnects or re-provisions, and says which (opus)
+- T-0328 [open] E6 · The free_text masker fits its output to the input's length (opus)
+- T-0329 [open] E9 · internal/core/core_test.go's recorder Residual double needs AddEmitted and Emitted (T-0302 blocks make check) (haiku)
+- T-0330 [open] E9 · internal/plan's chooseGroupMasker overwrites every masked column's masker with mask.Pick's default, including one the yml or a build named (sonnet)
+- T-0331 [open] E6 · Decide whether a first run may ask both the target question and the root question (human)
+- T-0332 [open] E9 · internal/invariants/CLAUDE.md's contract says the suite imports only internal/testutil of ours; I2 now imports the mask module (T-0302) (haiku)
+- T-0333 [open] E6 · --create-target's container name doubles the prefix for a directory named lazyslice-* (sonnet)
 
 ## Recently closed
 
 - T-0064 [done] E5 · Dogfood: two sessions against a real project of the maintainer's choosing, logged in docs/DOGFOOD_LOG.md → done
 - T-0283 [done] E6 · Decide whether v0.2.0 ships a docs site (mkdocs-material on GitHub Pages) or the in-repo docs stay the docs → done
-- T-0302 [done] E6 · The residual scan explains a name-list coincidence by vocabulary, count and row identity, and still refuses every passthrough (ADR-015, verify half) → done
 - T-0303 [done] E6 · tools/names regenerates the masker's name lists from the 2020 Census top-1000 files (public domain), checked in CI → done
 - T-0323 [done] E9 · Decide the free_text masker's length policy for short enum-like values → done
 - T-0065 [done] E6 · 20-second VHS GIF of the first run on Pagila → done
@@ -155,3 +160,4 @@
 - T-0298 [cancelled] E9 · Add a digit-run/phone-without-plus signal so plain 10-12 digit columns are not left to Luhn chance → cancelled
 - T-0083 [done] E5 · Target type registration for CopyFrom: no owner since internal/load shipped → done
 - T-0170 [done] E9 · torture regression 013 (json-object-key-email) fails on main → done
+- T-0197 [done] E5 · R2-05/A10 residual: a name in a language names.txt does not carry still reports "no name or value signal" as a clean bill of health → done
