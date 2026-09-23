@@ -2,6 +2,9 @@
 
 Decisions, plans, and generated references. `adr/` holds the ADRs;
 `BUILD_PLAN.md`, `OPERATING_MODEL.md`, `RUNBOOK.md` are hand-written;
+`DOGFOOD_LOG.md` (T-0064) records the dogfood sessions by shape only: what
+the tool did and what confused, never a value, a table name that identifies
+the application, or the maintainer's employer;
 `FLAGS.md`, `ERRORS.md`, `KEYBINDINGS.md` (not yet generated) are `tools/`
 output and must never be hand-edited; `prompting/` holds per-model cheat
 sheets. `media/` holds launch material: `first-run.tape` and `pace.awk`
