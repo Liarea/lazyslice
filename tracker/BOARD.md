@@ -1,4 +1,4 @@
-# Board · generated 2026-09-22 by tools/tracker.py (source: GitHub project 3 plus tracker/tasks/) — do not hand-edit
+# Board · generated 2026-09-23 by tools/tracker.py (source: GitHub project 3 plus tracker/tasks/) — do not hand-edit
 
 | Epic | Phase | Open | In progress | Done | Cancelled | Blocked |
 |---|---|---|---|---|---|---|
@@ -8,8 +8,8 @@
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 1 | 0 | 107 | 0 | 0 |
-| E6 Launch | 6 | 5 | 0 | 12 | 0 | 0 |
-| E9 Later | later | 94 | 0 | 34 | 7 | 0 |
+| E6 Launch | 6 | 3 | 0 | 14 | 0 | 0 |
+| E9 Later | later | 96 | 0 | 34 | 7 | 0 |
 
 ## Open and in progress
 
@@ -98,7 +98,6 @@
 - T-0277 [open] E9 · The generated cask's quarantine hook uses postflight, which Homebrew deprecates in favour of postflight_steps (sonnet)
 - T-0278 [open] E9 · Release notes name the range as 'since the first commit' when the previous tag is the root (sonnet)
 - T-0282 [open] E6 · Write the 'why I built this' paragraph for the README (human)
-- T-0283 [open] E6 · Decide whether v0.2.0 ships a docs site (mkdocs-material on GitHub Pages) or the in-repo docs stay the docs (human)
 - T-0291 [open] E9 · Makefile's .SHELLFLAGS (-eu -o pipefail) is silently ignored by macOS's GNU Make 3.81 (sonnet)
 - T-0292 [open] E9 · person_name role masking can collide with real name corpora on ordinary tables ()
 - T-0295 [open] E9 · second net's dictionary rule has no single-word check, and T-0287 makes that shape normal (sonnet)
@@ -107,15 +106,18 @@
 - T-0300 [open] E9 · A name column whose values carry digits is masked as an address (sonnet)
 - T-0301 [open] E9 · A go install build prints 'lazyslice dev' instead of its module version (sonnet)
 - T-0302 [open] E6 · The residual scan explains a name-list coincidence by vocabulary, count and row identity, and still refuses every passthrough (ADR-015, verify half) (opus)
-- T-0303 [open] E6 · tools/names regenerates the masker's name lists from the 2020 Census top-1000 files (public domain), checked in CI (sonnet)
 - T-0304 [open] E6 · Masked given names, surnames, full names and email local parts draw from the Census lists (ADR-015, mask half; mask/v0.3.0) (opus)
 - T-0305 [open] E9 · person_date refuses correct runs by cross-row coincidence and by the keyed self-draw (opus)
 - T-0306 [open] E9 · A masked enum with more than 128 labels reaches the residual filter and refuses on a true statement about its domain (sonnet)
 - T-0307 [open] E9 · A second name corpus (INSEE, ONS) and a run-time locale choice for masked names (sonnet)
 - T-0308 [open] E9 · internal/textsig/names.txt's English section could be regenerated from the Census CSVs (sonnet)
+- T-0309 [open] E9 · tools/names: assert no duplicate rows, a filled cut, and a real drops test (sonnet)
+- T-0310 [open] E9 · A minimal docs site (mkdocs-material on GitHub Pages) once the first ten issues show what strangers look for (sonnet)
 
 ## Recently closed
 
+- T-0283 [done] E6 · Decide whether v0.2.0 ships a docs site (mkdocs-material on GitHub Pages) or the in-repo docs stay the docs → done
+- T-0303 [done] E6 · tools/names regenerates the masker's name lists from the 2020 Census top-1000 files (public domain), checked in CI → done
 - T-0065 [done] E6 · 20-second VHS GIF of the first run on Pagila → done
 - T-0155 [done] E5 · v0.0.1 proves the release pipeline end to end: goreleaser, the tap cask, brew install prints a version → done
 - T-0196 [done] E5 · Migrate the tracker to GitHub Issues and Projects behind the existing tools/tracker.py command surface → done
@@ -139,5 +141,3 @@
 - T-0197 [done] E5 · R2-05/A10 residual: a name in a language names.txt does not carry still reports "no name or value signal" as a clean bill of health → done
 - T-0198 [done] E5 · special_category has no value validator; a digit/name-free special-category sentence still crosses unseen → done
 - T-0212 [done] E5 · renderSafe redacts by default, and prints a transform refusal's reason under the values flag → done
-- T-0222 [done] E5 · Cluster identity degrades field by field, and two unknown identities are treated as possibly the same cluster → done
-- T-0223 [done] E5 · mask.Apply never returns a masker's error verbatim: the module wraps it without the value → done
