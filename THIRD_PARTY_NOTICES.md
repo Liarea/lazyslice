@@ -142,6 +142,49 @@ composite's decision to `person_name` before this filter was added, and it is
 the reason a second Wikidata pull backs this file's exclusions rather than a
 hand-typed one.
 
+## `mask/words_corpus.go` — 2020 Census given-name and surname stock (T-0303)
+
+`mask/words_corpus.go`'s `censusGivenWords` and `censusSurnameWords` are
+**not** derived from Wikidata or from any of the ten `testdata/torture/`
+projects above; they are data taken from the U.S. Census Bureau's 2020
+Census names release,
+<https://www.census.gov/topics/population/genealogy/data/2020_names.html>.
+Both source files are works of the U.S. Government and so are in the public
+domain in the United States under **17 U.S.C. § 105** ("Copyright protection
+… is not available for any work of the United States Government"), not
+licensed to this project under any open-source licence. The Bureau asks
+that a use of its data be cited
+(<https://www.census.gov/about/policies/citation.html>); this project's
+citation is: U.S. Census Bureau, 2020 Census, "Frequently Occurring
+Surnames from the 2020 Census" / "Frequently Occurring First Names in the
+2020 Census by Sex."
+
+| File | URL | Date fetched | sha256 |
+|---|---|---|---|
+| `Names2020_FirstNames_Sex_Top1000.xlsx` | <https://www2.census.gov/topics/genealogy/2020surnames/Names2020_FirstNames_Sex_Top1000.xlsx> | 2026-09-22 | `b7e8a8ea8cf5babe0220aa9f0f19294664a1818fc61acd43efcd3ff356fa9676` |
+| `Names2020_LastNames_RaceHispanic_Top1000.xlsx` | <https://www2.census.gov/topics/genealogy/2020surnames/Names2020_LastNames_RaceHispanic_Top1000.xlsx> | 2026-09-22 | `89108b7321fc4656fba390ea665680ac651786d51effc51da54d4b8be3fdbf6b` |
+
+**The cut.** `tools/names` (`tools/names/README.md` has the full extraction
+and generation procedure) reads only each file's `name`, `sex`, `rank` and
+`count` columns — the surnames file's six race and Hispanic-origin
+proportion columns are never read, copied or embedded anywhere in this
+project. From the first-names file it derives a per-sex rank (the file
+itself carries one overall rank and a `MALE`/`FEMALE` count pair, not a
+per-sex rank), takes the union of the top 500 male-ranked and top 500
+female-ranked given names, dedupes and lowercases: **958 given names**.
+"Male-ranked"/"female-ranked" here means ranked by that sex's count within
+the same 1,000-name overall list, not a per-sex top-500 the Bureau itself
+publishes — the bottom of the male-ranked 500 is thin (e.g. `KENNEDY`,
+male rank 500, male count 6,742) and reaches names more commonly read as
+female by count (`tools/names/README.md` has the full derivation and a
+worked example). From the surnames file it takes all top-1,000 surnames,
+lowercased: **1,000 surnames**. Neither list is filtered against any other
+corpus the way
+`roleGivenWords`/`roleFamilyWords` above are — see `mask/CLAUDE.md`'s note
+on `words_corpus.go` for why that does not yet matter: no masker reads
+either constant as of this task (T-0303 fetches and generates the corpus
+only; T-0304 wires it in, after T-0302 lands).
+
 ## Copyleft summary
 
 Five of the ten fixtures are under copyleft licences: `discourse`
