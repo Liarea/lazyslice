@@ -146,6 +146,33 @@
   message: "{table}.{column} is not in {path}: classified fresh and masked at or above possible"
   args: [table, column, path]
 
+# T-0321: dogfood session 1's own report — "1,845 reason lines scrolled past
+# before each refusal ... nothing summarised either". Printed once, right
+# after the last classify.masked.column/classify.copied.column line, only on
+# a run with no committed yml to reuse (internal/core's CodeClassifySummary
+# doc comment has the full account of when this fires instead of
+# classify.reused below).
+- code: classify.summary
+  kind: info
+  stage: classify
+  message: "{column_count} column(s): {masked_count} masked, {copied_count} copied, {key_count} never-masked keys"
+  args: [column_count, masked_count, copied_count, key_count]
+
+# T-0321's other half: dogfood session 2 re-ran from a committed lazyslice.yml
+# with zero drift and got the same 1,806 reason lines session 1 did. On a run
+# that read a committed yml, the classify.masked.column/classify.copied.column
+# lines above are still sent for every column, but internal/render.Lines skips
+# one whose verdict matches what the yml already recorded (Event.Settled) —
+# this line replaces the settled rest on the human transcript, with a
+# changed_count naming how many of the yml's own decisions this run's
+# re-derivation disagreed with (review finding 2), alongside drift_count for
+# the columns the yml never saw at all.
+- code: classify.reused
+  kind: info
+  stage: classify
+  message: "{count} decisions from {path}, {drift_count} drift, {changed_count} changed"
+  args: [count, path, drift_count, changed_count]
+
 # An opt-out is not honoured when the column's type fingerprint has changed
 # since it was recorded, and also when it records no fingerprint at all: an
 # opt-out nothing can revoke is the fail-open version of THREAT_MODEL.md T3's
@@ -967,6 +994,19 @@
   stage: plan
   message: "{table}: {count} rows, {reason}"
   args: [table, count, reason]
+
+# T-0321: dogfood session 1's own report — "the plan listed 114 of 143 tables
+# as schema_only; unreachable one per line; nothing summarised either".
+# Printed once, right after the last plan.step line: how many tables the walk
+# reached (every mode but schema_only) against how many it left unreachable,
+# and the total rows the plan holds (plan.estimate's own {count}, repeated
+# here because this line is the one a reader scrolling past the per-table
+# list actually stops on).
+- code: plan.summary
+  kind: info
+  stage: plan
+  message: "{table_count} table(s) reached, {unreachable_count} unreachable, {row_count} rows"
+  args: [table_count, unreachable_count, row_count]
 
 - code: plan.estimate
   kind: info

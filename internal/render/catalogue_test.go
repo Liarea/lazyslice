@@ -47,6 +47,8 @@ func TestTemplatesReferenceOnlyDeclaredArgKeys(t *testing.T) {
 		event.ArgStage, event.ArgReason, event.ArgContainer, event.ArgPort,
 		event.ArgFKCount, event.ArgTableCount, event.ArgRowCount,
 		event.ArgResidualCount, event.ArgColumnCount,
+		event.ArgMaskedCount, event.ArgCopiedCount, event.ArgKeyCount,
+		event.ArgUnreachableCount, event.ArgDriftCount, event.ArgChangedCount,
 	} {
 		known[k] = true
 	}

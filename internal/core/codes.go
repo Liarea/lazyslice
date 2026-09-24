@@ -129,6 +129,16 @@ const (
 	// CodePlanEstimate is the plan's estimate with the assumption it rests on.
 	CodePlanEstimate event.Code = "plan.estimate"
 
+	// CodePlanSummary is T-0321's one-line plan summary, printed once right
+	// after the last CodePlanStep line: dogfood session 1 listed 114 of 143
+	// tables as schema_only, one line each, with nothing that said how many
+	// of the 143 the walk actually reached or how many rows the plan holds in
+	// total. This folds pipeline.Plan.Steps into one sentence — how many
+	// tables are reached (every mode but SchemaOnly), how many are
+	// unreachable (SchemaOnly), and the total row count CodePlanEstimate's
+	// own {count} already carries.
+	CodePlanSummary event.Code = "plan.summary"
+
 	// CodePlanPolymorphic names a detected <x>_type/<x>_id pair that is not
 	// followed, so that research/COMPLAINTS.md FK-10's silently empty slice is
 	// impossible (ARCHITECTURE.md section 14).
@@ -283,6 +293,51 @@ const (
 	// (T-0319, checkMasks). One event per such column or child, before the
 	// plan and before any write.
 	CodeMaskNotApplied event.Code = "classify.refused.mask"
+
+	// CodeClassifySummary is T-0321's one-line classify summary, printed once
+	// right after the last classify.masked.column/classify.copied.column
+	// line, on a run with no committed yml to reuse: dogfood session 1
+	// scrolled 1,845 reason lines past before its first refusal, with nothing
+	// that folded them into a count. It carries how many columns were masked,
+	// how many were copied because nothing said to mask them, and how many
+	// were copied because they are a surrogate key or foreign key column that
+	// internal/classify never masks regardless of what it finds (the
+	// "preserved verbatim" reasons, classify/reasons.go's surrogate_key,
+	// fk_column and key_child_exempt fragments) — a fourth bucket dogfood
+	// session 1's own report did not separate out, but a reader trying to
+	// tell "nothing looked personal" from "this is a key and never was going
+	// to be masked" needs it. Sent only when r.prior is nil; a run reusing a
+	// committed yml sends CodeClassifyReused instead of both the per-column
+	// lines and this one (session 2's own complaint: a drift-0 re-run printed
+	// all 1,806 reason lines again).
+	CodeClassifySummary event.Code = "classify.summary"
+
+	// CodeClassifyReused is T-0321's re-run line, sent alongside the
+	// per-column classify.masked.column/classify.copied.column lines and in
+	// place of CodeClassifySummary whenever a committed yml was read
+	// (r.prior != nil): dogfood session 2 re-ran from a committed
+	// lazyslice.yml with zero drift and got the same 1,806 reason lines
+	// session 1 did, because every decision the yml already recorded was
+	// still printed as if it were new. The per-column events are still sent
+	// to the sink for every column — the --json stream and internal/tui's
+	// reasons screen are the operator's actual review input and must not
+	// thin out on a re-run (T-0321 review round, finding 1) — but
+	// internal/render.Lines now skips one whose verdict matches what the yml
+	// already recorded (Event.Settled), so the human transcript still
+	// shrinks to this one line for the settled majority. The drift and
+	// opt-out-expiry warnings still print in full — those are exactly the
+	// columns the yml did *not* settle — and CodeClassifyReused itself
+	// carries three counts: how many decisions came from the yml (every
+	// column the yml carried a verdict for, changed ones included, drift
+	// excluded — unchanged from before this count grew a sibling), how many
+	// columns drifted (classify.column.drift's own count) and how many the
+	// yml did carry a
+	// verdict for but this run's re-derivation disagreed with — new sampled
+	// evidence, a new --mask or --unmask flag, or a pattern that now applies
+	// (review finding 2; decisionChanged is the comparison). A changed
+	// column's classify.masked.column/copied.column line is not settled, so
+	// it prints in full on the transcript too, with its reason.
+	CodeClassifyReused event.Code = "classify.reused"
 
 	// CodeReviewedChanged is exit 12: this run is not the run the operator
 	// reviewed. Request.Reviewed carries the schema fingerprint and the two
