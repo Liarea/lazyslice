@@ -8,8 +8,8 @@
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 0 | 0 | 108 | 0 | 0 |
-| E6 Launch | 6 | 23 | 0 | 16 | 0 | 0 |
-| E9 Later | later | 108 | 0 | 37 | 8 | 0 |
+| E6 Launch | 6 | 22 | 0 | 17 | 0 | 0 |
+| E9 Later | later | 107 | 0 | 38 | 8 | 0 |
 
 ## Open and in progress
 
@@ -112,7 +112,6 @@
 - T-0311 [open] E6 · The neighbouring-column sweep spares enum-like, identifier-shaped and unique-indexed columns (opus)
 - T-0312 [open] E6 · The same-column-name rule does not propagate a decision that was itself only a neighbour sweep (sonnet)
 - T-0313 [open] E6 · A bare 'name' column and a '*_file_name' column are not a person's name without corroboration (opus)
-- T-0314 [open] E6 · Framework metadata tables are copied whole and never masked (schema_migrations, ar_internal_metadata and their kin) (sonnet)
 - T-0315 [open] E6 · The entropy validator does not read filenames, hex digests, namespaced class names or a handful of samples as secrets (sonnet)
 - T-0316 [open] E6 · The Luhn check needs a card length and issuer prefix before it masks an id, number or version column (sonnet)
 - T-0317 [open] E6 · A four-part version string is not an IP address, and a digit-only license key is not a phone number (sonnet)
@@ -142,14 +141,15 @@
 - T-0345 [open] E6 · The screens' exit keys: esc inside help quits the program, enter runs unconfirmed, ctrl+c exits 0 (sonnet)
 - T-0346 [open] E6 · A lookup step is shown with 0 rows while the estimate counts its rows (sonnet)
 - T-0347 [open] E9 · extract's lookupLimit silently truncates a framework metadata table over 1,000 rows ()
-- T-0348 [open] E9 · verify's second net has no exemption for a framework metadata column that validates strongly (sonnet)
 - T-0349 [open] E9 · internal/pipeline/framework.go's per-tool bookkeeping column lists need a cited source per tool (sonnet)
 
 ## Recently closed
 
 - T-0143 [done] E9 · Decide the arbitrary-JSON policy: structure-preserving masking versus whole-document replacement → done
+- T-0314 [done] E6 · Framework metadata tables are copied whole and never masked (schema_migrations, ar_internal_metadata and their kin) → done
 - T-0331 [done] E6 · Decide whether a first run may ask both the target question and the root question → done
 - T-0337 [cancelled] E9 · Move internal/verify's tests off mask.RoleWords, then delete RoleWords in the next mask minor → cancelled
+- T-0348 [done] E9 · verify's second net has no exemption for a framework metadata column that validates strongly → done
 - T-0064 [done] E5 · Dogfood: two sessions against a real project of the maintainer's choosing, logged in docs/DOGFOOD_LOG.md → done
 - T-0283 [done] E6 · Decide whether v0.2.0 ships a docs site (mkdocs-material on GitHub Pages) or the in-repo docs stay the docs → done
 - T-0303 [done] E6 · tools/names regenerates the masker's name lists from the 2020 Census top-1000 files (public domain), checked in CI → done
@@ -170,5 +170,3 @@
 - T-0288 [done] E6 · A root table can hold more rows than --take names; say so in the flag's help or stop it → done
 - T-0289 [done] E6 · make gif records with a read-only role, probes readiness from the host, and pace.awk fails when it paused nothing → done
 - T-0290 [done] E6 · goreleaser release build still compiles mask/ from go.work, not the tagged version go.mod requires → done
-- T-0293 [done] E9 · plan equality groups ignore person_name Role, letting an FK pair mask two roles alike → done
-- T-0294 [done] E9 · plan-time DEFAULT rewrite for a person_name column ignores Role → done
