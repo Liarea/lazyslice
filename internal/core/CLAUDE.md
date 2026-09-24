@@ -810,3 +810,36 @@ for a refusal that was reaching people as an internal error.
   one the exit code came from and nothing prints `Report.Checks`, so dogfood
   session 1 met one second-net column per run. `verify.Refusals` carries them
   all when there is more than one; each is its own Error event in §6's order.
+
+## T-0325 (2026-09-24): --unmask on a first run is not a committed file
+
+Dogfood session 1 ran `--unmask` flags with no `./lazyslice.yml` in the
+directory and got `classify.column.drift` — "classified fresh and masked at
+or above possible" — for every column the flags did not name: 1,835 lines,
+none of them printed on the identical run with no `--unmask` flag at all.
+
+- **`cls.Drift` and `r.prior` are two different things, and `classifyStage`'s
+  drift loop was reading the wrong one.** `buildPrior` folds a `--unmask`
+  flag into a non-nil in-memory `*pipeline.Config` even when `r.prior` — the
+  committed file `readConfig` fills, and only from a file that actually
+  exists — is nil, so the flag's opt-out reaches this run's classification;
+  `classify.New().Classify` is called with that in-memory value as its
+  `prior` argument, and `Classification.Drift` is every column
+  `applyPrior` did not find in *that* `Config`'s `Columns` map, whatever
+  built it. The drift-warning loop and the `--strict-schema` refusal
+  (`classify.refused.strict_schema`, exit 10 — ARCHITECTURE.md §8 calls it
+  "any column the committed yml has never seen") both read `cls.Drift` with
+  no regard for whether it came from a file on disk, so a flag-only run with
+  nothing committed reported every column the flags did not touch as
+  "not in ./lazyslice.yml", and would have refused under `--strict-schema`
+  too. Both are now gated on `r.prior != nil`, so a first run — the ordinary
+  case a flag-only `--unmask` is used on — reports none, whatever the flags
+  say, exactly as it did before any `--unmask` flag was given.
+- **The message now names the decision, not the drift rule.** The old text —
+  "classified fresh and masked at or above possible" — describes what drift
+  means in general, and printed unchanged for a column this run had actually
+  left unmasked (dogfood session 1's own boolean columns, decided below the
+  mask threshold). `event.ArgVerdict` carries what `driftVerdict` reads off
+  the column's own `Decision`: `"copied"`, or `"masked as CATEGORY"`, the
+  same two spellings `classify.masked.column` and `classify.copied.column`
+  already use.

@@ -205,6 +205,13 @@ const (
 	// (internal/core's decisionChanged). Distinct from ArgDriftCount, which
 	// counts a column the yml never saw at all.
 	ArgChangedCount ArgKey = "changed_count"
+	// ArgVerdict is T-0325's fix to the drift warning: what this run actually
+	// did with a column not in the committed yml — "copied", or "masked as
+	// <category>" — rather than the fixed "masked at or above possible" the
+	// line used to print regardless of the decision. It is built from the
+	// column's own Decision (never a sample value), the same way ArgReason
+	// is.
+	ArgVerdict ArgKey = "verdict"
 )
 
 // Args is a fixed-key map of identifiers and counts.
