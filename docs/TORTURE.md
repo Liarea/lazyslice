@@ -1002,10 +1002,10 @@ regression `013`, a fixture none of these three schemas touches.
 
 | Schema | Columns | Labelled personal | Predicted | TP | FP | FN | Precision | Recall |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| django | 44 | 9 | 12 | 9 | 3 | 0 | **0.750** | **1.000** |
-| rails-activestorage | 36 | 7 | 15 | 7 | 8 | 0 | **0.467** | **1.000** |
+| django | 44 | 9 | 11 | 9 | 2 | 0 | **0.818** | **1.000** |
+| rails-activestorage | 36 | 7 | 14 | 7 | 7 | 0 | **0.500** | **1.000** |
 | supabase-auth | 271 | 50 | 78 | 50 | 28 | 0 | **0.641** | **1.000** |
-| all three | 351 | 66 | 105 | 66 | 39 | 0 | **0.629** | **1.000** |
+| all three | 351 | 66 | 103 | 66 | 37 | 0 | **0.641** | **1.000** |
 
 **T-0311 (2026-09-24) moved supabase-auth by three false positives and no
 true positive**, and the table above carries it. The neighbouring-column
@@ -1022,6 +1022,42 @@ full run: each schema loaded from its four scripts and classified by
 every column's masked-or-copied verdict compared. The other seven schemas,
 which have no truth set, moved 24 columns between them and none is personal
 data; THREAT_MODEL.md T1's T-0311 amendment lists them.
+
+**T-0313 (2026-09-24) moved django and rails-activestorage by one false
+positive each and no true positive**, and the table above carries it. A
+column matched only by the rule pack's bare `name` word (`name`,
+`display_name`, `<thing>_name`) now needs corroboration before it reaches
+`possible` — a word for people in the table or column name, or at least a
+fifth of its samples carrying a word from the name dictionary — and a
+`*_file_name` column is outside the rule altogether (ARCHITECTURE.md §4's
+T-0313 amendment). django's `auth_permission.name` ("Can add user", 0 of 200
+samples a dictionary word) and rails-activestorage's
+`active_storage_attachments.name` ("cover") are copied now: django 12 → 11
+predicted, precision 0.750 → 0.818; rails-activestorage 15 → 14, 0.467 →
+0.500; all three 105 → 103, 0.629 → 0.641; recall unchanged at 1.000.
+supabase-auth did not move: its two labelled-personal bare names,
+`mfa_factors.friendly_name` and `webauthn_credentials.friendly_name`, hold
+no value in this fixture, so the name decides alone exactly as before (a
+column with fewer than three samples is unproven, not clean); with values,
+a device its owner named ("Grace's iPhone") carries the owner's name in a
+possessive, which the dictionary now reads, and one named "YubiKey 5C" does
+not, and is copied. Measured the way T-0311 was: each of the ten schemas
+loaded from its four scripts and classified by `lazyslice classify --json`
+with the binary before the change and after. Eighteen columns across the
+corpus moved from masked to copied and none moved the other way; none is
+personal data. Ten are bare names no word or sample corroborated —
+django `auth_permission.name`, rails-activestorage
+`active_storage_attachments.name`, plausible `funnels.name`,
+`goals.display_name` and `goals.event_name`, calcom `Role.name` and
+`Team.name`, discourse `groups.name`, `groups.imap_mailbox_name` and
+`polls.name` — and eight are file names: mastodon's five Paperclip
+`*_file_name` columns, discourse `user_exports.file_name`, odoo
+`base_import_import.file_name`, and gitlab `push_rules.file_name_regex`,
+which the file-name exclusion reaches as well (a regexp over file names, not
+a person's). 237 bare-name columns across the ten are still masked on the name
+alone because this corpus's fill leaves their tables empty or their values
+NULL; real data is where the rule moves more, and dogfood session 1's 38
+`name` columns are what it was written for.
 
 The first measurement of this table, before T-0104, was supabase-auth 62
 predicted, 40 TP, 22 FP, 10 FN — precision 0.645, recall 0.800 — and all three
@@ -1096,29 +1132,36 @@ language), and the full suite — this file's fixtures, the composite tests,
 `TestDictionaryKeepsItsPrecisionRules`, the three per-language truth sets and
 `make torture` in full — passes with it in place.
 
-### django — precision 0.750, recall 1.000
+### django — precision 0.818, recall 1.000
 
-Nothing personal was missed. The three false positives are all the same shape: a
+Nothing personal was missed. The two false positives are both the same shape: a
 column called `name` that is not a person's.
 
 * `auth_group.name` — "Editors". `varchar(150) UNIQUE`, decided `person_name`,
-  and the one flag this schema needs.
-* `auth_permission.name` — "Can add user".
+  and the one flag this schema needs. Since T-0313 a bare `name` needs
+  corroboration, and this fixture's group names carry a dictionary word in 4
+  of 20 samples, which is the threshold, so it is still flagged.
 * `django_migrations.name` — "0001_initial".
+
+A third, `auth_permission.name` ("Can add user"), was one until T-0313: none of
+its samples carries a dictionary word, so the bare name stays at `low` and is
+copied.
 
 Both of the schema's *hidden* carriers were caught: `django_admin_log.object_repr`
 ("User: bjorn.haddad1@borealis-works.test") at `likely`, and
 `django_admin_log.change_message` at `possible`. Neither column's name says
 anything.
 
-### rails-activestorage — precision 0.467, recall 1.000
+### rails-activestorage — precision 0.500, recall 1.000
 
-The worst precision of the three, and it is one validator. Eight false
+The worst precision of the three, and it is one validator. Seven false
 positives, of which six are `LooksSecret` firing on a value that is merely long
 and mixed: a checksum, a `variation_digest`, an ActiveStorage `key`, a
 `content_type` of `application/pdf`, and `ar_internal_metadata.key` holding
-"environment". The other two are `person_name` on `service_name` ("local") and
-on `active_storage_attachments.name` ("cover").
+"environment". The seventh is `person_name` on `service_name` ("local"), a bare
+name no word or sample corroborates, raised to `possible` by the
+neighbouring-column rule beside `filename`. `active_storage_attachments.name`
+("cover") was an eighth until T-0313 and is copied now.
 
 Nothing personal was missed, including the one that matters:
 `active_storage_blobs.filename` — `ana-aluko-passport-3.pdf` — is caught at

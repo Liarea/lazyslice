@@ -42,8 +42,9 @@ exemption; add a way for a category's confidence to be lowered by config.
   accepted type families, the name patterns with their priorities, the
   table-scoped patterns (T-0119: a name rule gated by a second regexp over the
   table, for a column name that means something different depending which
-  table it is in), and the log-shaped table rule. Changing it changes
-  `Classification.Fingerprint`.
+  table it is in), the `unless` and `corroborated_by` fields a name rule may
+  carry (T-0313, "A bare name needs corroboration" below), and the log-shaped
+  table rule. Changing it changes `Classification.Fingerprint`.
 - `literal.go` — reading a Postgres array or composite output literal back into
   the values inside it (T-0103, T-0094). A reader, not a parser: liberal in what
   it accepts, and what it cannot read stays one opaque value.
@@ -1698,3 +1699,94 @@ spared columns with the `not-masked:` key, whose failure message in
 guessed-region phone hit was masked. A regression of this rule would fail
 there correctly but name the wrong cause; the harness is outside this task's
 paths.
+
+## A bare name needs corroboration (T-0313)
+
+Dogfood session 1 found 38 columns called just `name` — tags, folders,
+playlists, widgets, roles, languages, AI models, triggers — and every
+Paperclip `*_file_name` column masked as `person_name` by the rule pack's
+`(^|_)names?(_|$)` word, and two under unique indexes refused the plan. The
+word says a column holds *a* name, not *a person's*.
+
+**The rule pack.** `person_name`'s row keeps every specific spelling
+(`first_name`, `surname`, `nazwisko`...) and loses `names?` and
+`display_?names?`, which are `bare_name` now, one priority below it (34), so a
+specific spelling still wins a tie. A qualifier that itself says the name is a
+person's — `legal_name`, `preferred_name`, `nick_name`, `birth_name`,
+`married_name`, `card_holder_name`/`cardholder_name`, `billing_name`,
+`shipping_name`, `name_on_card`, `name_given`/`name_family`/`name_first`/
+`name_last`/`name_middle` — was added to `person_name`'s row by the review
+round, so it keeps `possible` on the name alone and never waits on
+corroboration; each spelling carries the underscore, so the row masks exactly
+what the old bare word masked there and nothing new (`bare_name_test.go`'s
+`kyc_checks` pins them with samples the dictionary does not hold). The
+run-together spellings (`nickname`, `legalname`) match no name rule at all,
+before T-0313 and since; that recall gap is T-0353. `bare_name` carries the two fields
+`rulepack.go` learnt for it: `unless` (`(^|_)file_?names?(_|$)`) takes a file
+name out of the rule entirely, in `match` and `matchColumn` alike, and
+`corroborated_by` is a regexp of words for people — about eighty,
+singular and plural, erring wide (`clients` and `agents` are here though they
+also name OAuth clients and AI agents) — read against the normalised table name and the normalised column
+name. `decodePack` refuses `corroborated_by` on any category but
+`person_name`, because the name dictionary is the only value evidence that can
+corroborate it (`TestCorroboratedByIsReadOnAPersonNameRuleOnly`).
+
+**`decide`**, on a name hit from a rule that carries `corroborated_by`, asks
+`bareNameVerdict`, which answers in this order:
+
+1. a word for people in the table or column name — corroborated, and the line
+   names the word (`bare_name_by_word`);
+2. fewer than `minSamples` samples — unproven, so the name decides alone as
+   it always did (`bare_name_unproven`): an empty table's `name` is masked;
+3. at least `nameCorroborationThreshold` (0.2) of the samples carrying a word
+   from the dictionary (`textsig.Dict.ContainsName`, which reads a possessive
+   as its name since this task) — corroborated (`bare_name_by_samples`);
+4. otherwise uncorroborated (`bare_name_uncorroborated`).
+
+Uncorroborated is not "no name signal", and the branches are ordered so that no
+case ends less masked than it needs to: a value signal at
+`validatorThreshold` decides the column as it does beside any name the values
+disagree with; a strong minority hit (`sig.strongHit`) keeps the old name-alone
+`possible` and the line names the hit; a lower rule that also matches
+(`matchColumnAfter`, so `content_name` is `free_text`) decides the column; and
+only with none of those is the column recorded at `low`, under `person_name` or
+a sub-threshold value signal's own category, with `work.nameUncorroborated`
+set. `low` is what the neighbouring-column rule's first arm raises beside a
+`likely` column, and that is deliberate: a personal column in the same table is
+evidence about this table. `sameColumnName` does not raise it
+(`nameUncorroborated` is skipped as a target): `users.name` holding people is
+no evidence about `tags.name`, and without the skip every uncorroborated
+`name` column in a schema with one masked `name` came straight back —
+`TestBareNameNeedsCorroboration`'s same-name check fails with the skip
+removed.
+
+**The threshold** is `validators.go`'s `nameCorroborationThreshold` and its
+comment has the calibration: label lists 0% to 12% dictionary words, lists of
+people 30% to 100%. It is far below `weakThreshold` because the name is half
+the evidence already.
+
+**Measured.** `TestBareNameTruthSetsWithSamples` reruns both DB-free truth
+sets with samples on their bare-name columns (the plain runs above leave every
+bare name unproven, so they cannot see this rule): pagila with its own
+category and language names reads precision 0.842 / recall 1.000 (0.762 /
+1.000 without samples), and the held-out names 0.979 / 1.000 (0.959 / 1.000);
+every labelled-personal bare name there is corroborated by its table alone,
+with samples the dictionary does not carry. Over the ten torture schemas,
+classified before and after, 18 columns moved from masked to copied and none
+the other way, none personal; docs/TORTURE.md and THREAT_MODEL.md T1's T-0313
+amendment list them. `TestBareNameNeedsCorroboration` pins both directions,
+including the residual: a bare `name` of a table not named for people, holding
+names in a script the dictionary lacks, is copied — THREAT_MODEL.md T1's
+stated residual, as a non-Latin name already was. It is pinned so a change
+that closes it is noticed and the residual text moves with it.
+`testdata/regressions/044` is the end-to-end half.
+
+**What is not changed.** The multilingual bare words for "name" in the
+`person_name` row — `nombres?`, `naam`, `navn` — still mask on the name alone:
+the goal named the English word, and narrowing another language's is a recall
+change of its own, filed rather than made here (T-0352). The JSON-leaf path
+(`jsonLeafIsPersonal`) reads `match`, which honours `unless` but not
+corroboration: a leaf has no table and no samples of its own, so a `name` key
+still marks a document personal, and a `file_name` key no longer does (the
+document is masked on its type either way).
+

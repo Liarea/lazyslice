@@ -335,6 +335,18 @@ the thresholds). The file pins both directions: eleven spared columns under
 `not-masked:`, and under `not-copied:` a native-script name column that is
 an enumeration by count alone and must still be swept.
 
+**044 is a twenty-eighth**, from the same dogfood session (**T-0313**): the
+rule pack's bare `name` word masked 38 columns called just `name` — tags,
+folders, playlists, widgets, languages, AI models — and every Paperclip
+`*_file_name` column as a person's name, and two under unique indexes refused
+the plan. `rules.yml`'s `bare_name` rule now needs corroboration (a word for
+people in the table or column name, or samples the name dictionary carries;
+internal/classify's own T-0313 section has the rule), and a `*_file_name`
+column is outside it. The file pins both directions: five label columns under
+`not-masked:`, and under `not-copied:` a users table's `name` corroborated by
+its table name alone and an orders table's `name` corroborated by its
+samples.
+
 The files are loaded and run by `make torture` (`internal/invariants`'s
 `TestTortureRegressions`, behind the `integration` and `torture` build tags), so
 a regression that comes back fails a build rather than being rediscovered by the
@@ -526,6 +538,7 @@ until T-0221. It is what 025 sets.
 | `040-person-name-list-coincidence-is-explained.sql` | ADR-015, tracker T-0302, not a torture-schema reduction — see this file's own prose above | a masked name equal to *another* row's real name in the same column was confirmed by the column probe and refused a correct run at exit 9; the residual scan now explains a hit inside the masker's own vocabulary by the count transform emitted and a row check by identity, and reports `verify.residual.explained` — here over a table with a primary key and a twin without one, both at `expect: ok` |
 | `041-generated-full-name-over-masked-name-columns.sql` | ADR-015, tracker T-0304, not a torture-schema reduction — see this file's own prose above | a generated `full_name` over masked `first_name` and `last_name` holds a real given name and surname in every target row once the lists are real names, which the second net's dictionary rule would refuse at exit 9; it is skipped for a generated column over masked columns only, and the run loads at `expect: ok` |
 | `043-enum-and-identifier-columns-beside-a-certain-email.sql` | dogfood session 1, tracker T-0311, not a torture-schema reduction — see this file's own prose above | **a copy that did not boot**: `unknownColumnsBesideCertain` swept a role, a state, a UI mode, an OS type, a log level, a timezone, a text uuid, a version, a hostname, a hex serial and an asset path into `free_text` beside a `certain` email column; an enumeration or an all-one-identifier-shape column is now spared and copied with a reason line saying why, while a native-script name column that is an enumeration by count alone is still swept and masked |
+| `044-bare-name-columns-of-label-tables.sql` | dogfood session 1, tracker T-0313, not a torture-schema reduction — see this file's own prose above | **a person's name where the application expects a label**: the rule pack's bare `name` word masked every column called `name` — a tag, a folder, a language, an AI model — and every `*_file_name` column as `person_name`, and a unique-indexed one refused the plan; `bare_name` now needs a word for people in the table or column name or samples the name dictionary carries, `not-masked:` pins five label columns copied and `not-copied:` pins a users table's `name` (corroborated by its table) and an orders table's `name` (corroborated by its samples) still masked |
 
 009's header now says `ok`. It did not always: `arrayArrivesAsLiteral` in
 `internal/plan/writeback.go` was written as a stand-in for the element-wise
