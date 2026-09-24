@@ -535,3 +535,77 @@ the evidence for a promise this call was not keeping.
 
 What is still owed: `internal/verify` does not re-read the target to confirm the
 object it refused over is actually gone before the run returns — **T-0183**.
+
+## ar_internal_metadata's environment is rewritten (T-0314)
+
+Dogfood session 1 found `ar_internal_metadata` copied verbatim, `environment`
+row and all, which makes a fresh Rails checkout refuse a destructive rake task
+because the row it reads back says `production`. `internal/pipeline`'s own
+T-0314 entry is where the table is recognised by name at all
+(`IsFrameworkMetadataTable`, checked in `internal/plan`'s `findLookups` and
+`internal/classify`'s `markNeverMasked`) and where the two columns are found
+(`ArInternalMetadataEnvironmentColumns`); this package is the one that writes
+the new value.
+
+- **`rewriteFrameworkMetadata` runs inside the table's own still-open
+  transaction, between `CopyFrom` finishing and `Commit`** (`commitTable`,
+  which replaces what used to be `tableCopy`'s own bare `commit` method). The
+  table gets exactly one transaction, opened at `Seq 0` and committed at
+  `Last` (ARCHITECTURE.md §1, §2's `RowBatch` doc, THREAT_MODEL.md T8), and
+  the rewrite is part of that same commit-or-nothing unit: a failure in it
+  rolls the whole table back, empty, rather than leaving rows committed with
+  `production` still in them or the UPDATE lost after a partial commit.
+  `commitTable` needed `schema` (to find the columns) and this package's own
+  `refuse`/`rollback` helpers, neither of which `tableCopy` carries, so the
+  method moved to `loader` rather than growing a fourth parameter on
+  `tableCopy.commit`; `copy` now calls `l.commitTable(ctx, cur, schema)`
+  where it used to call `cur.commit(ctx)`, and `copy` itself gained a
+  `schema` parameter to have one to pass.
+- **The match is by bare table name, case-insensitively**
+  (`strings.EqualFold(tc.table.Name, "ar_internal_metadata")`), the same rule
+  `pipeline.IsFrameworkMetadataTable` states; this function does not call
+  that one; because it is checking one specific name rather than the whole
+  list, and a second, wider check here would be a second place T-0314's name
+  list could drift from the first.
+- **The columns are found by `pipeline.ArInternalMetadataEnvironmentColumns`
+  over the *schema*, not assumed.** `ok` false — a same-named table of a
+  different shape, which nothing here can rule out by name alone — skips the
+  rewrite silently rather than sending a statement that names a column that
+  is not there; `internal/plan`'s `frameworkMetadataWhy` makes the identical
+  check before the run starts, so the plan's "environment rewritten to
+  development" sentence and what this function actually does can never
+  disagree about whether the columns exist. The two are deliberately not one
+  shared call site — `internal/plan` cannot import `internal/load` (stage
+  packages do not import each other) — so both read the one function that
+  answers the question and neither re-derives it.
+- **The statement is a plain `UPDATE ... SET value = 'development' WHERE key
+  = 'environment'`**, quoted with `ddl.QuoteIdent`/`ddl.QuoteLiteral`
+  (exported from `internal/load/ddl` for exactly this, beside the existing
+  exported `ddl.TableName` — T-0130's own comment on that function states the
+  same reason: two independent spellings of the same escaping is the risk).
+  It runs whether or not the source held a row with that key at all — an
+  `UPDATE` matching no row is a no-op, not a refusal — because a table this
+  package cannot fully characterise from a name alone should not refuse the
+  load over a shape it merely expected.
+- **Only Rails' own table gets a rewrite.** None of the other names on
+  T-0314's list carry a value that would make a development checkout behave
+  differently depending on it, so this function is the whole of that half of
+  the feature; a future entry needing the same treatment is a second
+  `if strings.EqualFold(...)` branch here; a same-named table of a different
+  shape — ok false — is still a framework metadata table by name and is still
+  copied whole; it is only the rewrite sentence that depends on the shape,
+  because internal/load makes the identical check before it writes the
+  UPDATE, and there is nothing else for such a table's copy to do.
+- **`tableByRef` is a linear scan over `schema.Tables`.** `Schema.Tables` is
+  the whole introspected catalog, never a row count, so this costs nothing
+  next to the `CopyFrom` it runs beside; a map would be a second index this
+  package would have to keep in step with the plan for one lookup per table.
+
+`internal/load/load_integration_test.go`'s
+`TestLoadRewritesArInternalMetadataEnvironment` is the end-to-end pin, against
+a real target: it loads `testdata/nasty.sql` plus two extra tables
+(`frameworkMetadataSchema`, the same shape `internal/plan`'s own T-0314 fixture
+uses) through the real extractor and this package's real `Load`, and asserts
+both that `schema_migrations` — reached by no foreign key at all — holds every
+one of its source rows rather than none, and that the target's `environment`
+row reads `development` against a source that still says `production`.

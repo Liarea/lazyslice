@@ -1263,3 +1263,62 @@ not a defect (root CLAUDE.md, THREAT_MODEL.md): the alternative is a
   and pagila are both read by suites outside this task's paths that count
   their tables, exactly the reason `extraSchema` above lives in this file
   and not in `testdata/`.
+
+## A framework metadata table bypasses the lookup rule, and says so when it cannot keep its promise (T-0314)
+
+`findLookups` forces `schema_migrations`, `ar_internal_metadata` and the rest
+of `pipeline.IsFrameworkMetadataTable`'s list to a `Lookup` step regardless of
+reachability, the mask check and the 1,000-row lookup ceiling: dogfood
+session 1 found `schema_migrations` reached by no foreign key at all — the
+ordinary shape of migration bookkeeping, not a corner case — so §3's own "at
+least one incoming edge" clause left it `SchemaOnly` and a fresh checkout
+re-ran every migration against the target. `frameworkMetadataWhy` is the
+`plan.step` line it gets instead of the bare `"lookup"` every other Lookup
+step carries, and `ar_internal_metadata` gets a second sentence when
+`pipeline.ArInternalMetadataEnvironmentColumns` finds its key/value columns
+where Rails put them, announcing the rewrite `internal/load` performs before
+any row moves rather than leaving it for an operator to discover by reading
+the target afterwards.
+
+**"Copied whole" was not always true, and the plan used to say it anyway**
+(the T-0314 review round, finding 1). Bypassing the row ceiling does not
+widen what one read can actually return: `internal/extract`'s own Lookup
+read (`lookupLimit`, `internal/extract/sql.go`) carries the identical
+1,001-row bound this package's `boundedCount` probe does
+(`countProbeLimit`), for the same THREAT_MODEL.md T9 reason — no statement
+this tool sends may scan a whole table unbounded. A framework table past
+1,000 rows (a mature Rails app's migrations, easily) is therefore truncated
+by that bound regardless of what `findLookups` decides, and the first
+landing's `frameworkMetadataWhy` did not look at `boundedCount`'s own answer
+at all: every framework table's line read "copied whole regardless of
+reachability", true or not. `frameworkMetadataWhy` now takes `n`, the same
+count `findLookups` already fetched, and switches the sentence once `n`
+exceeds `lookupRowCeiling`: "has more than 1000 rows -- only the first 1000
+(ordered by identity) are copied; T-0347 tracks copying it in full" — naming
+the tracked gap rather than a bare number, since `--take`, `--cap` and every
+other row-count flag on this tool are about the *slice*, not about a lookup
+table's own bound, and this is not a flag an operator can raise today.
+`TestPlanFrameworkMetadataTableOverTheLookupCeilingSaysSo`
+(`plan_integration_test.go`) is the guard, over a standalone 1,002-row
+fixture; reverting `frameworkMetadataWhy`'s `n`-aware branch fails it.
+
+**What is still open, and stays open on purpose.** Raising the bound itself
+— so a framework table past 1,000 rows is actually copied whole rather than
+merely told about its own shortfall — needs `internal/extract`'s
+`lookupLimit` to grow or gain an explicit, registered larger bound for a
+framework table specifically, and `internal/extract` is outside every task
+that has touched this file so far. **T-0347** is that gap, filed by the
+developer who found it; this package's own half is the honest sentence
+above, not a bound it cannot see past.
+
+**A second, independent gap the T-0314 review round found while measuring
+this one: `internal/verify`'s second net does not exempt a framework
+metadata table from its own scan at all**, beyond the narrow dense-sequence
+case `Decision.NeverMasked` already gates there. A framework table whose
+real values happen to validate strongly — a Rails migration timestamp that
+clears the Luhn check, the exact shape dogfood session 1 hit — refuses the
+whole run at exit 9 even though this package and `internal/classify` both
+correctly leave it unmasked. `internal/classify/CLAUDE.md`'s own T-0314
+section has the measurement; **T-0348** is where it is filed, since
+`internal/verify` is a third stage package neither this task nor T-0314's
+original one may touch.

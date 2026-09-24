@@ -60,6 +60,131 @@ exemption; add a way for a category's confidence to be lowered by config.
   FK propagation and shared names), the yml prior, then the threshold.
 - `codes.go` — the five `event.Code`s the classify stage renders; each has a row
   in `internal/event/catalogue.yml`.
+- `framework.go` — no file of that name here; see the T-0314 section below for
+  why the table-name list itself lives in `internal/pipeline`.
+
+## Framework metadata tables are never masked (T-0314)
+
+Dogfood session 1 found `schema_migrations.version` masked — its digit
+strings pass the Luhn check — and planned `SchemaOnly` besides, because
+nothing in `internal/plan`'s ordinary lookup rule reaches a table with no
+incoming foreign key at all, which is the *ordinary* shape of migration
+bookkeeping. `ar_internal_metadata` went the other way: copied verbatim,
+`environment` row and all, which makes a fresh Rails checkout refuse a
+destructive rake task against its own clone.
+
+`internal/pipeline.IsFrameworkMetadataTable` (that package's own CLAUDE.md
+has the full list and the reasoning for why it lives there rather than here
+or in `internal/plan`: three stage packages need the identical answer and
+none may import another) is checked first in `markNeverMasked`, ahead of the
+generated-column and surrogate-key checks it already made: it is a property
+of the *table*, not of any one column's signals, and it must win over
+whatever either of those checks would otherwise have said about the same
+column. It sets `neverMask` exactly as those two do — the column is still
+classified (base's signal passes still run and the reason line still
+records whatever they found, the same way a generated or surrogate-key
+column's own signal is recorded before the exemption fragment is appended)
+— but it can never be *masked*, whatever category or confidence the signals
+land on. `TestFrameworkMetadataTableNeverMasked` proves the override wins
+against a column shaped to mask under the ordinary rules (a national-id-
+shaped name and checksum-valid values).
+
+**`work.frameworkMetadata` is a second, separate flag from `neverMask`
+itself, and — since the T-0314 review round — it is the one `neverMask` two
+passes are allowed to lift.** `pipeline.IsFrameworkMetadataTable` matches a
+bare table name in any schema, so "bookkeeping the tool itself wrote and
+reads back, never end-user data" is a premise about the *usual* case, not a
+guarantee: a same-named application table is exactly the shape the two
+lifts below are for, and a real migration table loses nothing to either,
+because it never carries a foreign key at all (the ordinary shape dogfood
+session 1 found) and nothing in a real one's own values is worth a
+lazyslice.yml entry.
+
+- `propagateKeys` treats it exactly like the ordinary surrogate/FK key
+  exemption: cleared when a validated FK parent turns out to be masked, the
+  values converged on the parent's category, and the "framework metadata
+  table" reason fragment blanked (`frameworkMetadataFrag`, the same
+  bookkeeping `keyFrag` does). Before this round, `cw.generated ||
+  cw.frameworkMetadata` stopped the clear dead, and the test built to prove
+  it — a contrived `schema_migrations.version` FK-child of a masked
+  `people.ssn` — asserted the child stayed **unmasked**, which is the
+  THREAT_MODEL.md T1 recall hole and T8 join break the propagation sentence
+  exists to close, turned into required behaviour by the test. Only
+  `cw.generated` keeps the unconditional carve-out now (a generated column
+  is not copied at all, so there is nothing to mask); the renamed
+  `TestFrameworkMetadataTableFKChildIsMaskedWhenParentMasks` asserts the
+  child **masks** and converges on the parent's category, and reverting the
+  narrower `cw.generated`-only check fails it. Nothing in `testdata/`
+  carries this shape for real — no real `schema_migrations` or
+  `ar_internal_metadata` has a foreign key at all — so the test still builds
+  it by hand.
+- `applyPrior` lifts it too, from `raiseFromConfig`'s own success branch
+  only, on an explicit `lazyslice.yml` pattern or column entry naming the
+  column: ADR-004 lets a committed file only tighten, and an operator's own
+  "mask this" for a column real values are copied into must not read back
+  unmasked. `liftFrameworkMetadataExemption` is a no-op on every other
+  `neverMask` reason (generated, the ordinary key exemption), and it only
+  runs once `raiseFromConfig` has confirmed the raise leaves a usable
+  category, so a refused raise (`yml_no_category`) never clears the
+  exemption for nothing.
+  `TestFrameworkMetadataTableIsMaskedByExplicitYmlPattern` and
+  `TestFrameworkMetadataTableUnaffectedByARefusedYmlRaise` pin the two
+  directions.
+
+**The match is case-insensitive and on the bare table name alone**
+(`pipeline.IsFrameworkMetadataTable`'s own doc comment has the schema half).
+`TestFrameworkMetadataTableIsCaseInsensitive` pins the one entry on the list
+whose real catalogue spelling is mixed case, EF Core's
+`__EFMigrationsHistory`.
+
+**What this does not do.** It does not change what the column's signals
+decide — `Decision.Category` and `Decision.Confidence` are whatever `decide`
+found, unmasked reasons and all — only whether the column is masked, and (since
+the review round below) only for a column that is also on the table's own
+bookkeeping allowlist. The two lifts above are the escape for the case where
+even an allowlisted column's premise is wrong about one particular database (a
+same-named application table, an operator's own `lazyslice.yml` entry), not a
+widening of either list.
+
+**The exemption is narrower than the table match: only a column on
+`pipeline.IsFrameworkMetadataColumn`'s own per-table allowlist is exempt (the
+T-0314 review round's second finding).** The first landing exempted every
+column of a recognised table by name alone, on the premise that all of it is
+"bookkeeping the tool itself wrote and reads back, never end-user data" — true
+of a migration timestamp or a checksum, and not true of every column a real
+instance of one of these tools actually ships: Liquibase's `DATABASECHANGELOG`
+carries `AUTHOR` (the developer who ran the changeset) and Flyway's
+`flyway_schema_history` carries `INSTALLED_BY` (the database role or OS user
+that applied it), and either can hold a real name, a real username or an email
+address. `pipeline.frameworkMetadataColumns` (`internal/pipeline/framework.go`,
+that package's own CLAUDE.md has the reasoning for why the map lives there) is
+the well-known column list each tool's own migration schema ships — a version
+string, a checksum, a timestamp, a boolean flag — and `markNeverMasked` now
+checks `pipeline.IsFrameworkMetadataColumn(t.Ref.Name, col.Name)` alongside the
+table match before it sets `neverMask`. A column that clears the table check
+but not the column one falls straight through to the generated-column and
+surrogate-key checks, and from there to the ordinary passes below, exactly as
+if its table were never on the list at all — an `AUTHOR` column of email
+addresses masks as `email` like any other. `internal/plan` still forces the
+whole table to a `Lookup` step regardless of what any column here decides, so
+the row count and reachability guarantee T-0314 exists for is unaffected;
+`TestFrameworkMetadataTableBookkeepingColumnStaysExempt` and
+`TestFrameworkMetadataTableColumnNotOnAllowlistIsMasked`
+(`framework_test.go`) pin both directions, and
+`internal/pipeline`'s own `TestIsFrameworkMetadataColumn` pins the map.
+
+**Owed: `internal/verify`'s second net does not know about this exemption at
+all, beyond the narrow dense-sequence case (T-0348).** `Decision.NeverMasked`
+only gates `secondnet.go`'s `sequenceExempt` branch, which the two
+`requiresCorroboration`-gated national-id-digits validator entries use; every
+other entry there — including the Luhn/`financial_account` one dogfood
+session 1 actually hit — scans an unmasked column unconditionally, whatever
+`NeverMasked` says. `testdata/regressions/042`'s own header has the
+measurement: a framework table whose real values happen to validate strongly
+(a Luhn-valid migration timestamp, the exact dogfood shape) refuses the whole
+run at exit 9 even though this package correctly leaves it unmasked. Out of
+this package's reach — `internal/verify` is a different stage package — and
+filed rather than fixed here.
 
 ## Decisions made during implementation
 

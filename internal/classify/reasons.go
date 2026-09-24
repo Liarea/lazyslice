@@ -252,6 +252,13 @@ var fragments = []*fragment{
 		pattern: `foreign key to ` + reQualified + `: preserved verbatim`,
 	},
 	{
+		// T-0314: schema_migrations, ar_internal_metadata and the rest of
+		// pipeline.IsFrameworkMetadataTable's list.
+		name:    "framework_metadata",
+		format:  "framework metadata table: copied whole, never masked",
+		pattern: `framework metadata table: copied whole, never masked`,
+	},
+	{
 		// The child end of tracker T-0120's reconciliation (keyChildren). It
 		// names the parent column, because "this column looks personal and is
 		// copied anyway" is only answerable by pointing at the key that is

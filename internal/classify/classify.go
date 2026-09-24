@@ -60,6 +60,45 @@ type work struct {
 	// nothing for FK propagation to mask. The key exemption is the other half,
 	// and it is lifted when the key it references turns out to be masked.
 	generated bool
+	// frameworkMetadata is the T-0314 half of neverMask, and — unlike
+	// generated — a pass is allowed to lift it (T-0314 review round, finding
+	// 2). pipeline.IsFrameworkMetadataTable matches a bare table name in any
+	// schema, so the exemption's premise ("bookkeeping the framework itself
+	// wrote and reads back, never end-user data") is not guaranteed the way
+	// it is for a real generated column: an application table that happens to
+	// share one of the list's names, and that carries a validated foreign key
+	// into a masked parent, is exactly the shape THREAT_MODEL.md T1's recall
+	// floor and T8's join-integrity requirement are about, and a real
+	// migration table never carries a foreign key at all — the ordinary shape
+	// dogfood session 1 found — so lifting the exemption in that case costs a
+	// genuine framework table nothing. propagateKeys therefore treats this
+	// exactly as it treats the ordinary key exemption: cleared when a
+	// validated FK parent turns out to be masked. applyPrior lifts it too, on
+	// an explicit lazyslice.yml pattern or column entry naming this column —
+	// ADR-004 lets a committed file only tighten, and silently refusing an
+	// operator's own "mask this" for a column real values are copied into
+	// would be a loosening in disguise. Nothing here widens
+	// pipeline.IsFrameworkMetadataTable's list or narrows it by schema; both
+	// lifts are about a *specific column* an outside signal — a validated
+	// edge, an explicit file entry — has spoken about.
+	//
+	// markNeverMasked only ever sets this field true for a column that also
+	// clears pipeline.IsFrameworkMetadataColumn (T-0314 review round, finding
+	// 2, second pass): the table-name match alone used to exempt every column
+	// of the table, which reached Liquibase's DATABASECHANGELOG.AUTHOR and
+	// Flyway's flyway_schema_history.INSTALLED_BY — a developer's or a
+	// database role's identity, not bookkeeping the tool reads back — the same
+	// way it reached the columns that actually are. A column that clears
+	// IsFrameworkMetadataTable but not IsFrameworkMetadataColumn falls straight
+	// through this function to the ordinary passes below, exactly as if the
+	// table were not on the list at all.
+	frameworkMetadata bool
+	// frameworkMetadataFrag is the index in frags of the "framework metadata
+	// table" exemption fragment, or -1, the same bookkeeping keyFrag does for
+	// the surrogate-key fragment: lifting the exemption blanks it, because a
+	// line that says both "copied whole, never masked" and "raised by
+	// lazyslice.yml" describes two different columns.
+	frameworkMetadataFrag int
 	// keyFrag is the index in frags of the surrogate-key or FK-column exemption
 	// fragment, or -1. Lifting the exemption blanks that fragment, because a
 	// line that says both "preserved verbatim" and "propagated through foreign
@@ -747,13 +786,14 @@ func (st *state) base() {
 			st.order = append(st.order, cref)
 			ct := typeOf(st.schema, col)
 			w := &work{
-				d:            pipeline.Decision{Col: cref, Category: pipeline.CatNone, Confidence: pipeline.ConfNone, Source: pipeline.ByClassifier},
-				keyFrag:      -1,
-				noSignalFrag: -1,
-				family:       ct.Family,
-				array:        ct.Array,
-				table:        t.Ref,
-				column:       col,
+				d:                     pipeline.Decision{Col: cref, Category: pipeline.CatNone, Confidence: pipeline.ConfNone, Source: pipeline.ByClassifier},
+				keyFrag:               -1,
+				frameworkMetadataFrag: -1,
+				noSignalFrag:          -1,
+				family:                ct.Family,
+				array:                 ct.Array,
+				table:                 t.Ref,
+				column:                col,
 			}
 			st.dec[cref] = w
 			values := st.samples(cref, ct)
@@ -1455,10 +1495,45 @@ func isJSONFamily(family string) bool {
 	return family == famJSON || family == famJSONB || family == famHstore
 }
 
-// markNeverMasked records the two classes ARCHITECTURE.md §4 never masks and
+// markNeverMasked records the classes ARCHITECTURE.md §4 never masks and
 // always explains. They are excluded from every raising pass below, so that no
 // rule can quietly put a generator on a generated column or a join key.
 func (st *state) markNeverMasked(w *work, t pipeline.Table, col pipeline.Column, ct columnType) {
+	// A framework metadata table (T-0314): schema_migrations, ar_internal_metadata
+	// and the rest of pipeline.IsFrameworkMetadataTable's list. A column of one
+	// that is also on pipeline.IsFrameworkMetadataColumn's own allowlist for
+	// that table is bookkeeping the framework itself wrote and reads back,
+	// never end-user data, so root CLAUDE.md's "when in doubt, mask it" does
+	// not apply to it by default -- there is no doubt to resolve, the way
+	// there is for an ordinary column this package has never seen a signal
+	// from. internal/plan's own T-0314 entry is the other half: it copies the
+	// table whole as a lookup regardless of what this function decides, so a
+	// masked column here would still cost nothing to the row count and
+	// everything to what Rails, Django or Flyway reads back from it. This is
+	// checked first, ahead of the generated-column and surrogate-key checks
+	// below, because it is a property of the table (and, since the T-0314
+	// review round's second finding, of the specific column) rather than of
+	// the column's own signals, and it must win over whatever either of those
+	// would have said about the same column.
+	//
+	// The table match is on the bare name alone, in any schema, so the "never
+	// end-user data" premise can be wrong about a same-named application
+	// table -- w.frameworkMetadata's own doc comment is where the two passes
+	// that may still find doubt and mask anyway (a validated FK to a masked
+	// parent, an explicit lazyslice.yml raise) are recorded. The column
+	// allowlist is the same premise applied one level narrower: even a
+	// genuine instance of the tool's own table carries columns -- Liquibase's
+	// AUTHOR, Flyway's INSTALLED_BY -- that are a developer's or a database
+	// role's identity rather than the tool's bookkeeping, and a column not on
+	// the allowlist falls through to the ordinary passes below exactly as if
+	// its table were not on pipeline.IsFrameworkMetadataTable's list at all.
+	if pipeline.IsFrameworkMetadataTable(t.Ref.Name) && pipeline.IsFrameworkMetadataColumn(t.Ref.Name, col.Name) {
+		w.neverMask = true
+		w.frameworkMetadata = true
+		w.frameworkMetadataFrag = len(w.frags)
+		w.frags = append(w.frags, render("framework_metadata"))
+		return
+	}
 	if col.Generated != "" {
 		w.neverMask = true
 		w.generated = true
@@ -2282,15 +2357,24 @@ func (st *state) propagateKeys() bool {
 				continue
 			}
 			// A generated column is the one exemption propagation may not lift:
-			// it is not copied at all, so there is nothing here to mask. The key
-			// exemption is lifted, because it was a statement about the column's
-			// own signals (markNeverMasked) and the parent has just contradicted
-			// it: the child holds the very values the parent is being masked for.
-			// Leaving it exempt is the recall hole this sentence of §4 exists to
-			// close — the personal value ships in cleartext on the child side
-			// under exit 0 (THREAT_MODEL.md T1) — and it breaks the join as well,
-			// because the parent's values are replaced and the child's are not
-			// (T8).
+			// it is not copied at all, so there is nothing here to mask.
+			// Everything else — the ordinary surrogate/FK key exemption and, as
+			// of the T-0314 review round, the framework-metadata one — is a
+			// statement about the column's own signals (markNeverMasked) that
+			// the parent has just contradicted: the child holds the very values
+			// the parent is being masked for. Leaving either exempt is the
+			// recall hole this sentence of §4 exists to close — the personal
+			// value ships in cleartext on the child side under exit 0
+			// (THREAT_MODEL.md T1) — and it breaks the join as well, because
+			// the parent's values are replaced and the child's are not (T8). A
+			// framework metadata table is still copied whole as a lookup
+			// regardless of what this function decides (internal/plan's own
+			// T-0314 entry), and a real one — Rails, Django, Flyway and the
+			// rest of pipeline.IsFrameworkMetadataTable's list — never carries
+			// a foreign key at all, so lifting the exemption here never costs a
+			// genuine framework table anything; what it closes is a same-named
+			// application table that does (w.frameworkMetadata's own doc
+			// comment).
 			if cw.generated {
 				continue
 			}
@@ -2315,9 +2399,14 @@ func (st *state) propagateKeys() bool {
 			}
 			cw.neverMask = false
 			cw.typeConflict = false
+			cw.frameworkMetadata = false
 			if cw.keyFrag >= 0 {
 				cw.frags[cw.keyFrag] = ""
 				cw.keyFrag = -1
+			}
+			if cw.frameworkMetadataFrag >= 0 {
+				cw.frags[cw.frameworkMetadataFrag] = ""
+				cw.frameworkMetadataFrag = -1
 			}
 			cw.d.Category = pw.d.Category
 			if cw.d.Confidence < pw.d.Confidence {
@@ -2381,6 +2470,23 @@ func (st *state) sameColumnName() {
 // is a per-column opt-out, which is recorded with a reason and with the
 // column's type fingerprint, and is ignored when either is missing or the
 // fingerprint has moved (honourOptOut).
+//
+// A generated column or an ordinary surrogate/FK key is still off limits to
+// both loops below — neverMask stands as markNeverMasked or keyChildren left
+// it, because there is nothing a generated column's raise could mask and an
+// unlifted key exemption is a statement about the column's own signals a
+// caller's file has not contradicted. A framework-metadata exemption
+// (w.frameworkMetadata) is the one w.neverMask a raise here may still lift
+// (T-0314 review round, finding 3): an operator naming this exact column in a
+// pattern or a Columns entry has spoken about it more specifically than
+// pipeline.IsFrameworkMetadataTable's bare-name match did, and a committed yml
+// that already recorded the column as masked — from a run before this
+// exemption existed, or naming a real column a same-named application table
+// carries — must not read back unmasked, which ADR-004's "read-back only
+// tightens" forbids. Both loops leave the actual lifting to raiseFromConfig
+// (liftFrameworkMetadataExemption, called from its success branch only), so a
+// raise this package is about to refuse for lack of a usable category never
+// unmasks the column's default exemption for nothing.
 func (st *state) applyPrior(prior *pipeline.Config) (*pipeline.Classification, error) {
 	cls := &pipeline.Classification{}
 	if prior == nil {
@@ -2393,10 +2499,13 @@ func (st *state) applyPrior(prior *pipeline.Config) (*pipeline.Classification, e
 		}
 		for _, c := range st.order {
 			w := st.dec[c]
+			if w.neverMask && !w.frameworkMetadata {
+				continue
+			}
 			// pipeline.Pattern.Name is "regex over column or table name", so a
 			// user who writes a pattern for `patients` to raise a whole table
 			// gets the table, not silence.
-			if w.neverMask || (!re.MatchString(normaliseName(c.Column)) && !re.MatchString(normaliseName(c.Table.Name))) {
+			if !re.MatchString(normaliseName(c.Column)) && !re.MatchString(normaliseName(c.Table.Name)) {
 				continue
 			}
 			if pat.Confidence <= w.d.Confidence {
@@ -2412,7 +2521,7 @@ func (st *state) applyPrior(prior *pipeline.Config) (*pipeline.Classification, e
 			cls.Drift = append(cls.Drift, c)
 			continue
 		}
-		if cc.Confidence > w.d.Confidence && !w.neverMask {
+		if cc.Confidence > w.d.Confidence && (!w.neverMask || w.frameworkMetadata) {
 			st.raiseFromConfig(w, cc.Category, cc.Confidence, "yml_column")
 		}
 		if cc.Unmask == nil {
@@ -2436,6 +2545,26 @@ func (st *state) applyPrior(prior *pipeline.Config) (*pipeline.Classification, e
 	return cls, nil
 }
 
+// liftFrameworkMetadataExemption clears the one w.neverMask a yml raise is
+// allowed to lift (applyPrior's own doc comment) and blanks the "framework
+// metadata table" fragment it recorded, the same bookkeeping propagateKeys
+// does for the identical field over an FK edge instead of a yml entry.
+// raiseFromConfig is the one caller, and only from its success branch, so a
+// raise that is about to be refused (yml_no_category) never unmasks the
+// column's default exemption for nothing. A no-op on any column that is not
+// currently exempt for this reason.
+func liftFrameworkMetadataExemption(w *work) {
+	if !w.frameworkMetadata {
+		return
+	}
+	w.neverMask = false
+	w.frameworkMetadata = false
+	if w.frameworkMetadataFrag >= 0 {
+		w.frags[w.frameworkMetadataFrag] = ""
+		w.frameworkMetadataFrag = -1
+	}
+}
+
 // raiseFromConfig applies one yml raise, which is the only place a caller's
 // file can move a decision up.
 //
@@ -2456,6 +2585,14 @@ func (st *state) applyPrior(prior *pipeline.Config) (*pipeline.Classification, e
 // at low and raisable() keeps every other pass off. Checking only the incoming
 // category would make "confidence: certain" with no category the one route to
 // the email masker on a boolean column.
+//
+// It is also where a framework-metadata exemption is lifted (T-0314 review
+// round, finding 3): liftFrameworkMetadataExemption runs only once the checks
+// above have confirmed the raise leaves a usable category, so a raise about to
+// be refused (yml_no_category) never clears the column's default exemption for
+// nothing — a caller in applyPrior may call this whether or not the column is
+// currently framework-metadata-exempt, and only a raise that actually applies
+// changes that.
 func (st *state) raiseFromConfig(w *work, cat pipeline.Category, conf pipeline.Confidence, frag string) {
 	if cat != "" && cat != pipeline.CatNone {
 		if st.pack.accepted(cat, w.family) {
@@ -2471,6 +2608,7 @@ func (st *state) raiseFromConfig(w *work, cat pipeline.Category, conf pipeline.C
 		w.frags = append(w.frags, render("yml_no_category"))
 		return
 	}
+	liftFrameworkMetadataExemption(w)
 	w.d.Confidence = conf
 	w.d.Source = pipeline.ByYmlRaise
 	w.frags = append(w.frags, render(frag))

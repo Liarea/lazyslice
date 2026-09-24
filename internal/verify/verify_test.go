@@ -1004,6 +1004,66 @@ func TestAProfileURLFailsTheSecondNetAsAnOnlineID(t *testing.T) {
 	}
 }
 
+// TestTheSecondNetSkipsAFrameworkTablesOwnBookkeepingColumns is T-0348, the
+// verify half of T-0314: a Rails migration timestamp that passes the Luhn
+// check (dogfood session 1's exact shape) must not refuse the run when it
+// sits in schema_migrations.version, a column classify never masks; a
+// framework table's identity-bearing column, which is not on the tool's
+// bookkeeping allowlist, is still scanned.
+func TestTheSecondNetSkipsAFrameworkTablesOwnBookkeepingColumns(t *testing.T) {
+	cases := []struct {
+		name        string
+		table       ref.TableRef
+		column      string
+		vals        []any
+		neverMasked bool
+		wantFail    string
+	}{
+		{
+			name:        "schema_migrations.version passing Luhn is copied, not refused",
+			table:       ref.TableRef{Schema: "public", Name: "schema_migrations"},
+			column:      "version",
+			vals:        []any{"20250101050000", "20250101130000", "20250101210000"},
+			neverMasked: true,
+		},
+		{
+			name:     "flyway_schema_history.installed_by holding addresses is still scanned",
+			table:    ref.TableRef{Schema: "public", Name: "flyway_schema_history"},
+			column:   "installed_by",
+			vals:     []any{"ana.silva@corp.example", "li.wei@corp.example", "omar.haddad@corp.example", "eva.novak@corp.example"},
+			wantFail: "email",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			col := ref.ColumnRef{Table: c.table, Column: c.column}
+			s := &state{
+				schema: &pipeline.Schema{},
+				target: oneColumn{vals: c.vals},
+				steps:  []pipeline.Step{{Table: c.table, Mode: pipeline.Lookup}},
+				tables: map[ref.TableRef]*pipeline.Table{
+					c.table: {Ref: c.table, Columns: []pipeline.Column{{Name: c.column, TypeName: "text"}}},
+				},
+				cls: &pipeline.Classification{Decisions: map[ref.ColumnRef]pipeline.Decision{
+					col: {Col: col, Category: pipeline.CatNone, Source: pipeline.ByClassifier, NeverMasked: c.neverMasked},
+				}},
+			}
+			if err := s.secondNet(context.Background()); err != nil {
+				t.Fatalf("secondNet: %v", err)
+			}
+			if c.wantFail == "" {
+				if len(s.failures) != 0 {
+					t.Fatalf("the net refused %s on %v as %q; a migration tool's own bookkeeping column is copied by design", col, c.vals, s.failures[0].Reason)
+				}
+				return
+			}
+			if len(s.failures) != 1 || s.failures[0].Reason != c.wantFail {
+				t.Fatalf("the net recorded %d failures on %v, want one naming %s: a framework table's identity column is not on the bookkeeping allowlist", len(s.failures), c.vals, c.wantFail)
+			}
+		})
+	}
+}
+
 // TestSecondNetReadsDocumentKeysAsWellAsValues is the T-0137 review round's
 // finding 3: keyHits (residual.go) tests object keys of a *masked* column
 // against the filter, but the second net's netValues (secondnet.go) used to

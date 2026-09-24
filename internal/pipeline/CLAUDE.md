@@ -123,6 +123,41 @@ is catalog text that `internal/introspect` already carries on `Default` and that
 `internal/emit` does not write. Nothing here weakens `TestNoValueBearingField\
 Serialised`'s rule; a field that carried a row value would.
 
+**`framework.go` is a second implementation living here under the same
+protest as `ddlliteral.go`, and for the identical reason (T-0314).**
+`IsFrameworkMetadataTable` and `ArInternalMetadataEnvironmentColumns` are one
+answer — which tables are Rails', Django's, Flyway's and so on migration
+bookkeeping, and where Rails put `ar_internal_metadata`'s two columns — read by
+three callers that cannot import each other: `internal/plan` (force the table
+to a `Lookup` step regardless of §3's ordinary reachability, mask and
+row-ceiling rules, and say in the plan that the rewrite is coming),
+`internal/classify` (never mask a column of one that is also on the table's
+own `IsFrameworkMetadataColumn` allowlist) and `internal/load` (run the
+rewrite, inside the table's own transaction, before it commits). A name list
+and two field lookups touch no type in §2, read no row and issue no query —
+the same footing `Candidate.IsZero()` stands on, not `ddlliteral.go`'s own,
+which is a scanner. It is not a T-0162-shaped debt (no `textsig`-style leaf
+package exists for cross-stage business rules the way one exists for value
+validators), so no task is filed against it; if a fourth caller ever needs it,
+this is still the one home to read it from.
+
+**`IsFrameworkMetadataColumn` is the T-0314 review round's second finding's
+fix.** The bare table-name match `IsFrameworkMetadataTable` makes is a
+property of the table, but "never end-user data" is not true of every column
+of a real instance of one: Liquibase's `DATABASECHANGELOG` carries `AUTHOR`
+(the developer who ran the changeset) and Flyway's `flyway_schema_history`
+carries `INSTALLED_BY` (the role or OS user that applied it), and a blanket
+per-table exemption reached both along with the tool's actual bookkeeping.
+`frameworkMetadataColumns` is a second, per-table map of the well-known
+column names each tool's own migration schema ships — a version string, a
+checksum, a timestamp, a boolean flag — and `internal/classify`'s
+`markNeverMasked` only exempts a column that clears both maps. A column that
+clears `IsFrameworkMetadataTable` but not this one reaches the ordinary
+classifier exactly as if its table were not recognised at all; `internal/plan`
+still forces the whole table to a `Lookup` step regardless; `internal/load`'s
+`ar_internal_metadata` rewrite is unaffected, since `key` and `value` are both
+on that table's own list.
+
 **`Candidate` has an `IsZero()` (T-0165, 2026-09-14).** `Candidate` embeds
 `dsn.Ref` by value, and T-0135 gave `Ref` a `Params map[string]string` field,
 which makes a struct incomparable with `==` — and `Candidate` with it, since

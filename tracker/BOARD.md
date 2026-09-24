@@ -9,7 +9,7 @@
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 0 | 0 | 108 | 0 | 0 |
 | E6 Launch | 6 | 23 | 0 | 16 | 0 | 0 |
-| E9 Later | later | 105 | 0 | 37 | 8 | 0 |
+| E9 Later | later | 108 | 0 | 37 | 8 | 0 |
 
 ## Open and in progress
 
@@ -141,6 +141,9 @@
 - T-0344 [open] E6 · Decide whether the two --tui screens stay (with a filter, a full-reason view and a footer that shows the exit keys) or ADR-002's reversal is taken (human)
 - T-0345 [open] E6 · The screens' exit keys: esc inside help quits the program, enter runs unconfirmed, ctrl+c exits 0 (sonnet)
 - T-0346 [open] E6 · A lookup step is shown with 0 rows while the estimate counts its rows (sonnet)
+- T-0347 [open] E9 · extract's lookupLimit silently truncates a framework metadata table over 1,000 rows ()
+- T-0348 [open] E9 · verify's second net has no exemption for a framework metadata column that validates strongly (sonnet)
+- T-0349 [open] E9 · internal/pipeline/framework.go's per-tool bookkeeping column lists need a cited source per tool (sonnet)
 
 ## Recently closed
 

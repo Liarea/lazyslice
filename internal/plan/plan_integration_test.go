@@ -1039,6 +1039,27 @@ INSERT INTO public.note_links (link_id, target_type, target_id) VALUES
     (1, 'Note', 1),
     (2, 'Note', 999999),
     (3, 'Ghost', 5);
+
+-- T-0314's own fixture: two framework metadata tables reached by no foreign
+-- key at all, which is the ordinary shape migration bookkeeping has and the
+-- one shape §3's own lookup rule ("at least one incoming edge") cannot
+-- reach. TestPlanFrameworkMetadataTablesCopiedAsLookups is what pins this.
+CREATE TABLE public.schema_migrations (
+    version character varying NOT NULL PRIMARY KEY
+);
+
+INSERT INTO public.schema_migrations (version) VALUES
+    ('20250101000000'), ('20250102000000'), ('20250103000000');
+
+CREATE TABLE public.ar_internal_metadata (
+    key        character varying NOT NULL PRIMARY KEY,
+    value      character varying,
+    created_at timestamp(6) without time zone NOT NULL,
+    updated_at timestamp(6) without time zone NOT NULL
+);
+
+INSERT INTO public.ar_internal_metadata (key, value, created_at, updated_at) VALUES
+    ('environment', 'production', now(), now());
 `
 
 // nastyPlusRequest is nastyRequest with the second table extraSchema adds whose
@@ -1159,6 +1180,135 @@ func TestPlanForeignKeyToNonPrimaryUniqueColumn(t *testing.T) {
 			t.Errorf("people = %s, want the two account owners", got)
 		}
 	})
+}
+
+// T-0314: schema_migrations and ar_internal_metadata are reached by no
+// foreign key at all — extraSchema's own comment explains why that is the
+// ordinary shape of migration bookkeeping — so §3's ordinary lookup rule
+// ("no outgoing edge, at least one incoming edge") would leave both
+// SchemaOnly, and dogfood session 1 found exactly that: zero migration rows,
+// and ar_internal_metadata's source environment carried into the target
+// verbatim. Both must plan as Lookup, with every row, regardless of root.
+func TestPlanFrameworkMetadataTablesCopiedAsLookups(t *testing.T) {
+	ctx := context.Background()
+	r, schema := fixture(ctx, t, loadNastyPlus)
+
+	// The root is ordinary and unrelated to either table, which is the point:
+	// neither is reached by the walk from anywhere, and both must still be
+	// planned.
+	req := nastyPlusRequest(tref("public", "accounts"))
+	req.Take = 500
+	p, err := New().Plan(ctx, r, schema, nil, req)
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	steps := stepsByTable(p)
+
+	migrations := tref("public", "schema_migrations")
+	s, ok := steps[migrations]
+	if !ok {
+		t.Fatalf("public.schema_migrations has no step")
+	}
+	if s.Mode != pipeline.Lookup {
+		t.Errorf("public.schema_migrations mode = %v, want Lookup: it has no incoming foreign key, "+
+			"which is the ordinary shape of a migration bookkeeping table and not a reason to leave it "+
+			"SchemaOnly", s.Mode)
+	}
+	if !strings.Contains(s.Why, "framework metadata table") {
+		t.Errorf("public.schema_migrations Why = %q, want it to name the reason a lookup with no "+
+			"incoming edge exists at all", s.Why)
+	}
+
+	metadata := tref("public", "ar_internal_metadata")
+	m, ok := steps[metadata]
+	if !ok {
+		t.Fatalf("public.ar_internal_metadata has no step")
+	}
+	if m.Mode != pipeline.Lookup {
+		t.Errorf("public.ar_internal_metadata mode = %v, want Lookup", m.Mode)
+	}
+	if !strings.Contains(m.Why, "framework metadata table") {
+		t.Errorf("public.ar_internal_metadata Why = %q, want it to name the reason", m.Why)
+	}
+	if !strings.Contains(m.Why, "environment rewritten to development") {
+		t.Errorf("public.ar_internal_metadata Why = %q, want it to say the environment row will be "+
+			"rewritten (§3.5: the plan says so before any row moves)", m.Why)
+	}
+}
+
+// truncatedFrameworkMetadataSchema is a standalone, minimal schema for
+// TestPlanFrameworkMetadataTableOverTheLookupCeilingSaysSo: one framework
+// metadata table with more rows than lookupRowCeiling, reached by no foreign
+// key at all (the ordinary shape), and one ordinary, unrelated table to plan
+// from as root. It does not reuse nasty.sql or extraSchema, both of which are
+// read by suites elsewhere that count their tables (this file's own
+// extraSchema comment says the same).
+const truncatedFrameworkMetadataSchema = `
+CREATE TABLE public.reg_widgets (
+    widget_id bigint PRIMARY KEY,
+    name      text NOT NULL
+);
+
+INSERT INTO public.reg_widgets (widget_id, name) VALUES (1, 'Widget One');
+
+CREATE TABLE public.schema_migrations (
+    version character varying NOT NULL PRIMARY KEY
+);
+
+INSERT INTO public.schema_migrations (version)
+    SELECT lpad(gs::text, 14, '0') FROM generate_series(1, 1002) AS gs;
+`
+
+func loadTruncatedFrameworkMetadata(ctx context.Context, url string) error {
+	conn, err := pgx.Connect(ctx, url)
+	if err != nil {
+		return fmt.Errorf("connecting to load the truncated framework metadata fixture: %w", err)
+	}
+	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
+	if _, err := conn.Exec(ctx, truncatedFrameworkMetadataSchema); err != nil {
+		return fmt.Errorf("loading the truncated framework metadata fixture: %w", err)
+	}
+	return nil
+}
+
+// TestPlanFrameworkMetadataTableOverTheLookupCeilingSaysSo is the T-0314
+// review round's finding 1: internal/extract's own Lookup read carries the
+// identical 1,001-row bound findLookups' own boundedCount probe does
+// (lookupLimit, internal/extract/sql.go; countProbeLimit, sql.go in this
+// package; T-0347), so a framework metadata table with more than
+// lookupRowCeiling (1,000) rows is truncated regardless of what the plan
+// says. Before this fix, frameworkMetadataWhy said "copied whole" for such a
+// table anyway, because it never looked at boundedCount's own answer — a
+// mature Rails app's schema_migrations (easily past 1,000 migrations) would
+// plan with a line claiming completeness the run cannot back up, and an
+// operator would discover the shortfall only by counting rows in the target.
+func TestPlanFrameworkMetadataTableOverTheLookupCeilingSaysSo(t *testing.T) {
+	ctx := context.Background()
+	r, schema := fixture(ctx, t, loadTruncatedFrameworkMetadata)
+
+	root := tref("public", "reg_widgets")
+	req := pipeline.PlanRequest{Root: &root, Take: 10}
+	p, err := New().Plan(ctx, r, schema, nil, req)
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	steps := stepsByTable(p)
+
+	migrations := tref("public", "schema_migrations")
+	s, ok := steps[migrations]
+	if !ok {
+		t.Fatalf("public.schema_migrations has no step")
+	}
+	if s.Mode != pipeline.Lookup {
+		t.Errorf("public.schema_migrations mode = %v, want Lookup", s.Mode)
+	}
+	if strings.Contains(s.Why, "copied whole regardless of reachability") {
+		t.Errorf("public.schema_migrations Why = %q, want it not to claim the table was copied whole: "+
+			"it holds 1,002 rows and internal/extract's own Lookup read is bounded at 1,001 (T-0347)", s.Why)
+	}
+	if !strings.Contains(s.Why, "1000") {
+		t.Errorf("public.schema_migrations Why = %q, want it to name the row ceiling actually applied", s.Why)
+	}
 }
 
 // A polymorphic id that names no row, on a row the slice holds.
