@@ -386,4 +386,72 @@ removed. A curly apostrophe is not a letter and already split.
 `ContainsName`'s callers are all `internal/classify` (`Prose`, the T-0311
 spare guard, the bare-name corroboration), and each reads a `true` as a
 reason to mask or not to spare, so this widens only in the direction
-"when in doubt, mask it" asks for; `internal/verify` does not call it.
+"when in doubt, mask it" asks for. `internal/verify` did not call it until
+T-0315, whose `fileTally` reads it over a file name's stem, in the same
+direction (below).
+
+## T-0315 (2026-09-24): what `LooksSecret` does not read as a secret (`secretshape.go`)
+
+Dogfood session 1 masked six file-name columns, four MD5 and two
+file-fingerprint columns, three Rails single-table-inheritance `type` columns,
+a formatter, a component name and an environment variable's name as
+`credential`, each "N/N samples look like secrets", to the fixed literal a
+`type` column then raised on. `LooksSecret` now refuses four shapes before it
+measures entropy, beside the UUID and URL it already refused:
+
+- **`impersonalFileName`**: a name ending in one of `fileExtensions` (a closed
+  list; `key`, `pem`, `p12` and `pfx` are left out on purpose) whose stem
+  carries no word from the name dictionary. A file named after a person
+  (`aoife-byrne-passport-3.pdf`, the rails-activestorage truth set's one
+  labelled-personal filename) stays with the entropy check.
+- **`fixedHexDigest`**: hex of exactly 32, 40 or 64 characters in one case,
+  bare, under an `md5`/`sha1`/`sha256` prefix whose length must match, or as
+  16, 20 or 32 colon-separated byte pairs. Every other hex length is still a
+  secret, and so is a mixed-case run.
+- **`namespacedIdentifier`**: two or more `identifierWord`s joined by `::` or
+  `.`. `identifierWord` is where JWTs and dotted bot tokens are kept out: a
+  lone lower-case letter after a digit or inside a capital run is the mark of
+  a random run. A `.`-joined value is spared only when a segment is camelCase
+  (`camelHump`) and no word is in the name dictionary, because a dotted
+  handle (`katherine.johnson84`) is identifier words joined by a dot too; an
+  all-lower module path (`billing.invoice_mailer.v2`) stays with the entropy
+  check as the cost (the T-0315 review round).
+- **`envVarName`**: upper-case words joined by underscores, each capitals then
+  at most two digits, and no word from the name dictionary: an upper-case
+  reference built from a name and a year (`DUBLIN_GRACE_HOPPER_1906`) is the
+  same shape (the review round).
+
+`sparedShape` is the one guard `LooksSecret` calls. A value with a file
+extension answers to `impersonalFileName` alone and never falls through to
+the other three: `hopper_grace_1906_birth_cert.pdf` splits at its extension
+dot into two identifier words, and before the review round
+`namespacedIdentifier` spared the name-bearing file names the file-name rule
+leaves with the entropy check.
+
+`TestLooksSecretStillReadsSecrets` holds the secrets on the other side of the
+line, and `TestLooksSecretStillReadsRandomTokens` measures each guard over
+20,000 generated tokens per issuing shape (zero spared for every ungrouped
+shape and a JWT; the dotted and underscore-grouped lookalikes a few percent at
+most). `looksSecretEntropyOnly` in the test file is `LooksSecret` as it stood
+before, so each pinned value is proved a false positive first.
+
+**`FileNameStem` is exported and is not a validator**, like the identifier
+shapes: a file name's stem is what the two callers read to count how many of
+a column's file names carry a dictionary word, because a column of files named
+after their owners, with only half the owners in the dictionary, would
+otherwise fall under the validator threshold value by value and be copied.
+The share is a threshold, so it is the callers': `internal/classify`'s
+`namedFileNames` and `internal/verify`'s `fileTally` (their own CLAUDE.md
+T-0315 sections). This package answers about one string.
+
+Both callers get the four guards through `LooksSecret`, so this is a
+narrowing of both nets in one change, as the rule above asks; the column-name
+exemption and the five-sample floor are the callers' and live there.
+THREAT_MODEL.md T1's T-0315 amendment has the measurement and the residual:
+a secret of exactly a digest's hex length under a name no credential rule
+matches is copied.
+
+**Owed:** README.md's accepted residual 4 and SECURITY.md's residual 2 list
+"a credential's entropy" among the recognised shapes and do not yet say what
+it now skips; neither file was in T-0315's paths — **tracker T-0357** carries
+the sentence.

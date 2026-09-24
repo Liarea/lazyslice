@@ -1790,3 +1790,64 @@ corroboration: a leaf has no table and no samples of its own, so a `name` key
 still marks a document personal, and a `file_name` key no longer does (the
 document is masked on its type either way).
 
+
+## The entropy signal does not read application values as secrets (T-0315)
+
+Dogfood session 1 masked file names, MD5 and file-fingerprint digests, Rails
+single-table-inheritance `type` class names, a formatter, a component name, an
+environment variable's name and two columns of one and four values as
+`credential`, "N/N samples look like secrets", to the fixed literal, which in
+a `type` column raises on every row the application loads. Four pieces, and
+`internal/textsig`'s own T-0315 section has the value half:
+
+- **`textsig.LooksSecret` refuses four shapes** (a file name carrying no
+  dictionary word, a 32/40/64-character hex digest, a `::`/`.` namespaced
+  identifier (a dotted one only when camelCase and name-free), an
+  environment variable's name with no dictionary word). Nothing here is needed for
+  them: the validator entry calls `LooksSecret` as before.
+- **`entropyExemptNames`** (`validators.go`): a column whose normalised name is
+  `type`, `klass` or `component_name` is scored with `withoutSecrets(vs)`, the
+  list minus the entropy entry, in `state.base`. Exact names only: a
+  `token_type` is decided by the credential name rule before this is read,
+  and a polymorphic `commentable_type` is not in it (its values are class
+  names too; namespaced ones are spared by the value guard, and an
+  un-namespaced one is still read by the entropy check).
+- **`minSecretSamples`** (5): in `bestSignal`, the credential entry reaches the
+  strong branch only over five samples or more. Below that it falls through
+  to the weak branch (at `minSamples` or more it may record `low`) and the
+  validators after it are still asked. Every other validator keeps T-0058's
+  fail-closed reading below `minSamples`.
+- **`namedFileNames`** (`validators.go`): when at least
+  `nameCorroborationThreshold` of a column's samples are file names whose stem
+  carries a dictionary word, `bestSignal` swaps the credential entry's check
+  for "`LooksSecret`, or any file name", with its own phrase
+  (`phraseNamedFiles`, `reasons.go`). Without it, the first measurement copied
+  rails-activestorage's `active_storage_blobs.filename` (a truth-set true
+  positive) and mastodon's `media_attachments.file_file_name`, whose names
+  the dictionary holds in 72% and 51% of rows: `LooksSecret` keeps a
+  name-bearing file name, but the ratio over the column fell under
+  `validatorThreshold`.
+
+`rules.yml`'s credential row gains `key_?hash(es)?` in the same change:
+plausible's `api_keys.key_hash` is SHA-256 hex with no name signal and was
+masked on its values alone before the digest guard.
+
+`internal/verify/validators.go`'s credential entry mirrors the three names
+(`secretExemptColumns`, matched through `snakeColumnName`), the floor
+(`secretMinNonNull`) and the file-name share (`namedFileShare`, `fileTally`);
+the lists are kept in step by hand, like the rest of that file.
+
+**Tests.** `secret_shapes_test.go`: `TestEntropyValidatorSparesApplicationShapes`
+(each dogfood shape spared, five real secrets, a column of owner-named file
+names and a neutrally named column of dotted handles still masked; each of the
+last two sits in a table of its own so a neighbouring credential column cannot
+be what masks it) and
+`TestEntropyValidatorNeedsFiveSamples`. `testdata/regressions/045` pins both
+directions through a real run.
+
+**Measured.** THREAT_MODEL.md T1's T-0315 amendment: over the ten torture
+schemas 29 columns moved to copied and 3 to masked, none of the 29 personal;
+the three hand-labelled truth sets keep recall at 1.000 (precision 0.641 →
+0.647, docs/TORTURE.md), and `TestPagilaPrecisionAndRecall`,
+`TestFiftyNamesFromThreeSchemas` and `TestBareNameTruthSetsWithSamples` read
+as before, since they sample no credential-shaped value.

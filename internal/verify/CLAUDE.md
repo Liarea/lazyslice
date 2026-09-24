@@ -1630,3 +1630,39 @@ gained the cast-to-non-text exemption `internal/plan`'s did, in the same fix
 round: a literal immediately cast to `integer`/`bigint`/`numeric`/`boolean`
 (`pipeline.CastToNonText`) is exempt, the identical "shape, not category"
 argument the empty-collection exemption already makes.
+
+## The credential entry agrees with the classifier about entropy (T-0315)
+
+`internal/classify` stopped deciding a column `credential` on
+`textsig.LooksSecret` for a file name carrying no dictionary word, a
+32/40/64-character hex digest, a namespaced identifier or an environment
+variable's name (all four inside `LooksSecret`, so this net gets them by
+calling it), for a column named `type`, `klass` or `component_name`, and for
+a column of fewer than five samples. Each of those columns is left unmasked
+on purpose, and this net refusing it at exit 9 — with no green path short of
+`--unmask` — is the outcome the rest of this file argues against. So the
+credential entry, and only it, carries three things (`validators.go`):
+
+- **`minNonNull`** (`secretMinNonNull`, 5): below it the entry is not scored
+  at all, which overrides `scoreHits`' any-hit-below-`minValues` branch for
+  this entry alone. Every other entry keeps T-0058's floor.
+- **`exemptColumns`** (`secretExemptColumns`): the entry is not run over a
+  column those three names name, matched through `snakeColumnName`, which
+  reduces `Type`, `componentName` and `COMPONENT_NAME` to what
+  `internal/classify`'s `normaliseName` does.
+- **`fileTally`** (`secondnet.go`): counts a column's direct values that are
+  file names (`textsig.FileNameStem`), how many carry a dictionary word, and
+  how many `LooksSecret` spared. When the named share reaches
+  `namedFileShare` (internal/classify's `nameCorroborationThreshold`, 0.2),
+  the spared ones are added back to the entry's hits, so a column of
+  documents named after their owners is scored as it was before and a column
+  of screenshots is not. It uses the wide `ContainsName`, not `NameShape`:
+  it is the classifier's own criterion over more rows, and it can only
+  refuse a file-name column every one of whose values the entropy check
+  already refused before T-0315.
+
+`secret_floor_test.go`'s `TestTheSecondNetAgreesWithTheClassifierAboutEntropy`
+pins each spared shape and name, the camel-case spellings, and the three that
+must still refuse: five secret-shaped values in an ordinary column, a column
+of file names half of which carry a dictionary name, and a column of dotted
+handles (`katherine.johnson84`) under a neutral name.
