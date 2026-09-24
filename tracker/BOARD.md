@@ -9,7 +9,7 @@
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 0 | 0 | 108 | 0 | 0 |
 | E6 Launch | 6 | 22 | 0 | 17 | 0 | 0 |
-| E9 Later | later | 108 | 0 | 38 | 8 | 0 |
+| E9 Later | later | 109 | 0 | 38 | 8 | 0 |
 
 ## Open and in progress
 
@@ -143,6 +143,7 @@
 - T-0347 [open] E9 · extract's lookupLimit silently truncates a framework metadata table over 1,000 rows ()
 - T-0349 [open] E9 · internal/pipeline/framework.go's per-tool bookkeeping column lists need a cited source per tool (sonnet)
 - T-0350 [open] E9 · The torture harness's not-masked failure message always blames a guessed-region phone hit ()
+- T-0351 [open] E9 · T-0312 T1 measurement: torture corpus and THREAT_MODEL.md amendment for the sameColumnName swept-source exclusion (sonnet)
 
 ## Recently closed
 

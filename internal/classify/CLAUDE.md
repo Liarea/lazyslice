@@ -1642,6 +1642,49 @@ raised by `sameColumnName` as before, and its line carries both fragments.
 THREAT_MODEL.md T1's T-0311 amendment has the whole measurement and the
 residual; ARCHITECTURE.md §4's T-0311 amendment states the rule.
 
+**A swept column that was NOT spared is still not a source (T-0312).** The
+paragraph above only closed the gap for a column T-0311's own three guards
+took out of the sweep entirely; a column the sweep actually raised — genuinely
+signal-less, correctly masked `free_text` beside its own table's `certain`
+neighbour — was still an ordinary `sameColumnName` source until this fix,
+and dogfood session 1's own count (25 propagations of this shape in one
+run, four of them plan refusals over a unique-indexed text `uuid` column
+with no evidence behind it at all; ARCHITECTURE.md §4's T-0312 amendment has
+the breakdown) is what this closes. `work.sweptNoSignal`
+(`unknownColumnsBesideCertain`, set on the column it raises and on every
+`fkPairs` partner raised alongside it) is the mark; `sameColumnName`'s
+source-building loop skips a column carrying it, the same way it already
+skips `neverMask` and `CatNone`. A swept column is still an ordinary
+*target*: a same-named column elsewhere with real evidence still raises it,
+unaffected. `TestSameColumnNameDoesNotPropagateASweptDecision`
+(`classify_test.go`) pins it: a source table's signal-less column is swept
+beside its own `certain` email neighbour, and an unrelated table's
+same-named column — sampled, examined, and with no `certain` neighbour of
+its own — stays unmasked rather than inheriting the swept category.
+
+**The review round found the bit outlived the sweep's own guess
+(T-0312).** `sweptNoSignal` was set and never cleared, so a swept column that
+a *later* pass — `propagateKeys`, which walks every foreign-key edge
+including an unvalidated one `fkPairs` never sees — then overwrote with real
+evidence (the parent's category at the parent's confidence,
+`Source=ByFKPropagation`) still carried the stale bit into `sameColumnName`,
+which kept an evidenced decision out of the source set for no reason: the
+column is no longer a guess once propagation has spoken for it.
+`propagateKeys` now clears `cw.sweptNoSignal` in the branch that gives `cw`
+the parent's category, the same place it already clears `cw.neverMask`,
+`cw.typeConflict` and `cw.frameworkMetadata` for the same reason.
+`TestSameColumnNameUsesASweptDecisionOnceFKPropagationBacksIt` pins the
+reproduction: an unvalidated FK from the swept column to a certain,
+unrelated table's key lets both passes reach it, and a same-named column
+elsewhere is masked once the sweep's guess becomes real evidence. **Owed:**
+the residual recall change from the exclusion itself — a genuinely swept,
+never-FK-propagated column no longer exported as a source — is unmeasured
+over `testdata/torture/`; the two DB-free truth sets this package carries
+(`TestPagilaPrecisionAndRecall`, `TestFiftyNamesFromThreeSchemas`, the
+latter including the supabase-auth truth set) show no change in precision or
+recall from this diff, but neither contains the shape it affects. Filed as
+T-0351.
+
 **A committed lazyslice.yml keeps the old mask.** The yml records each
 column's confidence, and `applyPrior` raises a column back to what the file
 says (`yml_column`; ADR-004 lets a committed file only tighten). So a project

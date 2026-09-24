@@ -147,6 +147,21 @@ type work struct {
 	// and read only by unknownColumnsBesideCertain, which spares such a column
 	// from its sweep into free_text and prints why (T-0311; spare.go).
 	spare spareShape
+	// sweptNoSignal is set by unknownColumnsBesideCertain, on the column it
+	// raises and on every fkPairs partner it raises alongside it (T-0312,
+	// dogfood session 1): the whole claim that pass makes about this column
+	// is "a certain neighbour sits beside it and nothing is known about its
+	// own contents" -- no name rule, no value validator, no type signal, not
+	// even the sub-threshold kind sameColumnName's own silenced-type-conflict
+	// gate already excludes. sameColumnName's masked map is evidence for a
+	// same-named column in another table entirely, so a decision with this
+	// bit set must never enter it: the neighbour that justified raising this
+	// column has nothing to say about a column in a table it is not even
+	// beside, and letting the raise re-export as if it were an ordinary name
+	// or value hit is exactly how one guess became the "25 propagations"
+	// dogfood session 1 counted. It is never read outside sameColumnName; no
+	// other pass treats a decision differently for carrying it.
+	sweptNoSignal bool
 }
 
 // state is one Classify call.
@@ -1921,6 +1936,7 @@ func (st *state) unknownColumnsBesideCertain() {
 			w.d.Category = pipeline.CatFreeText
 			w.d.Confidence = pipeline.ConfPossible
 			w.d.Source = pipeline.ByNeighbour
+			w.sweptNoSignal = true
 			w.frags = append(w.frags, render("neighbour_unknown", quoteTable(t.Ref), certain))
 			for _, p := range partners {
 				w.frags = append(w.frags, render("fk_pair", quoteColumn(p)))
@@ -1928,6 +1944,7 @@ func (st *state) unknownColumnsBesideCertain() {
 				pw.d.Category = pipeline.CatFreeText
 				pw.d.Confidence = pipeline.ConfPossible
 				pw.d.Source = pipeline.ByNeighbour
+				pw.sweptNoSignal = true
 				pw.frags = append(pw.frags, render("fk_pair", quoteColumn(cref)))
 			}
 		}
@@ -2474,6 +2491,15 @@ func (st *state) propagateKeys() bool {
 			cw.neverMask = false
 			cw.typeConflict = false
 			cw.frameworkMetadata = false
+			// T-0312 review round: this branch is about to give cw a category
+			// backed by real evidence -- the parent's own decision, propagated
+			// across a validated edge -- which is exactly the kind of signal
+			// sweptNoSignal exists to distinguish a sweep's guess from. Leaving
+			// the bit set here would keep sameColumnName from treating this
+			// now-evidenced decision as a source, which is a T1 recall loss the
+			// goal never asked for: a same-named column elsewhere loses the
+			// propagation this decision should now be allowed to make.
+			cw.sweptNoSignal = false
 			if cw.keyFrag >= 0 {
 				cw.frags[cw.keyFrag] = ""
 				cw.keyFrag = -1
@@ -2506,6 +2532,17 @@ func (st *state) sameColumnName() {
 	for _, c := range st.order {
 		w := st.dec[c]
 		if w.d.Confidence < pipeline.ConfPossible || w.neverMask || w.d.Category == pipeline.CatNone {
+			continue
+		}
+		// T-0312: a decision unknownColumnsBesideCertain reached on no name
+		// or value signal of its own -- only a certain neighbour sitting
+		// beside it in *this* table -- carries nothing that speaks to a
+		// same-named column in a different table, so it is not a source
+		// here. Skipping it here, rather than at the consuming loop below,
+		// also keeps it out of shadowing an earlier, evidenced source: two
+		// columns sharing a name where the first is swept and the second has
+		// a real hit must still record the second.
+		if w.sweptNoSignal {
 			continue
 		}
 		key := normaliseName(c.Column)
