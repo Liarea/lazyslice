@@ -347,6 +347,25 @@ column is outside it. The file pins both directions: five label columns under
 its table name alone and an orders table's `name` corroborated by its
 samples.
 
+**045 is a twenty-ninth**, from the same dogfood session (**T-0315**): the
+entropy validator read six file-name columns, four MD5 and two file
+fingerprint columns, three Rails single-table-inheritance `type` columns, a
+formatter, a component name and an environment variable's name as secrets,
+"N/N samples look like secrets", and decided two more columns on one and four
+samples; each was masked to the fixed `$lazyslice$invalid`, which in a `type`
+column raises on every row the application loads. `textsig.LooksSecret` now
+refuses a file name carrying no dictionary word, a hex digest of exactly 32,
+40 or 64 characters, a namespaced identifier and an environment variable's
+name; internal/classify does not ask it about a column named `type`, `klass`
+or `component_name`; and it decides a column only over five samples or more
+(internal/classify's own T-0315 section has the rules, and internal/verify
+carries the same floor and names). The file pins both directions: thirteen
+columns under `not-masked:`, and under `not-copied:` four real secrets —
+two caught on name and value, a 64-character hex `access_token` on its name
+alone, an unnamed base62 token on eight samples — and a column of
+`photo-<username>-<n>.jpg` file names half of which carry a dictionary name,
+which the named-file rule still masks whole.
+
 The files are loaded and run by `make torture` (`internal/invariants`'s
 `TestTortureRegressions`, behind the `integration` and `torture` build tags), so
 a regression that comes back fails a build rather than being rediscovered by the
@@ -539,6 +558,7 @@ until T-0221. It is what 025 sets.
 | `041-generated-full-name-over-masked-name-columns.sql` | ADR-015, tracker T-0304, not a torture-schema reduction — see this file's own prose above | a generated `full_name` over masked `first_name` and `last_name` holds a real given name and surname in every target row once the lists are real names, which the second net's dictionary rule would refuse at exit 9; it is skipped for a generated column over masked columns only, and the run loads at `expect: ok` |
 | `043-enum-and-identifier-columns-beside-a-certain-email.sql` | dogfood session 1, tracker T-0311, not a torture-schema reduction — see this file's own prose above | **a copy that did not boot**: `unknownColumnsBesideCertain` swept a role, a state, a UI mode, an OS type, a log level, a timezone, a text uuid, a version, a hostname, a hex serial and an asset path into `free_text` beside a `certain` email column; an enumeration or an all-one-identifier-shape column is now spared and copied with a reason line saying why, while a native-script name column that is an enumeration by count alone is still swept and masked |
 | `044-bare-name-columns-of-label-tables.sql` | dogfood session 1, tracker T-0313, not a torture-schema reduction — see this file's own prose above | **a person's name where the application expects a label**: the rule pack's bare `name` word masked every column called `name` — a tag, a folder, a language, an AI model — and every `*_file_name` column as `person_name`, and a unique-indexed one refused the plan; `bare_name` now needs a word for people in the table or column name or samples the name dictionary carries, `not-masked:` pins five label columns copied and `not-copied:` pins a users table's `name` (corroborated by its table) and an orders table's `name` (corroborated by its samples) still masked |
+| `045-application-values-that-look-like-secrets.sql` | dogfood session 1, tracker T-0315, not a torture-schema reduction — see this file's own prose above | **a copy whose class names raised on load**: the entropy validator masked file names, MD5 and SHA-256 digests, STI `type` class names, formatter class paths, a component name, an environment variable's name and a four-sample column to the fixed credential literal; the four shapes are spared, a `type`/`klass`/`component_name` column is not asked, and a column needs five samples, while four real secrets and a column of file names named after their owners are still masked |
 
 009's header now says `ok`. It did not always: `arrayArrivesAsLiteral` in
 `internal/plan/writeback.go` was written as a stand-in for the element-wise

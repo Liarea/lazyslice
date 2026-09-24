@@ -828,7 +828,13 @@ func (st *state) base() {
 			}
 			st.dec[cref] = w
 			values := st.samples(cref, ct)
-			sig := bestSignal(dict, values, st.pack, ct.Family, st.validators)
+			vs := st.validators
+			if entropyExemptNames[normaliseName(col.Name)] {
+				// T-0315: a class or component name is not asked whether it
+				// looks like a secret; see entropyExemptNames.
+				vs = withoutSecrets(vs)
+			}
+			sig := bestSignal(dict, values, st.pack, ct.Family, vs)
 			st.decide(w, col, ct, values, sig)
 			st.appendContext(w, t, ct, sig.total)
 			st.markNeverMasked(w, t, col, ct)
@@ -988,11 +994,23 @@ func bestSignal(dict *textsig.Dict, values []string, p *compiledPack, family str
 	// matching is the noise minSamples was written about — raising it would
 	// mask a column on the strength of a single row.
 	proven := sig.total >= minSamples
+	namedFiles := namedFileNames(dict, values)
 	for _, v := range vs {
+		ok, phrase := v.ok, v.phrase
+		if v.cat == pipeline.CatCredential && namedFiles {
+			// T-0315: see namedFileNames. Every file name counts, whatever
+			// its own stem carries, as every one did before LooksSecret
+			// spared a file name.
+			ok = func(d *textsig.Dict, s string) bool {
+				_, file := textsig.FileNameStem(s)
+				return file || v.ok(d, s)
+			}
+			phrase = phraseNamedFiles
+		}
 		matched := 0
 		digitsOnly := true
 		for _, s := range values {
-			if v.ok(dict, s) {
+			if ok(dict, s) {
 				matched++
 				digitsOnly = digitsOnly && allDigits(s)
 			}
@@ -1027,8 +1045,11 @@ func bestSignal(dict *textsig.Dict, values []string, p *compiledPack, family str
 			}
 			continue
 		}
-		hit := &valueSignal{cat: v.cat, phrase: v.phrase, matched: matched, total: sig.total, digitsOnly: matched > 0 && digitsOnly}
-		if ratio >= validatorThreshold {
+		hit := &valueSignal{cat: v.cat, phrase: phrase, matched: matched, total: sig.total, digitsOnly: matched > 0 && digitsOnly}
+		if ratio >= validatorThreshold && (v.cat != pipeline.CatCredential || sig.total >= minSecretSamples) {
+			// T-0315: the entropy validator decides only over
+			// minSecretSamples or more; below that it falls through to the
+			// weak branch, and the validators after it are still asked.
 			sig.strong = hit
 			return sig
 		}

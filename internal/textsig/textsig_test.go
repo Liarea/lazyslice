@@ -54,9 +54,12 @@ func TestURLIsNotACredential(t *testing.T) {
 		}
 	}
 
+	// The hex vector was 64 characters until T-0315, which made a 32-, 40- or
+	// 64-character hex run a content digest (secretshape.go); a hex token of
+	// any other length is still a secret, and this one is 48.
 	secrets := []string{
 		"sk_live_4eC39HqLyjWDarjtT1zdp7dc",
-		"9f8b1c2d3e4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c",
+		"9f8b1c2d3e4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a",
 	}
 	for _, s := range secrets {
 		if ValidURL(s) {

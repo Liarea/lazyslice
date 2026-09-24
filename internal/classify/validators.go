@@ -40,6 +40,84 @@ const weakThreshold = 0.5
 // not evidence about a column; it is evidence about a row.
 const minSamples = 3
 
+// minSecretSamples is how many non-NULL samples the entropy validator
+// (textsig.LooksSecret, `credential`) needs before its ratio may decide a
+// column (tracker T-0315). Every other validator decides at any count once it
+// reaches validatorThreshold — below minSamples that is the T-0058 fail-closed
+// reading, "both of two values parse as an email address" — but an entropy
+// guess over one to four values is not the same claim as a parse over them:
+// dogfood session 1 masked two columns holding one and four ordinary values to
+// the credential literal on exactly that. Below it the validator can still
+// record `low` (sig.weak, at minSamples or more) for the neighbouring-column
+// rule to read, and a column whose name says credential is masked on the name
+// as before; what is given up is an unnamed column of one to four real secrets,
+// THREAT_MODEL.md T1's T-0315 amendment. internal/verify's credential entry
+// carries the same number, so the second net does not refuse a column this
+// package deliberately left unmasked.
+const minSecretSamples = 5
+
+// entropyExemptNames are the normalised column names whose values the entropy
+// validator is not asked about at all (tracker T-0315). A Rails
+// single-table-inheritance `type` column, its `klass` spelling, and a
+// `component_name` hold a class or component name the application
+// constantizes on every read: "ScheduledReportExport" clears the entropy floor
+// with no namespace for textsig's guard to see, and the credential literal in
+// its place raised on every row of the dogfood copy. The list is exact names
+// only, not a pattern: a `password_type` or `token_type` column is decided by
+// the credential name rule before this is read, and a polymorphic
+// `commentable_type` is outside what T-0315 settled.
+//
+// Only the entropy validator is dropped; every other one still runs, and the
+// name rules still apply, so a `type` column of email addresses is still an
+// email column. internal/verify/validators.go's credential entry carries the
+// same list, and the two are kept in step by hand, as that file's validator
+// list already is with this package's.
+var entropyExemptNames = map[string]bool{
+	"type":           true,
+	"klass":          true,
+	"component_name": true,
+}
+
+// namedFileNames reports whether a column's samples are file names enough of
+// which name a person for the whole column to be read as one (tracker T-0315).
+// textsig.LooksSecret no longer reads a file name as a secret unless its stem
+// carries a word from the name dictionary, which answers for one value; a
+// column is a different question. The rails-activestorage fixture's
+// `aoife-byrne-passport-3.pdf` carries a dictionary name in 72 of every 100
+// rows and mastodon's `photo-<username>-<n>.jpg` in about half, because the
+// dictionary does not hold every name: counted value by value, both columns
+// fall under validatorThreshold and the other rows' names are copied with the
+// column. So when at least nameCorroborationThreshold of the samples are file
+// names whose stem carries a dictionary word -- the share T-0313's bare-name
+// rule reads as a column of people's names -- bestSignal counts every file
+// name in the column as the entropy validator's hit, as it did before T-0315,
+// and the column is masked as `credential` with its own reason phrase. A column
+// of screenshots, exports and release files carries none and is spared.
+func namedFileNames(dict *textsig.Dict, values []string) bool {
+	if len(values) == 0 {
+		return false
+	}
+	named := 0
+	for _, s := range values {
+		if stem, ok := textsig.FileNameStem(s); ok && dict.ContainsName(stem) {
+			named++
+		}
+	}
+	return named > 0 && float64(named)/float64(len(values)) >= nameCorroborationThreshold
+}
+
+// withoutSecrets returns vs without the entropy validator, for a column
+// entropyExemptNames names.
+func withoutSecrets(vs []validatorEntry) []validatorEntry {
+	out := make([]validatorEntry, 0, len(vs))
+	for _, v := range vs {
+		if v.cat != pipeline.CatCredential {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
 // nameCorroborationThreshold is the share of a bare name column's samples
 // that must carry a word from the name dictionary (textsig.Dict.ContainsName)
 // before the samples corroborate the rule pack's bare_name rule (T-0313).

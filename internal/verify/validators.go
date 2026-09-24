@@ -3,6 +3,8 @@
 package verify
 
 import (
+	"strings"
+
 	"github.com/Liarea/lazyslice/internal/pipeline"
 	"github.com/Liarea/lazyslice/internal/textsig"
 )
@@ -167,7 +169,75 @@ type validator struct {
 	// neighbouring-column rule's own count). Without either, the ratio is
 	// never asked at all -- see corroborated in secondnet.go.
 	requiresCorroboration bool
-	ok                    func(string) bool
+	// minNonNull, when non-zero, is how many non-NULL values a column needs
+	// before this entry may fail it at all: below it the entry is never
+	// scored, which overrides the T-0058 any-hit-below-minValues floor
+	// scoreHits applies to every other ratio entry. It exists for the
+	// credential entry alone (T-0315), and it is internal/classify's
+	// minSecretSamples: textsig.LooksSecret is an entropy guess, the
+	// classifier no longer decides a column on it over fewer than five
+	// samples, and this net refusing, at exit 9 with no green path short of
+	// --unmask, the column the classifier deliberately left unmasked is the
+	// outcome internal/verify/CLAUDE.md argues against everywhere else.
+	minNonNull int64
+	// exemptColumns, when non-nil, names the columns this entry is never run
+	// over: internal/classify's entropyExemptNames (T-0315), for the
+	// credential entry alone -- a Rails `type`, a `klass`, a
+	// `component_name`, whose class names clear the entropy floor and are not
+	// credentials. It is matched on snakeColumnName(column), which reduces
+	// `Type`, `componentName`, `ComponentName` and `COMPONENT_NAME` to the
+	// same key internal/classify's normaliseName does. The two lists are kept
+	// in step by hand, like the rest of this file.
+	exemptColumns map[string]bool
+	ok            func(string) bool
+}
+
+// secretMinNonNull is internal/classify's minSecretSamples (T-0315): see
+// validator.minNonNull.
+const secretMinNonNull = 5
+
+// secretExemptColumns is internal/classify's entropyExemptNames (T-0315): see
+// validator.exemptColumns.
+var secretExemptColumns = map[string]bool{
+	"type":           true,
+	"klass":          true,
+	"component_name": true,
+}
+
+// namedFileShare is internal/classify's nameCorroborationThreshold as its
+// namedFileNames reads it (T-0315): the share of a column's values that must
+// be file names carrying a dictionary name before the column's other file
+// names count as the credential entry's hits again. See fileTally.
+const namedFileShare = 0.2
+
+// snakeColumnName lower-cases a column name and breaks it into words at a
+// lower-case letter or digit followed by a capital and at every character
+// that is not a letter or a digit, joining them with "_": the subset of
+// internal/classify's normaliseName that secretExemptColumns' three names
+// need, so that `componentName` is exempt here exactly when it is there.
+func snakeColumnName(s string) string {
+	var b strings.Builder
+	b.Grow(len(s) + 4)
+	prev := byte(0)
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c >= 'A' && c <= 'Z':
+			if (prev >= 'a' && prev <= 'z') || (prev >= '0' && prev <= '9') {
+				b.WriteByte('_')
+			}
+			b.WriteByte(c - 'A' + 'a')
+		case (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c >= 0x80:
+			b.WriteByte(c)
+		default:
+			if b.Len() > 0 && prev != '_' {
+				b.WriteByte('_')
+				c = '_'
+			}
+		}
+		prev = c
+	}
+	return b.String()
 }
 
 // validators is the set: internal/classify's twelve value validators, in its
@@ -437,7 +507,12 @@ var validators = []validator{
 	// parse, so one occurrence in an ordinary column is not evidence that the
 	// value is a credential the way one occurrence of a valid email address is
 	// evidence that it is an email address.
-	{category: pipeline.CatCredential, name: "credential", text: true, ok: textsig.LooksSecret},
+	//
+	// It is also the one entry with a floor and a column list (T-0315): it is
+	// never scored over fewer than secretMinNonNull values, nor over a
+	// column secretExemptColumns names, because internal/classify does not
+	// decide a column on it there either.
+	{category: pipeline.CatCredential, name: "credential", text: true, minNonNull: secretMinNonNull, exemptColumns: secretExemptColumns, ok: textsig.LooksSecret},
 	// The two dictionary-backed ones keep internal/classify's precedence:
 	// person_name before address, free_text last, so a note that mentions a
 	// street is prose and an address that parses as one is an address. Both ask

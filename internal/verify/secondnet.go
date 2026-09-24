@@ -236,6 +236,42 @@ type netTally struct {
 	hits    []int64
 }
 
+// fileTally counts one column's direct values that are file names
+// (textsig.FileNameStem): how many carry a word from the name dictionary in
+// their stem, and how many textsig.LooksSecret spared. It is the second net's
+// half of internal/classify's namedFileNames (T-0315): when at least
+// namedFileShare of a column's values are file names carrying a name, the
+// spared ones are counted as the credential entry's hits again, so a column
+// of documents named after people is scored as it was before LooksSecret
+// stopped reading a file name as a secret, and a column of screenshots is not.
+type fileTally struct {
+	named, spared int64
+}
+
+func (f *fileTally) observe(text string) {
+	stem, ok := textsig.FileNameStem(text)
+	if !ok {
+		return
+	}
+	if textsig.Dictionary().ContainsName(stem) {
+		f.named++
+	}
+	if !textsig.LooksSecret(text) {
+		f.spared++
+	}
+}
+
+// credentialHits is hits for every entry but the credential one, and for that
+// one hits plus the file names LooksSecret spared, when the column's file
+// names carry a name often enough (fileTally).
+func (f fileTally) credentialHits(val validator, hits, nonNull int64) int64 {
+	if val.category != pipeline.CatCredential || f.named == 0 || nonNull == 0 ||
+		float64(f.named)/float64(nonNull) < namedFileShare {
+		return hits
+	}
+	return hits + f.spared
+}
+
 // digitRange tracks one column's numeric span, order-independent on purpose
 // (T-0187 second review round, findings 1 and 3): scanSQL's "SELECT column
 // FROM table" (sql.go) carries no ORDER BY, so the order this net sees a
@@ -413,6 +449,7 @@ func (s *state) netColumn(ctx context.Context, col ref.ColumnRef, mode netMode) 
 	own := netTally{hits: make([]int64, len(validators))}
 	leaf := netTally{hits: make([]int64, len(validators))}
 	var seq digitRange
+	var files fileTally
 	// distinct holds, for the dictionary-backed validators only, the digests of
 	// up to minValues distinct values that hit. A digest rather than the value
 	// because a free_text value can be a whole document and this set outlives
@@ -432,6 +469,7 @@ func (s *state) netColumn(ctx context.Context, col ref.ColumnRef, mode netMode) 
 		for _, text := range direct {
 			own.nonNull++
 			s.count(text, false, mode, own.hits, distinct)
+			files.observe(text)
 			// seq reads every direct value regardless of family, not only a
 			// digits-family column's (T-0240): the character-family twin of
 			// the national_id digits entry (validators.go) is sequenceExempt
@@ -518,6 +556,11 @@ func (s *state) netColumn(ctx context.Context, col ref.ColumnRef, mode netMode) 
 			// finding; testdata/regressions/034's own control).
 			continue
 		}
+		if val.exemptColumns[snakeColumnName(col.Column)] {
+			// T-0315: a class or component name column, which
+			// internal/classify never asks this validator about either.
+			continue
+		}
 		if val.requiresCorroboration && !corroborated {
 			// T-0187 third review round, finding 1: this validator's ratio,
 			// however tuned, cannot tell a sparse column of assigned
@@ -536,13 +579,14 @@ func (s *state) netColumn(ctx context.Context, col ref.ColumnRef, mode netMode) 
 		// zero and scoreHits says nothing about it), and a text column holding
 		// a document is judged twice over two sets of values that have nothing
 		// to do with each other.
-		if !scoreHits(val, own.hits[i], own.nonNull, distinctHits) &&
+		ownHits := files.credentialHits(val, own.hits[i], own.nonNull)
+		if !scoreHits(val, ownHits, own.nonNull, distinctHits) &&
 			!scoreHits(val, leaf.hits[i], leaf.nonNull, 0) {
 			continue
 		}
 		s.fail(&Refusal{
 			Code: CodeRefusedSecondNet, Exit: exitResidual, Check: checkSecondNet,
-			Table: col.Table, Column: col.Column, Count: own.hits[i] + leaf.hits[i],
+			Table: col.Table, Column: col.Column, Count: ownHits + leaf.hits[i],
 			Reason: val.name,
 		})
 		// One category per column: the column is already exit 9, and a second
@@ -581,6 +625,11 @@ func (s *state) netColumn(ctx context.Context, col ref.ColumnRef, mode netMode) 
 // refusal proves noisy.
 func scoreHits(val validator, hits, nonNull int64, distinctHits int) bool {
 	if hits == 0 || nonNull == 0 {
+		return false
+	}
+	if nonNull < val.minNonNull {
+		// T-0315: the credential entry's own floor, below which it is not
+		// scored at all -- see validator.minNonNull.
 		return false
 	}
 	ratio := float64(hits) / float64(nonNull)

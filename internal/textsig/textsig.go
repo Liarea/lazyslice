@@ -305,12 +305,31 @@ func ValidURL(s string) bool {
 // fail-open on its own — a URL that carries a username would drop to `none` and
 // be copied verbatim (THREAT_MODEL.md T1) — so it is only half of the change,
 // and ValidURL above is the other half.
+//
+// Four more shapes are excluded for the same reason (tracker T-0315,
+// secretshape.go): a file's name ending in a known extension and carrying no
+// word from the name dictionary, a content
+// digest of fixed length (32, 40 or 64 hex characters, bare, under an
+// algorithm prefix, or as colon-separated byte pairs), a namespaced
+// identifier ("Billing::PdfExport", or "com.example.CsvFormatter" with no
+// dictionary word) and an environment variable's name ("AWS_S3_BUCKET_V2",
+// with no dictionary word). A file name is read by the file-name rule alone
+// (sparedShape). Each is a value an
+// application reads back by its meaning, and masking one to the credential
+// literal broke the application that reads it. Unlike a URL, none of them
+// has a category of its own to fall to, so a column of them is decided by the
+// validators after this one or by its name — the credential name rule still
+// masks a `password_digest` or an `api_key` column whatever its values look
+// like. What is given up is THREAT_MODEL.md T1's T-0315 amendment.
 func LooksSecret(s string) bool {
 	s = strings.TrimSpace(s)
 	if len(s) < 16 || len(s) > 512 {
 		return false
 	}
 	if ValidUUID(s) || ValidURL(s) || strings.ContainsAny(s, " \t\n@") {
+		return false
+	}
+	if sparedShape(s) {
 		return false
 	}
 	if hexRE.MatchString(s) {

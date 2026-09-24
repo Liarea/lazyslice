@@ -1003,9 +1003,30 @@ regression `013`, a fixture none of these three schemas touches.
 | Schema | Columns | Labelled personal | Predicted | TP | FP | FN | Precision | Recall |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | django | 44 | 9 | 11 | 9 | 2 | 0 | **0.818** | **1.000** |
-| rails-activestorage | 36 | 7 | 14 | 7 | 7 | 0 | **0.500** | **1.000** |
+| rails-activestorage | 36 | 7 | 13 | 7 | 6 | 0 | **0.538** | **1.000** |
 | supabase-auth | 271 | 50 | 78 | 50 | 28 | 0 | **0.641** | **1.000** |
-| all three | 351 | 66 | 103 | 66 | 37 | 0 | **0.641** | **1.000** |
+| all three | 351 | 66 | 102 | 66 | 36 | 0 | **0.647** | **1.000** |
+
+**T-0315 (2026-09-24) moved rails-activestorage by one false positive and no
+true positive**, and the table above carries it. `textsig.LooksSecret` no
+longer reads a hex digest of exactly 32, 40 or 64 characters, a file name
+carrying no dictionary word, a namespaced identifier or an environment
+variable's name as a secret, the classifier does not ask it about a column
+named `type`, `klass` or `component_name`, and it decides a column only over
+five samples (ARCHITECTURE.md §4's T-0315 amendment).
+`active_storage_blobs.checksum` (an MD5, labelled not-personal) is copied now:
+14 → 13 predicted, precision 0.500 → 0.538; all three 103 → 102, 0.641 →
+0.647; recall unchanged at 1.000. The one labelled-personal column the change
+could have cost, `active_storage_blobs.filename` (`aoife-byrne-passport-3.pdf`),
+is still masked at 200/200: a file name whose stem carries a dictionary word
+is still read by the entropy check, and because the dictionary holds a name
+in only 72 of every 100 of these, a column in which a fifth or more of the
+file names carry one has every file name counted — a first measurement
+without that rule copied this column, which is why the rule exists. django
+and supabase-auth did not move. Measured the way T-0311 and T-0313 were, over
+all ten schemas; the other seven moved 28 columns to copied and 3 to masked,
+none of the 28 personal, and THREAT_MODEL.md T1's T-0315 amendment lists
+them.
 
 **T-0311 (2026-09-24) moved supabase-auth by three false positives and no
 true positive**, and the table above carries it. The neighbouring-column
@@ -1152,13 +1173,14 @@ Both of the schema's *hidden* carriers were caught: `django_admin_log.object_rep
 `django_admin_log.change_message` at `possible`. Neither column's name says
 anything.
 
-### rails-activestorage — precision 0.500, recall 1.000
+### rails-activestorage — precision 0.538, recall 1.000
 
-The worst precision of the three, and it is one validator. Seven false
-positives, of which six are `LooksSecret` firing on a value that is merely long
-and mixed: a checksum, a `variation_digest`, an ActiveStorage `key`, a
+The worst precision of the three, and it is one validator. Six false
+positives, most of them `LooksSecret` firing on a value that is merely long
+and mixed: a `variation_digest`, an ActiveStorage `key`, a
 `content_type` of `application/pdf`, and `ar_internal_metadata.key` holding
-"environment". The seventh is `person_name` on `service_name` ("local"), a bare
+"environment" (the checksum was a sixth until T-0315, which reads an MD5 as a
+digest and copies it). The last is `person_name` on `service_name` ("local"), a bare
 name no word or sample corroborates, raised to `possible` by the
 neighbouring-column rule beside `filename`. `active_storage_attachments.name`
 ("cover") was an eighth until T-0313 and is copied now.

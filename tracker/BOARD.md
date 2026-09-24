@@ -9,7 +9,7 @@
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 0 | 0 | 108 | 0 | 0 |
 | E6 Launch | 6 | 20 | 0 | 20 | 0 | 0 |
-| E9 Later | later | 113 | 0 | 38 | 8 | 0 |
+| E9 Later | later | 114 | 0 | 38 | 8 | 0 |
 
 ## Open and in progress
 
@@ -146,6 +146,7 @@
 - T-0354 [open] E6 · The hex-digest spare of the certain-neighbour sweep lets short hex tokens through unmasked (opus)
 - T-0355 [open] E9 · Same-column-name rule after T-0312: the swept mark through propagateKeys, a docs misstatement, and the source-ordering test (sonnet)
 - T-0356 [open] E9 · Bare-name rule after T-0313: fixture independence, the Recall-bias bullet, and the category of birth_name and cardholder_name (sonnet)
+- T-0357 [open] E9 · README and SECURITY residual lists name the secrets T-0315 no longer reads by entropy ()
 
 ## Recently closed
 

@@ -38,6 +38,12 @@ const (
 	phraseLuhn       = "pass the Luhn check"
 	phraseIBAN       = "pass the IBAN check"
 	phraseSecrets    = "look like secrets"
+	// phraseNamedFiles is the entropy validator's own reading of a column of
+	// file names at least nameCorroborationThreshold of which carry a word
+	// from the name dictionary (T-0315, namedFileNames): the column's
+	// name-free file names are counted as secrets again, as they were before
+	// textsig.LooksSecret stopped reading a file name as one.
+	phraseNamedFiles = "are file names, a fifth or more carrying a dictionary name"
 	phraseURL        = "parse as URLs"
 	phraseProse      = "hold prose with dictionary names"
 	phraseJSONLeaf   = "hold personal data at a JSON leaf"
@@ -66,6 +72,7 @@ var validatorPhrases = []string{
 	phraseLuhn,
 	phraseIBAN,
 	phraseSecrets,
+	phraseNamedFiles,
 	phraseURL,
 	phraseProse,
 	phraseJSONLeaf,

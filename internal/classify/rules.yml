@@ -140,10 +140,17 @@ patterns:
   # needs. The hand labels this rule is scored against moved with it, in
   # names_test.go and supabase_misses_test.go, and the rates are recorded in
   # docs/TORTURE.md.
+  #
+  # `key_?hash(es)?` is here since T-0315, which stopped textsig.LooksSecret
+  # reading a hex digest of exactly 32, 40 or 64 characters as a secret. A hash
+  # of an API key is exactly that shape and was masked on its values alone:
+  # plausible's `api_keys.key_hash` (SHA-256 hex, no name signal) moved from
+  # masked to copied in T-0315's measurement, and this spelling is what brings
+  # it back, beside `password_?hash`, `token_?digests?` and `code_?hash(es)?`.
   - name: credential
     category: credential
     priority: 80
-    match: '(^|_)(passwords?|passwd|pwd|password_?hash|password_?digest|encrypted_?password|salts?|secrets?|api_?keys?|access_?tokens?|refresh_?tokens?|auth_?tokens?|tokens?|token_?digests?|private_?keys?|client_?secrets?|otp_?secrets?|totp_?secrets?|recovery_?codes?|signing_?keys?|encryption_?keys?|auth_?codes?|otp_?codes?|authorization_?codes?|code_?verifiers?|code_?challenges?|code_?hash(es)?|credential_?ids?|public_?keys?)(_|$)'
+    match: '(^|_)(passwords?|passwd|pwd|password_?hash|password_?digest|encrypted_?password|salts?|secrets?|api_?keys?|access_?tokens?|refresh_?tokens?|auth_?tokens?|tokens?|token_?digests?|private_?keys?|client_?secrets?|otp_?secrets?|totp_?secrets?|recovery_?codes?|signing_?keys?|encryption_?keys?|auth_?codes?|otp_?codes?|authorization_?codes?|code_?verifiers?|code_?challenges?|code_?hash(es)?|key_?hash(es)?|credential_?ids?|public_?keys?)(_|$)'
 
   - name: national_id
     category: national_id
