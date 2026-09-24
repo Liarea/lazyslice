@@ -229,6 +229,24 @@ func cardIdentifierNamed(snake string) bool {
 // ValidCard entries.
 func notCardIdentifierNamed(snake string) bool { return !cardIdentifierNamed(snake) }
 
+// networkIDVetoWords is internal/classify's list of the same name (T-0317):
+// a column whose snakeColumnName'd name carries one of these as any
+// underscore-separated token is never asked the IP/MAC question, because a
+// dotted-integer version string is an IPv4 address to net.ParseIP.
+var networkIDVetoWords = map[string]bool{"version": true, "build": true, "release": true}
+
+// notNetworkIDVetoed is the network_id entry's columns gate: every token is
+// checked, not only the last, as internal/classify's networkIDVetoed does,
+// because app_version_code carries the word in the middle.
+func notNetworkIDVetoed(snake string) bool {
+	for _, tok := range strings.Split(snake, "_") {
+		if networkIDVetoWords[tok] {
+			return false
+		}
+	}
+	return true
+}
+
 // secretMinNonNull is internal/classify's minSecretSamples (T-0315): see
 // validator.minNonNull.
 const secretMinNonNull = 5
@@ -506,7 +524,14 @@ var validators = []validator{
 	// list, which stays corroboration-gated on that side only (Options.
 	// PhoneRegion's own comment has the reason).
 	{category: pipeline.CatPhone, name: "phone", text: true, strong: true, ok: textsig.ValidPhone},
-	{category: pipeline.CatNetworkID, name: "network_id", text: true, strong: true, ok: func(s string) bool {
+	// A column whose name carries version, build or release is not asked
+	// (T-0317, its verify half; internal/classify's networkIDVetoed is the
+	// twin): a dotted-integer version string parses as an IPv4 address, and
+	// the classifier leaves such a column unmasked on that veto, so a hit
+	// here could only refuse a run the classifier decided correctly. A
+	// genuine IP or MAC column named that way is the residual the T1
+	// amendment states.
+	{category: pipeline.CatNetworkID, name: "network_id", text: true, strong: true, columns: notNetworkIDVetoed, ok: func(s string) bool {
 		return textsig.ValidIP(s) || textsig.ValidMAC(s)
 	}},
 	// Luhn is split by family, not just by strength (T-0136 review finding 2).

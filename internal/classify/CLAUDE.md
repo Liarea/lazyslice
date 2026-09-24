@@ -1875,3 +1875,124 @@ card and a neutral column holding a Visa-prefixed value of an unissued length
 are still masked. **Measured:** THREAT_MODEL.md T1's T-0316 amendment — no
 column of the ten torture schemas moved, because none samples a value that
 passes the check digit.
+
+## A version is not a network address, and a key is not a phone number (T-0317)
+
+Dogfood session 1 found two more coincidental value shapes. `last_player_version`
+held dot-separated integers of the same shape an IPv4 address is ("1.2.3.4"):
+93 of 168 samples passed `textsig.ValidIP`, below `validatorThreshold`, so
+`bestSignal`'s `strongHit` branch (T-0136, above) masked the whole column
+`free_text`, "a strong validator hit below the category threshold". Separately,
+`license_key` held ten-digit samples, 8 of which cleared one of
+`phoneGuessRegions`' numbering plans, and `guessedPhoneColumns` masked it
+`phone` beside a personal neighbour (T-0221, above) — the wrong shape for a
+key, whatever some numbering plan makes of its digits.
+
+Both are name-based vetoes over the *value* signal, the same shape T-0316's
+`withCardShape` already is, and both live in `validators.go` beside it:
+
+- **`networkIDVetoed`** answers whether any underscore-separated token of a
+  `normaliseName`'d column name is `version`, `build` or `release`. Unlike
+  `identifierNamed` (T-0316), which asks only about the last token because a
+  card check is about what the whole value is, this checks every token —
+  `app_version_code` carries the word in the middle. Nothing about the
+  column's other signals changes — a version column that also carries a
+  genuine email or phone value is still decided by that. `bestSignal` takes
+  the already-vetoed `vs` and passes it straight through to `compositeSignal`
+  and `byteaTextSignal`, so a composite or bytea column named `version` gets
+  the same treatment there too, by construction and not by a second edit;
+  `jsonLeafIsPersonal` is the one caller this does not reach, because it
+  reads `st.pack`'s bare `matchColumn` over a JSON leaf key, which has no
+  column name of the *document's* own to veto against and never took a `vs`
+  argument at all.
+  - **`withoutNetworkID`'s first landing dropped the `network_id` entries (IP,
+    MAC) from the validator list outright, unconditionally on the values, and
+    a review round on this same task found that goes further than the goal:
+    it also leaves a column unmasked when *all* of its values are genuine
+    addresses** (finding 2, T-0317 review round). Probed with a `build_host`
+    column of five real public IPv4 addresses in a table with no certain
+    neighbour: masked `network_id` before this change, "nothing recognised"
+    and unmasked after — any column with `version`, `build` or `release` as a
+    token and genuine addresses in it (`build_agent_address`,
+    `release_server`, `client_version_origin`) reached the target unmasked on
+    a name coincidence alone. The fix is narrower: `withoutNetworkID` now
+    clears the two `network_id` entries' `strong` field instead of removing
+    them. `bestSignal`'s ratio branch (`ratio >= validatorThreshold`, the
+    "this column really is mostly addresses" case) does not read `v.strong`
+    at all, so it is unaffected — a column that genuinely clears the
+    threshold on IP or MAC still masks `network_id`. Only the `strongHit`
+    branch below `validatorThreshold` (T-0136 finding 7) reads `v.strong`, so
+    only the coincidental-minority path — the dogfood shape, 93/168 — is
+    withheld now, which is what the goal actually described. Neither of the
+    T1 measurements moved (see Measured, below); `build_host`'s shape is not
+    in either truth set either.
+- **`phoneGuessVetoed`** answers the same question against `key`, `code`,
+  `license`, `serial` and `token`. It gates `base`'s own computation of
+  `w.guessedPhone` (the same block `isCharacterFamily` and `silencedByType`
+  already gate, T-0221's own section above), so a vetoed column's values are
+  never even offered to `guessedPhoneHit`, and `guessedPhoneColumns` has
+  nothing to raise. It is deliberately **not** read anywhere near the
+  configured-region entry `buildValidators` splices into `state.validators`
+  (T-0221's `phraseE164Region`): a `--phone-region` an operator configured is
+  trusted evidence on the same strong footing as the international-only
+  entry, and this task's goal is about the *guessed*, corroboration-only
+  fallback alone, not about an operator naming a region and handing the tool
+  a `license_key` column of the phone numbers their own support line prints
+  on printed licence cards. `decide`'s ordinary name-match branch (a column
+  whose own name matches `rules.yml`'s phone pattern) is unaffected for the
+  same reason `guessedPhoneColumns`' own comment already gives: that branch
+  masks the column before `guessedPhoneColumns` ever sees it, veto or not.
+
+**Neither veto removes masking outright.** A vetoed column beside a `certain`
+personal neighbour, with no other signal, is still swept into `free_text` by
+the neighbouring-column rule's second arm (T-0311, above) unless one of that
+arm's own guards spares it — the veto withholds one specific, wrong category,
+not the decision to mask at all. `t0317_test.go`'s
+`TestKeyNamedColumnIsNotMaskedAsGuessedPhone` pins exactly that: `license_key`
+and `serial_number` are still masked, `free_text`, beside their table's
+`email` column, and the assertion is on `Category != CatPhone`, not on
+`Masked`. `TestVersionNamedColumnIsNotMaskedAsNetworkID` pins the other
+direction, where nothing else in the fixture masks the column at all, and
+both tests carry a same-shaped control column with no veto word in its name
+to prove the fixture would otherwise mask the way the dogfood report
+describes.
+
+**Measured:** `TestPagilaPrecisionAndRecall` and `TestFiftyNamesFromThreeSchemas`
+are unchanged by this diff (precision 0.762/0.959, recall 1.000/1.000) —
+neither hand-labelled truth set carries a version/build/release or a
+key/code/license/serial/token column, so this is the floor showing no
+personal column newly missed, not a claim the torture corpus was measured
+(nothing under `testdata/` changed in this task).
+
+**Owed:** THREAT_MODEL.md T1 is outside this task's paths and does not yet
+carry this amendment — tracker T-0359 carries the edit, the way T-0357 and
+T-0358 already do for T-0315 and T-0316's own owed sentences elsewhere.
+
+**Owed: `internal/verify`'s second net has no matching veto** (finding 1, T-0317
+review round). T-0315 and T-0316 each mirrored their name veto into
+`internal/verify` (`exemptColumns`, the `columns` func) in the same landing;
+this task's paths did not reach that package, so the mirror was not done and
+no task filed either. `internal/verify/validators.go`'s `network_id` entry
+(`ValidIP || ValidMAC`, `strong: true`) has no gate of its own, so a column
+like `last_player_version` — which this change now leaves unmasked, with no
+certain neighbour (`masked=false`, `cat=none`) — still carries its coincidental
+IP-parsing minority into the loaded target, and `secondnet.go`'s `val.strong`
+branch fails the column on that single hit, refusing the whole run at exit 9.
+Not a data leak (fails closed), but the dogfood run goes from over-masked to a
+post-load refusal with no green path short of `--unmask`, and the two nets
+disagree in a way this package's own T-0055 note above argues against.
+Tracker **T-0360** carries the mirror.
+
+**This task's own review round (2026-09-24) reopened this same owed note as
+finding 1 and asked to hold the merge until T-0360 lands, or move T-0360 out
+of E9/Later into the current phase's epic (E6) so it is scheduled with this
+change rather than after it.** Neither is something this task's own paths or
+role can do: `internal/verify/` is outside `internal/classify/`,
+`internal/textsig/`, `ARCHITECTURE.md`, `testdata/` and `docs/`, and
+`lazyslice-tracker`'s "Who may do what" restricts a developer or reviewer
+agent to filing into E9 — `move` (re-homing a task into another epic) and
+holding a merge are the orchestrator's calls. T-0360 was filed with the fix
+already spelled out (the `columns`-based gate on verify's `network_id` entry,
+mirroring `networkIDVetoed`, plus the verify-level test) rather than only
+"do the mirror"; the sequencing decision the review round asked for is
+recorded here for whoever next holds the tracker.

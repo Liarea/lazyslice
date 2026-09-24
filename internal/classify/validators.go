@@ -169,6 +169,96 @@ func withCardShape(vs []validatorEntry) []validatorEntry {
 	return out
 }
 
+// networkIDVetoWords are the normalised name tokens that say a column holds
+// the application's own version, build or release identifier rather than a
+// network address (tracker T-0317). Dogfood session 1 masked
+// `last_player_version` as free_text: 93 of 168 samples are dot-separated
+// integers of the same shape an IPv4 address is ("1.2.3.4"), so
+// textsig.ValidIP parsed them and bestSignal's strongHit branch masked the
+// column on a strong validator's minority hit. A version string is not a
+// network address whatever its digits happen to parse as. See
+// networkIDVetoed and withoutNetworkID, read in state.base.
+var networkIDVetoWords = map[string]bool{
+	"version": true,
+	"build":   true,
+	"release": true,
+}
+
+// networkIDVetoed reports whether any underscore-separated token of a
+// normaliseName'd column name is a networkIDVetoWords word. Unlike
+// identifierNamed (T-0316), which asks only about the last token because a
+// card check is about what the whole value is, this checks every token: an
+// `app_version_code` column carries the word in the middle, and the same
+// coincidental IP shape applies there as it does at the end of a name.
+func networkIDVetoed(normalised string) bool {
+	for _, tok := range strings.Split(normalised, "_") {
+		if networkIDVetoWords[tok] {
+			return true
+		}
+	}
+	return false
+}
+
+// withoutNetworkID returns vs with the network_id entries (IP, MAC) no longer
+// marked strong, for a column networkIDVetoed names (T-0317 review round,
+// finding 2). The first landing removed the entries outright, which also
+// stopped a version-named column from being masked network_id when *all* of
+// its values are genuine addresses -- probed with a `build_host` column of
+// five real public IPv4s in a table with no certain neighbour: it masked
+// network_id before this change and reached "nothing recognised" after,
+// unmasked, because the veto did not depend on the values at all.
+//
+// bestSignal's ratio branch (the `ratio >= validatorThreshold` case) does not
+// read v.strong; only the strongHit branch below validatorThreshold does
+// (T-0136 finding 7). So a column that genuinely clears validatorThreshold on
+// IP or MAC -- a majority of its samples really are addresses -- is unaffected
+// and still masks network_id. What this withholds is only the minority
+// strongHit path: a coincidental IP-shaped minority, the dogfood shape
+// (93/168), no longer decides the column at all. Nothing else about the
+// validator list changes, so a version column that also carries a real email
+// or phone signal is still decided by that.
+func withoutNetworkID(vs []validatorEntry) []validatorEntry {
+	out := make([]validatorEntry, 0, len(vs))
+	for _, v := range vs {
+		if v.cat == pipeline.CatNetworkID {
+			v.strong = false
+		}
+		out = append(out, v)
+	}
+	return out
+}
+
+// phoneGuessVetoWords are the normalised name tokens that say a column holds
+// a key, code, license, serial or token of the application's own rather than
+// a telephone number (tracker T-0317). Dogfood session 1 masked
+// `license_key` as phone: its ten-digit samples cleared a guessed region's
+// numbering plan on 8 of 10 rows (guessedPhoneHit, T-0221), and
+// guessedPhoneColumns masked it on that corroborated guess alone -- the
+// wrong shape for a key, whatever some numbering plan makes of its digits.
+// See phoneGuessVetoed, read in state.base beside guessedPhoneHit.
+var phoneGuessVetoWords = map[string]bool{
+	"key":     true,
+	"code":    true,
+	"license": true,
+	"serial":  true,
+	"token":   true,
+}
+
+// phoneGuessVetoed reports whether any underscore-separated token of a
+// normaliseName'd column name is a phoneGuessVetoWords word. It is checked
+// only by the guessed-region fallback (base, guessedPhoneHit): a column whose
+// name already matches rules.yml's own phone pattern is decided by that name
+// rule first and never reaches this gate at all (guessedPhoneColumns' own
+// comment on why that arm can never fire).
+func phoneGuessVetoed(normalised string) bool {
+	for _, tok := range strings.Split(normalised, "_") {
+		if phoneGuessVetoWords[tok] {
+			return true
+		}
+	}
+	return false
+}
+
 // nameCorroborationThreshold is the share of a bare name column's samples
 // that must carry a word from the name dictionary (textsig.Dict.ContainsName)
 // before the samples corroborate the rule pack's bare_name rule (T-0313).

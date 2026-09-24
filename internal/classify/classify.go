@@ -844,6 +844,12 @@ func (st *state) base() {
 				// value in the full shape of a card; see identifierNamed.
 				vs = withCardShape(vs)
 			}
+			if networkIDVetoed(normaliseName(col.Name)) {
+				// T-0317: a version, build or release column is never a
+				// network address, whatever its dotted digits parse as; see
+				// networkIDVetoed.
+				vs = withoutNetworkID(vs)
+			}
 			sig := bestSignal(dict, values, st.pack, ct.Family, vs)
 			st.decide(w, col, ct, values, sig)
 			st.appendContext(w, t, ct, sig.total)
@@ -886,8 +892,14 @@ func (st *state) base() {
 			// national_id's checksum-only formats. Restricting the guess to
 			// text/varchar/bpchar/citext leaves that column for verify's own
 			// entry to decide, exactly as it does today.
+			// T-0317: a column named for a key, code, license, serial or
+			// token is never offered to the guessed-region fallback at all --
+			// dogfood session 1's license_key cleared a guessed region's
+			// numbering plan on 8/10 samples and was masked phone, the wrong
+			// shape for a key. See phoneGuessVetoed.
 			if w.d.Confidence < pipeline.ConfPossible &&
-				isCharacterFamily(ct.Family) && !silencedByType(st.pack, pipeline.CatPhone, ct.Family) {
+				isCharacterFamily(ct.Family) && !silencedByType(st.pack, pipeline.CatPhone, ct.Family) &&
+				!phoneGuessVetoed(normaliseName(col.Name)) {
 				if hit := guessedPhoneHit(values); hit != nil &&
 					float64(hit.matched)/float64(hit.total) >= validatorThreshold {
 					w.guessedPhone = hit
