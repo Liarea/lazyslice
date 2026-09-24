@@ -8,8 +8,8 @@
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 0 | 0 | 108 | 0 | 0 |
-| E6 Launch | 6 | 19 | 0 | 26 | 0 | 0 |
-| E9 Later | later | 118 | 0 | 39 | 8 | 0 |
+| E6 Launch | 6 | 20 | 0 | 26 | 0 | 0 |
+| E9 Later | later | 119 | 0 | 39 | 8 | 0 |
 
 ## Open and in progress
 
@@ -150,6 +150,8 @@
 - T-0365 [open] E9 · Share normaliseName's word-boundary fold through internal/textsig instead of hand-mirroring it in internal/verify ()
 - T-0366 [open] E9 · plan: T-0318 review follow-ups: fail-fast comments, empty Refusals guard, package CLAUDE.md, fixture comment (sonnet)
 - T-0367 [open] E9 · cli/verify: T-0319 review follow-ups: --mask duplicate check compares defaulted categories; Verify() asserted to return every second-net failure (sonnet)
+- T-0368 [open] E9 · Reconcile ARCHITECTURE.md and docgen fixtures with T-0326's removal of the positional DSN ()
+- T-0369 [open] E6 · verify: the second_net hint names a --mask category the column's type accepts, or semi_structured for a json column (sonnet)
 
 ## Recently closed
 

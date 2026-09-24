@@ -544,7 +544,9 @@ func TestExitCodes(t *testing.T) {
 		{"unknown flag", []string{"--nope"}, ExitUsage},
 		{"unparseable int", []string{"--take", "abc"}, ExitUsage},
 		{"unparseable depth", []string{"--depth", "notanint"}, ExitUsage},
+		{"a single positional argument", []string{"a"}, ExitUsage},
 		{"too many arguments", []string{"a", "b", "c"}, ExitUsage},
+		{"a stray positional argument alongside --source", []string{"--source", "postgres://nobody@127.0.0.1:1/none", "--unmask x"}, ExitUsage},
 		{"unknown flag on a subcommand", []string{"introspect", "--nope"}, ExitUsage},
 		{"unqualified unmask", []string{"--unmask", "notatable=because"}, ExitUsage},
 		{"unmask with no reason", []string{"--unmask", "public.users.email"}, ExitUsage},
@@ -569,6 +571,121 @@ func TestExitCodes(t *testing.T) {
 				t.Errorf("run(%q) = %d, want %d\nstderr: %s", c.args, got, c.want, stderr.String())
 			}
 		})
+	}
+}
+
+// T-0326: a dogfood session ran `lazyslice --source DSN --create-target '
+// --unmask x'` from one unsplit shell variable, and the stray positional
+// argument was silently accepted as a second, overriding DSN (the root
+// command took one positional argument and used it as req.Source whenever
+// it was present) — so the run went looking for a local postgres to load
+// into instead of naming the argument cobra should never have accepted. The
+// root command now takes none: cobra.NoArgs names the offending argument in
+// its own error, wrapped in errUsage the same way every other flag mistake
+// is, so this is exit 2, not the wrong error at exit 4.
+func TestStrayPositionalArgumentIsAUsageError(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	got := run(t.Context(), []string{"--source", "postgres://nobody@127.0.0.1:1/none", " --unmask x"}, &stdout, &stderr)
+	if got != ExitUsage {
+		t.Errorf("run with a stray positional argument = exit %d, want %d\nstderr: %s", got, ExitUsage, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "--unmask x") {
+		t.Errorf("stderr = %q, want it to name the stray argument", stderr.String())
+	}
+}
+
+// T-0326 review: cobra.NoArgs's own error quotes the stray argument verbatim,
+// and renderSafe prints every errUsage error in full, so a positional
+// connection string (the documented-but-no-longer-accepted "lazyslice
+// postgres://..." form) must never reach stderr with its password intact.
+func TestStrayPositionalDSNNeverPrintsThePassword(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	got := run(t.Context(), []string{"postgres://app:hunter2secret@db.example:5432/shop"}, &stdout, &stderr)
+	if got != ExitUsage {
+		t.Errorf("run with a stray positional DSN = exit %d, want %d\nstderr: %s", got, ExitUsage, stderr.String())
+	}
+	if strings.Contains(stderr.String(), "hunter2secret") {
+		t.Errorf("stderr leaked the DSN password: %q", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "db.example:5432/shop") {
+		t.Errorf("stderr = %q, want it to name the connection by its redacted form", stderr.String())
+	}
+}
+
+// T-0326 second review: dsn.Parse rejects a multi-host DSN with
+// dsn.ErrMultipleHosts and rejects a DSN with a non-numeric port, but the
+// text still carries a password in both cases — so a failed Parse must not
+// fall back to printing the argument verbatim. The rule (THE DECISION) is
+// shape, not scheme: any of the characters '=', '@', ':' or '/' means the
+// argument is named only as "a connection-string-shaped argument that could
+// not be parsed", whether it is a URI or a libpq keyword/value string, and
+// whether its scheme is upper- or lower-case. The passwords below are
+// synthetic high-entropy strings, not a real provider's secret format.
+func TestStrayPositionalUnparseableDSNNeverPrintsThePassword(t *testing.T) {
+	const password = "qX7mK2pL9vR4tN8w"
+	tests := []struct {
+		name string
+		arg  string
+	}{
+		{"multi-host URI", "postgres://app:" + password + "@h1,h2/shop"},
+		{"bad-port URI", "postgres://app:" + password + "@db:notaport/shop"},
+		{"keyword/value with a bad port", "host=db port=notaport password=" + password},
+		{"keyword/value with multiple hosts", "host=h1,h2 password=" + password},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdout, stderr bytes.Buffer
+			got := run(t.Context(), []string{tt.arg}, &stdout, &stderr)
+			if got != ExitUsage {
+				t.Errorf("run with a stray positional DSN = exit %d, want %d\nstderr: %s", got, ExitUsage, stderr.String())
+			}
+			if strings.Contains(stderr.String(), password) {
+				t.Errorf("stderr leaked the DSN password: %q", stderr.String())
+			}
+			if strings.Contains(stderr.String(), tt.arg) {
+				t.Errorf("stderr echoed the raw argument: %q", stderr.String())
+			}
+		})
+	}
+}
+
+// T-0326 second review: the scheme check the old looksLikeDSN heuristic used
+// was case-sensitive, so an upper-case POSTGRES:// URI fell through to being
+// quoted verbatim with its password. The character-shape rule that replaced
+// it does not look at the scheme at all.
+func TestStrayPositionalUpperCaseSchemeDSNNeverPrintsThePassword(t *testing.T) {
+	const password = "qX7mK2pL9vR4tN8w"
+	arg := "POSTGRES://app:" + password + "@h1/shop"
+
+	var stdout, stderr bytes.Buffer
+	got := run(t.Context(), []string{arg}, &stdout, &stderr)
+	if got != ExitUsage {
+		t.Errorf("run with an upper-case-scheme stray positional DSN = exit %d, want %d\nstderr: %s", got, ExitUsage, stderr.String())
+	}
+	if strings.Contains(stderr.String(), password) {
+		t.Errorf("stderr leaked the DSN password: %q", stderr.String())
+	}
+	if strings.Contains(stderr.String(), arg) {
+		t.Errorf("stderr echoed the raw argument: %q", stderr.String())
+	}
+}
+
+// T-0326 review: subcommand() ran oneDSN and silently overwrote an
+// already-set --source with a stray positional argument, so
+// `lazyslice plan --source <good DSN> ' --unmask x'` reported a bad --source
+// (the overwritten value) instead of naming the stray argument. A
+// subcommand now refuses at exit 2 when both are given, with the same
+// never-quote rule the root command's usage error uses.
+func TestSubcommandRefusesSourceAndPositionalDSNTogether(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	got := run(t.Context(), []string{
+		"plan", "--source", "postgres://nobody@127.0.0.1:1/none", " --unmask x",
+	}, &stdout, &stderr)
+	if got != ExitUsage {
+		t.Errorf("run with --source and a stray positional argument = exit %d, want %d\nstderr: %s", got, ExitUsage, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), " --unmask x") {
+		t.Errorf("stderr = %q, want it to name the stray argument", stderr.String())
 	}
 }
 

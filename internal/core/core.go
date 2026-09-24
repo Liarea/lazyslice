@@ -49,7 +49,7 @@ type Mode int
 // The six entry points. ModeRun is the zero value, so a Request built by hand
 // runs the whole pipeline, which is what `lazyslice` with no subcommand does.
 const (
-	ModeRun        Mode = iota // lazyslice [DSN]
+	ModeRun        Mode = iota // lazyslice --source DSN
 	ModeIntrospect             // lazyslice introspect
 	ModeClassify               // lazyslice classify
 	ModePlan                   // lazyslice plan, and --plan
@@ -97,7 +97,7 @@ type Request struct {
 	Explicit map[string]bool
 
 	// discover
-	Source              string // positional DSN or --source
+	Source              string // --source (a subcommand may still take it positionally, T-0326)
 	Target              string // --target
 	DockerHost          string // --docker-host
 	PasswordCommand     string // --password-command

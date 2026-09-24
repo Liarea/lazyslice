@@ -104,3 +104,31 @@ Entry points this directory may call: `core.Run`, `core.Introspect`, and `core.P
   column that still comes out unmasked refused, in `internal/core`. It needs
   no reason because it only tightens, and its name contains none of the
   forbidden spellings. No `--tui` screen offers it yet.
+
+- **The root command takes no positional argument; `--source` is the only way
+  to name the source there (T-0326).** A dogfood session ran `lazyslice
+  --source DSN --create-target ' --unmask x'` as one unsplit shell variable,
+  and the stray argument was silently taken as a second, overriding source —
+  cobra accepted a positional argument the root command never read. `Args` is
+  now `noArgs`, not `oneDSN`, and `RunE` no longer assigns `args[0]` to
+  `req.Source`. A subcommand (`plan`, `introspect`, ...) still takes a DSN
+  positionally, but refuses at exit 2 rather than silently overwriting an
+  already-set `--source` with it (same shell-quoting failure, one layer
+  down).
+  **Never quote a positional argument that could be a connection string in a
+  usage message.** No connection string can carry a password without one of
+  `=`, `@`, `:`, `/` (a scheme, an authority separator, a key/value pair, or
+  a URI path) — `describeStrayArg` checks for those four characters, not a
+  scheme, because a libpq keyword/value string carries no scheme at all and
+  `dsn.Parse` rejects some connection strings that still hold a password (a
+  multiple-host DSN, a bad port). An argument that parses is named through
+  `dsn.Ref`'s own redacting `String()`; an argument that doesn't parse but
+  contains one of the four characters is named only by shape, with none of
+  its own text; an argument free of all four cannot carry a password and may
+  be quoted in full — that is what keeps a shell-quoting mistake itself
+  (T-0326's dogfood case) visible in the error instead of turned into the
+  same vague message a real connection string gets. Apply this rule to any
+  future usage message that might echo a positional argument; do not go back
+  to a scheme-prefix check like the `looksLikeDSN` heuristic this replaced,
+  which missed an upper-case `POSTGRES://` scheme and any keyword/value
+  string.
