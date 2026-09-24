@@ -21,6 +21,7 @@ One row per code in the catalogue, in the file's own order. Exit is only meaning
 | `classify.column.drift` | classify | - | {table}.{column} is not in {path}: classified fresh and masked at or above possible |
 | `classify.column.opt_out_expired` | classify | - | the opt-out on {table}.{column} is not honoured: it records no type fingerprint, or the column's type changed |
 | `classify.refused.strict_schema` | classify | 10 | {count} columns are not in {path} and {flag} is set |
+| `classify.refused.mask` | classify | 2 | {flag} asks for {table}.{column} to be masked, and it cannot be: {reason} |
 | `plan.refused.no_root` | plan | 2 | {flag} names no table in the source |
 | `plan.refused.key_column` | plan | 2 | {flag} on {table} names {column}, which is not a column of it or is a system column: there is no ctid rung |
 | `plan.refused.where_syntax` | plan | 2 | {flag} carries {reason} at character {count}: the source only accepts a predicate that stays one |
@@ -57,7 +58,7 @@ One row per code in the catalogue, in the file's own order. Exit is only meaning
 | `verify.refused.fk` | verify | 8 | the foreign key {column} on {table} does not hold: {count} rows reference a parent row the target does not have |
 | `verify.refused.residual` | verify | 9 | a value in {table}.{column} is in the target as the source holds it: {reason} |
 | `verify.refused.residual_unconfirmable` | verify | 9 | residual hits in {table}.{column} could not be confirmed: {reason} |
-| `verify.refused.second_net` | verify | 9 | {table}.{column} is not masked and {count} of its values validate as {reason} |
+| `verify.refused.second_net` | verify | 9 | {table}.{column} is not masked and {count} of its values validate as {reason}: mask it with --mask {table}.{column}={reason}, or leave its table out with --skip-table {table} |
 | `verify.refused.catalog_literal` | verify | 9 | the target's schema carries a literal that parses as personal data in {table}.{column}: {reason} |
 | `verify.refused.row_count` | verify | 7 | {table} holds {count} rows in the target: {reason} |
 | `verify.refused.sequence` | verify | 7 | the sequence behind {table}.{column} was not reset: {reason} |

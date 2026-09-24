@@ -334,6 +334,10 @@ type run struct {
 	key    mask.Key
 	keyFP  string
 	unmask map[ref.ColumnRef]string
+	// masks is every column this run was asked to mask, by --mask or by a
+	// `mask:` block in the committed yml (T-0319), filled by classifyPrior and
+	// read by checkMasks and, for the flag's half, by emitter.
+	masks map[ref.ColumnRef]maskRequest
 	// phoneRegion is the resolved --phone-region / phone_region this run
 	// classified with (T-0221), filled by classifyPrior: r.req.PhoneRegion
 	// when the flag was given, else the committed yml's own value, else "".
@@ -438,6 +442,9 @@ func normalise(req Request) Request {
 	}
 	if req.Unmask == nil {
 		req.Unmask = map[string]string{}
+	}
+	if req.Mask == nil {
+		req.Mask = map[string]string{}
 	}
 	if req.AllowTypeLiterals == nil {
 		req.AllowTypeLiterals = map[string]string{}
@@ -1241,8 +1248,8 @@ func (r *run) checkReviewedClassification() error {
 }
 
 // classifierFingerprint is pipeline.Classification.Fingerprint as the
-// classifier alone decided it: the committed yml as prior, and none of this
-// run's --unmask flags.
+// classifier alone decided it: the committed yml and this run's other flags as
+// prior (buildPrior), and none of this run's --unmask flags.
 //
 // The flags are left out because --tui's reasons screen writes them, and the
 // two passes are therefore allowed to differ by exactly that much. Everything
@@ -1261,7 +1268,14 @@ func (r *run) classifierFingerprint() (string, error) {
 	if len(r.req.Unmask) == 0 {
 		return r.cls.Fingerprint, nil
 	}
-	cls, err := classify.New().Classify(r.schema, schemaSampler{schema: r.schema}, r.prior)
+	// Everything classifyPrior folded in except the --unmask flags: the
+	// --mask flags and --phone-region stay, because the reasons screen writes
+	// neither and both passes of a review carry them alike (T-0319).
+	prior, _, err := r.buildPrior(false, true)
+	if err != nil {
+		return "", err
+	}
+	cls, err := classify.New().Classify(r.schema, schemaSampler{schema: r.schema}, prior)
 	if err != nil {
 		return "", wrap(CodeInternal, exitInternal, err, "the columns could not be classified")
 	}
@@ -1467,6 +1481,12 @@ func (r *run) classifyStage() error {
 			Args: event.Args{event.ArgTable: col.Table.String(), event.ArgColumn: col.Column},
 		})
 	}
+	// A column the run was asked to mask that the classifier left unmasked
+	// is exit 2 here, after every decision line has been printed (so the
+	// reason the raise was declined is on screen) and before the plan.
+	if err := r.checkMasks(cls); err != nil {
+		return err
+	}
 	if r.req.StrictSchema && len(cls.Drift) > 0 {
 		return &Stop{
 			Code: classify.CodeRefusedStrictSchema, Exit: exitDrift,
@@ -1481,14 +1501,17 @@ func (r *run) classifyStage() error {
 	return nil
 }
 
-// classifyPrior is the committed file with the --unmask flags folded in.
+// classifyPrior is the committed file with the --unmask and --mask flags
+// folded in (buildPrior).
 //
 // The flag and the file are one input to the classifier, because they are one
-// question: is this column opted out? A flag opt-out carries no type
-// fingerprint — it is made for this run and dies with it — and classify honours
-// exactly that case by branching on `by: flag` (its honourOptOut).
+// question: is this column opted out, or asked to be masked? A flag opt-out
+// carries no type fingerprint — it is made for this run and dies with it — and
+// classify honours exactly that case by branching on `by: flag` (its
+// honourOptOut).
 func (r *run) classifyPrior() (*pipeline.Config, error) {
 	r.unmask = map[ref.ColumnRef]string{}
+	r.masks = map[ref.ColumnRef]maskRequest{}
 	// T-0221: the flag, when given, wins over the committed yml's own
 	// phone_region -- "the flags, last, so they win", the same rule
 	// planRequest states for --allow-type-literal. r.phoneRegion is read by
@@ -1498,32 +1521,12 @@ func (r *run) classifyPrior() (*pipeline.Config, error) {
 	if r.phoneRegion == "" && r.prior != nil {
 		r.phoneRegion = r.prior.PhoneRegion
 	}
-	if len(r.req.Unmask) == 0 && r.req.PhoneRegion == "" {
-		return r.prior, nil
+	prior, in, err := r.buildPrior(true, true)
+	if err != nil {
+		return nil, err
 	}
-
-	prior := &pipeline.Config{Columns: map[ref.ColumnRef]pipeline.ColumnConfig{}}
-	if r.prior != nil {
-		copied := *r.prior
-		prior = &copied
-		prior.Columns = make(map[ref.ColumnRef]pipeline.ColumnConfig, len(r.prior.Columns))
-		for k, v := range r.prior.Columns {
-			prior.Columns[k] = v
-		}
-	}
-	if r.req.PhoneRegion != "" {
-		prior.PhoneRegion = r.req.PhoneRegion
-	}
-	for name, reason := range r.req.Unmask {
-		col, err := resolveColumn(name, r.schema)
-		if err != nil {
-			return nil, wrap(CodeUsage, exitUsage, err, "--unmask %s", name)
-		}
-		cc := prior.Columns[col]
-		cc.Unmask = &pipeline.Unmask{Reason: reason, By: "flag"}
-		prior.Columns[col] = cc
-		r.unmask[col] = reason
-	}
+	r.unmask = in.unmask
+	r.masks = in.masks
 	return prior, nil
 }
 
@@ -2048,9 +2051,47 @@ func (r *run) move(ctx context.Context) (*pipeline.Report, error) {
 	r.closeRun(ctx, writer, lr, verifyErr)
 	r.done(event.Verify)
 	if verifyErr != nil {
+		// Verify runs every check and collects every failure (T-0319:
+		// dogfood session 1 met one second-net column per run, three runs in
+		// a row, because only the refusal the exit code came from was ever
+		// printed). verify.Refusals is that collection when there is more
+		// than one; each is sent as its own Error event here, the way
+		// reportPlanRefusals does for the plan.
+		var refusals verify.Refusals
+		if errors.As(verifyErr, &refusals) {
+			return report, r.reportVerifyRefusals(refusals)
+		}
 		return report, asStop(verifyErr)
 	}
 	return report, nil
+}
+
+// reportVerifyRefusals sends one Error event per failing verify check, in
+// ARCHITECTURE.md section 6's order, and returns the *Stop for the first,
+// which is the one the exit code comes from. The Stop is marked sent so that
+// Run's own report does not print the first a second time
+// (reportPlanRefusals, which this mirrors).
+func (r *run) reportVerifyRefusals(refusals verify.Refusals) error {
+	var first *Stop
+	for _, refusal := range refusals {
+		var s *Stop
+		if !errors.As(asStop(refusal), &s) {
+			continue
+		}
+		r.sink.Send(event.Event{
+			At: time.Now(), Kind: event.Error, Code: s.Code, Exit: s.Exit,
+			Table: s.Table, Column: s.Column, Args: s.Args,
+		})
+		if first == nil {
+			first = s
+		}
+	}
+	if first == nil {
+		return asStop(refusals)
+	}
+	first.err = refusals
+	first.sent = true
+	return first
 }
 
 // closeRun is core's half of T-0133 (THREAT_MODEL.md T8, amended 2026-09-14,
@@ -2229,6 +2270,7 @@ func (r *run) emitter() pipeline.Emitter {
 		SchemaFingerprint: r.schema.Fingerprint,
 		Prior:             r.prior,
 		Unmask:            r.unmask,
+		Mask:              r.flagMasks(),
 		Types:             r.typeAllow,
 		PasswordCommand:   r.req.PasswordCommand,
 		PhoneRegion:       r.phoneRegion,

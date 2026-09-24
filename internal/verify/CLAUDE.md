@@ -1685,3 +1685,19 @@ DDL-literal pass still read the bare `textsig.ValidLuhn`, unchanged and wider.
 `TestLuhnOnANumericColumnKeepsTheRatioRule`'s majority case now uses
 sixteen-digit Visa-prefixed values, because its column is named `reference`
 and its old thirteen-digit values pass only the check digit.
+
+## Every failure comes back, not only the first (T-0319)
+
+`Verify` returns `Refusals` (codes.go) when more than one check failed: every
+failure in §6's order, the first being the one the exit code comes from.
+`Refusals.Unwrap` exposes the members, so `errors.As` for a `*Refusal` still
+finds that first one and `internal/core`'s `closeRun` and `asStop` read it
+unchanged; a single failure is still a lone `*Refusal`. The checks always ran
+to the end — "the report names every column that is wrong" was already true of
+`Report.Checks` — but nothing printed `Report.Checks`, so dogfood session 1
+met one `second_net` column per run, three runs in a row. `internal/core`'s
+`reportVerifyRefusals` now sends one Error event per member. The
+`verify.refused.second_net` line names `--mask TABLE.COL={reason}` (the
+validator name is the category name, `validators.go`) and `--skip-table`, so
+the green path short of `--unmask` that `Options.PhoneRegion`'s comment used to
+deny now exists. `TestEverySecondNetColumnIsReportedInOneRun` holds the order.

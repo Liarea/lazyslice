@@ -345,6 +345,18 @@ columns:
 (`masker:` is omitted here — its presence on a column means the run masked
 it, and an unmasked column never carries one.)
 
+The other direction needs no reason, because it only ever masks more:
+`--mask public.film.description` masks a column the classifier copied, as
+`free_text`, or as the category you name with `=CATEGORY`. It is recorded
+under the column's `mask:` block with `by: flag`, and it is the answer to a
+`verify.refused.second_net` refusal, whose line names the flag and the
+category the check found. A column that cannot be masked that way (a key, or
+a type the category does not fit) is exit 2, never quietly copied, and so is
+a `--mask` on a column already masked under another category. Masking a key
+masks nothing on its own: a column that references it by foreign key and would
+still be copied is exit 2 too, and the refusal names it for a `--mask` of its
+own.
+
 Commit that file and the next run — including CI's — needs no flag and asks
 no question. A column the file has never seen is classified fresh, exactly as
 any column is: masked when the classifier lands at `possible` confidence or

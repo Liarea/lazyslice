@@ -919,6 +919,7 @@ type rawFlags struct {
 	caps              []string // --cap, either "N" or "TABLE=N"
 	keys              []string // --key TABLE=COL,COL
 	unmask            []string // --unmask TABLE.COL=REASON
+	mask              []string // --mask TABLE.COL[=CATEGORY]
 	allowTypeLiterals []string // --allow-type-literal TYPE=REASON
 	skipTables        []string // --skip-table TABLE
 }
@@ -993,6 +994,8 @@ func bindFlags(groups []flagGroup, req *core.Request, raw *rawFlags) {
 	classify := byTitle["classify"]
 	classify.StringArrayVar(&raw.unmask, "unmask", nil,
 		"Per-column opt-out, as TABLE.COL=REASON; the bare form is exit 2; repeatable")
+	classify.StringArrayVar(&raw.mask, "mask", nil,
+		"Mask a column the classifier left unmasked, as TABLE.COL or TABLE.COL=CATEGORY (default free_text); recorded with by: flag; repeatable")
 	classify.BoolVar(&req.StrictSchema, "strict-schema", false,
 		"Exit 10 on any column the committed yml has never seen")
 	classify.StringVar(&req.PhoneRegion, "phone-region", "",
@@ -1075,6 +1078,9 @@ func finish(cmd *cobra.Command, req *core.Request, raw *rawFlags) error {
 		return err
 	}
 	if err := parseUnmask(req, raw); err != nil {
+		return err
+	}
+	if err := parseMask(req, raw); err != nil {
 		return err
 	}
 	if err := parseAllowTypeLiteral(req, raw); err != nil {
@@ -1228,6 +1234,46 @@ func parseUnmask(req *core.Request, raw *rawFlags) error {
 				errUsage, col, previous, reason)
 		}
 		req.Unmask[col] = reason
+	}
+	return nil
+}
+
+// parseMask reads --mask TABLE.COL[=CATEGORY] (T-0319).
+//
+// It is the counterpart of --unmask: the answer to verify.refused.second_net
+// that masks the column rather than declaring it safe. It needs no reason,
+// because it only ever tightens (ADR-004); the category is optional and is
+// checked here against the v1 list so a misspelling is exit 2 before anything
+// connects. The column is resolved against the source catalog in
+// internal/core, which refuses a name that matches nothing and a column the
+// classifier still leaves unmasked.
+func parseMask(req *core.Request, raw *rawFlags) error {
+	if len(raw.mask) > 0 && req.Mask == nil {
+		req.Mask = map[string]string{}
+	}
+	for _, m := range raw.mask {
+		col, category, _ := strings.Cut(m, "=")
+		category = strings.TrimSpace(category)
+		table, column, qualified := strings.Cut(col, ".")
+		if !qualified || strings.TrimSpace(table) == "" || strings.TrimSpace(column) == "" {
+			return fmt.Errorf(
+				"%w: --mask wants TABLE.COL or TABLE.COL=CATEGORY, and the column must be qualified, got %q",
+				errUsage, m)
+		}
+		if err := core.CheckMaskCategory(category); err != nil {
+			return fmt.Errorf("%w: --mask %s: %w", errUsage, col, err)
+		}
+		if previous, duplicate := req.Mask[col]; duplicate && previous != category {
+			return fmt.Errorf(
+				"%w: --mask %s given twice, as %q and %q; one column has one category",
+				errUsage, col, previous, category)
+		}
+		if _, optedOut := req.Unmask[col]; optedOut {
+			return fmt.Errorf(
+				"%w: --mask and --unmask both name %s; a column is masked or opted out, not both",
+				errUsage, col)
+		}
+		req.Mask[col] = category
 	}
 	return nil
 }

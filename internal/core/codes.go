@@ -274,6 +274,16 @@ const (
 	// table of this source.
 	CodeUsage event.Code = "run.refused.usage"
 
+	// CodeMaskNotApplied is exit 2: a column --mask (or a `mask:` block in the
+	// committed yml) asked to mask came out of the classifier unmasked,
+	// because it is a column internal/classify never masks or because its
+	// type does not accept the category; or --mask would change the masker
+	// of a column already masked, or left it masked under another category;
+	// or a column referencing it across a foreign key is still copied
+	// (T-0319, checkMasks). One event per such column or child, before the
+	// plan and before any write.
+	CodeMaskNotApplied event.Code = "classify.refused.mask"
+
 	// CodeReviewedChanged is exit 12: this run is not the run the operator
 	// reviewed. Request.Reviewed carries the schema fingerprint and the two
 	// endpoints a preview pass resolved, and --tui's second pass takes a fresh

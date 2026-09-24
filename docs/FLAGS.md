@@ -37,6 +37,7 @@ One row per flag registered on the command tree, grouped as `--help` groups them
 
 | Flag | Type | Default | Description |
 |---|---|---|---|
+| `--mask` | stringArray | - | Mask a column the classifier left unmasked, as TABLE.COL or TABLE.COL=CATEGORY (default free_text); recorded with by: flag; repeatable |
 | `--phone-region` | string | - | ISO 3166-1 alpha-2 region libphonenumber recognises (e.g. GB; anything else is exit 2) a national-format phone column is read under, alongside the guessed regions every run already tries; recorded as phone_region and shown in the reasons output |
 | `--strict-schema` | bool | - | Exit 10 on any column the committed yml has never seen |
 | `--unmask` | stringArray | - | Per-column opt-out, as TABLE.COL=REASON; the bare form is exit 2; repeatable |

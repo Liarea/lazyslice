@@ -109,6 +109,24 @@ type ColumnConfig struct {
 	// 10). A yml naming mapping_file is refused at read (internal/emit); T-0142
 	// is the implementing task.
 	Unmask *Unmask
+	// Mask is the counterpart of Unmask: a masked decision the operator asked
+	// for, by --mask TABLE.COL[=CATEGORY] (T-0319) or by a hand-written entry.
+	// It only ever tightens (ADR-004): internal/core folds it into the
+	// classifier's prior as a raise to certain under Category, drops any
+	// opt-out on the same column, and refuses the run at exit 2 when the
+	// column still ends up unmasked. It carries no TypeFP, because a type
+	// change can only make it refuse, never make it copy.
+	Mask *Mask
+}
+
+// Mask is a per-column masked decision recorded by the operator rather than
+// reached by the classifier. There is no wholesale mask either: a column is
+// named, one at a time.
+type Mask struct {
+	// Category is the category the column is masked as. --mask with no
+	// =CATEGORY records free_text (core.DefaultMaskCategory).
+	Category Category
+	By       string
 }
 
 // Unmask is a per-column opt-out. There is no wholesale unmask, by design.

@@ -566,3 +566,57 @@ func keysOf(c *pipeline.Config) []string {
 	}
 	return out
 }
+
+// --mask's record (T-0319): the flag's category is written under `mask:` with
+// `by: flag` beside the masked decision, survives a write and a read, and a
+// later run with no flag carries the file's record forward -- but never
+// beside a decision that was not masked.
+func TestMaskRecordIsWrittenReadAndCarriedForward(t *testing.T) {
+	target := col("public", "feeds", "payload")
+	cls := &pipeline.Classification{Decisions: map[ref.ColumnRef]pipeline.Decision{
+		target: {Col: target, Category: pipeline.CatOnlineID, Confidence: pipeline.ConfCertain,
+			Source: pipeline.ByYmlRaise, Masked: true, Masker: "online_id"},
+	}}
+	plan := &pipeline.Plan{Root: tbl("public", "feeds")}
+
+	cfg, err := New(Options{Mask: map[ref.ColumnRef]pipeline.Category{target: pipeline.CatOnlineID}}).Emit(
+		plan, cls, nil, pipeline.PlanRequest{}, pipeline.Candidate{}, pipeline.Candidate{}, "")
+	if err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+	got := cfg.Columns[target].Mask
+	if got == nil || got.Category != pipeline.CatOnlineID || got.By != "flag" {
+		t.Fatalf("the flag's mask was recorded as %+v", got)
+	}
+
+	path := filepath.Join(t.TempDir(), "lazyslice.yml")
+	if werr := New(Options{}).Write(path, cfg); werr != nil {
+		t.Fatalf("Write: %v", werr)
+	}
+	read, err := New(Options{}).Read(path)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if back := read.Columns[target].Mask; back == nil || *back != *got {
+		t.Fatalf("the mask read back as %+v, want %+v", back, got)
+	}
+
+	next, err := New(Options{Prior: read}).Emit(
+		plan, cls, nil, pipeline.PlanRequest{}, pipeline.Candidate{}, pipeline.Candidate{}, "")
+	if err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+	if m := next.Columns[target].Mask; m == nil || *m != *got {
+		t.Errorf("a run with no flag dropped the file's mask: %+v", m)
+	}
+
+	cls.Decisions[target] = pipeline.Decision{Col: target, Source: pipeline.ByFlagUnmask}
+	unmasked, err := New(Options{Prior: read}).Emit(
+		plan, cls, nil, pipeline.PlanRequest{}, pipeline.Candidate{}, pipeline.Candidate{}, "")
+	if err != nil {
+		t.Fatalf("Emit: %v", err)
+	}
+	if unmasked.Columns[target].Mask != nil {
+		t.Error("a mask: block was written beside a column this run did not mask")
+	}
+}

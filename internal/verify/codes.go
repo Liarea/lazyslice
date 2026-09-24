@@ -4,6 +4,7 @@ package verify
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/Liarea/lazyslice/internal/event"
 	"github.com/Liarea/lazyslice/internal/pipeline"
@@ -172,6 +173,33 @@ func (r *Refusal) Error() string {
 
 // Unwrap gives access to the driver's error, where there was one.
 func (r *Refusal) Unwrap() error { return r.err }
+
+// Refusals is every failing check of one Verify call, in ARCHITECTURE.md
+// section 6's order (T-0319). Verify returns it instead of a lone *Refusal
+// when more than one check failed, so that the transcript names every column
+// that is wrong in one run instead of one per run: dogfood session 1 met three
+// second-net columns in three consecutive runs, each only after fixing the
+// last. The first member is the one the exit code comes from.
+type Refusals []*Refusal
+
+// Unwrap exposes every member to errors.As and errors.Is, so a caller asking
+// for a *Refusal finds the first, the same way plan.Refusals does.
+func (rs Refusals) Unwrap() []error {
+	out := make([]error, len(rs))
+	for i, r := range rs {
+		out[i] = r
+	}
+	return out
+}
+
+// Error renders every member, one per line.
+func (rs Refusals) Error() string {
+	lines := make([]string, len(rs))
+	for i, r := range rs {
+		lines[i] = fmt.Sprintf("%d. %s", i+1, r.Error())
+	}
+	return strings.Join(lines, "\n")
+}
 
 // check builds the pipeline.Check a refusal corresponds to, so that the report
 // and the error say the same thing.

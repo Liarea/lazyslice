@@ -139,6 +139,9 @@ type columnDoc struct {
 	TypeFP      string     `yaml:"type,omitempty"`
 	MappingFile string     `yaml:"mapping_file,omitempty"`
 	Unmask      *unmaskDoc `yaml:"unmask,omitempty"`
+	// Mask is --mask's record (T-0319), the counterpart of Unmask: a masked
+	// decision the operator asked for. Omitted when there is none.
+	Mask *maskDoc `yaml:"mask,omitempty"`
 	// Role is Decision.Role (T-0287): "given" or "family" for a person_name
 	// column whose name says so, omitted for mask.RoleFull -- the zero value
 	// and every other category's own, unset field -- the same way Masker is
@@ -150,6 +153,14 @@ type unmaskDoc struct {
 	Reason string `yaml:"reason"`
 	By     string `yaml:"by"`
 	TypeFP string `yaml:"type,omitempty"`
+}
+
+// maskDoc is one column's `mask:` block: the category it is masked as and who
+// asked. No reason and no type fingerprint, because a mask tightens and needs
+// neither a justification nor an expiry (ADR-004).
+type maskDoc struct {
+	Category string `yaml:"category"`
+	By       string `yaml:"by"`
 }
 
 // typeAllowDoc is one entry of the `types:` map — --allow-type-literal's own
@@ -225,6 +236,7 @@ func toDocument(c *pipeline.Config) document {
 			// mapping_file is never written (ADR-012): pipeline.ColumnConfig
 			// carries no field for it.
 			Unmask: unmaskOf(cc.Unmask),
+			Mask:   maskOf(cc.Mask),
 			Role:   string(cc.Role),
 		}
 	}
@@ -370,6 +382,9 @@ func (d document) config() (*pipeline.Config, error) {
 				By:     cd.Unmask.By,
 				TypeFP: cd.Unmask.TypeFP,
 			}
+		}
+		if cd.Mask != nil {
+			cc.Mask = &pipeline.Mask{Category: pipeline.Category(cd.Mask.Category), By: cd.Mask.By}
 		}
 		c.Columns[col] = cc
 	}
@@ -626,4 +641,11 @@ func unmaskOf(u *pipeline.Unmask) *unmaskDoc {
 		return nil
 	}
 	return &unmaskDoc{Reason: u.Reason, By: u.By, TypeFP: u.TypeFP}
+}
+
+func maskOf(m *pipeline.Mask) *maskDoc {
+	if m == nil {
+		return nil
+	}
+	return &maskDoc{Category: string(m.Category), By: m.By}
 }

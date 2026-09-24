@@ -129,8 +129,15 @@ type Request struct {
 	PlanOnly          bool // --plan
 
 	// classify
-	Unmask       map[string]string // --unmask TABLE.COL=REASON, repeatable
-	StrictSchema bool              // --strict-schema
+	Unmask map[string]string // --unmask TABLE.COL=REASON, repeatable
+	// Mask is --mask TABLE.COL[=CATEGORY], repeatable (T-0319): the
+	// counterpart of Unmask, keyed by the name as the operator typed it, with
+	// the category or "" for the bare form (DefaultMaskCategory). It is how an
+	// operator answers verify.refused.second_net without declaring anything
+	// safe; classifyPrior folds it into the classifier's prior and
+	// checkMasks refuses a run where it did not take.
+	Mask         map[string]string
+	StrictSchema bool // --strict-schema
 	// PhoneRegion is --phone-region REGION (T-0221): the libphonenumber
 	// region a national-format phone column is read under, folded into the
 	// classify prior in classifyPrior and carried forward to internal/emit
@@ -261,6 +268,7 @@ func NewRequest() Request {
 		TableCaps:         map[string]int{},
 		Keys:              map[string][]string{},
 		Unmask:            map[string]string{},
+		Mask:              map[string]string{},
 		AllowTypeLiterals: map[string]string{},
 		Explicit:          map[string]bool{},
 	}

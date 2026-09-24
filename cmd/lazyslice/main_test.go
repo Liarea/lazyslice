@@ -12,6 +12,7 @@ import (
 	"go/token"
 	"go/types"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -44,7 +45,7 @@ var wantFlags = []string{
 	"allow-remote-target", "require-read-only-role", "reconfigure",
 	"root", "take", "where", "cap", "depth", "row-budget", "memory-budget",
 	"key", "skip-table", "plan",
-	"unmask", "strict-schema",
+	"unmask", "mask", "strict-schema",
 	"residual-probe-cap",
 	"secret-file", "require-key",
 	"single-connection",
@@ -685,6 +686,55 @@ func TestUnmaskShapes(t *testing.T) {
 	}
 }
 
+// --mask TABLE.COL[=CATEGORY] (T-0319) is --unmask's counterpart. The bare
+// form is the default category, a misspelt category is exit 2 before
+// anything connects, and a column named by both --mask and --unmask is a
+// contradiction rather than a coin toss.
+func TestMaskShapes(t *testing.T) {
+	cases := []struct {
+		name    string
+		unmask  []string
+		args    []string
+		wantErr bool
+		want    map[string]string
+	}{
+		{name: "bare", args: []string{"feeds.payload"}, want: map[string]string{"feeds.payload": ""}},
+		{
+			name: "with a category",
+			args: []string{"public.feeds.payload=online_id"},
+			want: map[string]string{"public.feeds.payload": "online_id"},
+		},
+		{
+			name: "the same column twice, alike",
+			args: []string{"feeds.payload=email", "feeds.payload=email"},
+			want: map[string]string{"feeds.payload": "email"},
+		},
+		{name: "unqualified", args: []string{"payload"}, wantErr: true},
+		{name: "not a category", args: []string{"feeds.payload=url"}, wantErr: true},
+		{name: "none is not a mask", args: []string{"feeds.payload=none"}, wantErr: true},
+		{name: "two categories", args: []string{"feeds.payload=email", "feeds.payload=phone"}, wantErr: true},
+		{name: "and --unmask", unmask: []string{"feeds.payload=ok"}, args: []string{"feeds.payload"}, wantErr: true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			req := core.NewRequest()
+			err := finish(nil, &req, &rawFlags{unmask: c.unmask, mask: c.args})
+			if c.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "usage") {
+					t.Fatalf("finish(--mask %q) = %v, want a usage error", c.args, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("finish(--mask %q) = %v, want nil", c.args, err)
+			}
+			if !maps.Equal(req.Mask, c.want) {
+				t.Errorf("Mask = %v, want %v", req.Mask, c.want)
+			}
+		})
+	}
+}
+
 // The flag surface is more than a list of names: a default that changes
 // silently changes what every run does, and a type that changes turns a
 // documented flag into a parse error. ARCHITECTURE.md section 8's table gives
@@ -718,6 +768,7 @@ func TestV1FlagDefaultsAndTypes(t *testing.T) {
 		{"skip-table", "stringArray", "[]"},
 		{"plan", "bool", "false"},
 		{"unmask", "stringArray", "[]"},
+		{"mask", "stringArray", "[]"},
 		{"strict-schema", "bool", "false"},
 		{"residual-probe-cap", "int", strconv.Itoa(core.DefaultResidualProbeCap)},
 		{"secret-file", "string", core.DefaultSecretFile},

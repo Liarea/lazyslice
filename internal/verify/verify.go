@@ -67,7 +67,8 @@ type Options struct {
 	// corroboration-gated there for a reason that does not survive being
 	// asked of an already-loaded target: a ten-digit account column that
 	// happens to clear one of those regions by chance would refuse a correct
-	// run with no green path short of --unmask. See secondnet.go's count.
+	// run whose only green paths are --mask on a column that is not personal
+	// or --unmask. See secondnet.go's count.
 	PhoneRegion string
 }
 
@@ -205,12 +206,18 @@ func (v verifier) Verify(
 		Unconfirmed: s.unconfirmed,
 		Probes:      s.probes,
 	}
-	refusal := s.firstFailure()
-	if refusal == nil {
+	failures := s.orderedFailures()
+	if len(failures) == 0 {
 		return report, nil
 	}
-	report.ExitCode = refusal.Exit
-	return report, refusal
+	report.ExitCode = failures[0].Exit
+	if len(failures) == 1 {
+		return report, failures[0]
+	}
+	// More than one: every one comes back, so that core can print each
+	// (T-0319). Refusals unwraps to its members, so errors.As for a *Refusal
+	// still finds the first, the one the exit code came from.
+	return report, failures
 }
 
 // errNoTargetReader is the wiring failure the package comment describes. It is
@@ -231,6 +238,20 @@ func (s *state) firstFailure() *Refusal {
 		}
 	}
 	return nil
+}
+
+// orderedFailures is every failing check, in section 6's order and, within
+// one check, in the order the check found them — the first is firstFailure.
+func (s *state) orderedFailures() Refusals {
+	out := make(Refusals, 0, len(s.failures))
+	for _, name := range order {
+		for _, r := range s.failures {
+			if r.Check == name {
+				out = append(out, r)
+			}
+		}
+	}
+	return out
 }
 
 // fail records a failing check. It never stops the run: the report names every
