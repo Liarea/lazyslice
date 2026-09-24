@@ -762,3 +762,51 @@ for a refusal that was reaching people as an internal error.
   reads, per `core.Stop`'s own doc comment and `cmd/lazyslice`'s `report()`
   — is now built from the same four-way switch, so the CLI and the warn
   path never disagree about which of the four is true.
+
+## T-0319 (2026-09-24): --mask, and every verify failure printed
+
+- **`--mask TABLE.COL[=CATEGORY]` is folded into the classifier's prior**
+  (`mask.go`, `buildPrior`). It is the counterpart of `--unmask`: a raise to
+  `certain` under the category (default `DefaultMaskCategory`, `free_text`),
+  which is the one route a caller's file already has to move a decision up
+  (`internal/classify`'s `raiseFromConfig`), so `internal/classify` needed no
+  change. A `mask:` block in the committed yml is applied the same way on
+  every later run and drops the file's own `unmask:` for that column; this
+  run's `--unmask` flag beats the file's mask, and `--mask` plus `--unmask`
+  on one column is exit 2. `classifyPrior` is now `buildPrior(true)`.
+- **A mask that did not take is exit 2** (`checkMasks`,
+  `classify.refused.mask`), after the decision lines and before the plan:
+  `internal/classify` declines the raise for a column it never masks (a key,
+  a copy of an unmasked key, a generated column) and for a type the category
+  does not accept. Every such column is its own Error event and the returned
+  Stop is marked sent, the way `reportPlanRefusals` does it.
+- **Review round: three more refusals under the same code.** (1) A masked
+  column whose FK child (any edge, as `propagateKeys` walks) is still copied
+  names each child: `internal/classify` applies the yml raise a mask becomes
+  in `applyPrior`, after `keyChildren` and `foreignKeys`, so propagation never
+  sees it. The real fix is applying masks before propagation, which is
+  `internal/classify`'s (tracker T-0364); until then a key-family child that
+  `markNeverMasked` exempted (a uuid natural key's child) is refused with no
+  `--mask` that can clear it, which fails closed. A child with its own
+  `--unmask`/`unmask:` and a generated child are left alone. (2) `--mask` on a
+  column the classifier already masks under another category is refused: a
+  raise would swap the masker. `maskBaseline` reclassifies with
+  `buildPrior(true, false)` (everything but the `--mask` flags) to know, and
+  only when a `--mask` flag was given; the file's own `mask:` is in that
+  baseline, so a flag cannot re-categorise a recorded mask either. (3) A
+  `--mask` column that came out masked under a category other than the one
+  named is refused. `internal/emit` now writes the decision's category into
+  `mask:`, so a file mask that met a certain decision records what happened.
+  `buildPrior` takes `(withUnmaskFlags, withMaskFlags)`.
+- **The review pin now keeps `--mask` and `--phone-region` in.**
+  `classifierFingerprint` used to reclassify over `r.prior` alone whenever
+  `--unmask` was given, which dropped every other flag too; it now uses
+  `buildPrior(false)`, which leaves out only the `--unmask` flags the reasons
+  screen writes. Before, a `--tui` review whose second pass gained an
+  `--unmask` while `--phone-region` or `--mask` was also set compared two
+  fingerprints built from different priors.
+- **Every verify failure is printed** (`reportVerifyRefusals`). Verify always
+  ran every check and collected every failure, but `asStop` rendered only the
+  one the exit code came from and nothing prints `Report.Checks`, so dogfood
+  session 1 met one second-net column per run. `verify.Refusals` carries them
+  all when there is more than one; each is its own Error event in §6's order.

@@ -72,6 +72,12 @@ type Options struct {
 	// Unmask is --unmask TABLE.COL=REASON, the reasons the flag gave. They are
 	// recorded with `by: flag` so that the next run needs no flag.
 	Unmask map[ref.ColumnRef]string
+	// Mask is --mask TABLE.COL[=CATEGORY] (T-0319), the category each named
+	// column was asked to be masked as, already resolved and defaulted by
+	// internal/core. Each masked column it names is recorded under its `mask:`
+	// block with `by: flag`, so that the next run needs no flag, the same way
+	// Unmask is; the category written is the decision's.
+	Mask map[ref.ColumnRef]pipeline.Category
 	// Types is --allow-type-literal TYPE=REASON merged with the committed
 	// yml's own types: block, already decided by internal/core (planRequest):
 	// the flag's own entries carry this run's type fingerprint and `by: flag`,
@@ -225,6 +231,27 @@ func (e emitter) columnConfig(col ref.ColumnRef, d pipeline.Decision) pipeline.C
 			}
 		}
 	case pipeline.ByClassifier, pipeline.ByYmlRaise, pipeline.ByFKPropagation, pipeline.ByNeighbour:
+	}
+
+	// --mask's record (T-0319), whatever the decision's Source: a flag raise
+	// reaches the decision as ByYmlRaise, and a column the classifier already
+	// had at certain keeps ByClassifier, and the operator's request is
+	// recorded either way. Only on a masked decision: internal/core refuses a
+	// run whose mask did not take, so an unmasked one never reaches here, and a
+	// `mask:` block beside no `masker:` would be a file contradicting itself.
+	// The category recorded is the decision's own, not the one asked for, for
+	// the same reason: a file's mask whose category the column's type refused,
+	// or that met a decision already certain of another, still masked the
+	// column, and the record says what it was masked as (internal/core refuses
+	// the flag's version of that mismatch outright).
+	if d.Masked {
+		if _, ok := e.opts.Mask[col]; ok {
+			cc.Mask = &pipeline.Mask{Category: d.Category, By: "flag"}
+		} else if e.opts.Prior != nil {
+			if prior, ok := e.opts.Prior.Columns[col]; ok && prior.Mask != nil {
+				cc.Mask = &pipeline.Mask{Category: d.Category, By: prior.Mask.By}
+			}
+		}
 	}
 	return cc
 }

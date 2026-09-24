@@ -895,6 +895,8 @@ func cloneRequest(r core.Request) core.Request {
 	// only), but the map is cloned with the rest so that a screen that gains
 	// one cannot write through the caller's.
 	out.AllowTypeLiterals = maps.Clone(r.AllowTypeLiterals)
+	// --mask (T-0319) is a flag only too, cloned on the same reasoning.
+	out.Mask = maps.Clone(r.Mask)
 	out.Explicit = maps.Clone(r.Explicit)
 	out.SkipTables = slices.Clone(r.SkipTables)
 	if out.TableCaps == nil {

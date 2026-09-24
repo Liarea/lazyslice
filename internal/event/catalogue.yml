@@ -166,6 +166,20 @@
   message: "{count} columns are not in {path} and {flag} is set"
   args: [count, path, flag]
 
+# --mask TABLE.COL[=CATEGORY] (T-0319), or a `mask:` block in the committed
+# yml, names a column the run cannot mask as asked: a key or generated column
+# the classifier never masks, a type the category does not accept, a column
+# --mask would move from one masker to another, or one whose foreign-key child
+# would still be copied in clear (one event per such child). {flag} is
+# "--mask" or "mask: in PATH"; {reason} is a fixed phrase naming the category,
+# and the child column when there is one.
+- code: classify.refused.mask
+  kind: error
+  stage: classify
+  exit: 2
+  message: "{flag} asks for {table}.{column} to be masked, and it cannot be: {reason}"
+  args: [flag, table, column, reason]
+
 # The plan stage (ARCHITECTURE.md §3). Planner.Plan takes no event.Sink -- it is
 # pure, and core.Run is the only producer -- so the codes below are declared in
 # internal/plan/codes.go beside the *plan.Refusal that carries them, and emitted
@@ -625,7 +639,7 @@
   kind: error
   stage: verify
   exit: 9
-  message: "{table}.{column} is not masked and {count} of its values validate as {reason}"
+  message: "{table}.{column} is not masked and {count} of its values validate as {reason}: mask it with --mask {table}.{column}={reason}, or leave its table out with --skip-table {table}"
   args: [table, column, count, reason]
 
 # The catalog pass (internal/verify/catalog.go, T-0134). The other checks read

@@ -96,3 +96,11 @@ updating that table.
   from `internal/discover`'s `Refusal` by `internal/core`.
 
 Entry points this directory may call: `core.Run`, `core.Introspect`, and `core.Preview` (the `--tui` plan-only pass whose result is handed back as `core.Request.Reviewed`, so the writing run refuses if the snapshot or endpoints changed; T-PIN, 2026-09-08). Nothing else under internal/ is called from here.
+
+- **`--mask TABLE.COL[=CATEGORY]`** (T-0319) is in §8's table and registered
+  in the classify group. `parseMask` checks the shape, the category against
+  `core.CheckMaskCategory` (exported for this, like `ParseMemoryBudget`) and a
+  clash with `--unmask` on the same spelling; the name is resolved, and a
+  column that still comes out unmasked refused, in `internal/core`. It needs
+  no reason because it only tightens, and its name contains none of the
+  forbidden spellings. No `--tui` screen offers it yet.

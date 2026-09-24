@@ -153,3 +153,16 @@ file's own value). `Emit` copies it straight onto `cfg.PhoneRegion`;
 `document.go` writes and reads it under `classify.phone_region`, beside
 `classify.extra_patterns`, because it is the classifier's own input and not a
 plan or an endpoint value.
+
+## `mask:` (T-0319)
+
+A column's entry carries `mask: {category, by}` when the run masked it at the
+operator's request: `Options.Mask` is the `--mask` flag's, already resolved
+and defaulted by `internal/core`, written with `by: flag`; otherwise a prior
+file's `mask:` is carried forward verbatim. Either way only beside a masked
+decision — `internal/core` refuses a run whose mask did not take, so a
+`mask:` block beside no `masker:` would be the file contradicting itself. It
+has no reason and no type fingerprint, unlike `unmask:`, because it only
+tightens (ADR-004): a type change can make it refuse, never make it copy.
+The merge now carries three things forward, not two: `extra_patterns`, the
+honoured `unmask:` blocks and the `mask:` blocks.
