@@ -170,7 +170,10 @@ func TestPasswordCommandDoesNotPanicResolvingANamedSourcesMajor(t *testing.T) {
 // short-circuits the ladder — --source, --target, the positional DSN and rung 0
 // — and this flag is not on that list, so it neither discards a target the
 // tie-break chose nor outranks the committed yml. Widening it to do either is a
-// change to a frozen ADR and needs a superseding one, not a task.
+// change to a frozen ADR and needs a superseding one, not a task. ADR-016 is
+// that for exactly one record, lazyslice's own container
+// (TestACommittedContainerTargetIsTheContainerNotThePort); the record below
+// carries no such name and keeps ADR-008's meaning.
 func TestCreateTargetDoesNotOutrankTheLadderOrTheYml(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
@@ -230,6 +233,12 @@ func TestCreateTargetDoesNotOutrankTheLadderOrTheYml(t *testing.T) {
 // never a credential (ADR-004) — so a second run whose target comes off the
 // committed file dialled it with no password and stopped at exit 4 with
 // "password authentication failed". Rung 0 puts the remembered credential back.
+//
+// Since ADR-016 this is the fallback, not the first answer: with a local Docker
+// endpoint the container's own environment supplies the password
+// (TestACommittedContainerTargetIsTheContainerNotThePort). So this test leaves
+// quietEnvironment's non-local endpoint in place, which is the state the state
+// dir is still needed for.
 func TestASecondRunRecoversTheProvisionedTargetsPassword(t *testing.T) {
 	quietEnvironment(t)
 	dir := t.TempDir()
@@ -247,8 +256,7 @@ func TestASecondRunRecoversTheProvisionedTargetsPassword(t *testing.T) {
 
 	res, err := Resolve(t.Context(), Options{
 		Workdir: dir, NeedTarget: true,
-		Source:     "postgres://app@127.0.0.1:1/shop",
-		DockerHost: localDockerHost,
+		Source: "postgres://app@127.0.0.1:1/shop",
 		Config: &pipeline.Config{
 			Target:      pipeline.FromContainer,
 			TargetLabel: name,
@@ -303,6 +311,194 @@ func TestARememberedPasswordIsNotHandedToAnEndpointTheFileNames(t *testing.T) {
 			t.Errorf("label %q was handed a credential this run did not mint for it", label)
 		}
 	}
+}
+
+// ADR-016 (T-0327, dogfood session 2): a committed record of a container
+// lazyslice created names the container, not its port. The session-1 file was
+// copied to a new directory, so the state dir's password (keyed by this
+// directory's project name) was not found, and the run stopped at exit 4 on a
+// raw SQLSTATE 28P01; on a second machine the container does not exist at all.
+//
+// The record here is deliberately another directory's container, the copied
+// file's exact shape. Present, the run reconnects on the container's live
+// binding with its own POSTGRES_PASSWORD. Missing, --create-target provisions
+// this directory's own container, a terminal is asked Q1 naming the missing
+// one, and a headless run stops at exit 4 naming it — never a dial to a port
+// nothing lazyslice owns listens on.
+func TestACommittedContainerTargetIsTheContainerNotThePort(t *testing.T) {
+	const recorded = "lazyslice-target-session-one"
+	committed := func(t *testing.T) *pipeline.Config {
+		return &pipeline.Config{
+			Target:      pipeline.FromContainer,
+			TargetLabel: recorded,
+			TargetRef:   mustRef(t, "postgres://postgres@127.0.0.1:5433/postgres"),
+		}
+	}
+	ours := map[string]string{provision.LabelProject: "session-one"}
+
+	t.Run("present: reconnected with its own password on its live port", func(t *testing.T) {
+		quietEnvironment(t)
+		res, err := Resolve(t.Context(), Options{
+			Workdir: t.TempDir(), NeedTarget: true, Yes: true,
+			Source:     "postgres://app@127.0.0.1:1/shop",
+			DockerHost: localDockerHost,
+			Config:     committed(t),
+			dial: fakeDial(&fakeDocker{
+				list: []container.Summary{pgContainer("c1", "/"+recorded, "postgres:16", 5440, ours)},
+				env:  map[string][]string{"c1": {"POSTGRES_PASSWORD=minted"}},
+			}),
+			provisioner: refuseToProvision(t),
+		}, event.Discard)
+		if err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		if want := "postgres://postgres:minted@127.0.0.1:5440/postgres?sslmode=disable"; res.Target != want {
+			t.Errorf("target = %q, want %q", res.Target, want)
+		}
+		if !res.TargetNamed || res.TargetContainerID != recorded {
+			t.Errorf("TargetNamed = %v, TargetContainerID = %q; want the file's own container, named", res.TargetNamed, res.TargetContainerID)
+		}
+	})
+
+	// A restart must land where a reconnect does: the database the file
+	// records, not the container's POSTGRES_DB, or whether the container
+	// happened to be running decides which database is written.
+	t.Run("stopped: Q1' names it, and the restart loads into the recorded database", func(t *testing.T) {
+		quietEnvironment(t)
+		// What provision.Start hands back: the container's own name and a
+		// connection built from its environment, POSTGRES_DB included.
+		started := provisioned("postgres://postgres:minted@127.0.0.1:5441/scratch?sslmode=disable")
+		started.Container = recorded
+		p := &fakeProvisioner{result: started}
+		asked := &fakePrompter{answer: true}
+		res, err := Resolve(t.Context(), Options{
+			Workdir: t.TempDir(), NeedTarget: true,
+			Source:     "postgres://app@127.0.0.1:1/shop",
+			DockerHost: localDockerHost,
+			Config:     committed(t),
+			dial: fakeDial(&fakeDocker{
+				list: []container.Summary{stoppedPgContainer("c1", "/"+recorded, "postgres:16", ours)},
+				env:  map[string][]string{"c1": {"POSTGRES_DB=scratch", "POSTGRES_PASSWORD=minted"}},
+				host: map[string]*container.HostConfig{"c1": binding5432(5441)},
+			}),
+			dialCandidate: sayVersion(16),
+			provisioner:   handOut(p),
+			Prompter:      asked,
+		}, event.Discard)
+		if err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		if len(asked.questions) != 1 || !strings.Contains(asked.questions[0], recorded) || !strings.Contains(asked.questions[0], "start it?") {
+			t.Errorf("asked %q, want one Q1' naming %s", asked.questions, recorded)
+		}
+		if len(p.started) != 1 || p.started[0] != recorded || len(p.provisioned) != 0 {
+			t.Errorf("started %v, provisioned %d; want the recorded container started and nothing created", p.started, len(p.provisioned))
+		}
+		if want := "postgres://postgres:minted@127.0.0.1:5441/postgres?sslmode=disable"; res.Target != want {
+			t.Errorf("target = %q, want %q: the database the file records, not POSTGRES_DB", res.Target, want)
+		}
+		if !res.TargetNamed || res.TargetContainerID != recorded {
+			t.Errorf("TargetNamed = %v, TargetContainerID = %q; want the file's own container, named", res.TargetNamed, res.TargetContainerID)
+		}
+	})
+
+	t.Run("a container of that name lazyslice did not create keeps its secrets", func(t *testing.T) {
+		quietEnvironment(t)
+		res, err := Resolve(t.Context(), Options{
+			Workdir: t.TempDir(), NeedTarget: true, Yes: true,
+			Source:     "postgres://app@127.0.0.1:1/shop",
+			DockerHost: localDockerHost,
+			Config:     committed(t),
+			dial: fakeDial(&fakeDocker{
+				list: []container.Summary{pgContainer("c1", "/"+recorded, "postgres:16", 5440, nil)},
+				env:  map[string][]string{"c1": {"POSTGRES_PASSWORD=not-ours"}},
+			}),
+			provisioner: refuseToProvision(t),
+		}, event.Discard)
+		if err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		if strings.Contains(res.Target, "not-ours") {
+			t.Errorf("target = %q: an unlabelled container's environment was read", res.Target)
+		}
+	})
+
+	t.Run("missing, headless: exit 4 naming the container", func(t *testing.T) {
+		quietEnvironment(t)
+		var events []event.Event
+		_, err := Resolve(t.Context(), Options{
+			Workdir: t.TempDir(), NeedTarget: true, Yes: true,
+			Source:      "postgres://app@127.0.0.1:1/shop",
+			DockerHost:  localDockerHost,
+			Config:      committed(t),
+			dial:        fakeDial(&fakeDocker{}),
+			provisioner: refuseToProvision(t),
+		}, event.SinkFunc(func(e event.Event) { events = append(events, e) }))
+		r, ok := AsRefusal(err)
+		if !ok {
+			t.Fatalf("Resolve = %v, want a refusal", err)
+		}
+		if r.Code != CodeTargetContainerMissing || r.Exit != 4 || r.Args[event.ArgContainer] != recorded {
+			t.Errorf("refusal = %s exit %d %v, want %s exit 4 naming %s", r.Code, r.Exit, r.Args, CodeTargetContainerMissing, recorded)
+		}
+		if !hasError(events, CodeTargetContainerMissing, 4) {
+			t.Errorf("the refusal never reached the sink")
+		}
+	})
+
+	t.Run("missing, --create-target: this directory's own container, no question", func(t *testing.T) {
+		quietEnvironment(t)
+		dir := t.TempDir()
+		p := &fakeProvisioner{result: provisioned("postgres://postgres:pw@127.0.0.1:5434/postgres")}
+		asked := &fakePrompter{answer: true}
+		res, err := Resolve(t.Context(), Options{
+			Workdir: dir, NeedTarget: true, CreateTarget: true,
+			Source:        "postgres://app@127.0.0.1:1/shop",
+			DockerHost:    localDockerHost,
+			Config:        committed(t),
+			dial:          fakeDial(&fakeDocker{}),
+			dialCandidate: sayVersion(16),
+			provisioner:   handOut(p),
+			Prompter:      asked,
+		}, event.Discard)
+		if err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		if len(p.provisioned) != 1 || p.provisioned[0].Project != projectName(dir) {
+			t.Fatalf("provisioned %+v, want one container for this directory's project %q", p.provisioned, projectName(dir))
+		}
+		if len(asked.questions) != 0 {
+			t.Errorf("--create-target asked %q; the flag is the answer", asked.questions)
+		}
+		if res.Target != "postgres://postgres:pw@127.0.0.1:5434/postgres" {
+			t.Errorf("target = %q, want the provisioned container", res.Target)
+		}
+	})
+
+	t.Run("missing, a terminal: Q1 names the container that is gone", func(t *testing.T) {
+		quietEnvironment(t)
+		p := &fakeProvisioner{result: provisioned("postgres://postgres:pw@127.0.0.1:5434/postgres")}
+		asked := &fakePrompter{answer: true}
+		res, err := Resolve(t.Context(), Options{
+			Workdir: t.TempDir(), NeedTarget: true,
+			Source:        "postgres://app@127.0.0.1:1/shop",
+			DockerHost:    localDockerHost,
+			Config:        committed(t),
+			dial:          fakeDial(&fakeDocker{}),
+			dialCandidate: sayVersion(16),
+			provisioner:   handOut(p),
+			Prompter:      asked,
+		}, event.Discard)
+		if err != nil {
+			t.Fatalf("Resolve: %v", err)
+		}
+		if len(asked.questions) != 1 || !strings.Contains(asked.questions[0], recorded) {
+			t.Errorf("asked %q, want one Q1 naming %s", asked.questions, recorded)
+		}
+		if !res.Asked || len(p.provisioned) != 1 {
+			t.Errorf("Asked = %v, provisioned %d; want the one question spent and one container", res.Asked, len(p.provisioned))
+		}
+	})
 }
 
 // ADR-008 §3's own owed test: with the endpoint resolved to a remote daemon, a

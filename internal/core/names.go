@@ -269,6 +269,25 @@ func refusedTables(e pipeline.Eligibility) string {
 	return strings.Join(names, ", ")
 }
 
+// notEmptyReason is target.refused.not_empty's {reason}: why the tables its
+// {table} names stop the run, and the flag that settles it (T-0327).
+//
+// A marker the gate found and could not bind is the case dogfood session 2
+// hit — a target holding lazyslice's copy of a different source — and the
+// line used to say only "not empty", which reads as somebody else's data.
+// internal/pg reports that the marker is unbound and not why, so the words
+// cover both ways it can be: another source, or tables changed by hand after
+// the load (ARCHITECTURE.md section 11.2's binding is to the source and the
+// catalog both).
+func notEmptyReason(e pipeline.Eligibility) string {
+	if e.Marked && !e.MarkerBound {
+		return "it holds a copy of another source — lazyslice's marker there is not bound to this source, " +
+			"or its tables changed after lazyslice loaded them; name an empty database with --target"
+	}
+	return "lazyslice loads only into an empty database or into its own copy of this source; " +
+		"name an empty database with --target"
+}
+
 // targetChangedReason renders load.refused.target_changed's {reason}: the
 // row count dropOne's own per-table recheck found under its lock (T-0130),
 // or, for T-0242's whole-target recheck, the fact that the tables it named

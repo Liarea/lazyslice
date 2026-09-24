@@ -71,6 +71,15 @@ const (
 	// (a pooler, an SSH tunnel, host.docker.internal vs 127.0.0.1).
 	CodeTargetGateSameCluster event.Code = "target.refused.gate_same_cluster"
 
+	// CodeTargetAuth is exit 4: the target answered and refused the password
+	// (SQLSTATE 28P01). It used to be target.refused.unreachable, whose row
+	// says "did not respond" over a server that did, with the driver's raw
+	// "password authentication failed ... (SQLSTATE 28P01)" as the whole
+	// reason (T-0327, dogfood session 2). The row names the role and every
+	// place a password can come from; the SQLSTATE stays, as the identifier it
+	// is, and is never the whole message.
+	CodeTargetAuth event.Code = "target.refused.auth"
+
 	// CodeSourceStandby is T-0241's header line (round-4 red team,
 	// docs/reviews/2026-09-15-redteam/round4-still-leaking.json, "a read
 	// replica"): the source answered pg_is_in_recovery() true. Unlike the

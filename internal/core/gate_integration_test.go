@@ -5,16 +5,19 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Liarea/lazyslice/internal/event"
 	"github.com/Liarea/lazyslice/internal/pg"
+	"github.com/Liarea/lazyslice/internal/render"
 	"github.com/Liarea/lazyslice/internal/testutil"
 )
 
@@ -131,6 +134,60 @@ func TestAGateRefusalEndsTheRunInsteadOfTryingTheRunnerUp(t *testing.T) {
 	if n := userTables(ctx, t, spare); n != 0 {
 		t.Errorf("app_spare holds %d table(s): the run fell through to the runner-up "+
 			"and wrote to a database it never showed the operator", n)
+	}
+}
+
+// A target holding lazyslice's copy of a different source is refused, and the
+// refusal says that rather than "not empty" with a literal {table} in it
+// (T-0327, dogfood session 2). The gate was right to refuse — the marker is
+// bound to the first source, not this one — and wrong only in what it printed,
+// so this pins both: the refusal and its words, and a target left exactly as
+// the first run loaded it.
+func TestATargetHoldingAnotherSourcesCopyIsRefusedAsOne(t *testing.T) {
+	ctx := t.Context()
+	testutil.SkipWithoutDocker(ctx, t)
+	quietRungs(t)
+
+	admin := testutil.Postgres(ctx, t, "")
+	first := createDatabase(ctx, t, admin, "app_copy_first")
+	second := createDatabase(ctx, t, admin, "app_copy_second")
+	target := createDatabase(ctx, t, admin, "app_copy_target")
+	for _, src := range []string{first, second} {
+		execOn(ctx, t, src,
+			`CREATE TABLE items (id integer PRIMARY KEY)`,
+			`INSERT INTO items VALUES (1)`,
+		)
+	}
+	if _, err := Run(ctx, raceRequest(t, first, target), event.Discard); err != nil {
+		t.Fatalf("the run that makes the target the first source's copy: %v", err)
+	}
+
+	_, err := Run(ctx, raceRequest(t, second, target), event.Discard)
+	var stop *Stop
+	if !errors.As(err, &stop) {
+		t.Fatalf("Run = %v, want the gate's refusal", err)
+	}
+	if stop.Code != pg.CodeNotEmpty || stop.Exit != exitTarget {
+		t.Fatalf("stop = %s/exit %d, want %s/exit %d", stop.Code, stop.Exit, pg.CodeNotEmpty, exitTarget)
+	}
+
+	var buf bytes.Buffer
+	render.NewLines(&buf).Send(event.Event{Kind: event.Error, Code: stop.Code, Args: stop.Args})
+	line := buf.String()
+	if strings.ContainsAny(line, "{}") {
+		t.Errorf("rendered %q, want no unfilled placeholder", line)
+	}
+	for _, want := range []string{"a copy of another source", "public.items", "--target"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("rendered %q, want it to say %q", line, want)
+		}
+	}
+
+	if n := scalarOn(ctx, t, target, `SELECT count(*)::int FROM lazyslice_meta`); n != 1 {
+		t.Errorf("the target's marker holds %d run(s), want the first run's one: the refused run wrote to it", n)
+	}
+	if n := scalarOn(ctx, t, target, `SELECT count(*)::int FROM items`); n != 1 {
+		t.Errorf("the target's items holds %d row(s), want the 1 the first run loaded", n)
 	}
 }
 

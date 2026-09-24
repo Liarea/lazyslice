@@ -196,12 +196,14 @@ type Result struct {
 	TargetLabel      string
 	// TargetContainerID is the container name or ID behind the target, set
 	// only when the ladder itself found or provisioned that container (rungs
-	// 3 and 4, and Q1/Q1' adoption) — never for rung 0: a committed
-	// lazyslice.yml's TargetLabel is `target.service` (emit/document.go), the
-	// compose *service* name, which is not a valid `docker exec` argument for
-	// a container whose real name differs (T-0320 fix round, review finding
-	// 1). A caller must fall back to the generic target.connect line when
-	// this is empty, even when TargetProvenance says FromContainer.
+	// 3 and 4, and Q1/Q1' adoption), or when ADR-016 looked a committed
+	// record's own container up by name and found it — never from rung 0's
+	// label alone: a committed lazyslice.yml's TargetLabel is
+	// `target.service` (emit/document.go), the compose *service* name, which
+	// is not a valid `docker exec` argument for a container whose real name
+	// differs (T-0320 fix round, review finding 1). A caller must fall back
+	// to the generic target.connect line when this is empty, even when
+	// TargetProvenance says FromContainer.
 	TargetContainerID string
 
 	// TargetNamed is true when the target was named by the operator rather
@@ -298,6 +300,10 @@ func Resolve(ctx context.Context, o Options, sink event.Sink) (Result, error) {
 		res.TargetNamed = true
 		warnDroppedParams(progressOf(o), o.Target)
 	}
+	// recorded is the container a committed target record names when lazyslice
+	// created it (ADR-016). It is settled once the source is known, because
+	// the two ways it can end in a new container need the source's major.
+	var recorded string
 	if o.Config != nil {
 		// Rung 0. The yml short-circuits the same way a flag does, for whichever
 		// of the two sides it supplies (ADR-008 §1). It carries its own
@@ -308,7 +314,9 @@ func Resolve(ctx context.Context, o Options, sink event.Sink) (Result, error) {
 		// --create-target does not short-circuit this. ADR-008 §1 enumerates
 		// what does — --source, --target, the positional DSN and rung 0 — and
 		// §6 scopes --create-target to being Q1's headless answer, which fires
-		// only where the ladder found no target at all.
+		// only where the ladder found no target at all. ADR-016 makes one
+		// exception, a record of lazyslice's own container (recorded.go),
+		// where the flag and the record name the same kind of thing.
 		if res.Source == "" {
 			d, err := refDSNValidated(progressOf(o), o.Config.SourceRef)
 			if err != nil {
@@ -326,19 +334,33 @@ func Resolve(ctx context.Context, o Options, sink event.Sink) (Result, error) {
 			}
 		}
 		if res.Target == "" && o.NeedTarget {
-			d, err := rung0Target(o)
-			if err != nil {
-				return res, refuseInvalidRef(sink, "target", err)
-			}
-			if d != "" {
-				res.Target = d
-				res.TargetProvenance, res.TargetLabel = o.Config.Target, o.Config.TargetLabel
-				res.TargetNamed = true
+			if name, ok := recordedContainer(o.Config); ok {
+				// A target_ref that will not parse is still the loud exit-2
+				// refusal below, ahead of any Docker call.
+				if _, err := refDSNValidated(progressOf(o), o.Config.TargetRef); err != nil {
+					return res, refuseInvalidRef(sink, "target", err)
+				}
+				recorded = name
+			} else {
+				d, err := rung0Target(o)
+				if err != nil {
+					return res, refuseInvalidRef(sink, "target", err)
+				}
+				if d != "" {
+					res.Target = d
+					res.TargetProvenance, res.TargetLabel = o.Config.Target, o.Config.TargetLabel
+					res.TargetNamed = true
+				}
 			}
 		}
 	}
 	if res.Source != "" && (!o.NeedTarget || res.Target != "") {
 		return res, nil
+	}
+	if recorded != "" && res.Source != "" {
+		// The source is named, so the ladder has nothing left to find: no
+		// walk, no candidate list, one Docker lookup for one container.
+		return resolveRecorded(ctx, o, res, recorded, namedSource(res.Source), sink)
 	}
 
 	cands, dock := walk(ctx, o, sink)
@@ -364,6 +386,9 @@ func Resolve(ctx context.Context, o Options, sink event.Sink) (Result, error) {
 	}
 	if !o.NeedTarget || res.Target != "" {
 		return res, nil
+	}
+	if recorded != "" {
+		return resolveRecorded(ctx, o, res, recorded, source, sink)
 	}
 
 	// T-0184, ADR-013 (proposed): a headless run with no --target refuses,
@@ -922,6 +947,10 @@ func refDSNValidated(w io.Writer, r dsn.Ref) (string, error) {
 // that is not a single path element, so a lazyslice.yml naming another file
 // cannot make this read it. The label only has to *agree* with the name we
 // would have used, which is what identifies the endpoint as ours.
+//
+// Since ADR-016 this is the fallback for a record of lazyslice's own container,
+// not the first answer: the container's own environment is (recorded.go), and
+// this runs only when no local Docker endpoint answers for it.
 func rung0Target(o Options) (string, error) {
 	s, err := refDSNValidated(progressOf(o), o.Config.TargetRef)
 	if err != nil {
