@@ -1,4 +1,4 @@
-# Board · generated 2026-09-23 by tools/tracker.py (source: GitHub project 3 plus tracker/tasks/) — do not hand-edit
+# Board · generated 2026-09-24 by tools/tracker.py (source: GitHub project 3 plus tracker/tasks/) — do not hand-edit
 
 | Epic | Phase | Open | In progress | Done | Cancelled | Blocked |
 |---|---|---|---|---|---|---|
@@ -8,8 +8,8 @@
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 0 | 0 | 108 | 0 | 0 |
-| E6 Launch | 6 | 18 | 0 | 15 | 0 | 0 |
-| E9 Later | later | 100 | 0 | 36 | 7 | 0 |
+| E6 Launch | 6 | 23 | 0 | 16 | 0 | 0 |
+| E9 Later | later | 105 | 0 | 37 | 8 | 0 |
 
 ## Open and in progress
 
@@ -23,7 +23,6 @@
 - T-0126 [open] E9 · internal/textsig/CLAUDE.md still says internal/verify has no URL entry (T-0122 has landed) ()
 - T-0128 [open] E9 · A multidimensional array carried as a text literal is flattened to one dimension at CopyFrom ()
 - T-0142 [open] E9 · Implement the mapping_file contract of ADR-006 (opus)
-- T-0143 [open] E9 · Decide the arbitrary-JSON policy: structure-preserving masking versus whole-document replacement (human)
 - T-0144 [open] E9 · The memory budget accounts for samples, pending traversal, channels and batch bytes; rename the flag help to what it measures (sonnet)
 - T-0145 [open] E9 · A read-only verify command that checks the current target without dropping it (opus)
 - T-0146 [open] E9 · internal/verify: a residual hit on an array element cannot be confirmed by either probe of section 6 item 3 ()
@@ -90,7 +89,7 @@
 - T-0266 [open] E9 · The second net's surrogate-key exemption is measured against a key with no sequence or identity default (opus)
 - T-0267 [open] E9 · Workflow scripts carry the checkout's absolute home path in a REPO constant (sonnet)
 - T-0268 [open] E9 · lazyslice doctor prints the stated false negatives, as ARCHITECTURE.md says it does (sonnet)
-- T-0272 [open] E9 · Per-leaf categories for JSON documents on the Decision, so an email leaf is replaced by a fake email rather than filler (opus)
+- T-0272 [open] E6 · Per-leaf categories for JSON documents on the Decision, so an email leaf is replaced by a fake email rather than filler (opus)
 - T-0274 [open] E9 · The root decision line and the plan's own RootReason give different reasons when a name preference breaks a tie (sonnet)
 - T-0275 [open] E9 · tracker.py: close writes the archive file before it closes the issue, and every gh call has a timeout (sonnet)
 - T-0276 [open] E9 · tracker.py: five small robustness findings from T-0196's review (sonnet)
@@ -128,12 +127,26 @@
 - T-0327 [open] E6 · A committed yml whose target is a container lazyslice created reconnects or re-provisions, and says which (opus)
 - T-0328 [open] E6 · The free_text masker fits its output to the input's length (opus)
 - T-0330 [open] E9 · internal/plan's chooseGroupMasker overwrites every masked column's masker with mask.Pick's default, including one the yml or a build named (sonnet)
-- T-0331 [open] E6 · Decide whether a first run may ask both the target question and the root question (human)
 - T-0332 [open] E9 · internal/invariants/CLAUDE.md's contract says the suite imports only internal/testutil of ours; I2 now imports the mask module (T-0302) (haiku)
 - T-0333 [open] E6 · --create-target's container name doubles the prefix for a directory named lazyslice-* (sonnet)
+- T-0334 [open] E6 · Discovery does not choose the empty target container lazyslice itself created, and offers to start a duplicate on the next port (opus)
+- T-0335 [open] E9 · Move internal/verify's tests off the deprecated mask.RoleWords, then delete it ()
+- T-0336 [open] E9 · tools/names still generates a words_corpus.go header saying no masker reads the Census lists ()
+- T-0338 [open] E9 · Bring the name-list docs outside mask/ in step with T-0304's Census switch ()
+- T-0339 [open] E9 · Re-record the quickstart transcript and README's excerpt of it under the Census name lists ()
+- T-0340 [open] E9 · Print verify.residual.explained: the count ADR-015 promises never reaches the terminal or --json ()
+- T-0341 [open] E9 · small_domain: internal/core's markSmallDomains ignores the generator half of the admissible domain ()
+- T-0342 [open] E9 · testdata/regressions 039, 040 and 041 claim an explained count the harness never asserts (sonnet)
+- T-0343 [open] E6 · A first run asks both the target question and the root question when both are open (ADR-016 narrows ADR-008's one-question rule) (opus)
+- T-0344 [open] E6 · Decide whether the two --tui screens stay (with a filter, a full-reason view and a footer that shows the exit keys) or ADR-002's reversal is taken (human)
+- T-0345 [open] E6 · The screens' exit keys: esc inside help quits the program, enter runs unconfirmed, ctrl+c exits 0 (sonnet)
+- T-0346 [open] E6 · A lookup step is shown with 0 rows while the estimate counts its rows (sonnet)
 
 ## Recently closed
 
+- T-0143 [done] E9 · Decide the arbitrary-JSON policy: structure-preserving masking versus whole-document replacement → done
+- T-0331 [done] E6 · Decide whether a first run may ask both the target question and the root question → done
+- T-0337 [cancelled] E9 · Move internal/verify's tests off mask.RoleWords, then delete RoleWords in the next mask minor → cancelled
 - T-0064 [done] E5 · Dogfood: two sessions against a real project of the maintainer's choosing, logged in docs/DOGFOOD_LOG.md → done
 - T-0283 [done] E6 · Decide whether v0.2.0 ships a docs site (mkdocs-material on GitHub Pages) or the in-repo docs stay the docs → done
 - T-0303 [done] E6 · tools/names regenerates the masker's name lists from the 2020 Census top-1000 files (public domain), checked in CI → done
@@ -156,6 +169,3 @@
 - T-0290 [done] E6 · goreleaser release build still compiles mask/ from go.work, not the tagged version go.mod requires → done
 - T-0293 [done] E9 · plan equality groups ignore person_name Role, letting an FK pair mask two roles alike → done
 - T-0294 [done] E9 · plan-time DEFAULT rewrite for a person_name column ignores Role → done
-- T-0297 [done] E6 · A phone column's reason line says its digits parse as MAC addresses → done
-- T-0298 [cancelled] E9 · Add a digit-run/phone-without-plus signal so plain 10-12 digit columns are not left to Luhn chance → cancelled
-- T-0083 [done] E5 · Target type registration for CopyFrom: no owner since internal/load shipped → done
