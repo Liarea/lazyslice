@@ -1180,6 +1180,40 @@
   message: "wrote {path} (commit it for CI)"
   args: [path]
 
+# T-0320: dogfood session 1's own report — "a successful run prints the load
+# counts and then 'wrote ./lazyslice.yml (commit it for CI)'; nothing says
+# that foreign keys validated, N row counts matched, the residual scan found
+# nothing, or the second net scanned M columns". One line, printed once, at
+# the very end of a green run — right after config.file.written.
+- code: verify.summary
+  kind: info
+  stage: emit
+  message: "verify: {fk_count} foreign key(s) validated, {table_count} table row count(s) matched ({row_count} rows total), the residual scan found nothing ({residual_count} value(s) tested), the second net scanned {column_count} column(s)"
+  args: [fk_count, table_count, row_count, residual_count, column_count]
+
+# The other half of dogfood session 1: "nothing says how to connect to the
+# target lazyslice --create-target provisioned (the password lives in the
+# container's environment; psql fails until docker inspect)". Printed once,
+# right after verify.summary, on every green run — never the password itself
+# (THREAT_MODEL.md T5).
+- code: target.connect.container
+  kind: info
+  stage: emit
+  message: "target {database} on {host}:{port} as {role} — password: docker exec {container} printenv POSTGRES_PASSWORD"
+  args: [database, host, port, role, container]
+
+- code: target.connect.password_command
+  kind: info
+  stage: emit
+  message: "target {database} on {host}:{port} as {role} — password: from --password-command"
+  args: [database, host, port, role]
+
+- code: target.connect
+  kind: info
+  stage: emit
+  message: "target {database} on {host}:{port} as {role} — password: wherever you supplied it for --target ($PGPASSWORD, ~/.pgpass, or the connection string itself)"
+  args: [database, host, port, role]
+
 - code: config.refused.where_withheld
   kind: error
   stage: plan
