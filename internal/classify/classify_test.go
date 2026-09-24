@@ -1727,3 +1727,155 @@ func TestSameColumnNameDoesNotRaiseASilencedTypeConflict(t *testing.T) {
 		t.Errorf("b.stamp reason %q holds a fragment no template produced: %q", d.Reason, bad)
 	}
 }
+
+// TestSameColumnNameDoesNotPropagateASweptDecision pins T-0312, dogfood
+// session 1's own count: 25 propagations of the form "column name X is
+// free_text in public.T" that carried a neighbouring-column sweep's decision
+// -- reached on no name or value signal of its own, only a certain neighbour
+// sitting beside it in *that* table -- into a same-named column of a table
+// with no such neighbour at all. Four of the twenty-five were a text uuid
+// column under a unique index, and each became a plan refusal over a column
+// nothing here ever actually examined.
+//
+// patients.opaque is that shape: three samples with no name rule, no value
+// hit and no type signal, beside patients.email at `certain`, so
+// unknownColumnsBesideCertain sweeps it into free_text at ConfPossible with
+// Source=ByNeighbour and no evidence of its own (`patients` mirrors
+// TestRedTeamA2bNoColumnNameSignalAtAll's own fixture in redteam_test.go).
+//
+// other_records.opaque shares the name and nothing else: it has its own five
+// samples, so this is not the "too few samples" shape minSamples already
+// covers, and other_records holds no certain (or even likely) column of its
+// own for the neighbouring-column rule to reach it through directly. Before
+// this fix, sameColumnName's source-building loop only checked
+// Confidence/neverMask/Category on patients.opaque -- all satisfied by the
+// sweep -- and raised other_records.opaque to free_text/ConfPossible on that
+// alone. With the fix, a column the sweep raised is excluded from the set of
+// columns sameColumnName treats as a source, so other_records.opaque is left
+// exactly as its own (signal-less) examination decided: unmasked.
+func TestSameColumnNameDoesNotPropagateASweptDecision(t *testing.T) {
+	t.Parallel()
+	patients := ref.TableRef{Schema: "public", Name: "patients"}
+	other := ref.TableRef{Schema: "public", Name: "other_records"}
+	schema := &pipeline.Schema{
+		Tables: []pipeline.Table{
+			tt("public", "patients", []string{"id"},
+				tc("id", "bigint"),
+				tc("email", "text"),
+				tc("opaque", "text")),
+			tt("public", "other_records", []string{"id"},
+				tc("id", "bigint"),
+				tc("opaque", "text")),
+		},
+	}
+	samples := mapSampler{
+		col(patients, "email"):  anyOf("a@fixture.test", "b@fixture.test", "c@fixture.test"),
+		col(patients, "opaque"): anyOf("zz-1", "zz-2", "zz-3"),
+		col(other, "opaque"):    anyOf("qq-1", "qq-2", "qq-3", "qq-4", "qq-5"),
+	}
+	cls, err := New().Classify(schema, samples, nil)
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+
+	swept := decision(t, cls, col(patients, "opaque"))
+	if !swept.Masked || swept.Category != pipeline.CatFreeText {
+		t.Fatalf("patients.opaque = %+v, want swept as free_text beside its certain email neighbour "+
+			"(the source this test's propagation must not use)", swept)
+	}
+	if !strings.Contains(swept.Reason, "nothing is known about this column's contents") {
+		t.Fatalf("patients.opaque reason = %q, want the neighbour_unknown fragment: this test's "+
+			"claim depends on the source carrying no evidence of its own", swept.Reason)
+	}
+
+	d := decision(t, cls, col(other, "opaque"))
+	if d.Masked {
+		t.Errorf("other_records.opaque is masked: %+v, want copied: patients.opaque's only claim "+
+			"about itself is \"a certain neighbour sits beside it\", which says nothing about a "+
+			"column in an unrelated table, so sameColumnName must not propagate it", d)
+	}
+	if strings.Contains(d.Reason, "same_name") || strings.Contains(d.Reason, "is free_text in") {
+		t.Errorf("other_records.opaque reason = %q, carries a same_name propagation fragment; "+
+			"want none", d.Reason)
+	}
+	if !strings.Contains(d.Reason, "nothing recognised in 5 samples") {
+		t.Errorf("other_records.opaque reason = %q, want its own examination's reason: "+
+			"the column was sampled and looked at, not skipped", d.Reason)
+	}
+	if bad, ok := ParseReason(d.Reason); !ok {
+		t.Errorf("other_records.opaque reason %q holds a fragment no template produced: %q", d.Reason, bad)
+	}
+}
+
+// TestSameColumnNameUsesASweptDecisionOnceFKPropagationBacksIt pins the
+// T-0312 review round's high finding: sweptNoSignal must not survive a later
+// pass that replaces the sweep's guess with a decision backed by real
+// evidence. unknownColumnsBesideCertain and keyChildren/foreignKeys both run
+// before sameColumnName (classify.go's own six-pass order), and an
+// unvalidated foreign key is exactly the edge that lets both reach the same
+// column: fkPartners only indexes validated, non-virtual edges (T-0253), so
+// patients.contact's unvalidated FK to users.email keeps fkPairs from
+// pairing it at all -- unknownColumnsBesideCertain sweeps it into free_text
+// beside patients.email at ConfPossible, sweptNoSignal set -- and then
+// propagateKeys, which (unlike keyChildren) walks every edge including
+// unvalidated ones, converges it on users.email's own category at
+// ConfCertain, Source=ByFKPropagation. That decision is no longer a guess;
+// it is the same real evidence propagateKeys always exports, and
+// sameColumnName must treat it as an ordinary source the same as any other
+// FK-propagated column, not silently drop it for a stale bit a later pass
+// left set.
+func TestSameColumnNameUsesASweptDecisionOnceFKPropagationBacksIt(t *testing.T) {
+	t.Parallel()
+	users := ref.TableRef{Schema: "public", Name: "users"}
+	patients := ref.TableRef{Schema: "public", Name: "patients"}
+	other := ref.TableRef{Schema: "public", Name: "other_records"}
+	schema := &pipeline.Schema{
+		Tables: []pipeline.Table{
+			tt("public", "users", []string{"email"},
+				tc("email", "text")),
+			tt("public", "patients", []string{"id"},
+				tc("id", "bigint"),
+				tc("email", "text"),
+				tc("contact", "text")),
+			tt("public", "other_records", []string{"id"},
+				tc("id", "bigint"),
+				tc("contact", "text")),
+		},
+		FKs: []pipeline.ForeignKey{
+			{
+				Name: "patients_contact_fkey", Child: patients, ChildCols: []string{"contact"},
+				Parent: users, ParentCols: []string{"email"}, Validated: false,
+			},
+		},
+	}
+	samples := mapSampler{
+		col(users, "email"):      anyOf("u1@fixture.test", "u2@fixture.test", "u3@fixture.test"),
+		col(patients, "email"):   anyOf("a@fixture.test", "b@fixture.test", "c@fixture.test"),
+		col(patients, "contact"): anyOf("zz-1", "zz-2", "zz-3"),
+		col(other, "contact"):    anyOf("qq-1", "qq-2", "qq-3", "qq-4", "qq-5"),
+	}
+	cls, err := New().Classify(schema, samples, nil)
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+
+	pc := decision(t, cls, col(patients, "contact"))
+	if pc.Source != pipeline.ByFKPropagation || pc.Category != pipeline.CatEmail || pc.Confidence != pipeline.ConfCertain {
+		t.Fatalf("patients.contact = %+v, want FK-propagated to email at certain from users.email "+
+			"(the sweep's own guess must have been overwritten by real evidence before this test's "+
+			"claim about sameColumnName means anything)", pc)
+	}
+	if !pc.Masked {
+		t.Fatalf("patients.contact is not masked: %+v, want masked as email", pc)
+	}
+
+	d := decision(t, cls, col(other, "contact"))
+	if !d.Masked || d.Category != pipeline.CatEmail {
+		t.Errorf("other_records.contact = %+v, want masked as email: patients.contact's decision is "+
+			"now backed by a real FK propagation, not the sweep's guess, so sameColumnName must use "+
+			"it as a source", d)
+	}
+	if bad, ok := ParseReason(d.Reason); !ok {
+		t.Errorf("other_records.contact reason %q holds a fragment no template produced: %q", d.Reason, bad)
+	}
+}
