@@ -166,6 +166,32 @@ var fragments = []*fragment{
 		pattern: `name matches ` + reIdent,
 	},
 	{
+		// T-0313: the four answers bareNameVerdict gives about a column the
+		// rule pack's bare_name rule matched. The bare word says a column
+		// holds *a* name, so each line says what corroborated it as a
+		// person's, or that nothing did.
+		name:    "bare_name_by_word",
+		format:  "a bare name, corroborated by %s, a word for people",
+		pattern: `a bare name, corroborated by ` + reIdent + `, a word for people`,
+	},
+	{
+		name:    "bare_name_by_samples",
+		format:  "a bare name, corroborated by %d/%d samples carrying a word from the name dictionary",
+		pattern: `a bare name, corroborated by ` + reCount + `/` + reCount + ` samples carrying a word from the name dictionary`,
+	},
+	{
+		name:    "bare_name_unproven",
+		format:  "a bare name, masked on the name alone: %d samples are too few to check against the name dictionary",
+		pattern: `a bare name, masked on the name alone: ` + reCount + ` samples are too few to check against the name dictionary`,
+	},
+	{
+		name: "bare_name_uncorroborated",
+		format: "a bare name, not corroborated: no word for people in the table or column name, " +
+			"and %d/%d samples carry a word from the name dictionary, so the name alone decides no more than low",
+		pattern: `a bare name, not corroborated: no word for people in the table or column name, ` +
+			`and ` + reCount + `/` + reCount + ` samples carry a word from the name dictionary, so the name alone decides no more than low`,
+	},
+	{
 		name:    "samples",
 		format:  "%d/%d samples %s",
 		pattern: reCount + `/` + reCount + ` samples (?:` + phraseAlternation + `)`,

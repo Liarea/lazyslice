@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/goccy/go-yaml"
@@ -42,6 +43,15 @@ type patternRule struct {
 	Category string `yaml:"category"`
 	Priority int    `yaml:"priority"`
 	Match    string `yaml:"match"`
+	// Unless is a regexp over the same normalised column name as Match; a
+	// column it matches is outside the rule altogether (T-0313: a
+	// `*_file_name` column is a label, not a person's name).
+	Unless string `yaml:"unless"`
+	// CorroboratedBy is a regexp over the normalised table name and the
+	// normalised column name. A rule carrying one decides a column at
+	// `possible` only when it matches either, or when the samples corroborate
+	// the rule instead (T-0313; classify.go's bareNameVerdict).
+	CorroboratedBy string `yaml:"corroborated_by"`
 }
 
 // tablePatternRule is one row of table_patterns: a name rule that only
@@ -70,6 +80,39 @@ type compiledPattern struct {
 	Priority int
 	re       *regexp.Regexp
 	tableRe  *regexp.Regexp
+	// unless and corroborate are patternRule's Unless and CorroboratedBy,
+	// compiled, or nil where the row has none (T-0313).
+	unless      *regexp.Regexp
+	corroborate *regexp.Regexp
+}
+
+// matches reports whether the rule's own column regexp matches a normalised
+// column name that its unless regexp does not.
+func (pat compiledPattern) matches(normalised string) bool {
+	if !pat.re.MatchString(normalised) {
+		return false
+	}
+	return pat.unless == nil || !pat.unless.MatchString(normalised)
+}
+
+// needsCorroboration reports whether the rule decides a column only with
+// corroboration (T-0313).
+func (pat compiledPattern) needsCorroboration() bool { return pat.corroborate != nil }
+
+// corroboratedByName reports whether the rule's corroborated_by regexp matches
+// the normalised table name or the normalised column name, and returns the
+// word it matched there (without the underscores that bound it), which is
+// what the reason line names.
+func (pat compiledPattern) corroboratedByName(normalisedTable, normalised string) (string, bool) {
+	if pat.corroborate == nil {
+		return "", false
+	}
+	for _, name := range [2]string{normalisedTable, normalised} {
+		if m := pat.corroborate.FindString(name); m != "" {
+			return strings.Trim(m, "_"), true
+		}
+	}
+	return "", false
 }
 
 // compiledPack is the rule pack in the form the scorer uses.
@@ -165,12 +208,30 @@ func decodePack(rulesYAML []byte) (*compiledPack, error) {
 		if bad, ok := ParseReason(render("name_match", pr.Name)); !ok {
 			return nil, fmt.Errorf("classify: pattern name %q does not render inside the reason grammar: %q", pr.Name, bad)
 		}
-		c.Patterns = append(c.Patterns, compiledPattern{
+		cp := compiledPattern{
 			Name:     pr.Name,
 			Category: cat,
 			Priority: pr.Priority,
 			re:       re,
-		})
+		}
+		if pr.Unless != "" {
+			if cp.unless, err = regexp.Compile(pr.Unless); err != nil {
+				return nil, fmt.Errorf("classify: pattern %q: unless: %w", pr.Name, err)
+			}
+		}
+		if pr.CorroboratedBy != "" {
+			// The only value evidence that can corroborate a name rule is the
+			// name dictionary (bareNameVerdict), so the field means nothing on
+			// any other category, and a rule that carried it anyway would be
+			// decided on evidence about a different category.
+			if cat != pipeline.CatPersonName {
+				return nil, fmt.Errorf("classify: pattern %q: corroborated_by is only read on a %s rule, and this one is %s", pr.Name, pipeline.CatPersonName, cat)
+			}
+			if cp.corroborate, err = regexp.Compile(pr.CorroboratedBy); err != nil {
+				return nil, fmt.Errorf("classify: pattern %q: corroborated_by: %w", pr.Name, err)
+			}
+		}
+		c.Patterns = append(c.Patterns, cp)
 	}
 	if len(c.Patterns) == 0 {
 		return nil, fmt.Errorf("classify: the embedded rule pack has no name patterns")
@@ -231,7 +292,7 @@ func decodePack(rulesYAML []byte) (*compiledPack, error) {
 // match returns the highest-priority name rule that matches a normalised name.
 func (p *compiledPack) match(normalised string) (compiledPattern, bool) {
 	for _, pat := range p.Patterns {
-		if pat.re.MatchString(normalised) {
+		if pat.matches(normalised) {
 			return pat, true
 		}
 	}
@@ -245,11 +306,25 @@ func (p *compiledPack) match(normalised string) (compiledPattern, bool) {
 // name rules against each other. normalisedTable and normalised are both
 // normaliseName's output.
 func (p *compiledPack) matchColumn(normalisedTable, normalised string) (compiledPattern, bool) {
+	return p.matchColumnAfter(normalisedTable, normalised, "")
+}
+
+// matchColumnAfter is matchColumn over the rules that sort after the one named
+// after, or over every rule when after is "". decide asks it for the next rule
+// down when a rule that needs corroboration did not get it (T-0313), so a
+// column that also matches a lower rule -- `content_name` is free_text as well
+// as a bare name -- is decided by that rule instead of by nothing.
+func (p *compiledPack) matchColumnAfter(normalisedTable, normalised, after string) (compiledPattern, bool) {
+	skipping := after != ""
 	for _, pat := range p.ColumnPatterns {
+		if skipping {
+			skipping = pat.Name != after
+			continue
+		}
 		if pat.tableRe != nil && !pat.tableRe.MatchString(normalisedTable) {
 			continue
 		}
-		if pat.re.MatchString(normalised) {
+		if pat.matches(normalised) {
 			return pat, true
 		}
 	}

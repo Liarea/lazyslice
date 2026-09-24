@@ -371,3 +371,19 @@ upper case, no synonym resolution, so `"gb"` and `"UK"` both answer `false`
 and only `"GB"` answers `true`. `cmd/lazyslice`'s `checkPhoneRegion` is its
 one caller: `--phone-region` is normalised to upper case and refused at the
 flag surface, exit 2, before a region string ever reaches either net.
+
+## T-0313 (2026-09-24): `ContainsName` reads a possessive as its name
+
+`internal/classify`'s bare-name rule (its own CLAUDE.md, "A bare name needs
+corroboration") asks what share of a `name` column's samples carry a
+dictionary word, through `ContainsName`. That splitter keeps an apostrophe
+inside a word, so that a name spelled with one reads whole, which made
+"Grace's iPhone" — the name a phone gives itself, and the shape of
+supabase-auth's `friendly_name` columns — carry no name at all. A word the
+dictionary does not hold is now tried again with a trailing `'s` or `'`
+removed. A curly apostrophe is not a letter and already split.
+
+`ContainsName`'s callers are all `internal/classify` (`Prose`, the T-0311
+spare guard, the bare-name corroboration), and each reads a `true` as a
+reason to mask or not to spare, so this widens only in the direction
+"when in doubt, mask it" asks for; `internal/verify` does not call it.

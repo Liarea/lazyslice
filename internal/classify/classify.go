@@ -162,6 +162,17 @@ type work struct {
 	// dogfood session 1 counted. It is never read outside sameColumnName; no
 	// other pass treats a decision differently for carrying it.
 	sweptNoSignal bool
+	// nameUncorroborated is set by decide on a column the rule pack's
+	// bare_name rule matched and nothing corroborated as a person's name
+	// (T-0313, bareNameVerdict): no word for people in its table or column
+	// name, and enough samples to say the name dictionary does not carry
+	// them. Such a column sits at low, and sameColumnName must not raise it
+	// from a same-named column in another table: that `users.name` holds
+	// people is no evidence about `tags.name`, and exporting it was the rest
+	// of dogfood session 1's 38 masked `name` columns. The neighbouring-column
+	// rule still raises it, because a likely personal column beside it is
+	// evidence about its own table.
+	nameUncorroborated bool
 }
 
 // state is one Classify call.
@@ -1191,8 +1202,53 @@ func (st *state) decide(w *work, col pipeline.Column, ct columnType, values []st
 		return
 	}
 	best := sig.strong
-	hit, hasName := st.pack.matchColumn(normaliseName(w.table.Name), normaliseName(col.Name))
+	normTable, normCol := normaliseName(w.table.Name), normaliseName(col.Name)
+	hit, hasName := st.pack.matchColumn(normTable, normCol)
 	nameAccepted := hasName && st.pack.accepted(hit.Category, ct.Family)
+	// T-0313: the bare name word needs corroboration before it decides
+	// anything above low -- see bareNameVerdict and rules.yml's bare_name.
+	bareFrag := ""
+	if hasName && nameAccepted && hit.needsCorroboration() {
+		verdict, frag := bareNameVerdict(hit, normTable, normCol, values)
+		switch {
+		case verdict == bareUnproven && best != nil:
+			// Too few samples for the dictionary, and yet enough for a
+			// value signal to decide the column outright: the values
+			// decide it, below, and "masked on the name alone" would not
+			// be true of the line.
+		case verdict != bareUncorroborated:
+			bareFrag = frag
+		case best != nil:
+			// The values decide the column on their own, at likely, exactly
+			// as they do for any name and values that disagree (the
+			// hasName && nameAccepted branch's best != nil case below), so
+			// the uncorroborated name changes nothing here.
+		case sig.strongHit != nil:
+			// A strong validator matched a proven sample: one precise parse
+			// of a personal value is corroboration enough to mask on the
+			// name, as the column always was, and the line names the hit.
+			bareFrag = render("samples", sig.strongHit.matched, sig.strongHit.total, sig.strongHit.phrase)
+		default:
+			// A lower rule may still name the column (`content_name` is
+			// free_text as well as a bare name); only when none does is the
+			// bare name recorded, at low.
+			next, ok := st.pack.matchColumnAfter(normTable, normCol, hit.Name)
+			if !ok {
+				w.frags = append(w.frags, render("name_match", quoteIdent(hit.Name)))
+				w.d.Category = pipeline.CatPersonName
+				if sig.weak != nil {
+					w.d.Category = sig.weak.cat
+					w.frags = append(w.frags, render("samples", sig.weak.matched, sig.weak.total, sig.weak.phrase))
+				}
+				w.d.Confidence = pipeline.ConfLow
+				w.nameUncorroborated = true
+				w.frags = append(w.frags, frag)
+				return
+			}
+			hit = next
+			nameAccepted = st.pack.accepted(hit.Category, ct.Family)
+		}
+	}
 	// Carried for internal/verify's national_id digits-family entry (T-0187
 	// third review round, finding 1), independent of nameAccepted and of which
 	// category the decision below actually records: see
@@ -1205,6 +1261,9 @@ func (st *state) decide(w *work, col pipeline.Column, ct columnType, values []st
 	case hasName && nameAccepted:
 		w.d.Category = hit.Category
 		w.frags = append(w.frags, render("name_match", quoteIdent(hit.Name)))
+		if bareFrag != "" {
+			w.frags = append(w.frags, bareFrag)
+		}
 		switch {
 		case hit.Category == pipeline.CatSpecial:
 			// Special categories mask on name alone (ARCHITECTURE.md §4), which
@@ -1417,6 +1476,73 @@ func (st *state) decide(w *work, col pipeline.Column, ct columnType, values []st
 	if regionAssumed(sig) {
 		w.frags = append(w.frags, render("phone_region_configured", quoteIdent(st.region)))
 	}
+}
+
+// bareVerdict is what bareNameVerdict found about a column the rule pack's
+// bare_name rule matched (T-0313).
+type bareVerdict int
+
+const (
+	// bareCorroborated: a word for people in the table or column name, or
+	// enough samples carrying a word from the name dictionary.
+	bareCorroborated bareVerdict = iota
+	// bareUnproven: fewer than minSamples samples, so the dictionary cannot
+	// answer and the name decides alone, as it always did.
+	bareUnproven
+	// bareUncorroborated: enough samples, and too few of them carry a
+	// dictionary word.
+	bareUncorroborated
+)
+
+// bareNameVerdict asks whether a column the bare_name rule matched holds a
+// person's name, and returns the reason fragment that says what answered
+// (T-0313, dogfood session 1).
+//
+// rules.yml's bare_name is the word `name` -- and `display_name`, and every
+// `<thing>_name` -- which says a column holds *a* name. On a production Rails
+// schema that was 38 `name` columns of tags, folders, playlists, widgets,
+// roles, languages, AI models and triggers, each masked as a person's name,
+// two of them under unique indexes that refused the plan. So the word decides
+// `possible` only with one of three things behind it, tried in this order:
+//
+//  1. A word for people in the table name or the column name (the rule's
+//     corroborated_by regexp): `users.name`, `staff.display_name`,
+//     `orders.customer_name`. The table or the qualifier says whose name it
+//     is, and no sample is needed.
+//  2. Fewer than minSamples samples. An unproven column is not a clean one
+//     (bestSignal's own argument), so the name decides alone exactly as it
+//     did before this rule existed: an empty table, or a two-row one, is
+//     masked.
+//  3. At least nameCorroborationThreshold of the samples carrying a word from
+//     the name dictionary (textsig.Dict.ContainsName, the word-level question,
+//     not LooksLikeName's whole-value one: "Dr. Jane Smith" and "Jan Kowalski"
+//     carry a name and are not one to LooksLikeName).
+//
+// With none of the three, decide records the column at low: the
+// neighbouring-column rule still raises it beside a likely column, and
+// sameColumnName does not (work.nameUncorroborated). A person's name in such a
+// column that the dictionary cannot carry -- a script it does not hold, a name
+// it does not list -- is then copied, which is THREAT_MODEL.md T1's stated
+// residual for a name the dictionary cannot carry, as it already was for a
+// non-Latin name in a column named in that script.
+func bareNameVerdict(hit compiledPattern, normTable, normCol string, values []string) (bareVerdict, string) {
+	if word, ok := hit.corroboratedByName(normTable, normCol); ok {
+		return bareCorroborated, render("bare_name_by_word", quoteIdent(word))
+	}
+	if len(values) < minSamples {
+		return bareUnproven, render("bare_name_unproven", len(values))
+	}
+	dict := textsig.Dictionary()
+	matched := 0
+	for _, v := range values {
+		if dict.ContainsName(v) {
+			matched++
+		}
+	}
+	if float64(matched)/float64(len(values)) >= nameCorroborationThreshold {
+		return bareCorroborated, render("bare_name_by_samples", matched, len(values))
+	}
+	return bareUncorroborated, render("bare_name_uncorroborated", matched, len(values))
 }
 
 // regionAssumed reports whether sig's strong or strongHit signal is the
@@ -2553,6 +2679,11 @@ func (st *state) sameColumnName() {
 	for _, c := range st.order {
 		w := st.dec[c]
 		if w.neverMask || w.typeConflict || w.d.Confidence >= pipeline.ConfPossible {
+			continue
+		}
+		// T-0313: a bare name its own samples did not corroborate is not
+		// raised by a same-named column elsewhere (work.nameUncorroborated).
+		if w.nameUncorroborated {
 			continue
 		}
 		s, ok := masked[normaliseName(c.Column)]

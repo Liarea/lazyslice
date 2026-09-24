@@ -402,7 +402,17 @@ residuals are accepted rather than hidden:
    Devanagari, Amharic, or any other non-Latin script defeats both the
    name-pattern match on the column and the value match on its contents at
    once. Extending the rule pack to non-Latin scripts is filed, not shipped
-   (docs/reviews/2026-09-15-redteam/round5.json).
+   (docs/reviews/2026-09-15-redteam/round5.json). A column called just
+   `name` (or `display_name`, or `plan_name`) reaches the same place in any
+   script: unless its table or its own name has a word for people in it
+   (`users`, `customer_name`), it is copied when no column beside it is
+   decided personal at `likely` or above (a neighbour masked on its name
+   alone, such as a `phone` column, does not count), three or more of its
+   values are sampled, and fewer than a fifth of them carry a name the
+   dictionary holds — so a list of names the dictionary cannot carry, in
+   such a column, is copied. A name whose own qualifier says it is a
+   person's (`legal_name`, `billing_name`, `name_on_card`) is masked on
+   the name alone, as before.
 4. **A shape none of lazyslice's validators know, in a column no name rule
    names.** The validators parse or recognise about a dozen shapes —
    email, phone, national ID, IBAN, card number, IP or MAC address, a

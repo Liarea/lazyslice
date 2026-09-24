@@ -175,6 +175,13 @@ func (d *Dict) ContainsName(s string) bool {
 		if d.all[w] {
 			return true
 		}
+		// A possessive is the name it is built on (T-0313): "Grace's iPhone"
+		// is the default name a phone gives itself, and the splitter above
+		// keeps the apostrophe so that a name spelled with one still reads
+		// whole. A curly apostrophe is not a letter, so it already splits.
+		if base := strings.TrimSuffix(strings.TrimSuffix(w, "'s"), "'"); base != w && len(base) >= 3 && d.all[base] {
+			return true
+		}
 	}
 	return false
 }

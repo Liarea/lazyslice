@@ -40,6 +40,24 @@ const weakThreshold = 0.5
 // not evidence about a column; it is evidence about a row.
 const minSamples = 3
 
+// nameCorroborationThreshold is the share of a bare name column's samples
+// that must carry a word from the name dictionary (textsig.Dict.ContainsName)
+// before the samples corroborate the rule pack's bare_name rule (T-0313).
+//
+// It is deliberately far below weakThreshold, because the column's name is
+// already half the evidence and the question is only whether the values
+// contradict it. Measured on hand-made sample sets when it was chosen: label
+// columns of the dogfood-session-1 kind -- tags, folders, roles, AI models,
+// triggers, playlists, dashboard widgets, project names, company names,
+// country names, pagila's own category and language names -- carry a
+// dictionary word in 0% to 12% of their values (a language list's "Español"
+// and "Deutsch"; a tag called "green"), and people's names carry one in 30% to
+// 100% (an English list 100%, a fifteen-country list 80%, a list of names the
+// dictionary mostly lacks, with titles and initials, 30%). A column of names in
+// a script the dictionary does not carry scores 0% and is THREAT_MODEL.md T1's
+// stated residual; bare_name_test.go pins both directions.
+const nameCorroborationThreshold = 0.2
+
 // The validators themselves live in internal/textsig, which internal/verify's
 // second net imports too (tracker T-0055). What stays here is the half that is
 // about *this* package's inputs: turning one sampled value into the strings a

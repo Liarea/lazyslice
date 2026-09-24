@@ -23,7 +23,14 @@
 #     line prints as {pattern} and is the only part of a rule that reaches a
 #     rendered string. `priority` breaks a tie when two rules match one name:
 #     ip_address is network_id and not address, email_address is email and not
-#     address, and password_hash is credential and not person_name.
+#     address, and password_hash is credential and not person_name. Two
+#     optional fields (T-0313): `unless` is a regexp over the same normalised
+#     column name that takes the column out of the rule altogether, so a lower
+#     rule can still match it; `corroborated_by` is a regexp over the
+#     normalised table name and the normalised column name, and a rule that
+#     carries one reaches `possible` only when it matches either, or when the
+#     samples corroborate the rule instead — see bare_name below, the one rule
+#     that has it.
 #   table_patterns: one row per table-scoped name rule (T-0119): `table` is a
 #     regexp over the normalised *table* name, `match` is a regexp over the
 #     normalised *column* name exactly as in patterns: above, and `priority`
@@ -235,7 +242,59 @@ patterns:
     # actually closes the class is the multilingual value dictionary in
     # internal/textsig/names.txt, which both nets read. THREAT_MODEL.md T1
     # records what a name rule alone still misses.
-    match: '(^|_)(names?|first_?names?|last_?names?|given_?names?|family_?names?|middle_?names?|sur_?names?|full_?names?|maiden_?names?|display_?names?|real_?names?|forenames?|f_?names?|l_?names?|apellidos?|nombres?|nachname|familienname|vorname|prenom|nazwisko|imie|imię|cognome|achternaam|voornaam|naam|efternamn|förnamn|sukunimi|etunimi|sobrenome|navn|fornavn|etternavn|familia)(_|$)'
+    #
+    # The bare word `name`, and `display_name`, are not in this row any more:
+    # they are bare_name, below (T-0313). A qualifier that says the name is a
+    # person's is in this row instead, so it keeps `possible` on the name
+    # alone and never waits on corroboration: legal, preferred, nick, birth,
+    # married, holder and cardholder, billing and shipping, `name_on_card`,
+    # and the reversed spellings `name_given`, `name_family`, `name_first`,
+    # `name_last`, `name_middle` (T-0313 review). Each is spelled with the
+    # underscore before or after `name`, so this row masks exactly the
+    # qualified names the bare `names?` word masked before T-0313 and no
+    # others: a run-together `nickname` is not a new match here.
+    match: '(^|_)(legal_names?|preferred_names?|nick_names?|birth_names?|married_names?|holder_names?|card_?holder_names?|billing_names?|shipping_names?|name_on_card|name_(given|family|first|last|middle)|first_?names?|last_?names?|given_?names?|family_?names?|middle_?names?|sur_?names?|full_?names?|maiden_?names?|real_?names?|forenames?|f_?names?|l_?names?|apellidos?|nombres?|nachname|familienname|vorname|prenom|nazwisko|imie|imię|cognome|achternaam|voornaam|naam|efternamn|förnamn|sukunimi|etunimi|sobrenome|navn|fornavn|etternavn|familia)(_|$)'
+
+  # T-0313, dogfood session 1: on a production Rails schema, 38 columns called
+  # just `name` -- tags, folders, playlists, widgets, roles, languages, AI
+  # models, triggers -- and every `*_file_name` column (Paperclip's
+  # `logo_file_name`, `transcode_file_file_name`) were masked as person_name
+  # by the bare `names?` word this rule pack used to carry in the row above,
+  # and two of them, under unique indexes, refused the plan. The bare word
+  # says a column holds *a* name, not *a person's* name, so it is its own row
+  # now and it needs corroboration before it reaches `possible`
+  # (internal/classify's decide, bareNameVerdict):
+  #
+  #   - `corroborated_by` is a word for people, matched against the
+  #     normalised table name and the normalised column name alike: users,
+  #     customers, staff... as the table (`users.name`), or as the column's own
+  #     qualifier (`orders.customer_name`). Either is enough. The list errs
+  #     wide: `clients` and `agents` also name OAuth clients and AI agents,
+  #     whose names are labels, and they are here anyway because a CRM's
+  #     `clients.name` is the commoner shape and a missed person is the
+  #     failure that cannot be undone (T-0313 review).
+  #   - otherwise the column's samples: at least nameCorroborationThreshold of
+  #     them carrying a word from internal/textsig/names.txt.
+  #   - otherwise, with fewer than minSamples samples, the name alone decides,
+  #     exactly as before: an unproven column is not a clean one.
+  #
+  # A bare name with none of the three is recorded at `low`, which the
+  # neighbouring-column rule still raises beside a `likely` column, and is
+  # copied otherwise. A person's name in such a column that the dictionary
+  # cannot carry (a non-Latin script, a name it does not list) is then
+  # THREAT_MODEL.md T1's stated residual, as a non-Latin name already was.
+  #
+  # `unless` takes a column out of this rule altogether: a file name is a
+  # label, never a person's name, whatever table it sits in.
+  #
+  # `corroborated_by` is accepted on a person_name rule only, because the name
+  # dictionary is the only value evidence that could corroborate it.
+  - name: bare_name
+    category: person_name
+    priority: 34
+    match: '(^|_)(names?|display_?names?)(_|$)'
+    unless: '(^|_)file_?names?(_|$)'
+    corroborated_by: '(^|_)(users?|people|persons?|customers?|contacts?|employees?|members?|staff|staffers?|authors?|accounts?|profiles?|owners?|admins?|administrators?|patients?|students?|pupils?|teachers?|guests?|visitors?|attendees?|participants?|subscribers?|applicants?|candidates?|recipients?|senders?|passengers?|travell?ers?|donors?|volunteers?|residents?|beneficiar(y|ies)|clients?|players?|drivers?|agents?|tenants?|landlords?|workers?|artists?|speakers?|actors?|holders?|sellers?|riders?|parents?|mothers?|fathers?|guardians?|spouses?|individuals?|citizens?|cardholders?|leads?|prospects?|creators?|assignees?|reporters?|reviewers?|signers?|signator(y|ies)|inviters?|invitees?|referrers?|followers?|friends?|managers?|doctors?|physicians?|nurses?|clinicians?|practitioners?|therapists?|instructors?|tutors?|learners?|mentors?|mentees?|buyers?|shoppers?|borrowers?)(_|$)'
 
   - name: free_text
     category: free_text
