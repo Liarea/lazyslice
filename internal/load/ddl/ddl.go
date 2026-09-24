@@ -932,6 +932,16 @@ func tableName(t ref.TableRef) string {
 	return quoteIdent(t.Schema) + "." + quoteIdent(t.Name)
 }
 
+// QuoteIdent and QuoteLiteral are exported for the identical reason TableName
+// is (T-0314): internal/load's ar_internal_metadata environment rewrite
+// builds an UPDATE naming a column and a string value outside this package,
+// and two independent spellings of the same escaping is exactly the risk
+// TableName's own comment names.
+func QuoteIdent(s string) string { return quoteIdent(s) }
+
+// QuoteLiteral quotes s as a single-quoted SQL string literal.
+func QuoteLiteral(s string) string { return quoteLiteral(s) }
+
 // qualified quotes a name the catalog wrote as "schema.name".
 //
 // The split is at the first dot, which is where introspect's own concatenation

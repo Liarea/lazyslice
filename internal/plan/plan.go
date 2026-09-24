@@ -593,9 +593,52 @@ func (p *run) resolveIdentities(ctx context.Context) error {
 // incoming edge, at most 1,000 rows and no column the classifier masks is
 // copied whole rather than walked. A lookup that carries personal data is
 // walked, because copying it whole would copy every person in it.
+//
+// A framework metadata table (T-0314) is copied whole as a lookup too, but
+// not by this rule: dogfood session 1 found schema_migrations reached by no
+// foreign key at all, which is exactly the ordinary shape of such a table —
+// migration bookkeeping has nothing pointing at it — so §3's own "at least
+// one incoming edge" clause excluded the one table an operator most needs
+// intact. pipeline.IsFrameworkMetadataTable is checked first and bypasses
+// every one of the ordinary lookup gates: reachability, the mask check
+// (internal/classify leaves the table's own bookkeeping columns unmasked but
+// not every column of it — pipeline.IsFrameworkMetadataColumn narrows the
+// exemption per table since the T-0314 review round's second finding, so a
+// column like Liquibase's AUTHOR still masks on its own signals — and the
+// table is a lookup whether or not any column does, so nothing here asks)
+// and the 1,000-row ceiling. The root is still excluded (§3.1 never makes one of
+// these the default root, and an operator's explicit --root is a deliberate
+// choice the walk should honour, the same exemption every other lookup
+// table gets), and --skip-table still applies, because p.inScope has already
+// dropped a skipped table before this function runs.
+//
+// Bypassing the ceiling does not widen what a single read can return:
+// internal/extract's own Lookup read (lookupLimit, internal/extract/sql.go)
+// carries the identical 1,001-row bound this package's own boundedCount
+// probe does, for the same THREAT_MODEL.md T9 reason — no statement this
+// tool sends may scan a whole table unbounded. A framework table with more
+// than 1,000 rows (a mature Rails app's migrations, easily) is therefore
+// truncated by that bound whether or not this function admits it, and
+// frameworkMetadataWhy is where the plan says so: "copied whole" is true
+// only when boundedCount's own answer is at or under the ceiling, and a
+// truncated table's Why names the shortfall instead of claiming completeness
+// it cannot back up. The extract-side bound itself is raised or made
+// explicit for a framework table by a task whose paths reach
+// internal/extract (filed as T-0347); this is the plan-side half, which is
+// in scope here regardless of when that lands.
 func (p *run) findLookups(ctx context.Context, root ref.TableRef) error {
 	for _, t := range p.tables {
 		if !p.inScope[t.Ref] || t.Ref == root {
+			continue
+		}
+		if pipeline.IsFrameworkMetadataTable(t.Ref.Name) {
+			n, err := p.boundedCount(ctx, t.Ref)
+			if err != nil {
+				return err
+			}
+			p.lookups[t.Ref] = true
+			p.lookupRows[t.Ref] = n
+			p.why[t.Ref] = frameworkMetadataWhy(t, n)
 			continue
 		}
 		if len(p.outgoing[t.Ref]) > 0 || len(p.incoming[t.Ref]) == 0 {
@@ -619,6 +662,53 @@ func (p *run) findLookups(ctx context.Context, root ref.TableRef) error {
 		p.why[t.Ref] = "lookup"
 	}
 	return nil
+}
+
+// frameworkMetadataWhy is the plan.step line a framework metadata table gets
+// (T-0314), read by assemble instead of the bare "lookup" every other Lookup
+// step carries — §3 says the plan must say why each row is present, and
+// "lookup" alone does not say why a table with no incoming edge at all was
+// not left SchemaOnly the way §3's ordinary rule would have left it. n is
+// findLookups' own boundedCount answer for this table, capped at
+// countProbeLimit (1,001) the same way every other lookup's probe is.
+//
+// "Copied whole" is a claim about what actually happens, and it is true only
+// when n is at or under lookupRowCeiling (1,000): above that, internal/extract's
+// own Lookup read carries the identical 1,001-row bound (T-0347, this file's
+// own findLookups comment), so the table is truncated regardless of what this
+// line says. The T-0314 review round's own finding is what this guards: a
+// framework table this run cannot actually copy whole must not be told to an
+// operator that it was, because "copied whole" is the one sentence that
+// stands between an operator and manually checking the target's row count
+// against the source's.
+//
+// ar_internal_metadata gets a second sentence when its key/value columns are
+// where Rails puts them (pipeline.ArInternalMetadataEnvironmentColumns): the
+// rewrite internal/load performs is announced here, before any row moves,
+// rather than left for an operator to discover by reading the target
+// afterwards. A same-named table of a different shape — ok false — is still a
+// framework metadata table by name and is still copied whole (or truncated,
+// by the same rule above); it is only the rewrite sentence that depends on
+// the shape, because internal/load makes the identical check before it
+// writes the UPDATE (internal/load/CLAUDE.md's own T-0314 entry keeps the two
+// in step). The rewrite sentence still applies to a truncated copy: the
+// UPDATE runs inside the same per-table transaction as every row this run
+// does move, truncated or not.
+func frameworkMetadataWhy(t pipeline.Table, n int64) string {
+	var why string
+	if n > lookupRowCeiling {
+		why = fmt.Sprintf("framework metadata table, has more than %d rows -- only the first %d "+
+			"(ordered by identity) are copied; T-0347 tracks copying it in full", lookupRowCeiling, lookupRowCeiling)
+	} else {
+		why = "framework metadata table, copied whole regardless of reachability"
+	}
+	if !strings.EqualFold(t.Ref.Name, "ar_internal_metadata") {
+		return why
+	}
+	if _, _, ok := pipeline.ArInternalMetadataEnvironmentColumns(t); ok {
+		why += "; environment rewritten to development"
+	}
+	return why
 }
 
 // hasMaskedColumn says whether any column of the table reaches the mask
@@ -991,7 +1081,11 @@ func (p *run) assemble(root ref.TableRef, rootReason string) *pipeline.Plan {
 	for _, t := range p.tables {
 		switch {
 		case p.lookups[t.Ref]:
-			steps[t.Ref] = pipeline.Step{Table: t.Ref, Mode: pipeline.Lookup, Why: "lookup"}
+			// p.why is "lookup" for an ordinary lookup (findLookups sets both
+			// together) and frameworkMetadataWhy's fuller sentence for a
+			// framework metadata table (T-0314); either way this reads what
+			// findLookups actually recorded rather than repeating the literal.
+			steps[t.Ref] = pipeline.Step{Table: t.Ref, Mode: pipeline.Lookup, Why: p.why[t.Ref]}
 			rows += p.lookupRows[t.Ref]
 			estBytes += p.lookupRows[t.Ref] * rowWidth(t)
 		case p.selected[t.Ref] != nil:

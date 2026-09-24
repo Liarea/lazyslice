@@ -181,6 +181,18 @@ func (s *state) netMode(col ref.ColumnRef, c pipeline.Column) (netMode, bool) {
 		// The one column deliberately outside this net (ARCHITECTURE.md section
 		// 8): the opt-out carries a reason and expires on a type change instead.
 		return netMode{}, false
+	case has && d.NeverMasked && pipeline.IsFrameworkMetadataColumn(col.Table.Name, col.Column):
+		// A migration tool's own bookkeeping column (T-0314: schema_migrations.
+		// version, ar_internal_metadata.key, flyway_schema_history.checksum and
+		// their kin, listed per tool in internal/pipeline/framework.go) is
+		// copied whole by design and never masked, so a hit here can only
+		// refuse a correct run: a Rails migration timestamp that happens to
+		// pass the Luhn check is the shape dogfood session 1 met (T-0348). The
+		// exemption is the allowlist's, not the table's: a framework table's
+		// identity-bearing column (Flyway's installed_by, Liquibase's AUTHOR)
+		// is not on it, is classified like any other column, and is scanned
+		// here when it is copied. Both names are matched case-insensitively.
+		return netMode{}, false
 	case document(family):
 		// A masked document's masker was chosen per key by name, so the net
 		// checks the leaves; an unmasked one had no masker at all, which is a

@@ -679,6 +679,110 @@ func TestLoadNastyResetsAMixedCaseSequence(t *testing.T) {
 	})
 }
 
+// frameworkMetadataSchema adds T-0314's own two tables on top of nasty.sql for
+// the length of one test: schema_migrations and ar_internal_metadata, both
+// reached by no foreign key at all, which is the ordinary shape migration
+// bookkeeping has. They live here rather than in testdata/nasty.sql because
+// that file is shared with introspect, classify and the gate, and each of
+// them counts its tables (internal/plan's own extraSchema records the
+// identical reasoning for its copy of this same shape).
+const frameworkMetadataSchema = `
+CREATE TABLE public.schema_migrations (
+    version character varying NOT NULL PRIMARY KEY
+);
+
+INSERT INTO public.schema_migrations (version) VALUES
+    ('20250101000000'), ('20250102000000'), ('20250103000000');
+
+CREATE TABLE public.ar_internal_metadata (
+    key        character varying NOT NULL PRIMARY KEY,
+    value      character varying,
+    created_at timestamp(6) without time zone NOT NULL,
+    updated_at timestamp(6) without time zone NOT NULL
+);
+
+INSERT INTO public.ar_internal_metadata (key, value, created_at, updated_at) VALUES
+    ('environment', 'production', now(), now());
+`
+
+// loadNastyPlusFrameworkMetadata loads nasty.sql and then frameworkMetadataSchema.
+func loadNastyPlusFrameworkMetadata(ctx context.Context, url string) error {
+	if err := testutil.LoadNasty(ctx, url, false); err != nil {
+		return err
+	}
+	conn, err := pgx.Connect(ctx, url)
+	if err != nil {
+		return fmt.Errorf("connecting to add the framework metadata tables: %w", err)
+	}
+	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
+	if _, err := conn.Exec(ctx, frameworkMetadataSchema); err != nil {
+		return fmt.Errorf("adding the framework metadata tables: %w", err)
+	}
+	return nil
+}
+
+// TestLoadRewritesArInternalMetadataEnvironment is T-0314's pin on this
+// package's own half. schema_migrations has no incoming foreign key —
+// internal/plan's own T-0314 fix is what still plans it as a Lookup step —
+// so this is also the end-to-end proof that such a table is copied whole
+// rather than left SchemaOnly: dogfood session 1's whole complaint was zero
+// migration rows. ar_internal_metadata's environment row is checked against
+// the source's own "production" to prove the rewrite, not merely that
+// *some* value ended up in the column.
+func TestLoadRewritesArInternalMetadataEnvironment(t *testing.T) {
+	ctx := context.Background()
+	testutil.SkipWithoutDocker(ctx, t)
+	sourceURL := testutil.Postgres(ctx, t, "")
+	if err := loadNastyPlusFrameworkMetadata(ctx, sourceURL); err != nil {
+		t.Fatalf("loading nasty.sql plus the framework metadata tables: %v", err)
+	}
+	targetURL := testutil.Postgres(ctx, t, "")
+
+	s := openSource(ctx, t, sourceURL, nastyRequest())
+	if _, err := loadInto(ctx, s, targetURL); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	sourceConn := connect(ctx, t, sourceURL)
+	targetConn := connect(ctx, t, targetURL)
+
+	migrations := ref.TableRef{Schema: "public", Name: "schema_migrations"}
+
+	t.Run("schema_migrations is copied whole, not left SchemaOnly", func(t *testing.T) {
+		want, err := countRows(ctx, sourceConn, migrations)
+		if err != nil {
+			t.Fatalf("counting %s in the source: %v", migrations, err)
+		}
+		if want == 0 {
+			t.Fatalf("the source fixture holds no migration rows; the test proves nothing")
+		}
+		got, err := countRows(ctx, targetConn, migrations)
+		if err != nil {
+			t.Fatalf("counting %s in the target: %v", migrations, err)
+		}
+		if got != want {
+			t.Errorf("%s holds %d rows in the target, the source holds %d: a table with no incoming "+
+				"foreign key must still be copied whole", migrations, got, want)
+		}
+	})
+
+	t.Run("ar_internal_metadata's environment was rewritten to development", func(t *testing.T) {
+		sourceEnv := scalar[string](ctx, t, sourceConn,
+			`SELECT value FROM public.ar_internal_metadata WHERE key = 'environment'`)
+		if sourceEnv != "production" {
+			t.Fatalf("the source fixture's environment row is %q, want %q; the test proves nothing "+
+				"about the rewrite unless the source still says production", sourceEnv, "production")
+		}
+		targetEnv := scalar[string](ctx, t, targetConn,
+			`SELECT value FROM public.ar_internal_metadata WHERE key = 'environment'`)
+		if targetEnv != "development" {
+			t.Errorf("the target's environment row is %q, want %q: a snapshot's ar_internal_metadata "+
+				"must not make a development checkout refuse a destructive task the way the source's "+
+				"own %q would", targetEnv, "development", sourceEnv)
+		}
+	})
+}
+
 // testdata/README.md trap 27: the two tables whose column types the driver has
 // no codec for until the load gives it one. This is the end-to-end half of
 // ARCHITECTURE.md §11.1's "types registered in AfterConnect" — the source read

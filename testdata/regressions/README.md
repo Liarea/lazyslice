@@ -301,6 +301,25 @@ column from the two masked ones, so the second net skips its dictionary rule
 for a generated column whose expression names only masked columns of its own
 table (`generatedFromMasked`), and the run must load at `expect: ok`.
 
+**042 is a twenty-sixth**, from dogfood session 1 (**T-0314**) rather than
+from a torture schema or a review round: `schema_migrations` had no foreign
+key reaching it at all — the ordinary shape of migration bookkeeping, not a
+corner case — so `internal/plan`'s own lookup rule ("at least one incoming
+edge") left it `SchemaOnly`, zero rows, and a fresh Rails checkout re-ran
+every migration against the target. `ar_internal_metadata` went the other
+way: copied verbatim, its `environment` row still reading `production`,
+which makes the same checkout refuse a destructive rake task against its own
+clone. `internal/pipeline.IsFrameworkMetadataTable` (that package's own
+CLAUDE.md has the fixed list of names, one per well-known migration tool)
+now forces both tables to a `Lookup` step regardless of reachability, and
+`internal/classify` never masks a column of one. This file pins the CLI half
+— a real run over these two exact table names, with neither column masked —
+under `not-masked:`; the row-count and environment-rewrite claims
+`unique-masked:`/`equal-masked:`/`not-copied:` have no way to state are
+`internal/plan`'s own `TestPlanFrameworkMetadataTablesCopiedAsLookups` and
+`internal/load`'s own `TestLoadRewritesArInternalMetadataEnvironment`, both
+against a real target.
+
 The files are loaded and run by `make torture` (`internal/invariants`'s
 `TestTortureRegressions`, behind the `integration` and `torture` build tags), so
 a regression that comes back fails a build rather than being rediscovered by the

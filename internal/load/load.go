@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/Liarea/lazyslice/internal/event"
@@ -327,7 +328,7 @@ func (l loader) load(
 	if err := registerTypes(ctx, w, schema); err != nil {
 		return res, err
 	}
-	if err := l.copy(ctx, w, plan, in, res); err != nil {
+	if err := l.copy(ctx, w, plan, schema, in, res); err != nil {
 		return res, err
 	}
 	if err := l.postData(ctx, w, plan, schema, res); err != nil {
@@ -770,6 +771,7 @@ func (l loader) copy(
 	ctx context.Context,
 	w pipeline.Writer,
 	plan *pipeline.Plan,
+	schema *pipeline.Schema,
 	in <-chan pipeline.RowBatch,
 	res *pipeline.LoadResult,
 ) error {
@@ -821,7 +823,7 @@ func (l loader) copy(
 		if !b.Last {
 			continue
 		}
-		n, err := cur.commit(ctx)
+		n, err := l.commitTable(ctx, cur, schema)
 		table := cur.table
 		cur = nil
 		if err != nil {
@@ -979,19 +981,89 @@ func (tc *tableCopy) send(ctx context.Context, row []any) error {
 	}
 }
 
-// commit closes the row channel, waits for CopyFrom and commits. The
-// transaction is rolled back on any failure, so the table is empty rather than
-// part-written.
-func (tc *tableCopy) commit(ctx context.Context) (int64, error) {
+// commitTable closes the row channel, waits for CopyFrom, applies the T-0314
+// framework-metadata fixup (currently just ar_internal_metadata's environment
+// rewrite) while the transaction is still open, and commits. Any failure
+// rolls the transaction back, so the table ends up empty rather than
+// part-written or written-but-not-fixed-up — the same one-transaction-per-
+// table property every other row of this table's copy already has
+// (ARCHITECTURE.md §1, §2's RowBatch doc, THREAT_MODEL.md T8).
+//
+// It replaces what used to be tableCopy's own commit method: the fixup needs
+// schema (to find ar_internal_metadata's key/value columns) and the loader's
+// own refuse/rollback helpers, neither of which tableCopy carries, and a
+// second copy of "wait, then commit" here and there is one more place the two
+// could drift apart on what "after the copy, before the commit" means.
+func (l loader) commitTable(ctx context.Context, tc *tableCopy, schema *pipeline.Schema) (int64, error) {
 	res := tc.wait()
 	if res.err != nil {
 		rollback(ctx, tc.tx)
 		return 0, refuse(CodeRefusedCopy, exitLoad, tc.table, "", res.err)
 	}
+	if err := l.rewriteFrameworkMetadata(ctx, tc, schema); err != nil {
+		rollback(ctx, tc.tx)
+		return 0, err
+	}
 	if err := tc.tx.Commit(ctx); err != nil {
 		return 0, refuse(CodeRefusedCopy, exitLoad, tc.table, "", err)
 	}
 	return res.n, nil
+}
+
+// rewriteFrameworkMetadata is T-0314's second half. ar_internal_metadata is
+// copied whole like any other framework metadata table (internal/plan's
+// frameworkMetadataWhy, internal/pipeline.IsFrameworkMetadataTable) and never
+// masked (internal/classify's own T-0314 entry), which means its environment
+// row survives copy exactly as the source wrote it — and a fresh Rails
+// checkout reads that row before it will run a destructive rake task, so a
+// snapshot whose row still says "production" makes the clone refuse to do the
+// one thing a development database is for.
+//
+// It matches on the bare table name alone, the same as
+// pipeline.IsFrameworkMetadataTable, and then asks
+// pipeline.ArInternalMetadataEnvironmentColumns the identical question
+// internal/plan's frameworkMetadataWhy asks before the run starts — the same
+// function, so the plan's "environment rewritten to development" sentence and
+// what this actually does cannot disagree about whether the columns are
+// there. A same-named table of a different shape (ok false) is left alone:
+// nothing here guesses at a column that is not there.
+//
+// It runs inside tc's own still-open transaction, after CopyFrom has
+// finished and before commit — the same transaction T8 already requires this
+// table's rows to be in, so a failure here empties the table exactly as a
+// CopyFrom failure would rather than leaving a row already committed with
+// "production" still in it.
+func (l loader) rewriteFrameworkMetadata(ctx context.Context, tc *tableCopy, schema *pipeline.Schema) error {
+	if !strings.EqualFold(tc.table.Name, "ar_internal_metadata") {
+		return nil
+	}
+	t, ok := tableByRef(schema, tc.table)
+	if !ok {
+		return nil
+	}
+	keyCol, valueCol, ok := pipeline.ArInternalMetadataEnvironmentColumns(t)
+	if !ok {
+		return nil
+	}
+	sql := "UPDATE " + ddl.TableName(tc.table) + " SET " + ddl.QuoteIdent(valueCol) +
+		" = " + ddl.QuoteLiteral("development") +
+		" WHERE " + ddl.QuoteIdent(keyCol) + " = " + ddl.QuoteLiteral("environment")
+	if err := tc.tx.Exec(ctx, sql); err != nil {
+		return refuse(CodeRefusedCopy, exitLoad, tc.table, "", err)
+	}
+	return nil
+}
+
+// tableByRef finds one table of schema by its ref. schema.Tables is small —
+// the whole introspected catalog, never a row count — so a linear scan costs
+// nothing next to the CopyFrom this runs beside.
+func tableByRef(schema *pipeline.Schema, t ref.TableRef) (pipeline.Table, bool) {
+	for _, table := range schema.Tables {
+		if table.Ref == t {
+			return table, true
+		}
+	}
+	return pipeline.Table{}, false
 }
 
 // abort ends the table's transaction without committing. It is what makes a
