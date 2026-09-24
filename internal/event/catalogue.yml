@@ -26,6 +26,16 @@
   message: "target {host} did not respond: {reason}"
   args: [host, reason]
 
+# T-0327 (dogfood session 2): the server answered and refused the password
+# (SQLSTATE 28P01). It used to be target.refused.unreachable, which said "did
+# not respond" and rendered the driver's raw line as the whole reason.
+- code: target.refused.auth
+  kind: error
+  stage: discover
+  exit: 4
+  message: "target {host} refused the password for role {role} (SQLSTATE 28P01): put it in the --target connection string, $PGPASSWORD or ~/.pgpass, or pass --password-command"
+  args: [host, role]
+
 - code: target.refused.missing
   kind: error
   stage: discover
@@ -74,12 +84,16 @@
   message: "target {database} holds {count} user tables, more than lazyslice will check"
   args: [database, count]
 
+# {table} is the occupied tables, sorted and capped at five; {reason} says why
+# they stop the run — a copy of another source when lazyslice's own marker is
+# there and not bound to this source — and names --target (T-0327: the row
+# used to render with {table} unfilled and the table list as its reason).
 - code: target.refused.not_empty
   kind: error
   stage: discover
   exit: 4
-  message: "{table} in the target is not empty: {reason}"
-  args: [table, reason]
+  message: "the target {database} is not empty ({table}): {reason}"
+  args: [database, table, reason]
 
 - code: target.refused.probe_failed
   kind: error
@@ -1492,3 +1506,15 @@
   exit: 4
   message: "the target on {host} is on the source's own cluster: pass {flag} to write there on purpose"
   args: [host, flag]
+
+# ADR-016 (T-0327, dogfood session 2): ./lazyslice.yml records a container
+# lazyslice created as the target, this machine's Docker has no container of
+# that name, and nothing permits a new one — no --create-target, and nobody at
+# a terminal to answer Q1. Before this the run dialled the recorded port with
+# no password and stopped at a bare SQLSTATE 28P01.
+- code: target.refused.container_missing
+  kind: error
+  stage: discover
+  exit: 4
+  message: "./lazyslice.yml's target is the container {container}, which this machine's docker does not have: pass --create-target to start a new one for this directory, or --target to name another database"
+  args: [container]

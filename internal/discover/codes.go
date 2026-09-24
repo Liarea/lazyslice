@@ -111,6 +111,15 @@ const (
 	// because it short-circuits the ladder before this check runs at all
 	// (ADR-008 §1, §5).
 	CodeTargetHeadlessSameCluster event.Code = "target.refused.headless_same_cluster"
+
+	// CodeTargetContainerMissing is ADR-016's stop: a committed lazyslice.yml
+	// records a container lazyslice created as the target, this machine's
+	// Docker has no container of that name, and nothing permits a new one —
+	// no --create-target, and nobody at a terminal to say yes to Q1. Exit 4,
+	// naming the container, --create-target and --target: the second-machine
+	// and removed-container cases of T-0327, which used to reach the target's
+	// recorded port with no password and stop at a bare SQLSTATE 28P01.
+	CodeTargetContainerMissing event.Code = "target.refused.container_missing"
 )
 
 // The ADR-005 exit codes this package returns. They are repeated here rather

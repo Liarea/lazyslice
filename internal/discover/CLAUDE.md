@@ -154,6 +154,12 @@ candidate.
   `TestCreateTargetDoesNotOutrankTheLadderOrTheYml` pins the ADR's semantics.
   **Owed:** if the widening is wanted, it needs a tracker task for a superseding
   ADR; the operator's answer today is `--target`, which does name a database.
+  **ADR-016 (T-0327) is that ADR for exactly one record:** a committed target
+  of lazyslice's own container (`recordedContainer`, `recorded.go`), where the
+  flag provisions or reuses this directory's own container instead. Every
+  other record and the ladder's tie-break keep the semantics above, and the
+  yml case of `TestCreateTargetDoesNotOutrankTheLadderOrTheYml` still pins
+  them.
 - **A provisioned target's credential is recovered at rung 0
   (`rung0Target`).** `lazyslice.yml` records a reference and never a password
   (ADR-004), and the ordinary password sources — `PGPASSWORD`, `~/.pgpass`,
@@ -167,6 +173,19 @@ candidate.
   name is computed from the working directory and compared with the file's
   label rather than taken from it, because the label is committed text and must
   not become a path this reads.
+  **Since ADR-016 (T-0327) this is the fallback, not the first answer.** Keyed
+  by this directory's project, it found nothing for a `lazyslice.yml` copied
+  to another directory (dogfood session 2) and nothing on a second machine, and
+  the run stopped on a bare SQLSTATE 28P01. `recorded.go` now looks the
+  recorded container up by name on a local Docker endpoint (read-only: one
+  list, one inspect), requires `provision.LabelProject` on it before reading
+  its environment, and connects on its live binding with its own
+  `POSTGRES_PASSWORD`; stopped is Q1′, absent is Q1 naming it (headless:
+  `target.refused.container_missing`, exit 4). `rung0Target` runs only when no
+  local endpoint answers. The lookup runs after the source is known, and
+  without a walk when the source is named, because the two ways it ends in a
+  new container need the source's major. `askQ1` takes its lead sentence and
+  its refusal as parameters for that state, so Q1 stays one code path.
 - **Rung 4's port comes from `HostConfig.PortBindings`, not from the summary.**
   A container that is not running publishes nothing, so `Summary.Ports` is
   empty for every stopped container; the configured binding is what the daemon

@@ -155,6 +155,31 @@ const (
 // written outside this package and must not spell the name a second way.
 func Name(project string) string { return namePrefix + project }
 
+// IsName reports whether name is shaped like a container Name produced: the
+// lazyslice-target- prefix followed by one or more characters of Docker's
+// container-name alphabet ([a-zA-Z0-9_.-]).
+//
+// It is how internal/discover recognises a committed lazyslice.yml target
+// record as one of this package's containers (ADR-016). The shape is a
+// precondition, not a proof: the container that answers to the name must
+// still carry LabelProject before anything reads its environment, because the
+// label in the file is committed text anybody can write.
+func IsName(name string) bool {
+	rest, ok := strings.CutPrefix(name, namePrefix)
+	if !ok || rest == "" {
+		return false
+	}
+	for _, r := range rest {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9',
+			r == '_', r == '.', r == '-':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // Volume is the named volume that holds the cluster for a project.
 func Volume(project string) string { return Name(project) + volumeSuffix }
 

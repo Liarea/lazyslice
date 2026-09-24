@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Liarea/lazyslice/internal/classify"
@@ -817,10 +818,42 @@ func passwordCommandStop(ref dsn.Ref, err error) *Stop {
 // pg.RenderAnyError with values off, collapsed to one line by oneLine: a
 // driver error that wraps four dial attempts is a wall of text under a ✗.
 func unreachableTarget(target dsn.Ref, err error, message string) *Stop {
+	if authRefused(err) {
+		return targetAuthRefused(target, err, message)
+	}
 	s := wrap(pg.CodeUnreachable, exitTarget, err, "%s", message)
 	s.Args = event.Args{
 		event.ArgHost:   target.String(),
 		event.ArgReason: oneLine(pg.RenderAnyError(err, false)),
+	}
+	return s
+}
+
+// authRefused reports whether err is the server refusing the password:
+// SQLSTATE 28P01, invalid_password. 28000 (no pg_hba.conf entry, a role that
+// may not connect) is not a password problem and keeps the unreachable row
+// with the server's own line, as internal/discover's connectErr does.
+func authRefused(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "28P01"
+}
+
+// targetAuthRefused is target.refused.auth (T-0327): the server answered, so
+// "did not respond" was untrue, and the driver's line alone named neither the
+// role nor where a password comes from.
+//
+// The role is the reference's, which never carries the password; an empty one
+// is pgx's own default, the operating-system user, and is said so rather than
+// rendered as a blank.
+func targetAuthRefused(target dsn.Ref, err error, message string) *Stop {
+	s := wrap(CodeTargetAuth, exitTarget, err, "%s", message)
+	role := target.User
+	if role == "" {
+		role = "(your operating-system user)"
+	}
+	s.Args = event.Args{
+		event.ArgHost: target.String(),
+		event.ArgRole: role,
 	}
 	return s
 }
@@ -1070,24 +1103,7 @@ func (r *run) openTarget(ctx context.Context) error {
 		return wrap(gateCode(e), exitTarget, err, "the target did not pass the gate")
 	}
 	if e.Verdict != pipeline.Eligible {
-		exit := exitTarget
-		if e.Reason == pg.CodeSameDatabase {
-			// Section 9 rule 1 is the one refusal that is a usage error: the
-			// operator named the source twice.
-			exit = exitUsage
-		}
-		return &Stop{
-			Code: gateCode(e), Exit: exit,
-			Args: event.Args{
-				event.ArgHost:     targetRef.Host,
-				event.ArgDatabase: targetRef.Database,
-				event.ArgCount:    strconv.Itoa(e.TableCount),
-				event.ArgFlag:     "--allow-remote-target",
-				event.ArgRole:     r.priv.Role,
-				event.ArgReason:   refusedTables(e),
-			},
-			Message: fmt.Sprintf("the target %s is not eligible", targetRef),
-		}
+		return gateRefusal(e, targetRef, r.priv.Role)
 	}
 
 	r.send(event.Discover, event.Decision, CodeTargetChosen, event.Args{
@@ -1160,6 +1176,38 @@ func (r *run) openTarget(ctx context.Context) error {
 	}
 	r.targetPool = pool
 	return nil
+}
+
+// gateRefusal is the Stop for a target the gate did not find eligible: the
+// gate's own code, ADR-005's exit, and every argument the refusal rows
+// template.
+func gateRefusal(e pipeline.Eligibility, targetRef dsn.Ref, role string) *Stop {
+	exit := exitTarget
+	if e.Reason == pg.CodeSameDatabase {
+		// Section 9 rule 1 is the one refusal that is a usage error: the
+		// operator named the source twice.
+		exit = exitUsage
+	}
+	args := event.Args{
+		event.ArgHost:     targetRef.Host,
+		event.ArgDatabase: targetRef.Database,
+		event.ArgCount:    strconv.Itoa(e.TableCount),
+		event.ArgFlag:     "--allow-remote-target",
+		event.ArgRole:     role,
+		event.ArgReason:   refusedTables(e),
+	}
+	if gateCode(e) == pg.CodeNotEmpty {
+		// T-0327: the row names the tables and says why, and a Stop that set
+		// only {reason} rendered a literal "{table}" and the table list where
+		// the reason belongs.
+		args[event.ArgTable] = refusedTables(e)
+		args[event.ArgReason] = notEmptyReason(e)
+	}
+	return &Stop{
+		Code: gateCode(e), Exit: exit,
+		Args:    args,
+		Message: fmt.Sprintf("the target %s is not eligible", targetRef),
+	}
 }
 
 // acquireLease takes this run's ownership of the target (ARCHITECTURE.md

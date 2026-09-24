@@ -21,6 +21,8 @@ import (
 	"github.com/Liarea/lazyslice/internal/dsn"
 	"github.com/Liarea/lazyslice/internal/event"
 	"github.com/Liarea/lazyslice/internal/pg"
+	"github.com/Liarea/lazyslice/internal/pipeline"
+	"github.com/Liarea/lazyslice/internal/ref"
 	"github.com/Liarea/lazyslice/internal/render"
 )
 
@@ -185,6 +187,80 @@ func TestTheUnreachableTargetRefusalDropsAPgErrorsRowFields(t *testing.T) {
 	}
 	if strings.ContainsAny(line, "{}") {
 		t.Errorf("rendered %q, want no unfilled placeholder", line)
+	}
+}
+
+// A password the target refused is its own refusal, not "did not respond"
+// with the driver's line as the whole reason (T-0327, dogfood session 2: a
+// raw 'password authentication failed for user "postgres" (SQLSTATE 28P01)'
+// was everything the operator was told).
+func TestARefusedPasswordSaysWhereAPasswordComesFrom(t *testing.T) {
+	_, targetRef, err := dsn.Parse("postgres://postgres@127.0.0.1:5433/postgres")
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	pgErr := &pgconn.PgError{
+		Severity: "FATAL", Code: "28P01",
+		Message: `password authentication failed for user "postgres"`,
+	}
+	s := unreachableTarget(targetRef, fmt.Errorf("pg: gate: connecting to the target: %w", pgErr), "the target would not open")
+	if s.Code != CodeTargetAuth || s.Exit != exitTarget {
+		t.Fatalf("stop = %s/exit %d, want %s/exit %d", s.Code, s.Exit, CodeTargetAuth, exitTarget)
+	}
+
+	var buf bytes.Buffer
+	render.NewLines(&buf).Send(event.Event{Kind: event.Error, Code: s.Code, Args: s.Args})
+	line := buf.String()
+	if strings.ContainsAny(line, "{}") {
+		t.Errorf("rendered %q, want no unfilled placeholder", line)
+	}
+	for _, want := range []string{"127.0.0.1:5433/postgres", "postgres", "--password-command", "PGPASSWORD", "28P01"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("rendered %q, want it to name %q", line, want)
+		}
+	}
+	if strings.Contains(line, "did not respond") {
+		t.Errorf("rendered %q: the server answered, so it did respond", line)
+	}
+}
+
+// The not-empty refusal fills its template and, for lazyslice's own copy of a
+// different source, says so (T-0327: it rendered a literal "{table}" and the
+// word "not empty" over a target lazyslice itself had loaded).
+func TestTheNotEmptyRefusalRendersWhole(t *testing.T) {
+	_, targetRef, err := dsn.Parse("postgres://postgres@127.0.0.1:5433/postgres")
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	occupied := map[ref.TableRef]int64{
+		{Schema: "public", Name: "film"}:  pg.RowsNotCounted,
+		{Schema: "public", Name: "actor"}: pg.RowsNotCounted,
+	}
+	for _, tc := range []struct {
+		name string
+		e    pipeline.Eligibility
+		want string
+	}{
+		{"another source's copy", pipeline.Eligibility{Reason: pg.CodeNotEmpty, RowCounts: occupied, Marked: true}, "a copy of another source"},
+		{"unmarked rows", pipeline.Eligibility{Reason: pg.CodeNotEmpty, RowCounts: occupied}, "an empty database"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := gateRefusal(tc.e, targetRef, "postgres")
+			if s.Code != pg.CodeNotEmpty || s.Exit != exitTarget {
+				t.Fatalf("stop = %s/exit %d, want %s/exit %d", s.Code, s.Exit, pg.CodeNotEmpty, exitTarget)
+			}
+			var buf bytes.Buffer
+			render.NewLines(&buf).Send(event.Event{Kind: event.Error, Code: s.Code, Args: s.Args})
+			line := buf.String()
+			if strings.ContainsAny(line, "{}") {
+				t.Errorf("rendered %q, want no unfilled placeholder", line)
+			}
+			for _, want := range []string{"public.actor, public.film", tc.want, "--target"} {
+				if !strings.Contains(line, want) {
+					t.Errorf("rendered %q, want it to say %q", line, want)
+				}
+			}
+		})
 	}
 }
 

@@ -843,3 +843,25 @@ none of them printed on the identical run with no `--unmask` flag at all.
   the column's own `Decision`: `"copied"`, or `"masked as CATEGORY"`, the
   same two spellings `classify.masked.column` and `classify.copied.column`
   already use.
+
+## Two refusals that now say why (T-0327, ADR-016)
+
+- **A refused password is `target.refused.auth`, not "did not respond".**
+  `unreachableTarget` is still every target-connect failure's one door, and it
+  now sends SQLSTATE 28P01 to `targetAuthRefused`: exit 4, `{host}` and
+  `{role}` from the redacted reference, and a row naming the `--target` string,
+  `$PGPASSWORD`, `~/.pgpass` and `--password-command`. Dogfood session 2's
+  whole message used to be the driver's `password authentication failed ...
+  (SQLSTATE 28P01)` under a row claiming the server had not answered. 28000
+  keeps the unreachable row, as `internal/discover`'s `connectErr` does.
+  The note above ("anything else that goes wrong is `unreachableTarget`
+  ... same code") is true of every other failure.
+- **`gateRefusal` builds the gate's Stop, and fills `not_empty` whole.** The
+  row is `the target {database} is not empty ({table}): {reason}`; the Stop
+  used to set only `{reason}`, to the table list, so `{table}` rendered raw.
+  `notEmptyReason` says *a copy of another source* when lazyslice's own marker
+  is present and unbound. `internal/pg` reports that the marker is unbound and
+  not why (another source, a newer schema version, or a catalog changed by
+  hand), so the sentence covers both kinds; **owed** to `internal/pg` — filed
+  as tracker debt — is that reason on `Eligibility`, after which the sentence
+  names the one cause (T-0370).

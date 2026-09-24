@@ -63,10 +63,19 @@ func noTarget(ctx context.Context, o Options, cands []found, source *found, dock
 		return nil, false, refuseNoTarget(sink, "--target")
 	}
 	if stopped := onlyStopped(cands, source); stopped != nil {
-		return startStopped(ctx, o, stopped, dock, sink)
+		return startStopped(ctx, o, stopped, dock, sink, "")
 	}
-	return askQ1(ctx, o, source, dock, sink)
+	return askQ1(ctx, o, source, dock, sink, q1Lead, func() error {
+		return refuseNoTarget(sink, "--create-target")
+	})
 }
+
+// q1Lead is Q1's first sentence in ADR-008 §6's own words: the state it fires
+// on when the ladder found nothing target-shaped. ADR-016 asks the same
+// question in one more state — a committed lazyslice.yml names a lazyslice
+// container this machine's Docker does not have — and names that container in
+// its lead instead (missingLead, recorded.go).
+const q1Lead = "no local postgres found to load into."
 
 // askQ1 is ADR-008 §6's Q1: "no local postgres found to load into. start one?".
 //
@@ -74,7 +83,16 @@ func noTarget(ctx context.Context, o Options, cands []found, source *found, dock
 // identical question, because the container Q1 creates is one lazyslice names,
 // owns and exists to write into. Headless — no controlling terminal, or --yes —
 // it is the hard failure the table gives it: exit 4 naming --create-target.
-func askQ1(ctx context.Context, o Options, source *found, dock dockerEndpoint, sink event.Sink) (*found, bool, error) {
+//
+// lead is the sentence before "start one?", and refuse is the stop both a "no"
+// and the headless path take. They are parameters because ADR-016 asks the
+// same question about a committed target container that is gone, and that
+// state's stop names --target as well as --create-target and names the
+// container; everything else — the headless check first, the image, the port,
+// the create — is one path so that the two cannot drift.
+func askQ1(ctx context.Context, o Options, source *found, dock dockerEndpoint, sink event.Sink,
+	lead string, refuse func() error,
+) (*found, bool, error) {
 	// Whether there is anyone to ask is settled before anything is computed to
 	// ask them: a headless run takes Q1's hard failure without dialling the
 	// source for a major it will not use and without claiming a port it will
@@ -84,7 +102,7 @@ func askQ1(ctx context.Context, o Options, source *found, dock dockerEndpoint, s
 	// spent when nobody was at a terminal to spend it.
 	p, done, ok := prompterFor(o)
 	if !ok {
-		return nil, false, refuseNoTarget(sink, "--create-target")
+		return nil, false, refuse()
 	}
 	defer done()
 
@@ -98,10 +116,10 @@ func askQ1(ctx context.Context, o Options, source *found, dock dockerEndpoint, s
 	}
 	name := provision.Name(projectName(o.Workdir))
 
-	answer, err := p.Confirm("no local postgres found to load into. start one? postgres:"+
+	answer, err := p.Confirm(lead+" start one? postgres:"+
 		strconv.Itoa(major)+" as "+name+" on port "+strconv.Itoa(port)+" [Y/n]", true)
 	if err != nil || !answer {
-		return nil, true, refuseNoTarget(sink, "--create-target")
+		return nil, true, refuse()
 	}
 	f, err := provisionWith(ctx, o, dock, sink, provision.Request{
 		Project:  projectName(o.Workdir),
@@ -155,7 +173,12 @@ func provisionWith(ctx context.Context, o Options, dock dockerEndpoint, sink eve
 // same stop the same state produces headlessly for Q1: exit 4 naming
 // --create-target, since one blocking question has already been asked and Q1
 // cannot be the follow-up.
-func startStopped(ctx context.Context, o Options, stopped *found, dock dockerEndpoint, sink event.Sink) (*found, bool, error) {
+//
+// database is the database a committed record names (ADR-016 §3), or empty for
+// the ladder's own Q1', which loads into the container's POSTGRES_DB. Without
+// it a restarted record would load into POSTGRES_DB while the same record,
+// found running, loads into the database it names.
+func startStopped(ctx context.Context, o Options, stopped *found, dock dockerEndpoint, sink event.Sink, database string) (*found, bool, error) {
 	asked := false
 	if p, done, ok := prompterFor(o); ok {
 		asked = true
@@ -177,6 +200,11 @@ func startStopped(ctx context.Context, o Options, stopped *found, dock dockerEnd
 	})
 	if err != nil {
 		return nil, asked, provisionRefusal(err, sink)
+	}
+	if database != "" {
+		if res, err = onDatabase(res, database); err != nil {
+			return nil, asked, refuseInvalidRef(sink, "target", err)
+		}
 	}
 	return adopted(ctx, o, res, sink), asked, nil
 }

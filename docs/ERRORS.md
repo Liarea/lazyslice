@@ -7,13 +7,14 @@ One row per code in the catalogue, in the file's own order. Exit is only meaning
 | Code | Stage | Exit | Message |
 |---|---|---|---|
 | `target.refused.unreachable` | discover | 4 | target {host} did not respond: {reason} |
+| `target.refused.auth` | discover | 4 | target {host} refused the password for role {role} (SQLSTATE 28P01): put it in the --target connection string, $PGPASSWORD or ~/.pgpass, or pass --password-command |
 | `target.refused.missing` | discover | 4 | no target: pass {flag} postgres://... |
 | `target.refused.no_create` | discover | 4 | role {role} may not create objects in {database}: {statement} |
 | `target.refused.start_timeout` | discover | 4 | target container {container} did not become ready after {seconds}s: docker logs {container} |
 | `target.refused.same_database` | discover | 2 | target {database} on {host} is the source database |
 | `target.refused.remote` | discover | 4 | target {host} is not on this machine: pass {flag} to write to it |
 | `target.refused.table_cap` | discover | 4 | target {database} holds {count} user tables, more than lazyslice will check |
-| `target.refused.not_empty` | discover | 4 | {table} in the target is not empty: {reason} |
+| `target.refused.not_empty` | discover | 4 | the target {database} is not empty ({table}): {reason} |
 | `target.refused.probe_failed` | discover | 4 | could not check the target {database}: {reason} |
 | `target.refused.lease_held` | discover | 4 | the target {database} is held by {reason}: one lazyslice run writes a target at a time |
 | `classify.masked.column` | classify | - | {table}.{column}: {reason} |
@@ -154,3 +155,4 @@ One row per code in the catalogue, in the file's own order. Exit is only meaning
 | `target.refused.ref_invalid` | discover | 2 | ./lazyslice.yml's target_ref does not describe a usable connection: {reason} — edit the file's target: block, delete it to let lazyslice rediscover the target, or pass {flag} to override it for this run |
 | `target.refused.headless_same_cluster` | discover | 4 | every reachable candidate is on {host}, the source's own cluster: pass {flag} to write there on purpose |
 | `target.refused.gate_same_cluster` | discover | 4 | the target on {host} is on the source's own cluster: pass {flag} to write there on purpose |
+| `target.refused.container_missing` | discover | 4 | ./lazyslice.yml's target is the container {container}, which this machine's docker does not have: pass --create-target to start a new one for this directory, or --target to name another database |

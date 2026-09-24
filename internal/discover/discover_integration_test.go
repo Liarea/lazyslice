@@ -357,32 +357,39 @@ func TestASecondRunOpensTheTargetItProvisioned(t *testing.T) {
 		TargetRef:   made.Candidate.Ref,
 	}
 
-	res, err := Resolve(ctx, Options{
-		Workdir: dir, NeedTarget: true, Yes: true,
-		Source: testutil.Postgres(ctx, t, ""),
-		Config: committed,
-	}, event.Discard)
-	if err != nil {
-		t.Fatalf("Resolve on the second run: %v", err)
-	}
-	// The reference is the file's, so the spelling is the file's — what has to
-	// match is the endpoint, and what has to be added back is the credential.
-	if _, ref, parseErr := dsn.Parse(res.Target); parseErr != nil || !reflect.DeepEqual(ref, made.Candidate.Ref) {
-		t.Errorf("target = %q (%v), want the endpoint the first run provisioned, %s",
-			redactDSN(res.Target), parseErr, made.Candidate.Ref)
-	}
+	source := testutil.Postgres(ctx, t, "")
+	// The same directory, and a different one holding a copy of the same
+	// file: dogfood session 2's shape (T-0327, ADR-016), where the state dir's
+	// password is keyed by a project name the new directory does not have and
+	// only the container's own environment can supply it.
+	for _, workdir := range []string{dir, t.TempDir()} {
+		res, err := Resolve(ctx, Options{
+			Workdir: workdir, NeedTarget: true, Yes: true,
+			Source: source,
+			Config: committed,
+		}, event.Discard)
+		if err != nil {
+			t.Fatalf("Resolve on the second run from %s: %v", workdir, err)
+		}
+		// What has to match is the endpoint, and what has to be added back is
+		// the credential.
+		if _, ref, parseErr := dsn.Parse(res.Target); parseErr != nil || !reflect.DeepEqual(ref, made.Candidate.Ref) {
+			t.Errorf("target = %q (%v), want the endpoint the first run provisioned, %s",
+				redactDSN(res.Target), parseErr, made.Candidate.Ref)
+		}
 
-	cfg, err := pgconn.ParseConfig(res.Target)
-	if err != nil {
-		t.Fatalf("parsing the target the second run resolved: %v", err)
-	}
-	conn, err := pgconn.ConnectConfig(ctx, cfg)
-	if err != nil {
-		t.Fatalf("the second run could not open the target it provisioned: %v", err)
-	}
-	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
-	if _, execErr := conn.Exec(ctx, "SELECT 1").ReadAll(); execErr != nil {
-		t.Fatalf("the target did not answer: %v", execErr)
+		cfg, err := pgconn.ParseConfig(res.Target)
+		if err != nil {
+			t.Fatalf("parsing the target the second run resolved: %v", err)
+		}
+		conn, err := pgconn.ConnectConfig(ctx, cfg)
+		if err != nil {
+			t.Fatalf("the second run from %s could not open the target it provisioned: %v", workdir, err)
+		}
+		if _, execErr := conn.Exec(ctx, "SELECT 1").ReadAll(); execErr != nil {
+			t.Errorf("the target did not answer: %v", execErr)
+		}
+		_ = conn.Close(context.WithoutCancel(ctx))
 	}
 }
 
