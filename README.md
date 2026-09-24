@@ -118,6 +118,8 @@ $ lazyslice --source postgres://ls:pw@127.0.0.1:55701/shop?sslmode=disable \
   public.orders: 149 rows
   public.products: 20 rows
   public.order_items: 298 rows
+  verify: 3 foreign key(s) validated, 4 table row count(s) matched (517 rows total), the residual scan found nothing (170 value(s) tested), the second net scanned 11 column(s)
+  target shop_dev on 127.0.0.1:55702 as ls — password: wherever you supplied it for --target ($PGPASSWORD, ~/.pgpass, or the connection string itself)
 $ echo $?
 0
 ```

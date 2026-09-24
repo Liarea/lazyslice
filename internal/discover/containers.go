@@ -170,7 +170,8 @@ func candidateFor(ctx context.Context, api dockerAPI, c container.Summary) (foun
 		return found{}, false
 	}
 	return found{
-		dsn: d,
+		dsn:         d,
+		containerID: c.ID,
 		cand: pipeline.Candidate{
 			Ref:        ref,
 			Provenance: pipeline.FromContainer,

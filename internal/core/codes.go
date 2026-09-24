@@ -317,6 +317,31 @@ const (
 	// that a transcript missing progress lines says why (channel.go).
 	CodeProgressDropped event.Code = "run.progress.dropped"
 
+	// CodeVerifySummary is T-0320's one-line verify summary, printed once at
+	// the end of a green run, right after config.file.written: dogfood
+	// session 1 found that a successful run said nothing about foreign keys
+	// validating, N row counts matching, the residual scan finding nothing,
+	// or the second net scanning M columns — the per-check codes above only
+	// ever announce a *failure* (reportVerifyRefusals), so a green run had no
+	// line at all for what verify actually did. This folds
+	// pipeline.Report.Checks and Report.Rows into one sentence.
+	CodeVerifySummary event.Code = "verify.summary"
+
+	// CodeTargetConnectContainer, CodeTargetConnectPasswordCommand and
+	// CodeTargetConnect are T-0320's target line, printed once right after
+	// verify.summary: host, port, database and user for the target the run
+	// just wrote, and where its password lives — never the password itself
+	// (dogfood session 1: nothing said how to connect to a target
+	// --create-target provisioned, and psql failed until `docker inspect`).
+	// Three codes rather than one message templated by a possibly-empty
+	// {container}, because render's own rule for a missing placeholder is to
+	// print it verbatim ("a message with a hole in it names the missing
+	// argument") — a single template would print a literal {container} for
+	// every target that is not a Docker container.
+	CodeTargetConnectContainer       event.Code = "target.connect.container"
+	CodeTargetConnectPasswordCommand event.Code = "target.connect.password_command"
+	CodeTargetConnect                event.Code = "target.connect"
+
 	// CodeQuarantineFailed is a warning: a residual-class verify failure (exit
 	// 9) means the target holds personal data, closeRun tried to drop every
 	// table this run loaded (load.DropLoaded), and that drop itself failed on

@@ -194,6 +194,15 @@ type Result struct {
 	// TargetProvenance and TargetLabel are the same two facts about the target.
 	TargetProvenance pipeline.Provenance
 	TargetLabel      string
+	// TargetContainerID is the container name or ID behind the target, set
+	// only when the ladder itself found or provisioned that container (rungs
+	// 3 and 4, and Q1/Q1' adoption) — never for rung 0: a committed
+	// lazyslice.yml's TargetLabel is `target.service` (emit/document.go), the
+	// compose *service* name, which is not a valid `docker exec` argument for
+	// a container whose real name differs (T-0320 fix round, review finding
+	// 1). A caller must fall back to the generic target.connect line when
+	// this is empty, even when TargetProvenance says FromContainer.
+	TargetContainerID string
 
 	// TargetNamed is true when the target was named by the operator rather
 	// than picked by the ladder: --target, the positional DSN (both arrive as
@@ -408,6 +417,7 @@ func Resolve(ctx context.Context, o Options, sink event.Sink) (Result, error) {
 	}
 	res.Target = string(target.dsn)
 	res.TargetProvenance, res.TargetLabel = target.cand.Provenance, target.cand.Label
+	res.TargetContainerID = target.containerID
 	prov := provenanceOf(*target)
 	if runnerUp != nil {
 		prov += " (runner-up " + runnerUp.cand.Ref.String() + ")"

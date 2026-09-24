@@ -111,6 +111,8 @@ $ lazyslice --source postgres://ls:pw@127.0.0.1:55701/shop?sslmode=disable \
   public.orders: 149 rows
   public.products: 20 rows
   public.order_items: 298 rows
+  verify: 3 foreign key(s) validated, 4 table row count(s) matched (517 rows total), the residual scan found nothing (170 value(s) tested), the second net scanned 11 column(s)
+  target shop_dev on 127.0.0.1:55702 as ls — password: wherever you supplied it for --target ($PGPASSWORD, ~/.pgpass, or the connection string itself)
 $ echo $?
 0
 ```
@@ -183,10 +185,12 @@ hit, or the second net) also empties the tables this run loaded, rather than
 leaving a suspected leak on disk; an exit 7 (a row count or sequence) or exit
 8 (a foreign key) failure leaves the loaded rows in place, because those are
 what an operator diagnoses the failure against (internal/core's `closeRun`).
-This build
-prints no separate "✓ verified" line to the terminal or to `--json` on a
-passing run — the marker row above is, today, the only place that says so
-without reading the exit code. That gap is filed as tracker task **T-0265**.
+A green run's transcript also ends with the `verify:` line above the two
+`dropping ...`/row-count blocks in "The run" section: one line folding every
+check ARCHITECTURE.md section 6 ran, and a second line naming the target's
+host, port, database and user and where its password lives — never the
+password itself (T-0320). `--json` carries both as `verify.summary` and
+`target.connect*` events, the same as every other line here.
 
 ## Re-running against the same target reloads it
 
@@ -207,6 +211,8 @@ $ lazyslice --source postgres://ls:pw@127.0.0.1:55701/shop?sslmode=disable \
   public.orders: 149 rows
   public.products: 20 rows
   public.order_items: 298 rows
+  verify: 3 foreign key(s) validated, 4 table row count(s) matched (517 rows total), the residual scan found nothing (170 value(s) tested), the second net scanned 11 column(s)
+  target shop_dev on 127.0.0.1:55702 as ls — password: wherever you supplied it for --target ($PGPASSWORD, ~/.pgpass, or the connection string itself)
 $ echo $?
 0
 ```

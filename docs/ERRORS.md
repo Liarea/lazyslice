@@ -123,6 +123,10 @@ One row per code in the catalogue, in the file's own order. Exit is only meaning
 | `secret.password_command.failed` | discover | 5 | no password for {host}: --password-command {reason} |
 | `config.file.read` | emit | - | from {path} |
 | `config.file.written` | emit | - | wrote {path} (commit it for CI) |
+| `verify.summary` | emit | - | verify: {fk_count} foreign key(s) validated, {table_count} table row count(s) matched ({row_count} rows total), the residual scan found nothing ({residual_count} value(s) tested), the second net scanned {column_count} column(s) |
+| `target.connect.container` | emit | - | target {database} on {host}:{port} as {role} — password: docker exec {container} printenv POSTGRES_PASSWORD |
+| `target.connect.password_command` | emit | - | target {database} on {host}:{port} as {role} — password: from --password-command |
+| `target.connect` | emit | - | target {database} on {host}:{port} as {role} — password: wherever you supplied it for --target ($PGPASSWORD, ~/.pgpass, or the connection string itself) |
 | `config.refused.where_withheld` | plan | 2 | {path} records a withheld --where predicate and this run passed none: pass {flag} again, or the slice would silently be a different one |
 | `config.refused.mapping_file` | emit | 2 | {path} names mapping_file for {table}.{column}, which is not supported in this version: remove the mapping_file: line for {table}.{column} from {path}, then use --unmask {table}.{column}=REASON, or a lower --take or --cap |
 | `run.refused.usage` | plan | 2 | a flag names something this source does not have |

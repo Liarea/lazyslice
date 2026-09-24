@@ -161,6 +161,24 @@ const (
 	ArgDatabase  ArgKey = "database"
 	ArgStage     ArgKey = "stage"
 	ArgReason    ArgKey = "reason"
+	// ArgPort is a target or source port number (T-0320's target line): host
+	// and database already had their own keys, and the acceptance for that
+	// line is "host, port, database, user", which a bare {host} does not
+	// carry — internal/core's other decision lines (source.decided,
+	// target.decided) never print the port at all.
+	ArgPort ArgKey = "port"
+	// ArgFKCount, ArgTableCount, ArgRowCount, ArgResidualCount and
+	// ArgColumnCount are T-0320's verify summary line. One event needs five
+	// distinct numbers (foreign keys validated, tables whose row count was
+	// checked, rows loaded, residual-filter values tested, second-net columns
+	// scanned) and Args is a map, so the generic ArgCount — already reused,
+	// one value per event, by many other codes — cannot hold more than one of
+	// them at once.
+	ArgFKCount       ArgKey = "fk_count"
+	ArgTableCount    ArgKey = "table_count"
+	ArgRowCount      ArgKey = "row_count"
+	ArgResidualCount ArgKey = "residual_count"
+	ArgColumnCount   ArgKey = "column_count"
 )
 
 // Args is a fixed-key map of identifiers and counts.

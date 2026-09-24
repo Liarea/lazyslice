@@ -259,6 +259,16 @@ type run struct {
 	sourceLabel string
 	targetProv  pipeline.Provenance
 	targetLabel string
+	// targetContainerID is discover.Result.TargetContainerID: the real
+	// container name or ID behind the target, set only when the ladder found
+	// or provisioned that container itself (rungs 3 and 4, and Q1/Q1'
+	// adoption). It is empty for a rung-0 or --target-named target, including
+	// one whose targetLabel came from a committed lazyslice.yml's compose
+	// service name — that label is not a valid `docker exec` argument for a
+	// container whose real name differs (T-0320 fix round, review finding
+	// 1). targetConnectLine keys the docker-exec line on this, never on
+	// targetLabel.
+	targetContainerID string
 	// targetNamed is discover.Result.TargetNamed (resolveEndpoints): true when
 	// the operator named the target themselves — --target, the positional DSN,
 	// or a committed lazyslice.yml's target: block — false when the ladder
@@ -521,7 +531,108 @@ func (r *run) execute(ctx context.Context) (*pipeline.Report, error) {
 	if err := r.emitConfig(report); err != nil {
 		return report, err
 	}
+	// T-0320: the last two lines of every green run — this point is only
+	// reached once move (extract, transform, load, verify) and emitConfig
+	// have all returned with no error, which is exactly "a green run" for
+	// dogfood session 1's own report.
+	r.verifySummary(report)
+	r.targetConnectLine()
 	return report, nil
+}
+
+// ---------- T-0320: the verify summary and target lines ----------
+
+// verifySummary sends CodeVerifySummary, one line folding every check
+// ARCHITECTURE.md section 6 ran into a sentence: dogfood session 1 found that
+// a green run said nothing about foreign keys validating, row counts
+// matching, the residual scan or the second net — the per-check codes
+// (reportVerifyRefusals) only ever announce a *failure*, never a count on the
+// green path. report is never nil here: it is move's own return value on its
+// only success path (verify.Verify's report, after verifyErr == nil).
+func (r *run) verifySummary(report *pipeline.Report) {
+	// Keyed on Code, not Name: "row_count" and "residual" each carry more
+	// than one Passed entry — counts.go's per-table report() alongside its
+	// own final pass(), and residual.go's report() (CodeUnconfirmed,
+	// CodeResidualExplained) alongside its own pass() — so matching on Name
+	// alone and keeping "the last one" depended on report() always being
+	// appended before pass(), an ordering nothing enforces (T-0320 fix round,
+	// review finding 2). The four *Passed codes are each written exactly
+	// once, by the check's own final pass() call.
+	var fk, tablesChecked, residual, secondNet int64
+	for _, c := range report.Checks {
+		if !c.Passed {
+			continue // a green run has no failing check; belt and suspenders
+		}
+		switch c.Code {
+		case verify.CodeFKPassed:
+			fk = c.Count
+		case verify.CodeRowCountPassed:
+			tablesChecked = c.Count
+		case verify.CodeResidualPassed:
+			residual = c.Count
+		case verify.CodeSecondNetPassed:
+			secondNet = c.Count
+		default:
+			// Every other Passed code (report()'s per-table entries, and
+			// every other check's own pass()) contributes nothing to this
+			// summary line.
+		}
+	}
+	var rows int64
+	for _, n := range report.Rows {
+		rows += n
+	}
+	r.send(event.Emit, event.Info, CodeVerifySummary, event.Args{
+		event.ArgFKCount:       strconv.FormatInt(fk, 10),
+		event.ArgTableCount:    strconv.FormatInt(tablesChecked, 10),
+		event.ArgRowCount:      strconv.FormatInt(rows, 10),
+		event.ArgResidualCount: strconv.FormatInt(residual, 10),
+		event.ArgColumnCount:   strconv.FormatInt(secondNet, 10),
+	})
+}
+
+// targetConnectLine sends one of the three T-0320 target-connect codes: host,
+// port, database and user for the target this run just wrote, and where its
+// password lives — never the password (THREAT_MODEL.md T5). r.targetCand.Ref
+// is filled by openTarget before the gate runs, so it is always set by the
+// time move has returned successfully.
+func (r *run) targetConnectLine() {
+	tref := r.targetCand.Ref
+	args := event.Args{
+		event.ArgDatabase: tref.Database,
+		event.ArgHost:     tref.Host,
+		event.ArgPort:     strconv.Itoa(tref.Port),
+		event.ArgRole:     tref.User,
+	}
+	// A container-backed target — one the discovery ladder found running, or
+	// one --create-target provisioned — carries its password in the
+	// container's own environment (ARCHITECTURE.md section 9), never in
+	// lazyslice.yml (ADR-004) and never resolved through
+	// --password-command (passwordAvailable is already true for it). That is
+	// exactly dogfood session 1's own complaint: "psql fails until docker
+	// inspect".
+	//
+	// The docker exec line is keyed on targetContainerID, never targetLabel:
+	// for a compose-managed database the ladder found running or stopped,
+	// targetLabel is the compose *service* name (e.g. "db"), which is what
+	// the candidate list prints, but "docker exec db ..." fails whenever the
+	// real container name differs (e.g. "myproj-db-1") — the common case.
+	// targetContainerID is only ever set when the ladder itself resolved a
+	// real container (containers.go, question.go's adopted), so a rung-0
+	// target with no validated container — including one whose committed
+	// lazyslice.yml names a provenance that looks container-shaped — falls
+	// through to the generic target.connect line instead of printing a
+	// command built from unvalidated committed text (T-0320 fix round,
+	// review finding 1).
+	switch {
+	case (r.targetProv == pipeline.FromContainer || r.targetProv == pipeline.FromStoppedContainer) && r.targetContainerID != "":
+		args[event.ArgContainer] = r.targetContainerID
+		r.send(event.Emit, event.Info, CodeTargetConnectContainer, args)
+	case r.req.PasswordCommand != "":
+		r.send(event.Emit, event.Info, CodeTargetConnectPasswordCommand, args)
+	default:
+		r.send(event.Emit, event.Info, CodeTargetConnect, args)
+	}
 }
 
 // ---------- the yml ----------
@@ -647,6 +758,7 @@ func (r *run) resolveEndpoints(ctx context.Context) error {
 	}
 	r.req.Source, r.sourceProv, r.sourceLabel = res.Source, res.SourceProvenance, res.SourceLabel
 	r.req.Target, r.targetProv, r.targetLabel = res.Target, res.TargetProvenance, res.TargetLabel
+	r.targetContainerID = res.TargetContainerID
 	r.targetNamed = res.TargetNamed
 	// ADR-008's one-question rule, for rootQuestion (Q2): res.Asked is true
 	// only when Q1 or Q1' actually reached the controlling terminal, so a
