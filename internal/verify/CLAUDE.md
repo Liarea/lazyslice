@@ -1666,3 +1666,22 @@ pins each spared shape and name, the camel-case spellings, and the three that
 must still refuse: five secret-shaped values in an ordinary column, a column
 of file names half of which carry a dictionary name, and a column of dotted
 handles (`katherine.johnson84`) under a neutral name.
+
+## The card entries are split by column name (T-0316)
+
+`internal/classify`'s card entry now wants a known issuer prefix
+(`textsig.ValidCard`), and under a column name ending in an identifier word
+the issuer's own length as well (`textsig.CardShape`). Both of this net's card
+entries — character (`strong`, any hit refuses) and numeric (ratio) — are
+split the same way, four rows in `validators`, each carrying a `columns`
+predicate over `snakeColumnName(column)` (`cardIdentifierNamed` or its
+complement) that the scoring loop in `netColumn` checks beside
+`exemptColumns`. Without the split, a column the classifier now copies for a
+value that passes only the check digit would be refused here at exit 9 for
+the same value. `cardIdentifierWords` is classify's `identifierNameWords`,
+kept in step by hand. `residual.go`'s `strongKeyCategory` and `catalog.go`'s
+DDL-literal pass still read the bare `textsig.ValidLuhn`, unchanged and wider.
+`card_test.go`'s `TestTheSecondNetWantsTheShapeOfACard` pins both directions;
+`TestLuhnOnANumericColumnKeepsTheRatioRule`'s majority case now uses
+sixteen-digit Visa-prefixed values, because its column is named `reference`
+and its old thirteen-digit values pass only the check digit.

@@ -1851,3 +1851,27 @@ the three hand-labelled truth sets keep recall at 1.000 (precision 0.641 →
 0.647, docs/TORTURE.md), and `TestPagilaPrecisionAndRecall`,
 `TestFiftyNamesFromThreeSchemas` and `TestBareNameTruthSetsWithSamples` read
 as before, since they sample no credential-shaped value.
+
+## The card entry wants the shape of a card (T-0316)
+
+Dogfood session 1 masked eight identifier columns as `free_text`, "a strong
+validator hit below the category threshold", on values that passed only the
+Luhn check digit. The card entry in `baseValidators` reads
+`textsig.ValidCard` (a known issuer prefix as well as the check digit), and
+`state.base` swaps it for `textsig.CardShape` (the issuer's own length too)
+through `withCardShape` when `identifierNamed` says the normalised column name
+ends in `id`, `number`, `num`, `no`, `nr`, `version`, `ref` or `reference`
+(`identifierNameWords`, `validators.go`). Only the check changes: category,
+phrase, strength and order are as before, so the reason line reads the same
+when a column is masked. `internal/verify/validators.go` carries the same word
+list as `cardIdentifierWords`, by hand, and splits both of its card entries on
+it. `jsonLeafIsPersonal` still reads the bare `textsig.ValidLuhn`, unchanged.
+
+`card_shape_test.go`'s `TestCardEntryNeedsTheShapeOfACard` pins it: a
+`version` column of migration timestamps, a `customer_id` and a neutrally named
+column each with one check-digit-only value are copied (each masked before the
+change, checked by reverting it); an `invoice_number` holding the Visa test
+card and a neutral column holding a Visa-prefixed value of an unissued length
+are still masked. **Measured:** THREAT_MODEL.md T1's T-0316 amendment — no
+column of the ten torture schemas moved, because none samples a value that
+passes the check digit.

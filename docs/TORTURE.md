@@ -1007,6 +1007,13 @@ regression `013`, a fixture none of these three schemas touches.
 | supabase-auth | 271 | 50 | 78 | 50 | 28 | 0 | **0.641** | **1.000** |
 | all three | 351 | 66 | 102 | 66 | 36 | 0 | **0.647** | **1.000** |
 
+**T-0316 (2026-09-24) moved nothing.** The card signal now wants a known
+issuer prefix as well as the Luhn check digit, and the issuer's own length
+under a column named for an identifier (ARCHITECTURE.md §4's T-0316
+amendment). Classified before and after over all ten schemas, every one of the
+10,035 columns kept its decision and its reason line: no sampled value in the
+corpus passes the check digit. The table above is unchanged.
+
 **T-0315 (2026-09-24) moved rails-activestorage by one false positive and no
 true positive**, and the table above carries it. `textsig.LooksSecret` no
 longer reads a hex digest of exactly 32, 40 or 64 characters, a file name
