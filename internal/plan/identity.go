@@ -58,6 +58,7 @@ func (p *run) resolveIdentity(ctx context.Context, tbl *pipeline.Table) (identit
 			return id, nil
 		}
 	}
+	var probedFailed []string
 	if cols := p.pseudoKeyColumns(tbl); len(cols) > 0 {
 		ok, err := p.probePseudoKey(ctx, tbl, cols)
 		if err != nil {
@@ -66,14 +67,138 @@ func (p *run) resolveIdentity(ctx context.Context, tbl *pipeline.Table) (identit
 		if ok {
 			return p.identityOver(tbl, cols, pipeline.IdentityPseudo)
 		}
+		// The pseudo-key rung already probed exactly these columns and found a
+		// duplicate: keyHint must not suggest them back (T-0318 review, finding
+		// 2), or pasting the hint verbatim spends a whole run rediscovering the
+		// answer this run already has.
+		probedFailed = cols
 	}
+	hint := keyHint(tbl, enumTypeNames(p.schema), probedFailed)
 	return identity{}, refuse(CodeNoIdentity, exitPlan, tbl.Ref,
-		fmt.Sprintf("%s has no row identity: pass --key %s=col,col or --skip-table %s",
-			tbl.Ref, tbl.Ref, tbl.Ref),
+		fmt.Sprintf("%s has no row identity: pass %s", tbl.Ref, hint),
 		event.Args{
 			event.ArgTable: tbl.Ref.String(),
-			event.ArgFlag:  "--key " + tbl.Ref.String() + "=col,col or --skip-table " + tbl.Ref.String(),
+			event.ArgFlag:  hint,
 		})
+}
+
+// keyHint is the escape §3.4's identity refusal offers: --key naming a
+// composite key, or --skip-table. Ordinarily the columns are a placeholder —
+// nothing about the ladder having failed says which columns would identify a
+// row — but a table of three columns or fewer that reached this refusal is,
+// overwhelmingly, a join table: a Rails habtm table is exactly two foreign-key
+// columns and no primary key at all, and the whole row is its own composite
+// key. Naming the table's actual columns turns the hint into a command an
+// operator can paste straight from the transcript instead of one they have to
+// open the schema to finish (T-0318, dogfood session 1: a join table's second,
+// identical twin cost a run of its own to even be named).
+//
+// probedFailed is the pseudo-key rung's own candidate when that rung ran and
+// found a duplicate -- nil when the rung was never reached or had nothing to
+// probe. When smallTableKeyColumns' suggestion is that same set, or a subset
+// of it, the columns are not offered: those exact columns already failed a
+// uniqueness probe this same run, and pasting `--key` naming them earns the
+// operator the identical plan.refused.key_not_unique refusal on the next run
+// instead of the escape they were told to take (T-0318 review, finding 2).
+// The hint falls back to --skip-table alone rather than to the generic
+// placeholder in that case, because there is no third candidate this rule
+// could name: for a table of three columns or fewer, smallTableKeyColumns and
+// pseudoKeyColumns can only ever agree or disagree on the same short list.
+func keyHint(tbl *pipeline.Table, enums map[string]bool, probedFailed []string) string {
+	named, ok := smallTableKeyColumns(tbl, enums)
+	switch {
+	case ok && allIn(named, probedFailed):
+		// smallTableKeyColumns' own suggestion is exactly the set (or a subset
+		// of the set) the pseudo-key rung already probed and found duplicated:
+		// naming it again is not a hint, it is the answer this run already
+		// has. There is no third candidate to fall back to for a table this
+		// small, so the --key half is dropped rather than replaced.
+		return fmt.Sprintf("--skip-table %s", tbl.Ref)
+	case ok:
+		return fmt.Sprintf("--key %s=%s or --skip-table %s", tbl.Ref, joinCols(named), tbl.Ref)
+	default:
+		// smallTableKeyColumns declined for a reason that has nothing to do
+		// with probedFailed (too many columns, or a column left out as
+		// nullable or incomparable): the generic placeholder is still the
+		// right offer, whether or not some other candidate was probed and
+		// failed elsewhere on this same table.
+		return fmt.Sprintf("--key %s=col,col or --skip-table %s", tbl.Ref, tbl.Ref)
+	}
+}
+
+// allIn says whether every element of named already appears in probed. An
+// empty named is never "in" an empty probed (both nil): the caller only asks
+// this question when named is non-empty, and the zero value must not be read
+// as a match.
+func allIn(named, probed []string) bool {
+	if len(named) == 0 || len(probed) == 0 {
+		return false
+	}
+	set := make(map[string]bool, len(probed))
+	for _, c := range probed {
+		set[c] = true
+	}
+	for _, c := range named {
+		if !set[c] {
+			return false
+		}
+	}
+	return true
+}
+
+// smallTableKeyColumns is every non-generated column of a table with three
+// columns or fewer, in table column order -- the obvious composite key for a
+// join table that carries no other candidate -- provided every one of them is
+// safe to suggest. The second return is false for a table this rule does not
+// apply to: more than three columns, three columns that are all generated
+// (nothing left to suggest), or -- since the T-0318 review -- any remaining
+// column that is nullable or of a type the key encoding cannot compare.
+//
+// Both exclusions matter and neither is optional. A nullable column is never
+// a candidate, the same rule pseudoKeyColumns' own doc comment states at
+// length: count(DISTINCT (a, b)) counts a tuple holding a NULL as distinct,
+// so a nullable pair can pass a uniqueness probe and then lose every row with
+// a NULL in it at readKeys -- the silent omission of testdata/README.md trap
+// 12, reached this time not through a probe but through an operator pasting
+// this very hint verbatim. `create_table :a_b, id: false { t.belongs_to :a;
+// t.belongs_to :b }` is the ordinary Rails shape that produces exactly this:
+// two nullable foreign-key columns, no primary key. And a column the key
+// encoding has no default btree opclass for -- json, xml, a geometric type --
+// does not fail with a refusal at all if suggested: count(DISTINCT (...)) and
+// the join's ORDER BY both die inside pgx with "could not identify a
+// comparison function", which is a wrapped driver error, not the exit 12 and
+// the remedy §3.4 promises. comparableType is pseudoKeyColumns' own
+// admission rule for a column's type, applied here without that rung's
+// separate FK/discriminator requirement -- this rule's whole candidacy is "is
+// this a plausible identifying column", and comparability is a property of
+// the type alone, unrelated to whether the column happens to be a foreign key
+// or named like a discriminator.
+//
+// A column excluded for being generated is simply left out, the way it always
+// was: the target recomputes it, so it was never a candidate to begin with and
+// its absence says nothing about whether the rest of the columns are safe. A
+// column excluded for being nullable or incomparable is different -- its
+// presence in the table means the *composite* of the row is not what this
+// rule promised, so the whole suggestion is withdrawn rather than offered one
+// column short.
+func smallTableKeyColumns(tbl *pipeline.Table, enums map[string]bool) ([]string, bool) {
+	if len(tbl.Columns) == 0 || len(tbl.Columns) > 3 {
+		return nil, false
+	}
+	var cols []string
+	for _, c := range tbl.Columns {
+		if c.Generated != "" {
+			continue
+		}
+		if c.Nullable || !comparableType(c, enums) {
+			return nil, false
+		}
+		cols = append(cols, c.Name)
+	}
+	if len(cols) == 0 {
+		return nil, false
+	}
+	return cols, true
 }
 
 // explicitIdentity takes the first rung: a key the caller named. It is a
@@ -272,6 +397,29 @@ func isDiscriminator(col pipeline.Column, enums map[string]bool) bool {
 	}
 	if !discriminatorNamePattern.MatchString(col.Name) {
 		return false
+	}
+	return comparableType(col, enums)
+}
+
+// comparableType says whether a column's type is one the key encoding can
+// compare and order without decoding it: kindInt, kindText, kindBpchar and
+// kindUUID all have a default btree opclass by keyset.go's own construction,
+// and so do boolean and every enum type, admitted by name here because
+// Postgres itself requires the opclass before either can exist. Everything
+// else kindOther carries — json, xml, a geometric type, among others — has no
+// default btree opclass, and admitting one is what isDiscriminator's own name
+// match already declines and what smallTableKeyColumns must decline too
+// (T-0318 review, finding 1): a NOT NULL json column offered in a --key hint
+// dies inside pgx with "could not identify a comparison function" rather than
+// reaching any refusal or remedy this tool prints.
+//
+// This is exactly isDiscriminator's own type test, pulled out so
+// smallTableKeyColumns can ask the same question of a column that is neither
+// a foreign key nor discriminator-named — comparability is a property of the
+// type alone and does not depend on either.
+func comparableType(col pipeline.Column, enums map[string]bool) bool {
+	if col.TypeOID == oidBool || enums[col.TypeName] {
+		return true
 	}
 	switch typeOf(col).kind {
 	case kindInt, kindText, kindBpchar, kindUUID:

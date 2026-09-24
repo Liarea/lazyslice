@@ -21,6 +21,7 @@ import (
 	"github.com/Liarea/lazyslice/internal/pipeline"
 	"github.com/Liarea/lazyslice/internal/ref"
 	"github.com/Liarea/lazyslice/internal/testutil"
+	"github.com/Liarea/lazyslice/mask"
 )
 
 // Which rows a plan holds is a statement about a real Postgres, so these run
@@ -1529,5 +1530,129 @@ func TestPlanRootLineIsUnchangedWhenNothingIsPulledIn(t *testing.T) {
 	}
 	if cust.Why != "root" {
 		t.Errorf(`customers.Why = %q, want "root": nothing was pulled in beyond the seed`, cust.Why)
+	}
+}
+
+// ---------- collecting refusals across independent causes, end to end (T-0318) ----------
+
+// collectedRefusalsSchema is a Plan()-level reduction of dogfood session 1's
+// own shape: two Rails habtm join tables with no derivable identity at all
+// (no primary key, no unique index, no foreign key declared on either, so
+// resolveIdentity's pseudo-key rung has nothing to probe), and a root/child
+// pair each carrying one masked column under a unique index too narrow for
+// any registered generator to widen into -- the identical reduction
+// unique_test.go's uniqueRun and refusals_test.go's narrowUniqueColumnTable
+// both fake by hand. refusals_test.go's own fixture already proves the shape
+// holds without a database, by calling resolveIdentities and checkUniqueDomain
+// directly; this is the other half the T-0318 review round's third finding
+// asked for -- a single New().Plan() call against a real Postgres, so a
+// regression in plan()'s own sequencing (returning early once
+// len(p.refusals) > 0 anywhere before the last check, say) fails this test
+// and not only the one that calls the two checks by hand.
+const collectedRefusalsSchema = `
+CREATE TABLE public.customers (
+    id     bigint PRIMARY KEY,
+    handle character varying(18) NOT NULL
+);
+
+CREATE TABLE public.sessions (
+    id          bigint PRIMARY KEY,
+    customer_id bigint NOT NULL REFERENCES public.customers (id),
+    token       character varying(18) NOT NULL
+);
+
+CREATE TABLE public.assemblies_kits (
+    assembly_id bigint NOT NULL,
+    kit_id      bigint NOT NULL
+);
+
+CREATE TABLE public.assemblies_parts (
+    assembly_id bigint NOT NULL,
+    part_id     bigint NOT NULL
+);
+
+INSERT INTO public.customers (id, handle) VALUES (1, 'cust-1');
+INSERT INTO public.sessions (id, customer_id, token) VALUES (10, 1, 'sess-1');
+`
+
+func loadCollectedRefusals(ctx context.Context, url string) error {
+	conn, err := pgx.Connect(ctx, url)
+	if err != nil {
+		return fmt.Errorf("connecting to load the collected-refusals fixture: %w", err)
+	}
+	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
+	if _, err := conn.Exec(ctx, collectedRefusalsSchema); err != nil {
+		return fmt.Errorf("loading the collected-refusals fixture: %w", err)
+	}
+	return nil
+}
+
+// narrowCredentialDecision is the same shape unique_test.go's uniqueRun and
+// refusals_test.go's narrowUniqueColumnTable both fake: character varying(18)
+// has no room for credential_unique's prefix and a distinguishing suffix, so
+// the category's only masker left is the fixed literal, whose domain of 1
+// clears no d_required at any row count -- including the single row each
+// table plans here.
+func narrowCredentialDecision(col ref.ColumnRef) pipeline.Decision {
+	return pipeline.Decision{
+		Col: col, Category: pipeline.CatCredential, Masker: mask.CredentialMasker,
+		Masked: true, UniqueIndex: true,
+	}
+}
+
+// TestPlanCollectsFourIndependentRefusalsInOneRun is the T-0318 review round's
+// third finding, driven through Plan() end to end rather than through
+// resolveIdentities and checkUniqueDomain directly
+// (refusals_test.go's TestCollectsTwoNoIdentityAndTwoUniqueDomainRefusalsInOneRun
+// takes the shortcut): dogfood session 1 took nine runs to reach a green
+// verify, one cause at a time, and this is the same shape driven through a
+// real Postgres and the same New().Plan() entry point an operator's own run
+// takes.
+func TestPlanCollectsFourIndependentRefusalsInOneRun(t *testing.T) {
+	ctx := context.Background()
+	r, schema := fixture(ctx, t, loadCollectedRefusals)
+
+	customers := tref("public", "customers")
+	sessions := tref("public", "sessions")
+	kits := tref("public", "assemblies_kits")
+	parts := tref("public", "assemblies_parts")
+
+	handle := ref.ColumnRef{Table: customers, Column: "handle"}
+	token := ref.ColumnRef{Table: sessions, Column: "token"}
+	cls := &pipeline.Classification{Decisions: map[ref.ColumnRef]pipeline.Decision{
+		handle: narrowCredentialDecision(handle),
+		token:  narrowCredentialDecision(token),
+	}}
+
+	root := customers
+	_, err := New().Plan(ctx, r, schema, cls, pipeline.PlanRequest{Root: &root})
+
+	var refusals Refusals
+	if !errors.As(err, &refusals) {
+		t.Fatalf("Plan returned %v (%T), want plan.Refusals carrying all four causes", err, err)
+	}
+	if len(refusals) != 4 {
+		t.Fatalf("collected %d refusals, want 4 (two no_identity, two unique_domain): %v", len(refusals), refusals)
+	}
+
+	// The order is deterministic and asserted exactly: resolveIdentities runs
+	// before checkUniqueDomain (plan.go), each visits tables in (schema, name)
+	// order, and neither reorders what it finds.
+	if refusals[0].Code != CodeNoIdentity || refusals[0].Table != kits {
+		t.Errorf("refusals[0] = %s %s, want %s %s", refusals[0].Code, refusals[0].Table, CodeNoIdentity, kits)
+	}
+	if refusals[1].Code != CodeNoIdentity || refusals[1].Table != parts {
+		t.Errorf("refusals[1] = %s %s, want %s %s", refusals[1].Code, refusals[1].Table, CodeNoIdentity, parts)
+	}
+	if refusals[2].Code != CodeUniqueDomain || refusals[2].Table != customers {
+		t.Errorf("refusals[2] = %s %s, want %s %s", refusals[2].Code, refusals[2].Table, CodeUniqueDomain, customers)
+	}
+	if refusals[3].Code != CodeUniqueDomain || refusals[3].Table != sessions {
+		t.Errorf("refusals[3] = %s %s, want %s %s", refusals[3].Code, refusals[3].Table, CodeUniqueDomain, sessions)
+	}
+	for i, rf := range refusals {
+		if rf.Exit != exitPlan {
+			t.Errorf("refusals[%d].Exit = %d, want %d", i, rf.Exit, exitPlan)
+		}
 	}
 }

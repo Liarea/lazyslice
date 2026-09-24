@@ -118,11 +118,16 @@ func TestUnwritableColumnIsRefusedAtPlan(t *testing.T) {
 	if got := refusal.Args[event.ArgReason]; !strings.Contains(got, "credential") {
 		t.Errorf("args[reason] = %q, want the category named", got)
 	}
-	// The whole point of moving the check here is that it happens before the
-	// run reads rows. The privilege pass is the only statement that precedes
-	// it.
-	if r.queries > 1 {
-		t.Errorf("the planner sent %d statements before refusing; only the privilege pass should run", r.queries)
+	// The whole point of moving the check here is that it happens before a
+	// key is fetched: the privilege pass and the root's own seed read are the
+	// only statements this one-table fixture ever sends, whether or not the
+	// column turns out unwritable. Since T-0318 the run does not stop the
+	// moment this check finds something — it keeps walking so that an
+	// independent no_identity or unique_domain cause elsewhere in the schema
+	// is found in the same run — so "no further statements" is no longer the
+	// assertion; "no statement moves a row" still is, and nothing here could.
+	if r.queries > 2 {
+		t.Errorf("the planner sent %d statements before refusing; want the privilege pass and the root's own seed read, no more", r.queries)
 	}
 }
 
@@ -209,8 +214,12 @@ func TestMaskedCompositeIsRefusedAtPlan(t *testing.T) {
 			t.Errorf("args[reason] = %q does not offer %q", refusal.Args[event.ArgReason], want)
 		}
 	}
-	if r.queries > 1 {
-		t.Errorf("the planner sent %d statements before refusing; only the privilege pass should run", r.queries)
+	// Since T-0318 the run keeps walking past this refusal to look for an
+	// independent cause elsewhere (writeback_test.go's other assertion has
+	// the full account); the privilege pass and this one-table fixture's own
+	// root seed read are the only two statements it can still send.
+	if r.queries > 2 {
+		t.Errorf("the planner sent %d statements before refusing; want the privilege pass and the root's own seed read, no more", r.queries)
 	}
 }
 
