@@ -8,8 +8,8 @@
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 0 | 0 | 108 | 0 | 0 |
-| E6 Launch | 6 | 22 | 0 | 17 | 0 | 0 |
-| E9 Later | later | 111 | 0 | 38 | 8 | 0 |
+| E6 Launch | 6 | 20 | 0 | 20 | 0 | 0 |
+| E9 Later | later | 113 | 0 | 38 | 8 | 0 |
 
 ## Open and in progress
 
@@ -109,9 +109,6 @@
 - T-0308 [open] E9 · internal/textsig/names.txt's English section could be regenerated from the Census CSVs (sonnet)
 - T-0309 [open] E9 · tools/names: assert no duplicate rows, a filled cut, and a real drops test (sonnet)
 - T-0310 [open] E9 · A minimal docs site (mkdocs-material on GitHub Pages) once the first ten issues show what strangers look for (sonnet)
-- T-0311 [open] E6 · The neighbouring-column sweep spares enum-like, identifier-shaped and unique-indexed columns (opus)
-- T-0312 [open] E6 · The same-column-name rule does not propagate a decision that was itself only a neighbour sweep (sonnet)
-- T-0313 [open] E6 · A bare 'name' column and a '*_file_name' column are not a person's name without corroboration (opus)
 - T-0315 [open] E6 · The entropy validator does not read filenames, hex digests, namespaced class names or a handful of samples as secrets (sonnet)
 - T-0316 [open] E6 · The Luhn check needs a card length and issuer prefix before it masks an id, number or version column (sonnet)
 - T-0317 [open] E6 · A four-part version string is not an IP address, and a digit-only license key is not a phone number (sonnet)
@@ -146,10 +143,16 @@
 - T-0351 [open] E9 · T-0312 T1 measurement: torture corpus and THREAT_MODEL.md amendment for the sameColumnName swept-source exclusion (sonnet)
 - T-0352 [open] E9 · Decide whether the multilingual bare words for name (nombre, naam, navn) need corroboration like bare_name ()
 - T-0353 [open] E9 · Match run-together person-name spellings (nickname, legalname) in the person_name rule ()
+- T-0354 [open] E6 · The hex-digest spare of the certain-neighbour sweep lets short hex tokens through unmasked (opus)
+- T-0355 [open] E9 · Same-column-name rule after T-0312: the swept mark through propagateKeys, a docs misstatement, and the source-ordering test (sonnet)
+- T-0356 [open] E9 · Bare-name rule after T-0313: fixture independence, the Recall-bias bullet, and the category of birth_name and cardholder_name (sonnet)
 
 ## Recently closed
 
 - T-0143 [done] E9 · Decide the arbitrary-JSON policy: structure-preserving masking versus whole-document replacement → done
+- T-0311 [done] E6 · The neighbouring-column sweep spares enum-like, identifier-shaped and unique-indexed columns → done
+- T-0312 [done] E6 · The same-column-name rule does not propagate a decision that was itself only a neighbour sweep → done
+- T-0313 [done] E6 · A bare 'name' column and a '*_file_name' column are not a person's name without corroboration → done
 - T-0314 [done] E6 · Framework metadata tables are copied whole and never masked (schema_migrations, ar_internal_metadata and their kin) → done
 - T-0331 [done] E6 · Decide whether a first run may ask both the target question and the root question → done
 - T-0337 [cancelled] E9 · Move internal/verify's tests off mask.RoleWords, then delete RoleWords in the next mask minor → cancelled
@@ -171,6 +174,3 @@
 - T-0285 [done] E6 · go install works: the mask module gets its own tag and go.mod requires it by version, with go.work for local development → done
 - T-0286 [done] E6 · research/POSTMORTEMS.md carries two stale facts the blog draft inherited → done
 - T-0287 [done] E6 · The person_name masker respects the column's role: a first-name column gets a given name, a last-name column a surname → done
-- T-0288 [done] E6 · A root table can hold more rows than --take names; say so in the flag's help or stop it → done
-- T-0289 [done] E6 · make gif records with a read-only role, probes readiness from the host, and pace.awk fails when it paused nothing → done
-- T-0290 [done] E6 · goreleaser release build still compiles mask/ from go.work, not the tagged version go.mod requires → done
