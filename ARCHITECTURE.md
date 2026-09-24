@@ -997,7 +997,7 @@ type Sink interface{ Send(Event) }
 
 ## 8. The CLI surface for v1
 
-`lazyslice [DSN] [flags]` runs the pipeline. Subcommands: `introspect`, `classify`, `plan`, `verify`, `doctor`, `version`. Every subcommand accepts `--json`. `--help` is grouped by stage. The flag reference in `docs/FLAGS.md` is generated from this table and CI fails on drift.
+`lazyslice --source DSN [flags]` runs the pipeline. Subcommands: `introspect`, `classify`, `plan`, `verify`, `doctor`, `version`. Every subcommand accepts `--json`. `--help` is grouped by stage. The flag reference in `docs/FLAGS.md` is generated from this table and CI fails on drift.
 
 | Flag | Default | Stage | What it does |
 |---|---|---|---|
@@ -1142,7 +1142,7 @@ A writable source role prints, as the loudest lines in the header, the warning a
     GRANT USAGE ON SCHEMA public TO lazyslice_ro;
     GRANT SELECT ON ALL TABLES IN SCHEMA public TO lazyslice_ro;
     GRANT EXECUTE ON FUNCTION pg_control_system() TO lazyslice_ro;
-  then: lazyslice postgres://lazyslice_ro@127.0.0.1:5432/shop
+  then: lazyslice --source postgres://lazyslice_ro@127.0.0.1:5432/shop
 ```
 
 The block is the `Statement` arg of `source.role.writable`, rendered from a catalogue template with role, database and schema names; `docs/READ_ONLY_ROLE.md` holds the long version and is never the answer (CLAUDE.md; research/SQLIT_STUDY.md §5.5 Scenario C, "ends in a command, not a doc link"). **The fifth grant is T-0241** (round-4 red team, below): without it, rule 1's cluster identity degrades to the postmaster start time and the server version for the recommended role, which cannot tell a streaming standby apart from its own primary — the one shape those two fields can never settle. Granting `EXECUTE` on `pg_control_system` restores `system_identifier`, the field that can.

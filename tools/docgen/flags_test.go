@@ -26,7 +26,7 @@ func TestParseHelpGroups(t *testing.T) {
 		{
 			name: "ordinary flags, short and long, bool and typed, with a real default",
 			help: "Usage:\n" +
-				"  lazyslice [DSN] [flags]\n" +
+				"  lazyslice [flags]\n" +
 				"\n" +
 				"discover:\n" +
 				"      --source string   Names the source; a non-Postgres scheme or unsupported major exits 2\n" +
@@ -49,7 +49,7 @@ func TestParseHelpGroups(t *testing.T) {
 			// checkCompleteness above.
 			name: "a digit and an ampersand in a header title are recognised as their own groups",
 			help: "Usage:\n" +
-				"  lazyslice [DSN] [flags]\n" +
+				"  lazyslice [flags]\n" +
 				"\n" +
 				"discover:\n" +
 				"      --source string   Names the source\n" +
@@ -73,7 +73,7 @@ func TestParseHelpGroups(t *testing.T) {
 			// as opposed to the disused-header shape below.
 			name: "an unrecognised header while a previous group is open closes that group instead of misattributing its flags",
 			help: "Usage:\n" +
-				"  lazyslice [DSN] [flags]\n" +
+				"  lazyslice [flags]\n" +
 				"\n" +
 				"discover:\n" +
 				"      --source string   Names the source\n" +
@@ -85,7 +85,7 @@ func TestParseHelpGroups(t *testing.T) {
 		{
 			name: "a NoOptDefVal flag has no two-space separator before its bracketed default",
 			help: "Usage:\n" +
-				"  lazyslice [DSN] [flags]\n" +
+				"  lazyslice [flags]\n" +
 				"\n" +
 				"render:\n" +
 				"      --colour[=\"auto\"]   Colourise output; bare form means auto\n" +
@@ -130,7 +130,7 @@ func TestParseHelpGroups(t *testing.T) {
 // checkCompleteness enforces at `make docs` time, run here without a subprocess.
 func TestParseHelpGroupsAgainstRealHelp(t *testing.T) {
 	help := `Usage:
-  lazyslice [DSN] [flags]
+  lazyslice [flags]
 
 Commands:
   classify     Classify every column and print the reasons
@@ -178,7 +178,7 @@ other:
 // because the line still became exactly one row.
 func TestParseHelpGroupsNonQuotedDefault(t *testing.T) {
 	help := "Usage:\n" +
-		"  lazyslice [DSN] [flags]\n" +
+		"  lazyslice [flags]\n" +
 		"\n" +
 		"plan:\n" +
 		"      --timeout duration   How long to wait (default 30s)\n"
@@ -204,7 +204,7 @@ func TestParseHelpGroupsNonQuotedDefault(t *testing.T) {
 // flagTokenRE does not count it as an expected flag line either.
 func TestParseHelpGroupsWrappedDescription(t *testing.T) {
 	help := "Usage:\n" +
-		"  lazyslice [DSN] [flags]\n" +
+		"  lazyslice [flags]\n" +
 		"\n" +
 		"discover:\n" +
 		"      --source string   Names the source; a non-Postgres scheme or unsupported\n" +

@@ -42,6 +42,7 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/Liarea/lazyslice/internal/core"
+	"github.com/Liarea/lazyslice/internal/dsn"
 	"github.com/Liarea/lazyslice/internal/event"
 	"github.com/Liarea/lazyslice/internal/pg"
 	"github.com/Liarea/lazyslice/internal/pipeline"
@@ -426,6 +427,59 @@ func oneDSN(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// noArgs is cobra.NoArgs with its error replaced, so that a stray positional
+// argument is exit 2 like every other usage error rather than exit 1, and so
+// that the message never repeats the argument verbatim. The root command
+// takes its source only from --source; a positional argument here is never
+// read, so accepting and silently using one (T-0326) hid a shell-quoting
+// mistake as a discovery failure instead of naming the argument cobra never
+// should have accepted.
+//
+// cobra.NoArgs's own error quotes args[0] verbatim, and renderSafe prints
+// every errUsage error in full, so that path put a connection string's
+// password on stderr the moment someone tried the documented but no-longer-
+// accepted "lazyslice postgres://..." form (T-0326 review). describeStrayArg
+// names the argument without ever repeating a credential.
+func noArgs(cmd *cobra.Command, args []string) error {
+	if len(args) == 0 {
+		return nil
+	}
+	return fmt.Errorf(
+		"%w: %s takes no positional arguments; got %s — pass the source with --source",
+		errUsage, cmd.CommandPath(), describeStrayArg(args[0]),
+	)
+}
+
+// dsnLikeChars are the characters no connection string can carry a password
+// without: an authority separator ('@'), a scheme or port separator (':'),
+// a key/value separator ('=', for a libpq keyword/value string) or a path
+// separator ('/', for a URI's database name). An argument holding none of
+// them cannot carry a credential.
+const dsnLikeChars = "=@:/"
+
+// describeStrayArg names a stray positional argument for a usage message
+// without ever printing a password (T-0326 second review: THE DECISION). If
+// the argument parses as a connection string, dsn.Ref's own redacting
+// String() names it. Otherwise, if it contains any of dsnLikeChars, it is
+// named only by shape, with none of its own text — dsn.Parse rejects
+// connection strings it doesn't support (multiple hosts, a bad port) while
+// the text still holds a credential, so a failed Parse does not by itself
+// mean the argument is safe to echo, and neither does a missing scheme: a
+// libpq keyword/value string carries no scheme at all. An argument free of
+// all four characters cannot carry a password, so it may be quoted in full
+// — this is what keeps a shell-quoting mistake (T-0326's dogfood case,
+// " --unmask x") visible instead of turned into the same vague message a
+// real connection string gets.
+func describeStrayArg(arg string) string {
+	if _, ref, err := dsn.Parse(arg); err == nil {
+		return fmt.Sprintf("a connection string (%s)", ref)
+	}
+	if strings.ContainsAny(arg, dsnLikeChars) {
+		return "a connection-string-shaped argument that could not be parsed"
+	}
+	return fmt.Sprintf("%q", arg)
+}
+
 // errUsage marks a flag the user must fix. It is wrapped, never returned bare,
 // so the message always says which flag and what shape it wanted.
 var errUsage = errors.New("usage")
@@ -436,21 +490,18 @@ func newRootCmd(ctx context.Context, req *core.Request, raw *rawFlags, stdout io
 	var showVersion bool
 
 	cmd := &cobra.Command{
-		Use:   "lazyslice [DSN] [flags]",
+		Use:   "lazyslice [flags]",
 		Short: "Snapshot a production database into a safe local copy",
 		Long: "lazyslice subsets a production SQL database by a root table, follows its\n" +
 			"foreign keys, masks personal data, and loads the result into a local\n" +
 			"database. It never writes to the source, and it refuses to write to a\n" +
 			"target that is not empty or was not written by lazyslice.",
-		Args:         oneDSN,
+		Args:         noArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if showVersion {
 				fmt.Fprint(stdout, versionText())
 				return nil
-			}
-			if len(args) == 1 {
-				req.Source = args[0]
 			}
 			if err := finish(cmd, req, raw); err != nil {
 				return err
@@ -493,6 +544,20 @@ func subcommand(
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 1 {
+				// A subcommand still takes its DSN positionally (unlike the
+				// root command, T-0326), but silently overwriting an
+				// already-set --source with it hid the same shell-quoting
+				// mistake the root command's fix addresses: `lazyslice plan
+				// --source postgres://nobody@127.0.0.1:1/none ' --unmask x'`
+				// went looking for a bad --source instead of naming the
+				// stray argument (T-0326 review). Refuse instead, with the
+				// same never-quote rule.
+				if cmd.Flags().Changed("source") {
+					return fmt.Errorf(
+						"%w: %s takes a positional DSN or --source, not both; got %s — remove one",
+						errUsage, cmd.CommandPath(), describeStrayArg(args[0]),
+					)
+				}
 				req.Source = args[0]
 			}
 			// The mode is what tells the five subcommands apart inside
