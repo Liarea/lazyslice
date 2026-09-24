@@ -9,7 +9,7 @@
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 0 | 0 | 108 | 0 | 0 |
 | E6 Launch | 6 | 19 | 0 | 22 | 0 | 0 |
-| E9 Later | later | 118 | 0 | 38 | 8 | 0 |
+| E9 Later | later | 119 | 0 | 38 | 8 | 0 |
 
 ## Open and in progress
 
@@ -150,6 +150,7 @@
 - T-0360 [open] E9 · internal/verify's network_id entry has no version/build/release veto to match T-0317's classifier-side one ()
 - T-0361 [open] E6 · The second net's secret exemption agrees with the classifier: the '_type' normalisation and the JSON leaves (sonnet)
 - T-0362 [open] E9 · Card shape after T-0316: JSON-leaf docs, UATP's one-digit prefix, and card_no in the name pattern (sonnet)
+- T-0363 [open] E9 · A bare 12-, 16- or 40-character hex column is masked as a MAC address ()
 
 ## Recently closed
 

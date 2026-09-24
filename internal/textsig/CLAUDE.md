@@ -105,7 +105,10 @@ with three segments, an IANA `Area/Location` zone), `first.last` is not a
 hostname, an all-digit run is not a hex digest, and a version that also reads
 as a dotted date with a four-digit year (`5.3.1985`) is not a version
 (`DottedDate`, the T-0311 review) — and `TestIdentifierShapesRefusePersonalLookalikes`
-holds those edges. `DottedDate` is a guard in the same sense: nothing masks
+holds those edges. `HexDigest` accepts a digest's length only (8 to 12, or
+exactly 32, 40, 64 or 128 where `LooksSecret` does not claim the value;
+T-0354), because a 15-character hex token was spared under its first
+8-to-128 rule and nothing else here reads hex under 32. `DottedDate` is a guard in the same sense: nothing masks
 on it.
 
 **Test.** `go test ./internal/textsig/...`. `textsig_test.go` holds T-0100's

@@ -23,6 +23,12 @@
 -- (uuid, hex digest, semantic version, hostname, path) is spared and copied,
 -- and its reason line says which -- `not-masked:` is that half.
 --
+-- The serial is 32-character hex, an MD5 digest's length. A hex column is
+-- spared only at a digest's length (8 to 12 characters, or exactly 32, 40,
+-- 64 or 128 where the entropy check does not claim the value; T-0354): the
+-- 22-character serial this file first carried is a hex token as far as its
+-- samples say, and is swept now as it was before T-0311.
+--
 -- reg043_users.tag is the half THREAT_MODEL.md T1 cares about: a native-
 -- script given name per row, each seen twice, so it is an enumeration by
 -- count and not by token shape (the round-4 and round-5 red teams' own
@@ -72,15 +78,15 @@ INSERT INTO public.reg043_users (id, email, role, state, uuid, ui_mode, tag) VAL
     (12, 'user12@realcorp.example', 'guest', 'suspended', '0b6f3e2a-9c4d-4e1f-8a7b-5d2c1e0f0012', 'system', 'ማርታ');
 
 INSERT INTO public.reg043_devices (id, user_id, owner_email, os_type, log_level, timezone, app_version, hostname, serial, asset_path) VALUES
-    (1,  1,  'owner01@realcorp.example', 'linux',   'debug', 'Europe/London',    '2.1.0',  'api.alpha.prod.internal',   '3f9a2c7e1b4d8a60c5e701', '/assets/devices/alpha.png'),
-    (2,  2,  'owner02@realcorp.example', 'linux',   'debug', 'Europe/London',    '2.2.0',  'api.bravo.prod.internal',   '3f9a2c7e1b4d8a60c5e702', '/assets/devices/bravo.png'),
-    (3,  3,  'owner03@realcorp.example', 'linux',   'debug', 'Europe/London',    '2.3.0',  'api.charlie.prod.internal', '3f9a2c7e1b4d8a60c5e703', '/assets/devices/charlie.png'),
-    (4,  4,  'owner04@realcorp.example', 'linux',   'info',  'Europe/London',    '2.4.0',  'api.delta.prod.internal',   '3f9a2c7e1b4d8a60c5e704', '/assets/devices/delta.png'),
-    (5,  5,  'owner05@realcorp.example', 'windows', 'info',  'Europe/London',    '2.5.0',  'api.echo.prod.internal',    '3f9a2c7e1b4d8a60c5e705', '/assets/devices/echo.png'),
-    (6,  6,  'owner06@realcorp.example', 'windows', 'info',  'Europe/London',    '2.6.0',  'api.foxtrot.prod.internal', '3f9a2c7e1b4d8a60c5e706', '/assets/devices/foxtrot.png'),
-    (7,  7,  'owner07@realcorp.example', 'windows', 'info',  'America/New_York', '2.7.0',  'api.golf.prod.internal',    '3f9a2c7e1b4d8a60c5e707', '/assets/devices/golf.png'),
-    (8,  8,  'owner08@realcorp.example', 'windows', 'info',  'America/New_York', '2.8.0',  'api.hotel.prod.internal',   '3f9a2c7e1b4d8a60c5e708', '/assets/devices/hotel.png'),
-    (9,  9,  'owner09@realcorp.example', 'macos',   'warn',  'America/New_York', '2.9.0',  'api.india.prod.internal',   '3f9a2c7e1b4d8a60c5e709', '/assets/devices/india.png'),
-    (10, 10, 'owner10@realcorp.example', 'macos',   'warn',  'America/New_York', '2.10.0', 'api.juliet.prod.internal',  '3f9a2c7e1b4d8a60c5e710', '/assets/devices/juliet.png'),
-    (11, 11, 'owner11@realcorp.example', 'android', 'error', 'Europe/Berlin',    '2.11.0', 'api.kilo.prod.internal',    '3f9a2c7e1b4d8a60c5e711', '/assets/devices/kilo.png'),
-    (12, 12, 'owner12@realcorp.example', 'android', 'error', 'Europe/Berlin',    '2.12.0', 'api.lima.prod.internal',    '3f9a2c7e1b4d8a60c5e712', '/assets/devices/lima.png');
+    (1,  1,  'owner01@realcorp.example', 'linux',   'debug', 'Europe/London',    '2.1.0',  'api.alpha.prod.internal',   '3f9a2c7e1b4d8a60c5e79d02b7e4a101', '/assets/devices/alpha.png'),
+    (2,  2,  'owner02@realcorp.example', 'linux',   'debug', 'Europe/London',    '2.2.0',  'api.bravo.prod.internal',   '3f9a2c7e1b4d8a60c5e79d02b7e4a102', '/assets/devices/bravo.png'),
+    (3,  3,  'owner03@realcorp.example', 'linux',   'debug', 'Europe/London',    '2.3.0',  'api.charlie.prod.internal', '3f9a2c7e1b4d8a60c5e79d02b7e4a103', '/assets/devices/charlie.png'),
+    (4,  4,  'owner04@realcorp.example', 'linux',   'info',  'Europe/London',    '2.4.0',  'api.delta.prod.internal',   '3f9a2c7e1b4d8a60c5e79d02b7e4a104', '/assets/devices/delta.png'),
+    (5,  5,  'owner05@realcorp.example', 'windows', 'info',  'Europe/London',    '2.5.0',  'api.echo.prod.internal',    '3f9a2c7e1b4d8a60c5e79d02b7e4a105', '/assets/devices/echo.png'),
+    (6,  6,  'owner06@realcorp.example', 'windows', 'info',  'Europe/London',    '2.6.0',  'api.foxtrot.prod.internal', '3f9a2c7e1b4d8a60c5e79d02b7e4a106', '/assets/devices/foxtrot.png'),
+    (7,  7,  'owner07@realcorp.example', 'windows', 'info',  'America/New_York', '2.7.0',  'api.golf.prod.internal',    '3f9a2c7e1b4d8a60c5e79d02b7e4a107', '/assets/devices/golf.png'),
+    (8,  8,  'owner08@realcorp.example', 'windows', 'info',  'America/New_York', '2.8.0',  'api.hotel.prod.internal',   '3f9a2c7e1b4d8a60c5e79d02b7e4a108', '/assets/devices/hotel.png'),
+    (9,  9,  'owner09@realcorp.example', 'macos',   'warn',  'America/New_York', '2.9.0',  'api.india.prod.internal',   '3f9a2c7e1b4d8a60c5e79d02b7e4a109', '/assets/devices/india.png'),
+    (10, 10, 'owner10@realcorp.example', 'macos',   'warn',  'America/New_York', '2.10.0', 'api.juliet.prod.internal',  '3f9a2c7e1b4d8a60c5e79d02b7e4a110', '/assets/devices/juliet.png'),
+    (11, 11, 'owner11@realcorp.example', 'android', 'error', 'Europe/Berlin',    '2.11.0', 'api.kilo.prod.internal',    '3f9a2c7e1b4d8a60c5e79d02b7e4a111', '/assets/devices/kilo.png'),
+    (12, 12, 'owner12@realcorp.example', 'android', 'error', 'Europe/Berlin',    '2.12.0', 'api.lima.prod.internal',    '3f9a2c7e1b4d8a60c5e79d02b7e4a112', '/assets/devices/lima.png');
