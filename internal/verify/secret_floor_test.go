@@ -44,6 +44,10 @@ func TestTheSecondNetAgreesWithTheClassifierAboutEntropy(t *testing.T) {
 		{"a component_name column", "component_name", classes, ""},
 		{"a componentName column", "componentName", classes, ""},
 		{"a Type column", "Type", classes, ""},
+		{"a _type column", "_type", tokens, "credential"},
+		{"a TYpe column, exempt in classify's t_ype but not here", "TYpe", tokens, "credential"},
+		{"a KLass column, exempt in classify's k_lass but not here", "KLass", tokens, "credential"},
+		{"a ComponentNAme column, exempt in classify's component_n_ame but not here", "ComponentNAme", tokens, "credential"},
 		{"file names", "note", []any{
 			"Screenshot_2024-03-01_Ab3Xk9.png", "Screenshot_2024-03-02_Zq7Rt5.png",
 			"webcam_20240301_101512_cam2.JPG", "player-4.2.1-Hk2mP-x64.exe", "export-2024-03-01T101512Z.csv",
@@ -97,5 +101,53 @@ func TestTheSecondNetAgreesWithTheClassifierAboutEntropy(t *testing.T) {
 					s.failures, c.vals, c.wantFail)
 			}
 		})
+	}
+}
+
+// T-0361 (the T-0315 review round's finding 2): exemptColumns names a
+// column's own scalar value -- a Rails STI class name -- and must not also
+// wave through the string leaves of a document the same column happens to
+// hold. internal/classify's entropyExemptNames is read only at the column's
+// own base-signal question; its document leaf walk carries no column-name
+// context and never reads the exemption, so a jsonb column named `type`
+// whose leaves carry a credential-shaped string is unmasked there exactly as
+// any other document's leaves are. This net must agree: the column's own
+// name being on secretExemptColumns must not suppress the leaf tally too.
+func TestTheSecondNetScansDocumentLeavesOfAnExemptColumnName(t *testing.T) {
+	table := customers()
+	col := ref.ColumnRef{Table: table, Column: "type"}
+	// Five documents, each a bare JSON string -- the same five tokens
+	// TestTheSecondNetAgreesWithTheClassifierAboutEntropy's "five
+	// secret-shaped values" case uses. A bare scalar rather than an object
+	// keeps the leaf tally to exactly the token (an object key such as
+	// "secret" would itself be one more leaf string and dilute the ratio
+	// below validatorThreshold), so the ratio (5/5) clears the credential
+	// entry's own scoring above secretMinNonNull and the failure is
+	// attributable to the leaf tally alone.
+	vals := []any{
+		`"q4r7uXzN8vK2mL9pQ3sT6wY1"`,
+		`"Zb3Xk9Lm2Qp7Rt5Vw8Yc1Nd4"`,
+		`"H7jK2mP9qR4sT8vW3xY6zB1c"`,
+		`"aB3dE6gH9jK2mN5pQ8rT1vW4"`,
+		`"M2nP5qR8sT1vW4xY7zB0cD3f"`,
+	}
+	s := &state{
+		schema: &pipeline.Schema{},
+		target: oneColumn{vals: vals},
+		steps:  []pipeline.Step{{Table: table, Mode: pipeline.ChildOK}},
+		tables: map[ref.TableRef]*pipeline.Table{
+			table: {Ref: table, Columns: []pipeline.Column{{Name: col.Column, TypeName: "jsonb"}}},
+		},
+		cls: &pipeline.Classification{Decisions: map[ref.ColumnRef]pipeline.Decision{
+			col: {Col: col, Category: pipeline.CatNone, Source: pipeline.ByClassifier},
+		}},
+	}
+	if err := s.secondNet(context.Background()); err != nil {
+		t.Fatalf("secondNet: %v", err)
+	}
+	if len(s.failures) != 1 || s.failures[0].Reason != "credential" {
+		t.Fatalf("the net recorded %v, want one refusal naming credential; a jsonb column named "+
+			"\"type\" hid a secret in a document leaf and the exempt column name must not cover that too",
+			s.failures)
 	}
 }

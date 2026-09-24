@@ -8,7 +8,7 @@
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 0 | 0 | 108 | 0 | 0 |
-| E6 Launch | 6 | 19 | 0 | 25 | 0 | 0 |
+| E6 Launch | 6 | 19 | 0 | 26 | 0 | 0 |
 | E9 Later | later | 116 | 0 | 39 | 8 | 0 |
 
 ## Open and in progress
@@ -109,7 +109,6 @@
 - T-0308 [open] E9 · internal/textsig/names.txt's English section could be regenerated from the Census CSVs (sonnet)
 - T-0309 [open] E9 · tools/names: assert no duplicate rows, a filled cut, and a real drops test (sonnet)
 - T-0310 [open] E9 · A minimal docs site (mkdocs-material on GitHub Pages) once the first ten issues show what strangers look for (sonnet)
-- T-0319 [open] E6 · After a second-net refusal the operator can mask the column: --mask, and every failing column reported at once (opus)
 - T-0320 [open] E6 · A green run prints one verify summary line and how to reach the target (sonnet)
 - T-0321 [open] E6 · The reasons dump and the plan end with a summary, and a re-run from a committed yml is quiet (sonnet)
 - T-0322 [open] E9 · Infer foreign keys from naming conventions as virtual_fks candidates, so a Rails schema is reachable (opus)
@@ -147,7 +146,8 @@
 - T-0361 [open] E6 · The second net's secret exemption agrees with the classifier: the '_type' normalisation and the JSON leaves (sonnet)
 - T-0362 [open] E9 · Card shape after T-0316: JSON-leaf docs, UATP's one-digit prefix, and card_no in the name pattern (sonnet)
 - T-0363 [open] E9 · A bare 12-, 16- or 40-character hex column is masked as a MAC address ()
-- T-0364 [open] E9 · classify: apply a yml mask or raise before FK propagation, so a masked natural key masks its children ()
+- T-0364 [open] E6 · classify: apply a yml mask or raise before FK propagation, so a masked natural key masks its children ()
+- T-0365 [open] E9 · Share normaliseName's word-boundary fold through internal/textsig instead of hand-mirroring it in internal/verify ()
 
 ## Recently closed
 
@@ -160,6 +160,7 @@
 - T-0316 [done] E6 · The Luhn check needs a card length and issuer prefix before it masks an id, number or version column → done
 - T-0317 [done] E6 · A four-part version string is not an IP address, and a digit-only license key is not a phone number → done
 - T-0318 [done] E6 · The plan reports every refusal in one run, and a no-identity hint names the columns → done
+- T-0319 [done] E6 · After a second-net refusal the operator can mask the column: --mask, and every failing column reported at once → done
 - T-0331 [done] E6 · Decide whether a first run may ask both the target question and the root question → done
 - T-0337 [cancelled] E9 · Move internal/verify's tests off mask.RoleWords, then delete RoleWords in the next mask minor → cancelled
 - T-0348 [done] E9 · verify's second net has no exemption for a framework metadata column that validates strongly → done
@@ -175,4 +176,3 @@
 - T-0155 [done] E5 · v0.0.1 proves the release pipeline end to end: goreleaser, the tap cask, brew install prints a version → done
 - T-0196 [done] E5 · Migrate the tracker to GitHub Issues and Projects behind the existing tools/tracker.py command surface → done
 - T-0269 [done] E6 · A timestamp column's reason line says its samples look like secrets → done
-- T-0279 [done] E6 · README as the landing page: GIF first, install, the run, why, a verified comparison table, how PII is decided, the rails → done
