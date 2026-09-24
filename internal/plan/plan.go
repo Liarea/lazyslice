@@ -205,6 +205,52 @@ type run struct {
 	// them (ddlliteral.go's columnDefault). Reported on pipeline.Plan rather
 	// than acted on, since there is nothing to mask it with.
 	pendingKeyDefaults []string
+
+	// refusals is every no_identity, unwritable, skip_parent and unique_domain
+	// (or equality_group) refusal this run has found so far, in the order the
+	// checks that can produce them ran (T-0318, this package's CLAUDE.md's
+	// "Collecting refusals" section). plan() returns it, as Refusals, instead
+	// of stopping at the first one — every other refusal in this package still
+	// stops the run the moment it is found, by returning a bare *Refusal.
+	refusals Refusals
+}
+
+// collect records a refusal one of the four collecting checks found and lets
+// that check keep going, rather than stopping the run at the first cause it
+// meets (T-0318). It is never called for a refusal this package still treats
+// as fail-fast — checkWhere, checkRecreatable, chooseRoot, the unreadable-
+// table and row/memory-budget refusals, checkFKPairRefusal and
+// checkDDLLiterals all still return their *Refusal directly and end the run
+// the moment they are raised.
+func (p *run) collect(r *Refusal) { p.refusals = append(p.refusals, r) }
+
+// fail is what every check downstream of the first collecting one wraps its
+// own fail-fast error in before returning it. A fail-fast refusal — an
+// unreadable parent, a row or memory budget, an FK-pair refusal, an explicit
+// --key naming the wrong thing, a real read failure — still stops the run
+// the moment it happens; what it must not do is make an earlier collected
+// no_identity, unwritable or skip_parent refusal vanish, unreported, because
+// nothing outside this package can see p.refusals except through the error
+// plan() actually returns. When this pass has collected nothing yet, err is
+// returned unchanged — every one of this package's ordinary refusals reaches
+// core exactly as it always has. When it has collected something and err is
+// itself a *Refusal, that refusal joins the list and the aggregate is
+// returned instead, so a rare combination — say, --skip-table naming one
+// needed parent (collected) and a second, unrelated table the role cannot
+// read at all (fail-fast) — still tells the operator about both in one run
+// rather than only the second. Anything that is not a *Refusal (a context
+// cancellation, a real driver error) is not a refusal to collect and is
+// returned exactly as it arrived.
+func (p *run) fail(err error) error {
+	if err == nil || len(p.refusals) == 0 {
+		return err
+	}
+	var refusal *Refusal
+	if errors.As(err, &refusal) {
+		p.collect(refusal)
+		return p.refusals
+	}
+	return err
 }
 
 // item is one entry of the FIFO worklist.
@@ -235,7 +281,7 @@ func (p *run) plan(ctx context.Context) (*pipeline.Plan, error) {
 		return nil, err
 	}
 	if err := p.applySkipAndPrivileges(ctx, root); err != nil {
-		return nil, err
+		return nil, p.fail(err)
 	}
 	// The write-back check comes before the first key is fetched: a masked
 	// column its type cannot hold is a refusal the operator should get instead
@@ -243,29 +289,39 @@ func (p *run) plan(ctx context.Context) (*pipeline.Plan, error) {
 	// T-0054). It runs after the skip and privilege pass so that a table this
 	// run will never read cannot refuse it.
 	if err := p.checkWriteBack(); err != nil {
-		return nil, err
+		return nil, p.fail(err)
 	}
 	// The FK-pair refusal runs beside the write-back check for the same
 	// reason: it needs no row count, only which tables are in scope, and it
 	// should stop the run before the first key is fetched (fkpair.go,
 	// T-0253, T-0257).
 	if err := p.checkFKPairRefusal(); err != nil {
-		return nil, err
+		return nil, p.fail(err)
 	}
 	if err := p.resolveIdentities(ctx); err != nil {
-		return nil, err
+		return nil, p.fail(err)
+	}
+	// A table with no identity is dropped and its refusal collected
+	// (resolveIdentities), so the run can still walk everything else and find
+	// more independent causes in the same pass (T-0318). The one table that
+	// cannot be dropped this way is the root itself: seedKeys has nothing to
+	// order the seed by without it, so a root with no identity stops here with
+	// whatever this pass has already collected rather than walking a queue
+	// that was never seeded.
+	if !p.inScope[root] {
+		return nil, p.refusals
 	}
 	if err := p.findLookups(ctx, root); err != nil {
-		return nil, err
+		return nil, p.fail(err)
 	}
 	// §3.2 is decided before the walk, so that every inferred edge is in the
 	// plan the operator reads before a row moves (§3.5). It reads the source, so
 	// it cannot run before §3.6 has said what this role may read.
 	if err := p.inferPolymorphic(ctx); err != nil {
-		return nil, err
+		return nil, p.fail(err)
 	}
 	if err := p.walk(ctx, root); err != nil {
-		return nil, err
+		return nil, p.fail(err)
 	}
 	// §5's unique-index domain rule runs last of the checks, because it is the
 	// only one whose question needs n: the walk is what decides how many rows of
@@ -273,7 +329,17 @@ func (p *run) plan(ctx context.Context) (*pipeline.Plan, error) {
 	// still runs before assemble, so nothing has been extracted and the target
 	// has not been touched.
 	if err := p.checkUniqueDomain(); err != nil {
-		return nil, err
+		return nil, p.fail(err)
+	}
+	// Every collecting check has now run (applySkipAndPrivileges,
+	// checkWriteBack, resolveIdentities, checkUniqueDomain); a run that found
+	// any of the four refusals T-0318 collects stops here; not before,
+	// because a refusal found on the first of them must not hide one the last
+	// of them would also have found, and not after, because nothing past this
+	// point (checkDDLLiterals, assemble) is meant to run over a plan the
+	// operator cannot act on.
+	if len(p.refusals) > 0 {
+		return nil, p.refusals
 	}
 	// §11.1's literal rule runs after the masker is finally chosen, because a
 	// masked column's default is rewritten with the masker its *rows* will go
@@ -455,16 +521,25 @@ func (p *run) applySkipAndPrivileges(ctx context.Context, root ref.TableRef) err
 		if !p.inScope[t] {
 			continue
 		}
+		// Both refusals below are collected rather than returned (T-0318): a
+		// second --skip-table naming a second table the slice needs as a
+		// parent is an independent cause from the first, and stopping at the
+		// first left the second undiscovered until a later run cleared it.
+		// The table named is left in scope either way — the flag that would
+		// have dropped it was refused, so this run still needs it exactly as
+		// if the flag had not been given.
 		if t == root {
-			return refuse(CodeSkipParent, exitPlan, t,
+			p.collect(refuse(CodeSkipParent, exitPlan, t,
 				fmt.Sprintf("--skip-table %s names the root of the slice", t),
-				event.Args{event.ArgTable: t.String(), event.ArgFlag: "--skip-table"})
+				event.Args{event.ArgTable: t.String(), event.ArgFlag: "--skip-table"}))
+			continue
 		}
 		if asParent[t] {
-			return refuse(CodeSkipParent, exitPlan, t,
+			p.collect(refuse(CodeSkipParent, exitPlan, t,
 				fmt.Sprintf("--skip-table %s cannot skip a table the slice needs as a parent: "+
 					"the slice would not be referentially complete", t),
-				event.Args{event.ArgTable: t.String(), event.ArgFlag: "--skip-table"})
+				event.Args{event.ArgTable: t.String(), event.ArgFlag: "--skip-table"}))
+			continue
 		}
 		p.drop(t)
 		p.skipped = append(p.skipped, t)
@@ -574,6 +649,17 @@ func (p *run) staticReach(root ref.TableRef) map[ref.TableRef]bool {
 // where a table with no identity stops the run (§3.4). It runs after
 // --skip-table has been applied, so that the flag clears the refusal for a
 // child-only table (T-0032).
+//
+// A CodeNoIdentity refusal is collected rather than returned (T-0318): the
+// table is dropped to SchemaOnly, the same way an unreadable or skipped table
+// is, so the rest of this run's tables can still be walked and checked --
+// dogfood session 1 found a second such table only after a --key or
+// --skip-table had cleared the first, one run apart, and this is the check
+// that puts both in the same run's refusal list. Every other identity
+// refusal (an explicit --key naming a system column or a column the table
+// does not have, or one that does not identify a row) is still fail-fast:
+// those are usage mistakes about a specific flag, not an independent cause
+// among several the operator would otherwise fix one at a time.
 func (p *run) resolveIdentities(ctx context.Context) error {
 	for i := range p.tables {
 		t := &p.tables[i]
@@ -582,6 +668,13 @@ func (p *run) resolveIdentities(ctx context.Context) error {
 		}
 		id, err := p.resolveIdentity(ctx, t)
 		if err != nil {
+			var refusal *Refusal
+			if errors.As(err, &refusal) && refusal.Code == CodeNoIdentity {
+				p.collect(refusal)
+				p.drop(t.Ref)
+				p.why[t.Ref] = "no identity"
+				continue
+			}
 			return err
 		}
 		p.ids[t.Ref] = id

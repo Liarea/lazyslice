@@ -43,6 +43,11 @@ import (
 // the privilege pass, so a column in a table this run will never read is not a
 // refusal — and in the order build() sorted them, so two runs over one snapshot
 // refuse on the same column.
+//
+// Every unwritable column is collected rather than the first one stopping the
+// run (T-0318): a schema with several such columns used to be fixed one
+// --unmask or one --skip-table at a time, one run apart from the next unwritable
+// column it had not yet been told about.
 func (p *run) checkWriteBack() error {
 	if p.cls == nil {
 		return nil
@@ -89,7 +94,8 @@ func (p *run) checkWriteBack() error {
 							"--skip-table " + t.Ref.String() + ", or --unmask " + t.Ref.String() + "." + col.Name + "=REASON",
 					})
 				r.Column = col.Name
-				return r
+				p.collect(r)
+				continue
 			}
 			c, judged := p.constraintsOf(col)
 			if !judged || mask.Writable(mask.Category(d.Category), d.Masker, c) {
@@ -104,7 +110,7 @@ func (p *run) checkWriteBack() error {
 					event.ArgReason: "the category " + string(d.Category) + " does not fit the type " + c.TypeTag,
 				})
 			r.Column = col.Name
-			return r
+			p.collect(r)
 		}
 	}
 	return nil

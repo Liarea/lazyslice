@@ -3,7 +3,6 @@
 package plan
 
 import (
-	"errors"
 	"strings"
 	"testing"
 
@@ -135,12 +134,14 @@ func TestEqualityGroupRefusesTwoClosedColumnsWithDifferentLabels(t *testing.T) {
 		`CHECK ((token = ANY (ARRAY['a'::text, 'b'::text])))`,
 		`CHECK ((token = ANY (ARRAY['c'::text, 'd'::text])))`)
 
-	err := p.checkUniqueDomain()
-	var refusal *Refusal
-	if !errors.As(err, &refusal) {
-		t.Fatalf("checkUniqueDomain returned %v, want a *plan.Refusal: two CHECK lists of "+
-			"equal length and different contents mask one value to two different labels", err)
+	if err := p.checkUniqueDomain(); err != nil {
+		t.Fatalf("checkUniqueDomain returned an error instead of collecting the refusal: %v", err)
 	}
+	if len(p.refusals) != 1 {
+		t.Fatalf("checkUniqueDomain collected %d refusals, want 1: two CHECK lists of "+
+			"equal length and different contents mask one value to two different labels", len(p.refusals))
+	}
+	refusal := p.refusals[0]
 	if refusal.Code != CodeEqualityGroup {
 		t.Errorf("Code = %q, want %q", refusal.Code, CodeEqualityGroup)
 	}
@@ -204,11 +205,13 @@ func TestEqualityGroupRefusesWhenNoMaskerFitsEveryMember(t *testing.T) {
 	// typmod 24 is varchar(20): len("lazyslice-invalid-") plus two symbols.
 	p, pcol, ccol := fkRun("text", -1, "character varying(20)", 24, true, 200)
 
-	err := p.checkUniqueDomain()
-	var refusal *Refusal
-	if !errors.As(err, &refusal) {
-		t.Fatalf("checkUniqueDomain returned %v, want a *plan.Refusal", err)
+	if err := p.checkUniqueDomain(); err != nil {
+		t.Fatalf("checkUniqueDomain returned an error instead of collecting the refusal: %v", err)
 	}
+	if len(p.refusals) != 1 {
+		t.Fatalf("checkUniqueDomain collected %d refusals, want 1", len(p.refusals))
+	}
+	refusal := p.refusals[0]
 	// The code is the group's own and not plan.refused.unique_domain, whose
 	// template asserts a unique index: this branch also fires with no member
 	// under one (T-0132 review, finding 3).

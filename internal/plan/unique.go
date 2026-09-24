@@ -71,12 +71,26 @@ import (
 // died at exit 8 with the foreign key unvalidatable (finding 3 of
 // docs/reviews/2026-09-09/REVIEW.md). A column no foreign key touches is a group
 // of one and this is exactly the check it always was.
+//
+// A group's refusal is collected rather than returned (T-0318): dogfood
+// session 1's own transcript was ten masked columns under unique indexes,
+// named one at a time across ten runs, because the first one refused stopped
+// the walk before the next nine were even asked about. Every group still gets
+// exactly one refusal at most — chooseGroupMasker returns on the first member
+// of a group that cannot be fitted, which is unchanged — but a schema with
+// several offending groups now finds all of them in the one run that finds
+// any.
 func (p *run) checkUniqueDomain() error {
 	if p.cls == nil {
 		return nil
 	}
 	for _, g := range p.equalityGroups(p.maskedMembers()) {
 		if err := p.chooseGroupMasker(g); err != nil {
+			var refusal *Refusal
+			if errors.As(err, &refusal) {
+				p.collect(refusal)
+				continue
+			}
 			return err
 		}
 	}

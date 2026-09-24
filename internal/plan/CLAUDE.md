@@ -1322,3 +1322,231 @@ correctly leave it unmasked. `internal/classify/CLAUDE.md`'s own T-0314
 section has the measurement; **T-0348** is where it is filed, since
 `internal/verify` is a third stage package neither this task nor T-0314's
 original one may touch.
+
+## Collecting refusals instead of stopping at the first (T-0318, 2026-09-24)
+
+Dogfood session 1's own transcript is the brief: nine runs to reach a green
+`verify`, each one refused on the next single cause — one join table with no
+identity (a second, identical one was implied by the schema but not named
+until the first was cleared, costing a run of its own), then ten masked
+columns under unique indexes named one per run, then the second net naming
+one column per run. Four checks now collect every refusal they can find
+instead of returning the moment they find one: `resolveIdentities`
+(`identity.go`, `plan.refused.no_identity`), `checkWriteBack`
+(`writeback.go`, `plan.refused.unwritable`), the skip-cannot-drop-a-parent
+branches of `applySkipAndPrivileges` (`plan.go`, `plan.refused.skip_parent`)
+and `checkUniqueDomain` (`unique.go`, `plan.refused.unique_domain` and its
+`plan.refused.equality_group` sibling). Every other refusal in this
+package — `checkWhere`, `checkRecreatable`, `chooseRoot`, the
+unreadable-table and root/skip-table refusals inside
+`applySkipAndPrivileges` itself, the row and memory budgets, `checkFKPairRefusal`
+and `checkDDLLiterals` — is still fail-fast, unchanged: each of those is a
+usage mistake or a single hard stop, not one of several independent causes an
+operator would otherwise fix one exit-12 at a time.
+
+- **`run.collect` and `run.refusals` (`plan.go`) are the whole mechanism.** A
+  collecting check calls `p.collect(r)` and keeps going — over the next
+  table, the next column, the next equality group — instead of `return r`.
+  `plan()` itself still checks `len(p.refusals) > 0` at exactly two points:
+  right after `resolveIdentities`, and it checks `!p.inScope[root]` there
+  specifically rather than the refusal count, because the root is the one
+  table `resolveIdentities` cannot drop and carry on from — `walk`'s
+  `seedKeys` has nothing to order the seed by without it — so a root with no
+  identity stops the pass with whatever it already found rather than trying
+  to walk a queue that was never seeded. The second and only other check is
+  the very last thing `plan()` does before `checkDDLLiterals` and
+  `assemble`: every collecting check has run by then, so this is the one
+  place a non-empty `p.refusals` can be returned instead of building a plan
+  the operator cannot act on. Nothing in between the two checks ever asks
+  `len(p.refusals) > 0` early — `checkWriteBack` and
+  `applySkipAndPrivileges` return `nil` after collecting, on purpose, so a
+  cause found early in the pass never hides one only the walk or the
+  unique-index check would have found.
+- **A no-identity table is dropped, not merely refused.** `resolveIdentities`
+  treats `CodeNoIdentity` the way `applySkipAndPrivileges` already treats an
+  unreadable child-only table: collect the refusal, `p.drop` the table out of
+  `inScope`, and move on. Every later stage that reads `p.inScope` — the
+  walk's parent and child loops, `findLookups`, `checkUniqueDomain`'s
+  `plannedRows` — already treats a dropped table as absent, which is the
+  entire reason dropping was the right verb here rather than teaching four
+  more functions to also skip a table with no identity. Any *other* identity
+  refusal — an explicit `--key` naming a system column, a column the table
+  does not have, or one that is not unique — is still fail-fast: those are
+  mistakes about one flag, not an independent cause among several.
+- **A run that collects anything now sends more statements to the source
+  than the same refusal used to.** `checkWriteBack`'s and
+  `applySkipAndPrivileges`'s own doc comments used to promise "before a key
+  is fetched" as a ceiling on the whole run, and that promise still holds for
+  *those checks' own* position in the pipeline — neither moved — but it no
+  longer holds for the run as a whole: finding a `unique_domain` cause in the
+  same pass needs the walk, which reads keys, so a schema with both an
+  unwritable column and an unrelated unique-index collision now reads more
+  than the one privilege-pass statement before it refuses.
+  `writeback_test.go`'s two query-count assertions were loosened from "the
+  privilege pass and nothing else" to "the privilege pass and this
+  one-table fixture's own root seed read, and no more" for exactly this
+  reason — the trade is deliberate: more reads, in exchange for every
+  independent cause in one run instead of one per run.
+- **`run.fail` (`plan.go`) is what every call site downstream of
+  `applySkipAndPrivileges` wraps its own error in before returning it,
+  instead of the bare `return nil, err` every one of them used to be.** A
+  fail-fast refusal this package never taught to collect — an unreadable
+  parent, a row or memory budget, an FK-pair refusal, a bad explicit
+  `--key` — still stops the run the moment it happens, and `fail` is a
+  no-op the moment `p.refusals` is still empty, which is every ordinary run:
+  `err` comes back unchanged and every existing refusal reaches core exactly
+  as it always has. What it exists for is the rarer combination where a
+  fail-fast cause arrives *after* this pass has already collected
+  something — `--skip-table` naming one table the slice needs as a parent
+  (collected) beside a second, unrelated table the role cannot read at all
+  (fail-fast, inside the very same `applySkipAndPrivileges` call) is the
+  shape `TestAFailFastRefusalJoinsWhatWasAlreadyCollected`
+  (`refusals_test.go`) pins. Without it, `plan()`'s `if err != nil { return
+  nil, err }` would have returned the bare fail-fast `*Refusal` and the
+  skip_parent refusal already sitting in `p.refusals` would never have
+  reached core at all — collected, and then silently dropped, which is worse
+  than never collecting it. `fail` joins a `*Refusal` onto the list and
+  returns the aggregate; anything else (a context cancellation, a real
+  driver error) is not a refusal to collect and passes through unchanged.
+- **The aggregate type is `Refusals` (`refusal.go`), `[]*Refusal` with an
+  `Error() string` that renders one numbered line per member.** `plan()`
+  returns it, as the plain `error` interface, exactly where it used to
+  return a bare `*Refusal` — the signature `Planner.Plan(...) (*Plan, error)`
+  (§2) has not changed and could not without moving every caller. `Code`,
+  `Exit`, `Table`, `Column`, `Args` and `Message` are deliberately not fields
+  of `Refusals` itself: `internal/core.asStop` and `cmd/lazyslice`'s `report`
+  both read a single refusal's shape to build the process's one exit code and
+  the one line printed after the transcript, and the first member — first in
+  the order the four checks above run, which is also the order they are
+  listed above — answers for both, because every one of them is already
+  ADR-005's exit 12 regardless of which is first. "Exiting 12 with the first
+  code" (the brief's own words) is therefore true by construction and not by
+  a separate rule comparing exit codes: there is only ever one exit code
+  among the four to begin with.
+- **`Refusals.Unwrap() []error` is what keeps every existing single-refusal
+  caller correct without being rewritten.** `errors.As(err, &singleRefusal)`
+  — `internal/core/names.go`'s own `*plan.Refusal` case in `asStop`, and
+  every "held without a database" unit test in this package that predates
+  T-0318 (`writeback_test.go`, `fkpair_test.go`, the not-recreatable case in
+  `plan_test.go`) — still finds the first member through the standard
+  library's own multi-error unwrapping, unchanged. What does *not* survive
+  unwrapping is a direct call to one of the four collecting functions
+  themselves: `checkUniqueDomain()` and `checkWriteBack()` now return `nil`
+  on the collected path and leave the finding in `p.refusals`, so
+  `unique_test.go` and `equality_test.go`'s three refusal-asserting cases
+  were rewritten to read `p.refusals` after the call rather than the call's
+  own return value — the same shift `refusals_test.go`'s own fixture assumes
+  throughout.
+- **`internal/core.planStage` intercepts `plan.Refusals` before it ever
+  reaches `asStop`.** `asStop` builds exactly one `*Stop` from exactly one
+  refusal's fields, and a *Stop* is one event's worth of `Code`/`Exit`/
+  `Args` — it has nowhere to put a second refusal. `run.reportPlanRefusals`
+  (`internal/core/run.go`) is the new, narrow escape hatch: it sends one
+  `event.Error` per member, in collection order, then returns the `*Stop`
+  the first member's fields build, marked `sent` so `run.report`'s own
+  single-event send does not print that first refusal a second time — the
+  identical guard `refusalStop` already uses for the discovery ladder's own
+  refusal (`internal/core/CLAUDE.md`, "Decisions made during
+  implementation"). `internal/core/plan_refusals_test.go` pins both halves —
+  one event per member and the no-double-send guard — without a database,
+  the way `refusal_test.go` pins the ladder's own single-send guard.
+- **The `--key` hint on `CodeNoIdentity` names the table's own columns when
+  the table has three columns or fewer** (`keyHint`, `smallTableKeyColumns`,
+  `identity.go`). A Rails `habtm` join table is exactly two foreign-key
+  columns and no primary key at all — the composite of the whole row *is*
+  its identity — so past the ladder's every other rung failing, naming those
+  columns back to the operator turns "pass `--key TABLE=col,col`" from a
+  placeholder into a command they can paste unedited. The cutoff is the
+  table's total column count, not the count of columns the hint ends up
+  printing: a three-column table with one generated column still gets the
+  other two named, but a four-column table gets the bare placeholder even if
+  three of its columns are generated, because past three columns nothing
+  about the shape says "this is a join table" any more and a wrong guess is
+  worse than the placeholder it would replace. A generated column is left
+  out of the printed list for the same reason `pseudoKeyColumns` already
+  excludes one: the target recomputes it, so it can never be part of a
+  `--key` an operator passes on the *source*.
+- **The fixture is Go, not a `testdata/regressions/*.sql` file.** Every other
+  entry in that directory reduces a real failing run against one of the ten
+  `testdata/torture/` schemas, and this defect is a pipeline-ordering one —
+  what stops when — rather than a shape one particular schema carries; the
+  closest real analogue (`testdata/regressions/010`, T-0132's own foreign-key
+  equality defect) is itself pinned as a unit test first and a regression
+  file second, for the identical reason `unique_test.go`'s own header states:
+  the evidence would otherwise be Docker-gated and outside what a plain `go
+  test` runs. `refusals_test.go`'s fixture builds two Rails-shaped join
+  tables with no identity and two credential columns under a unique index
+  too narrow for `credential_unique` to widen, and drives
+  `resolveIdentities`/`checkUniqueDomain` directly, the same "held without a
+  database" pattern `writeback_test.go` and `unique_test.go` already use for
+  the two checks it exercises.
+
+## The `--key` hint's review round: a nullable or incomparable column, and a hint that repeats a failed probe (T-0318 review, 2026-09-24)
+
+Landing the hint above found two ways it could make a run worse rather than
+shorter, both in the same review pass, before either shipped past this
+package's own tests.
+
+- **`smallTableKeyColumns` no longer suggests a column that is nullable or of
+  a type the key encoding cannot compare.** The first version suggested every
+  non-generated column of a table with three columns or fewer, which is not
+  what §3.4's own pseudo-key rung admits and for the same two reasons that
+  rung's doc comment already states at length. A nullable column passes
+  `count(DISTINCT (a, b))` — a tuple holding a NULL counts as distinct — and
+  then loses every row with a NULL in a key column at `readKeys`, which is
+  `testdata/README.md` trap 12 reached through an operator pasting this exact
+  hint rather than through the probe trap 12 names; `create_table :a_b, id:
+  false { t.belongs_to :a; t.belongs_to :b }` is the ordinary Rails shape that
+  produces two nullable foreign-key columns and no primary key, not a corner
+  case. A NOT NULL column of a type with no default btree opclass — `json`,
+  `xml`, a geometric type — does not even reach a refusal if suggested:
+  `count(DISTINCT (...))` and the join's `ORDER BY` both die inside pgx with
+  "could not identify a comparison function for type json", which carries
+  none of §3.4's exit code or remedy. `comparableType` (`identity.go`) is
+  `isDiscriminator`'s own type test, pulled out so this rule can ask it of a
+  column that is neither a foreign key nor discriminator-named — comparability
+  is a property of the type alone and was never tied to either. A column
+  excluded for being generated is still simply left out, as before; a column
+  excluded for being nullable or incomparable withdraws the whole suggestion
+  instead, because the composite the rule promised is no longer the row's
+  actual identity once one of its columns cannot safely be in it.
+  `TestKeyHintFallsBackToThePlaceholderWhenAColumnIsNullable` and
+  `TestKeyHintFallsBackToThePlaceholderWhenAColumnIsIncomparable`
+  (`refusals_test.go`) hold both.
+- **The hint does not repeat a column set the pseudo-key rung already probed
+  and found duplicated.** For a join table whose FK columns are also its only
+  pseudo-key candidate — the ordinary shape, since a table small enough for
+  `smallTableKeyColumns` to name columns at all is small enough that its own
+  FK columns usually *are* the pseudo-key rung's candidate — `resolveIdentity`
+  reaches this hint only after `probePseudoKey` has already run a uniqueness
+  probe over exactly those columns and found them not unique. The first
+  version of the hint suggested them back anyway: an operator who pastes
+  `--key TABLE=a_id,b_id` gets `plan.refused.key_not_unique` on the next run,
+  a second run spent confirming an answer this run already had, which is the
+  opposite of what T-0318 exists to fix. `resolveIdentity` now passes the
+  rung's own probed-and-failed candidate into `keyHint`
+  (`probedFailed`), and when `smallTableKeyColumns`' suggestion equals it or
+  is contained in it, the hint drops to `--skip-table TABLE` alone rather than
+  offering a `--key` that would fail identically. There is no third candidate
+  to fall back to instead: for a table of three columns or fewer, the two
+  rules can only ever agree or disagree on the same short list.
+  `TestKeyHintFallsBackWhenThePseudoKeyProbeAlreadyFailedOnTheSameColumns` is
+  the guard. The generic placeholder is unaffected either way — when
+  `smallTableKeyColumns` declines for its own reason (too many columns, or a
+  nullable/incomparable one) the placeholder is still printed, whether or not
+  some unrelated candidate on the same table was probed and failed; suppressing
+  it in that case was the first draft's own regression, caught by
+  `TestPlanUncomparableColumnStillRefusesWithNoIdentity` (`plan_integration_test.go`,
+  §3.4's json-column fixture), which still expects both `--key` and
+  `--skip-table` in the message.
+- **A `Plan()`-level fixture, through a real Postgres, joined the
+  held-without-a-database one.** `refusals_test.go`'s own fixture calls
+  `resolveIdentities` and `checkUniqueDomain` directly and never goes through
+  `Plan()`/`plan()`, so a regression in `plan()`'s own sequencing — an early
+  return once `len(p.refusals) > 0` anywhere before the last collecting check,
+  say — would not fail it. `TestPlanCollectsFourIndependentRefusalsInOneRun`
+  (`plan_integration_test.go`) is the same reduction — two Rails habtm join
+  tables with no derivable identity, and a root/child pair each carrying one
+  masked column under a unique index too narrow to widen into — driven through
+  one `New().Plan()` call, and asserts the four refusals arrive in the order
+  the checks that produce them run.

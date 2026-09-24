@@ -3,7 +3,6 @@
 package plan
 
 import (
-	"errors"
 	"strings"
 	"testing"
 
@@ -111,11 +110,13 @@ func TestUniqueDomainRefusesWhenNoMaskerFits(t *testing.T) {
 	// typmod 22 is varchar(18): len("lazyslice-invalid-") with nothing after it.
 	p, tbl := uniqueRun(pipeline.CatCredential, mask.CredentialMasker, "character varying(18)", 22, 200)
 
-	err := p.checkUniqueDomain()
-	var refusal *Refusal
-	if !errors.As(err, &refusal) {
-		t.Fatalf("checkUniqueDomain returned %v, want a *plan.Refusal", err)
+	if err := p.checkUniqueDomain(); err != nil {
+		t.Fatalf("checkUniqueDomain returned an error instead of collecting the refusal: %v", err)
 	}
+	if len(p.refusals) != 1 {
+		t.Fatalf("checkUniqueDomain collected %d refusals, want 1", len(p.refusals))
+	}
+	refusal := p.refusals[0]
 	if refusal.Code != CodeUniqueDomain {
 		t.Errorf("Code = %q, want %q", refusal.Code, CodeUniqueDomain)
 	}

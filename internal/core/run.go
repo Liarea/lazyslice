@@ -1608,6 +1608,19 @@ func (r *run) planStage(ctx context.Context) error {
 	}
 	p, err := plan.New().Plan(ctx, r.reader, r.schema, r.cls, req)
 	if err != nil {
+		// internal/plan collects every no_identity, unwritable, skip_parent
+		// and unique_domain/equality_group refusal it finds in one pass
+		// rather than stopping at the first (T-0318: dogfood session 1 took
+		// nine runs to reach a green verify, each one refused on the next
+		// single cause). plan.Refusals is that collection; asStop's own
+		// *plan.Refusal case still applies to it (Refusals.Unwrap exposes
+		// the first member), so this is the one place that also sends the
+		// rest as their own Error events, ahead of returning the *Stop every
+		// other refusal produces.
+		var refusals plan.Refusals
+		if errors.As(err, &refusals) {
+			return r.reportPlanRefusals(refusals)
+		}
 		return asStop(err)
 	}
 	p.SnapshotID = r.snapshot
@@ -1647,6 +1660,37 @@ func (r *run) planStage(ctx context.Context) error {
 			strconv.FormatInt(p.Estimate.FilterMemory>>10, 10) + " KiB of residual filter",
 	})
 	return nil
+}
+
+// reportPlanRefusals sends one Error event per refusal internal/plan
+// collected (T-0318) and returns the *Stop the rest of Run treats like any
+// other refusal.
+//
+// Every member is already ADR-005's exit 12 (plan.Refusals' own doc comment
+// has the full account of why), so the process exit code is never in
+// question; what this function decides is that the transcript names every
+// independent cause the run found, in the order plan() found them, rather
+// than only the one that answers for the exit code and the one line
+// cmd/lazyslice's report prints after it. It sends refusals itself instead
+// of leaving that to Run's own r.report(err) call because report sends
+// exactly one Error event for whatever *Stop it is given (its own doc
+// comment: "an exit code and the line that explains it can never
+// disagree") — sending N here and a further one there would print the first
+// refusal twice. The returned *Stop is marked sent for exactly that reason,
+// the same way the discovery ladder's own refusal is (asStop's
+// refusalStop doc).
+func (r *run) reportPlanRefusals(refusals plan.Refusals) error {
+	for _, ref := range refusals {
+		r.sink.Send(event.Event{
+			At: time.Now(), Kind: event.Error, Code: ref.Code, Exit: ref.Exit,
+			Table: ref.Table, Column: ref.Column, Args: ref.Args,
+		})
+	}
+	first := refusals[0]
+	return &Stop{
+		Code: first.Code, Exit: first.Exit, Table: first.Table, Column: first.Column,
+		Args: first.Args, Message: first.Message, err: refusals, sent: true,
+	}
 }
 
 // planRequest builds the planner's input from the flags and the committed file.
