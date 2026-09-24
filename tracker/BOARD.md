@@ -9,7 +9,7 @@
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 0 | 0 | 108 | 0 | 0 |
 | E6 Launch | 6 | 19 | 0 | 26 | 0 | 0 |
-| E9 Later | later | 116 | 0 | 39 | 8 | 0 |
+| E9 Later | later | 118 | 0 | 39 | 8 | 0 |
 
 ## Open and in progress
 
@@ -148,6 +148,8 @@
 - T-0363 [open] E9 · A bare 12-, 16- or 40-character hex column is masked as a MAC address ()
 - T-0364 [open] E6 · classify: apply a yml mask or raise before FK propagation, so a masked natural key masks its children ()
 - T-0365 [open] E9 · Share normaliseName's word-boundary fold through internal/textsig instead of hand-mirroring it in internal/verify ()
+- T-0366 [open] E9 · plan: T-0318 review follow-ups: fail-fast comments, empty Refusals guard, package CLAUDE.md, fixture comment (sonnet)
+- T-0367 [open] E9 · cli/verify: T-0319 review follow-ups: --mask duplicate check compares defaulted categories; Verify() asserted to return every second-net failure (sonnet)
 
 ## Recently closed
 
