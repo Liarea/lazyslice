@@ -140,11 +140,22 @@
   message: "{table}.{column}: {reason}"
   args: [table, column, reason]
 
+# T-0325: dogfood session 1 read "classified fresh and masked at or above
+# possible" for a column this run had actually copied (a boolean, decided
+# below the mask threshold) — the line described the drift rule, not the
+# decision the run just reached. {verdict} is that decision, "copied" or
+# "masked as CATEGORY", the same way classify.masked.column and
+# classify.copied.column already say it. This code is also only ever sent
+# when a committed yml exists to be missing from (internal/core's
+# classifyStage gates the whole loop on r.prior != nil); an --unmask flag
+# with no such file used to build an in-memory prior the drift pass could
+# not tell from a committed one, and printed this line for every column the
+# flags did not name.
 - code: classify.column.drift
   kind: warn
   stage: classify
-  message: "{table}.{column} is not in {path}: classified fresh and masked at or above possible"
-  args: [table, column, path]
+  message: "{table}.{column} is not in {path}: classified fresh and {verdict}"
+  args: [table, column, path, verdict]
 
 # T-0321: dogfood session 1's own report — "1,845 reason lines scrolled past
 # before each refusal ... nothing summarised either". Printed once, right

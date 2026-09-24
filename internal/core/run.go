@@ -1611,15 +1611,31 @@ func (r *run) classifyStage() error {
 			},
 		})
 	}
-	for _, col := range cls.Drift {
-		r.sink.Send(event.Event{
-			At: time.Now(), Stage: event.Classify, Kind: event.Warn, Code: classify.CodeColumnDrift,
-			Table: col.Table, Column: col.Column,
-			Args: event.Args{
-				event.ArgTable: col.Table.String(), event.ArgColumn: col.Column,
-				event.ArgPath: r.req.ConfigPath,
-			},
-		})
+	// T-0325: a column not in r.prior.Columns at all is drift, and drift is
+	// only a fact about a *committed* file — r.prior is nil until readConfig
+	// finds one on disk. classifyStage's own local `prior` (buildPrior's
+	// return, passed to classify.New().Classify above) is not the same
+	// value: an --unmask flag with no committed yml still builds a non-nil
+	// in-memory Config so the flag's opt-out can be folded into this run's
+	// classification, and cls.Drift was computed against that Config's
+	// Columns map, which the loop below cannot tell from a committed file's.
+	// With no r.prior, every column the flags did not name was "drift" from
+	// a file that was never read, one warning line per column. Gated on
+	// r.prior != nil so a first run — the ordinary case a flag-only
+	// --unmask is used on — reports none, exactly as it did before any
+	// --unmask flag was given.
+	if r.prior != nil {
+		for _, col := range cls.Drift {
+			r.sink.Send(event.Event{
+				At: time.Now(), Stage: event.Classify, Kind: event.Warn, Code: classify.CodeColumnDrift,
+				Table: col.Table, Column: col.Column,
+				Args: event.Args{
+					event.ArgTable: col.Table.String(), event.ArgColumn: col.Column,
+					event.ArgPath:    r.req.ConfigPath,
+					event.ArgVerdict: driftVerdict(cls.Decisions[col]),
+				},
+			})
+		}
 	}
 	for _, col := range cls.Expired {
 		r.sink.Send(event.Event{
@@ -1644,7 +1660,11 @@ func (r *run) classifyStage() error {
 	if err := r.checkMasks(cls); err != nil {
 		return err
 	}
-	if r.req.StrictSchema && len(cls.Drift) > 0 {
+	// --strict-schema is "exit 10 on any column the committed yml has never
+	// seen" (ARCHITECTURE.md §8) — a claim about a file on disk, and, for the
+	// same T-0325 reason as the warning loop above, cls.Drift means that only
+	// when r.prior is non-nil.
+	if r.prior != nil && r.req.StrictSchema && len(cls.Drift) > 0 {
 		return &Stop{
 			Code: classify.CodeRefusedStrictSchema, Exit: exitDrift,
 			Args: event.Args{
@@ -1694,6 +1714,22 @@ func (r *run) classifySummary(cls *pipeline.Classification, columns []ref.Column
 		event.ArgCopiedCount: strconv.Itoa(copied),
 		event.ArgKeyCount:    strconv.Itoa(keys),
 	})
+}
+
+// driftVerdict is classify.column.drift's {verdict}: what this run actually
+// did with a column the committed yml has never seen (T-0325), rather than
+// the drift rule's own fixed description of what drift means in general.
+// "copied" when the column's own decision this run left it unmasked —
+// dogfood session 1's own boolean columns, which had never crossed the mask
+// threshold and so were never going to be "masked at or above possible" —
+// and "masked as CATEGORY" otherwise, the same two spellings
+// classify.masked.column and classify.copied.column already use to tell a
+// reader of the transcript which happened.
+func driftVerdict(d pipeline.Decision) string {
+	if !d.Masked {
+		return "copied"
+	}
+	return "masked as " + string(d.Category)
 }
 
 // neverMaskedKeyReason reports whether reason is one of internal/classify's

@@ -18,7 +18,7 @@ One row per code in the catalogue, in the file's own order. Exit is only meaning
 | `target.refused.lease_held` | discover | 4 | the target {database} is held by {reason}: one lazyslice run writes a target at a time |
 | `classify.masked.column` | classify | - | {table}.{column}: {reason} |
 | `classify.copied.column` | classify | - | {table}.{column}: {reason} |
-| `classify.column.drift` | classify | - | {table}.{column} is not in {path}: classified fresh and masked at or above possible |
+| `classify.column.drift` | classify | - | {table}.{column} is not in {path}: classified fresh and {verdict} |
 | `classify.summary` | classify | - | {column_count} column(s): {masked_count} masked, {copied_count} copied, {key_count} never-masked keys |
 | `classify.reused` | classify | - | {count} decisions from {path}, {drift_count} drift, {changed_count} changed |
 | `classify.column.opt_out_expired` | classify | - | the opt-out on {table}.{column} is not honoured: it records no type fingerprint, or the column's type changed |
