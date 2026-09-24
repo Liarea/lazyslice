@@ -455,3 +455,34 @@ matches is copied.
 "a credential's entropy" among the recognised shapes and do not yet say what
 it now skips; neither file was in T-0315's paths — **tracker T-0357** carries
 the sentence.
+
+## T-0316 (2026-09-24): a card is an issuer prefix and a length, not a check digit (`card.go`)
+
+Dogfood session 1 masked eight identifier columns (customer, subscription,
+invoice and estimate numbers, `schema_migrations.version`) as `free_text` on
+the one digit run in ten that passes the Luhn check by chance. Two validators
+now sit beside `ValidLuhn`, both through `anyCandidate`:
+
+- **`ValidCard`**: twelve to nineteen digits, the check digit, and a prefix in
+  `issuerRanges`, the IIN table of Wikipedia's "Payment card number" (source
+  and read date in the file). The table errs wide — every network it lists,
+  UATP's leading `1` included — because a range it misses is a card copied.
+- **`CardShape`**: `ValidCard` and a length that prefix's issuer issues. It is
+  the "full shape" `internal/classify` and `internal/verify` ask of a column
+  whose *name* says identifier; that name rule is theirs, kept in step by hand
+  (`identifierNameWords` / `cardIdentifierWords`), never this package's.
+
+**`ValidLuhn` is unchanged** and still read by the callers T-0316 did not
+reach: `internal/plan`'s and `internal/verify`'s DDL-literal passes,
+`internal/verify/residual.go`'s JSON key reader, `internal/transform`'s JSON
+key masking and `internal/classify`'s `jsonLeafIsPersonal`. Each of those is
+wider than the row path now, which is the safe direction; narrowing them is a
+separate T1 question. `card_test.go` pins the dogfood timestamp
+(`20230415123453`, Luhn-valid, no issuer) and the Visa test card
+(`4111111111111111`, both validators), plus one value per tier boundary; each
+pin is first shown to pass the bare check digit.
+
+**Owed:** README.md (its "a Luhn check for card numbers" and accepted
+residual 4) and SECURITY.md (residual 2) do not yet say the card signal wants
+an issuer prefix, or what a card outside the table costs; neither file was in
+T-0316's paths — **tracker T-0358** carries the clause.

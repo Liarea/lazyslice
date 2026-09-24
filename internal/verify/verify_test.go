@@ -662,7 +662,9 @@ func TestLuhnOnANumericColumnKeepsTheRatioRule(t *testing.T) {
 	table := customers()
 	col := ref.ColumnRef{Table: table, Column: "reference"}
 
-	// luhnValidID(13) is a Luhn-valid thirteen-digit number; the ids from
+	// luhnValidID(4000000000000000) is a Luhn-valid sixteen-digit number under
+	// Visa's prefix, the full shape of a card (textsig.CardShape), so it is a
+	// real hit on a column named `reference` (T-0316); the ids from
 	// thirteenDigitIDs are ordinary thirteen-digit identifiers that do not
 	// pass the check digit.
 	cases := []struct {
@@ -671,8 +673,8 @@ func TestLuhnOnANumericColumnKeepsTheRatioRule(t *testing.T) {
 		wantFail bool
 	}{
 		{
-			name:     "one Luhn hit among nineteen ordinary thirteen-digit ids (below the ratio, proven column)",
-			vals:     append(append([]any{}, thirteenDigitIDs(19)...), luhnValidID(1300000000000)),
+			name:     "one card-shaped hit among nineteen ordinary thirteen-digit ids (below the ratio, proven column)",
+			vals:     append(append([]any{}, thirteenDigitIDs(19)...), luhnValidID(4000000000000000)),
 			wantFail: false,
 		},
 		{
@@ -742,11 +744,14 @@ func luhnValidID(base int64) int64 {
 
 // luhnMajority is twenty values, sixteen of which are Luhn-valid -- at or
 // over validatorThreshold, where even the ratio-scored digits side of the
-// Luhn entry fails.
+// Luhn entry fails. The sixteen are sixteen-digit numbers under Visa's
+// prefix, the full shape of a card (textsig.CardShape): since T-0316 a column
+// named `reference` is scored on that shape, and the thirteen-digit numbers
+// this helper used to return pass only the check digit.
 func luhnMajority() []any {
 	out := make([]any, 0, 20)
 	for i := 0; i < 16; i++ {
-		out = append(out, luhnValidID(int64(1300000000000)+int64(i)*7))
+		out = append(out, luhnValidID(int64(4000000000000000)+int64(i)*7))
 	}
 	for i := 0; i < 4; i++ {
 		out = append(out, thirteenDigitIDs(1)[0])

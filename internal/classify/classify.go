@@ -558,7 +558,12 @@ var baseValidators = []validatorEntry{
 	{pipeline.CatNationalID, phraseNationalID, true, func(_ *textsig.Dict, s string) bool { return textsig.ValidNationalIDStructured(s) }},
 	{pipeline.CatNationalID, phraseNationalID, false, func(_ *textsig.Dict, s string) bool { return textsig.ValidNationalIDChecksumOnly(s) }},
 	{pipeline.CatFinancial, phraseIBAN, false, func(_ *textsig.Dict, s string) bool { return textsig.ValidIBAN(s) }},
-	{pipeline.CatFinancial, phraseLuhn, true, func(_ *textsig.Dict, s string) bool { return textsig.ValidLuhn(s) }},
+	// The card entry asks for a known issuer prefix as well as the Luhn check
+	// digit (T-0316): a bare check digit is one digit run in ten, and dogfood
+	// session 1 masked eight identifier columns on it. A column whose name
+	// says it holds an identifier asks textsig.CardShape instead, in base()
+	// (identifierNamed, validators.go).
+	{pipeline.CatFinancial, phraseLuhn, true, func(_ *textsig.Dict, s string) bool { return textsig.ValidCard(s) }},
 	// ValidPhone parses under textsig.PhoneRegionHint ("ZZ"), which only ever
 	// admits an already-international number -- a national-format column
 	// (07911 123456, 020 7946 0958) scores zero here whatever the ratio
@@ -833,6 +838,11 @@ func (st *state) base() {
 				// T-0315: a class or component name is not asked whether it
 				// looks like a secret; see entropyExemptNames.
 				vs = withoutSecrets(vs)
+			}
+			if identifierNamed(normaliseName(col.Name)) {
+				// T-0316: an id, number, version or reference column needs a
+				// value in the full shape of a card; see identifierNamed.
+				vs = withCardShape(vs)
 			}
 			sig := bestSignal(dict, values, st.pack, ct.Family, vs)
 			st.decide(w, col, ct, values, sig)

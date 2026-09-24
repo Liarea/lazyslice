@@ -189,8 +189,45 @@ type validator struct {
 	// same key internal/classify's normaliseName does. The two lists are kept
 	// in step by hand, like the rest of this file.
 	exemptColumns map[string]bool
-	ok            func(string) bool
+	// columns, when non-nil, is asked of snakeColumnName(column) before this
+	// entry is scored over it, and the entry is skipped when it answers false.
+	// It exists for the four card entries alone (T-0316): a column whose name
+	// says it holds an identifier is scored with textsig.CardShape, every
+	// other column with textsig.ValidCard, which is internal/classify's
+	// identifierNamed split. See cardIdentifierNamed.
+	columns func(string) bool
+	ok      func(string) bool
 }
+
+// cardIdentifierWords is internal/classify's identifierNameWords (T-0316):
+// the last words of a column name that say the column holds an identifier of
+// its own. The two lists are kept in step by hand, like the rest of this file,
+// so that the second net does not refuse at exit 9 a column the classifier
+// deliberately left unmasked because a value passed only the check digit.
+var cardIdentifierWords = map[string]bool{
+	"id":        true,
+	"number":    true,
+	"num":       true,
+	"no":        true,
+	"nr":        true,
+	"version":   true,
+	"ref":       true,
+	"reference": true,
+}
+
+// cardIdentifierNamed reports whether a snakeColumnName'd column name ends in
+// one of cardIdentifierWords.
+func cardIdentifierNamed(snake string) bool {
+	last := snake
+	if i := strings.LastIndexByte(snake, '_'); i >= 0 {
+		last = snake[i+1:]
+	}
+	return cardIdentifierWords[last]
+}
+
+// notCardIdentifierNamed is cardIdentifierNamed's complement, for the two
+// ValidCard entries.
+func notCardIdentifierNamed(snake string) bool { return !cardIdentifierNamed(snake) }
 
 // secretMinNonNull is internal/classify's minSecretSamples (T-0315): see
 // validator.minNonNull.
@@ -241,7 +278,7 @@ func snakeColumnName(s string) string {
 }
 
 // validators is the set: internal/classify's twelve value validators, in its
-// own precedence order, folded into fifteen entries here (its two network
+// own precedence order, folded into seventeen entries here (its two network
 // validators, IP and MAC, share one). Its two financial validators used
 // to share one too, until T-0136 split them back apart: Luhn and IBAN are
 // both checksums over an arbitrary string, but Luhn's only ever matches a run
@@ -256,7 +293,10 @@ func snakeColumnName(s string) string {
 // `strong` (see its own comment below), and the entry over integer/bigint/
 // numeric columns is not, so this file's own entry count runs two ahead of
 // the classifier's for financial_account -- the two Luhn rows here answer
-// for the classifier's one.
+// for the classifier's one. Since T-0316 each of the two is split once more by
+// column name (ValidCard, or CardShape under an identifier's name), so four
+// card rows answer for it, and the fifteen entries the national_id paragraph
+// below counts are seventeen.
 //
 // national_id is split four ways (below, T-0187 review round finding 2 and
 // T-0240), which is why the classifier's twelve validators fold into fifteen
@@ -488,8 +528,19 @@ var validators = []validator{
 	// and validatorThreshold (with the any-hit-below-minValues floor,
 	// T-0058) is what decides it, same as IBAN and every other non-strong
 	// entry.
-	{category: pipeline.CatFinancial, name: "financial_account", text: true, strong: true, ok: textsig.ValidLuhn},
-	{category: pipeline.CatFinancial, name: "financial_account", digits: true, ok: textsig.ValidLuhn},
+	//
+	// Each of the two is split once more by column name (T-0316), because a
+	// bare check digit is one digit run in ten and dogfood session 1's
+	// classifier masked eight identifier columns on it: every column asks for
+	// a known issuer prefix (textsig.ValidCard), and a column whose name says
+	// id, number, version or reference asks for the issuer's own length as
+	// well (textsig.CardShape). internal/classify's card entry makes the same
+	// split, so a column it copies for a value that is not the shape of a card
+	// is not refused here for the same value.
+	{category: pipeline.CatFinancial, name: "financial_account", text: true, strong: true, columns: notCardIdentifierNamed, ok: textsig.ValidCard},
+	{category: pipeline.CatFinancial, name: "financial_account", text: true, strong: true, columns: cardIdentifierNamed, ok: textsig.CardShape},
+	{category: pipeline.CatFinancial, name: "financial_account", digits: true, columns: notCardIdentifierNamed, ok: textsig.ValidCard},
+	{category: pipeline.CatFinancial, name: "financial_account", digits: true, columns: cardIdentifierNamed, ok: textsig.CardShape},
 	// IBAN is a checksum over letters and digits, not a run of digits, so it
 	// keeps the ratio rule rather than joining Luhn as strong: an ordinary
 	// all-caps title or slug is about as likely to be fifteen-to-thirty-four

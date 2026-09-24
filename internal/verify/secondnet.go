@@ -556,6 +556,10 @@ func (s *state) netColumn(ctx context.Context, col ref.ColumnRef, mode netMode) 
 			// finding; testdata/regressions/034's own control).
 			continue
 		}
+		if val.columns != nil && !val.columns(snakeColumnName(col.Column)) {
+			// T-0316: the card entry this column's name does not select.
+			continue
+		}
 		if val.exemptColumns[snakeColumnName(col.Column)] {
 			// T-0315: a class or component name column, which
 			// internal/classify never asks this validator about either.

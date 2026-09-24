@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/Liarea/lazyslice/internal/pipeline"
@@ -113,6 +114,56 @@ func withoutSecrets(vs []validatorEntry) []validatorEntry {
 	for _, v := range vs {
 		if v.cat != pipeline.CatCredential {
 			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// identifierNameWords are the last words of a normalised column name that say
+// the column holds an identifier of its own (tracker T-0316): an `id`, a
+// `number`, a `version`, a `reference`, and their usual abbreviations.
+// Dogfood session 1 masked eight such columns -- CRM and billing customer
+// ids, subscription ids, invoice and estimate numbers, a schema_migrations
+// `version` -- as free_text on a minority of values that passed the card
+// check by chance. On a column named like this, the card entry asks
+// textsig.CardShape (an issuer prefix and the length that issuer issues)
+// instead of textsig.ValidCard (an issuer prefix at any length from twelve to
+// nineteen): the name says the digits are the application's own, so a value
+// must look like a card in every respect before it outweighs that. A real card
+// number in such a column still passes CardShape and is masked as before.
+//
+// internal/verify/validators.go keeps the same list (cardIdentifierWords),
+// by hand, so the second net does not refuse a column this package left
+// unmasked on the same evidence.
+var identifierNameWords = map[string]bool{
+	"id":        true,
+	"number":    true,
+	"num":       true,
+	"no":        true,
+	"nr":        true,
+	"version":   true,
+	"ref":       true,
+	"reference": true,
+}
+
+// identifierNamed reports whether a normaliseName'd column name ends in one of
+// identifierNameWords.
+func identifierNamed(normalised string) bool {
+	last := normalised
+	if i := strings.LastIndexByte(normalised, '_'); i >= 0 {
+		last = normalised[i+1:]
+	}
+	return identifierNameWords[last]
+}
+
+// withCardShape returns vs with the card entry's check replaced by
+// textsig.CardShape, for a column identifierNamed names (T-0316).
+func withCardShape(vs []validatorEntry) []validatorEntry {
+	out := make([]validatorEntry, len(vs))
+	copy(out, vs)
+	for i := range out {
+		if out[i].phrase == phraseLuhn {
+			out[i].ok = func(_ *textsig.Dict, s string) bool { return textsig.CardShape(s) }
 		}
 	}
 	return out
