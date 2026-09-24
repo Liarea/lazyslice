@@ -58,9 +58,20 @@ var markers = map[event.Kind]string{
 // and they carry no fact a reader of the transcript needs: CONCEPT.md's
 // transcript is a list of decisions and results, not a list of stages, and the
 // --json stream still carries both for a caller that wants them.
+//
+// A settled Decision (e.Settled, T-0321) prints nothing either: it is a
+// column whose verdict this run reached is the one the committed yml already
+// recorded, and classify.reused is the one line that speaks for the settled
+// majority on a re-run. The event still reaches every sink — dropping it here
+// is a rendering decision, the kind this package's own CLAUDE.md already
+// gives Lines (StageStart/StageDone above) — so a caller wanting the full,
+// unfolded per-column record still has it in the --json stream.
 func (l *Lines) Send(e event.Event) {
 	marker, ok := markers[e.Kind]
 	if !ok {
+		return
+	}
+	if e.Kind == event.Decision && e.Settled {
 		return
 	}
 	line := text(e)

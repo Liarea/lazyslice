@@ -19,6 +19,8 @@ One row per code in the catalogue, in the file's own order. Exit is only meaning
 | `classify.masked.column` | classify | - | {table}.{column}: {reason} |
 | `classify.copied.column` | classify | - | {table}.{column}: {reason} |
 | `classify.column.drift` | classify | - | {table}.{column} is not in {path}: classified fresh and masked at or above possible |
+| `classify.summary` | classify | - | {column_count} column(s): {masked_count} masked, {copied_count} copied, {key_count} never-masked keys |
+| `classify.reused` | classify | - | {count} decisions from {path}, {drift_count} drift, {changed_count} changed |
 | `classify.column.opt_out_expired` | classify | - | the opt-out on {table}.{column} is not honoured: it records no type fingerprint, or the column's type changed |
 | `classify.refused.strict_schema` | classify | 10 | {count} columns are not in {path} and {flag} is set |
 | `classify.refused.mask` | classify | 2 | {flag} asks for {table}.{column} to be masked, and it cannot be: {reason} |
@@ -99,6 +101,7 @@ One row per code in the catalogue, in the file's own order. Exit is only meaning
 | `plan.root.candidate` | plan | - | {count}. {table} — {reason} |
 | `plan.root.unknown` | plan | - | {reason} |
 | `plan.step` | plan | - | {table}: {count} rows, {reason} |
+| `plan.summary` | plan | - | {table_count} table(s) reached, {unreachable_count} unreachable, {row_count} rows |
 | `plan.estimate` | plan | - | {count} rows, {reason}; the snapshot is held about {seconds}s, assuming 20,000 rows/s |
 | `plan.polymorphic.detected` | plan | - | polymorphic pair detected, not followed: no constraint — {reason} |
 | `plan.polymorphic.unmapped` | plan | - | {reason} |

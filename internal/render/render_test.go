@@ -45,6 +45,34 @@ func TestLinesSkipsStageBrackets(t *testing.T) {
 	}
 }
 
+// A settled Decision (T-0321) prints nothing: it is a column whose verdict
+// this run reached is the one the committed yml already recorded, and
+// classify.reused is what speaks for it on the human transcript. An unsettled
+// one — Settled left false, the zero value, exactly like every Decision before
+// T-0321 — still prints in full, reason and all.
+func TestLinesSkipsASettledDecisionButPrintsAnUnsettledOne(t *testing.T) {
+	var b bytes.Buffer
+	l := NewLines(&b)
+	l.Send(event.Event{
+		Stage: event.Classify, Kind: event.Decision, Code: "classify.masked.column",
+		Table: ref.TableRef{Schema: "public", Name: "customer"}, Column: "email",
+		Settled: true,
+		Args:    event.Args{event.ArgTable: "public.customer", event.ArgColumn: "email", event.ArgReason: "name matches email"},
+	})
+	if b.Len() != 0 {
+		t.Errorf("Lines wrote %q for a settled decision, want nothing", b.String())
+	}
+
+	l.Send(event.Event{
+		Stage: event.Classify, Kind: event.Decision, Code: "classify.masked.column",
+		Table: ref.TableRef{Schema: "public", Name: "customer"}, Column: "phone",
+		Args: event.Args{event.ArgTable: "public.customer", event.ArgColumn: "phone", event.ArgReason: "name matches phone"},
+	})
+	if !strings.Contains(b.String(), "customer.phone") {
+		t.Errorf("Lines wrote %q, want the unsettled decision for customer.phone", b.String())
+	}
+}
+
 // A code with no catalogue row is a bug in the tree. The line has to name it
 // rather than print nothing, because a stage that emits an unknown code would
 // otherwise be silent exactly where it had something to say.

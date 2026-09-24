@@ -179,6 +179,32 @@ const (
 	ArgRowCount      ArgKey = "row_count"
 	ArgResidualCount ArgKey = "residual_count"
 	ArgColumnCount   ArgKey = "column_count"
+	// ArgMaskedCount, ArgCopiedCount and ArgKeyCount are T-0321's classify
+	// summary line: how many of the columns just decided were masked, copied
+	// because nothing said to mask them, or copied because they are a
+	// surrogate key or foreign key column that is never masked regardless of
+	// what the classifier finds (ArgColumnCount carries the total, reused
+	// from the verify summary above).
+	ArgMaskedCount ArgKey = "masked_count"
+	ArgCopiedCount ArgKey = "copied_count"
+	ArgKeyCount    ArgKey = "key_count"
+	// ArgUnreachableCount is T-0321's plan summary line: how many of the
+	// plan's tables are schema-only because nothing reaches them, alongside
+	// ArgTableCount (reused from the verify summary above) for how many the
+	// walk did reach and ArgRowCount for the total rows selected.
+	ArgUnreachableCount ArgKey = "unreachable_count"
+	// ArgDriftCount is T-0321's re-run line: how many of the columns just
+	// classified are not in the committed yml (Classification.Drift),
+	// alongside ArgCount for how many decisions the yml supplied and ArgPath
+	// for the yml's own path.
+	ArgDriftCount ArgKey = "drift_count"
+	// ArgChangedCount is the re-run line's third count (T-0321 review round,
+	// finding 2): how many columns the committed yml did carry a decision
+	// for, but this run's re-derivation reached a different one — masked
+	// versus copied, category, confidence, or unmasked versus not
+	// (internal/core's decisionChanged). Distinct from ArgDriftCount, which
+	// counts a column the yml never saw at all.
+	ArgChangedCount ArgKey = "changed_count"
 )
 
 // Args is a fixed-key map of identifiers and counts.
@@ -198,6 +224,19 @@ type Event struct {
 	// Exit is non-zero only with Kind == Error, and its value is the process
 	// exit code ADR-005 assigns to that Code.
 	Exit int
+	// Settled is true on a Kind == Decision event whose verdict matches what
+	// the committed yml already recorded for that column (T-0321 review
+	// round, finding 1: internal/core's decisionChanged says no). It is a
+	// fact about the event, not a second opinion about what happened — the
+	// verdict, the table, the column and the reason are unchanged — so every
+	// sink still receives it: internal/tui's Collector forwards to the line
+	// printer before it decides what its own screens keep, and --json's
+	// NDJSON writer never drops a field. internal/render.Lines is the one
+	// reader: it skips a settled Decision line, which is what lets a re-run
+	// from a committed lazyslice.yml with nothing to report fold its
+	// per-column transcript down to classify.reused's one line without the
+	// --json stream or the TUI's reasons screen losing a single column.
+	Settled bool
 }
 
 // Sink receives events. Send must not block indefinitely and must be safe to

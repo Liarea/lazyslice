@@ -1560,15 +1560,50 @@ func (r *run) classifyStage() error {
 		return err
 	}
 
-	for _, col := range sortedColumns(cls.Decisions) {
+	// T-0321: dogfood session 2 re-ran from a committed lazyslice.yml with
+	// zero drift and got the same 1,806 per-column reason lines session 1
+	// did, because a decision the yml already recorded was printed exactly
+	// like a fresh one. r.prior is that yml (classifyPrior's own return,
+	// stashed by readConfig before this stage ran) — non-nil means a
+	// committed file was read. The per-column classify.masked.column and
+	// classify.copied.column events are always sent to the sink, for every
+	// column, whatever r.prior says: the --json stream and internal/tui's
+	// reasons screen (both sinks in front of, not instead of, the line
+	// printer — internal/tui/collect.go's Collector calls next.Send before
+	// it decides what to keep) are the operator's actual review input, and a
+	// re-run from a committed yml must not thin either of them out (T-0321
+	// review round, finding 1). Only Lines, the human transcript, folds a
+	// settled decision away: e.Settled is set here, on a column whose
+	// decision this run reached the same verdict prior recorded (i.e.
+	// !decisionChanged), and internal/render.Lines skips printing exactly
+	// those. A column not in r.prior.Columns at all (cls.Drift) is never
+	// settled — the drift set built below is what this loop and the
+	// reused-line count both read to tell "not seen before" from "seen and
+	// unchanged".
+	columns := sortedColumns(cls.Decisions)
+	drift := make(map[ref.ColumnRef]bool, len(cls.Drift))
+	for _, col := range cls.Drift {
+		drift[col] = true
+	}
+	var changed int
+	for _, col := range columns {
 		d := cls.Decisions[col]
 		code := classify.CodeColumnCopied
 		if d.Masked {
 			code = classify.CodeColumnMasked
 		}
+		settled := false
+		if r.prior != nil && !drift[col] {
+			if cc, ok := r.prior.Columns[col]; ok {
+				settled = !decisionChanged(d, cc)
+			}
+		}
+		if r.prior != nil && !settled && !drift[col] {
+			changed++
+		}
 		r.sink.Send(event.Event{
 			At: time.Now(), Stage: event.Classify, Kind: event.Decision, Code: code,
-			Table: col.Table, Column: col.Column,
+			Table: col.Table, Column: col.Column, Settled: settled,
 			Args: event.Args{
 				event.ArgTable:  col.Table.String(),
 				event.ArgColumn: col.Column,
@@ -1593,6 +1628,16 @@ func (r *run) classifyStage() error {
 			Args: event.Args{event.ArgTable: col.Table.String(), event.ArgColumn: col.Column},
 		})
 	}
+	if r.prior == nil {
+		r.classifySummary(cls, columns)
+	} else {
+		r.send(event.Classify, event.Info, CodeClassifyReused, event.Args{
+			event.ArgCount:        strconv.Itoa(len(columns) - len(cls.Drift)),
+			event.ArgPath:         r.req.ConfigPath,
+			event.ArgDriftCount:   strconv.Itoa(len(cls.Drift)),
+			event.ArgChangedCount: strconv.Itoa(changed),
+		})
+	}
 	// A column the run was asked to mask that the classifier left unmasked
 	// is exit 2 here, after every decision line has been printed (so the
 	// reason the raise was declined is on screen) and before the plan.
@@ -1611,6 +1656,81 @@ func (r *run) classifyStage() error {
 		}
 	}
 	return nil
+}
+
+// classifySummary sends CodeClassifySummary, T-0321's one line folding every
+// just-printed classify.masked.column/classify.copied.column line into a
+// count: how many columns were masked, how many were copied because nothing
+// said to mask them, and how many were copied because they are a surrogate
+// key or foreign key column internal/classify never masks regardless of what
+// it finds. Only called when r.prior is nil (classifyStage); a run reusing a
+// committed yml sends CodeClassifyReused instead.
+//
+// The third bucket is read off Decision.Reason rather than a field
+// pipeline.Decision carries, because internal/classify's "preserved verbatim"
+// wording (classify/reasons.go's surrogate_key, fk_column and
+// key_child_exempt fragments, the only three that use it) is the one place
+// this package can see "never masked because it is a key" without a second
+// copy of internal/classify's own neverMask bookkeeping — a decision's Reason
+// is drawn from that file's fixed grammar (ARCHITECTURE.md section 2 "Value-
+// free types"), so matching a substring of it names a fragment, never a
+// sampled value.
+func (r *run) classifySummary(cls *pipeline.Classification, columns []ref.ColumnRef) {
+	var masked, copied, keys int
+	for _, col := range columns {
+		d := cls.Decisions[col]
+		switch {
+		case d.Masked:
+			masked++
+		case neverMaskedKeyReason(d.Reason):
+			keys++
+		default:
+			copied++
+		}
+	}
+	r.send(event.Classify, event.Info, CodeClassifySummary, event.Args{
+		event.ArgColumnCount: strconv.Itoa(len(columns)),
+		event.ArgMaskedCount: strconv.Itoa(masked),
+		event.ArgCopiedCount: strconv.Itoa(copied),
+		event.ArgKeyCount:    strconv.Itoa(keys),
+	})
+}
+
+// neverMaskedKeyReason reports whether reason is one of internal/classify's
+// three "preserved verbatim" fragments — surrogate_key, fk_column or
+// key_child_exempt (classify/reasons.go) — the only reasons that phrase
+// appears in. Those are the columns internal/classify never masks regardless
+// of what it finds in the data (a primary key, or a foreign key column
+// pointing at one), as opposed to a column that was merely copied because
+// nothing about its name or values looked personal.
+func neverMaskedKeyReason(reason string) bool {
+	return strings.Contains(reason, "preserved verbatim")
+}
+
+// decisionChanged reports whether this run's decision for a column differs
+// from what the committed yml recorded for it (T-0321 review round, finding
+// 2): masked versus copied (cc.Masker is set exactly when the recorded
+// decision was masked, columnConfig's own rule in internal/emit), Category,
+// Confidence, or whether the column is unmasked now against whether it was
+// unmasked then. The classifier re-derives every column on every run and
+// applyPrior only tightens (internal/classify's own doc comment on that
+// func), so a column the yml recorded as copied can come out masked this run
+// on new sampled evidence, a new pattern or a --mask flag; a column can also
+// come out copied this run because of a new --unmask flag. Either is a
+// decision the operator has not reviewed and must not be folded into the
+// "settled" count classify.reused reports, so classifyStage calls this for
+// every column that is in prior.Columns at all (a column that is not is
+// already counted as drift, never as settled).
+func decisionChanged(d pipeline.Decision, cc pipeline.ColumnConfig) bool {
+	if d.Masked != (cc.Masker != "") {
+		return true
+	}
+	if d.Category != cc.Category || d.Confidence != cc.Confidence {
+		return true
+	}
+	wasUnmasked := cc.Unmask != nil
+	isUnmasked := d.Source == pipeline.ByFlagUnmask || d.Source == pipeline.ByYmlUnmask
+	return wasUnmasked != isUnmasked
 }
 
 // classifyPrior is the committed file with the --unmask and --mask flags
@@ -1643,6 +1763,29 @@ func (r *run) classifyPrior() (*pipeline.Config, error) {
 }
 
 // ---------- plan ----------
+
+// planSummary sends CodePlanSummary, T-0321's one line folding every
+// just-printed plan.step line into a count: how many tables the walk reached
+// (every pipeline.Step.Mode but SchemaOnly) against how many it left
+// unreachable (SchemaOnly — "unreachable; DDL only", pipeline.Mode's own
+// doc), and the total rows the plan holds (p.Estimate.Rows, the same number
+// plan.estimate prints next). Dogfood session 1 listed 114 of 143 tables as
+// schema_only, one line each, with no line that said so in one place.
+func (r *run) planSummary(p *pipeline.Plan) {
+	var reached, unreachable int
+	for _, s := range p.Steps {
+		if s.Mode == pipeline.SchemaOnly {
+			unreachable++
+		} else {
+			reached++
+		}
+	}
+	r.send(event.Plan, event.Info, CodePlanSummary, event.Args{
+		event.ArgTableCount:       strconv.Itoa(reached),
+		event.ArgUnreachableCount: strconv.Itoa(unreachable),
+		event.ArgRowCount:         strconv.FormatInt(p.Estimate.Rows, 10),
+	})
+}
 
 // virtualEvents prints one plan.polymorphic.inferred line per entry of
 // p.Virtual: §3.5 requires the plan to state every virtual edge it will
@@ -1752,6 +1895,7 @@ func (r *run) planStage(ctx context.Context) error {
 			},
 		})
 	}
+	r.planSummary(p)
 	r.virtualEvents(p)
 	for _, pair := range p.Polymorphic {
 		r.send(event.Plan, event.Warn, CodePlanPolymorphic, event.Args{event.ArgReason: pair})
