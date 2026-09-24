@@ -109,14 +109,31 @@ func DottedDate(s string) bool {
 	return false
 }
 
-// HexDigest reports whether s is a run of hexadecimal digits of the length a
-// digest or an abbreviated commit hash takes: eight to 128 characters, with at
-// least one decimal digit and at least one letter a to f. The mixture is what
-// keeps an all-digit number (an account, a national identifier) and an
-// all-letter word ("facade", "deface") out of it.
+// HexDigest reports whether s is a run of hexadecimal digits of a length a
+// digest or an abbreviated commit hash takes, with at least one decimal digit
+// and at least one letter a to f. The mixture is what keeps an all-digit
+// number (an account, a national identifier) and an all-letter word
+// ("facade", "deface") out of it.
+//
+// The lengths are the digest lengths and nothing between them (T-0354, the
+// T-0311 review): eight to twelve characters, an abbreviated commit hash; or
+// exactly 32, 40, 64 or 128 characters (MD5, SHA-1, SHA-256, SHA-512) when
+// LooksSecret does not already read the value as a secret. A first landing
+// accepted every length from eight to 128, and because LooksSecret claims hex
+// only at 32 or more, a column of 15-character hex tokens (an API key, a reset
+// token, an invite code, a session id) under a neutral name was spared from
+// the neighbouring-column sweep and copied. A hex token of exactly a digest's
+// length still cannot be told from a digest by its value; that is
+// THREAT_MODEL.md T1's T-0354 residual.
 func HexDigest(s string) bool {
 	s = strings.TrimSpace(s)
-	if len(s) < 8 || len(s) > 128 {
+	switch n := len(s); {
+	case n >= 8 && n <= 12:
+	case n == 32 || n == 40 || n == 64 || n == 128:
+		if LooksSecret(s) {
+			return false
+		}
+	default:
 		return false
 	}
 	digit, letter := false, false

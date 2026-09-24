@@ -8,7 +8,8 @@ import "testing"
 // identifier shapes that decide whether a value carrying personal data could
 // be spared as an identifier: a slashed date (with a month name or without)
 // is not a path, nor is a bare two-segment home directory, a first.last
-// username is not a hostname, an all-digit number is not a hex digest, a
+// username is not a hostname, an all-digit number or a hex token of no digest's length is not a hex
+// digest, a
 // dotted date of birth is not a semantic version, and a URL is ValidURL's
 // rather than a path.
 func TestIdentifierShapesRefusePersonalLookalikes(t *testing.T) {
@@ -27,8 +28,8 @@ func TestIdentifierShapesRefusePersonalLookalikes(t *testing.T) {
 			[]string{"api.prod.internal", "example.com", "db.local"},
 			[]string{"john.smith", "zbigniew.brzezinski", "localhost", "a.b.1", "x@y.com"}},
 		{"HexDigest", HexDigest,
-			[]string{"3f9a2c7e", "d41d8cd98f00b204e9800998ecf8427e"},
-			[]string{"12345678", "deadbeefcafe", "3f9a2c7", "3f9a2c7g"}},
+			[]string{"3f9a2c7e", "d41d8cd98f00b204e9800998ecf8427e", "3f9a2c7e1b4d8a60c5e79d02b7e4a1c86f35e001"},
+			[]string{"12345678", "deadbeefcafe", "3f9a2c7", "3f9a2c7g", "3f9a2c7e1b4d801"}},
 		{"SemanticVersion", SemanticVersion,
 			[]string{"1.4.2", "v2.0.0-rc.1", "3.1.0+build.7"},
 			[]string{"1.4", "01.2.3", "1.2.3.4", "2024.05", "5.3.1985", "12.11.1979", "1.1.1970", "1985.3.5",

@@ -23,7 +23,7 @@ import (
 // once, a colour enum carrying a dictionary name, a gender enum, a path
 // naming a person, and the review round's controls: dotted and month-name
 // dates of birth, a bare home directory, blood groups, marital status,
-// postcodes, ISO dates and CamelCase handles.
+// postcodes, ISO dates and CamelCase handles, and T-0354's 15-character hex tokens.
 func TestSweepSparesEnumIdentifierAndUniqueColumns(t *testing.T) {
 	t.Parallel()
 	users := ref.TableRef{Schema: "public", Name: "users"}
@@ -67,6 +67,7 @@ func TestSweepSparesEnumIdentifierAndUniqueColumns(t *testing.T) {
 		tc("tag_c", "text"),
 		tc("code_b", "text"),
 		tc("code_c", "text"),
+		tc("ext_b", "text"),
 	)
 	schema := &pipeline.Schema{
 		Tables: []pipeline.Table{usersTable, devicesTable},
@@ -120,8 +121,13 @@ func TestSweepSparesEnumIdentifierAndUniqueColumns(t *testing.T) {
 		col(devices, "timezone"):    twelve("Europe/London", 6, "America/New_York", 4, "Europe/Berlin", 2),
 		col(devices, "app_version"): each("2.%.0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"),
 		col(devices, "hostname"):    each("api.%.prod.internal", letters...),
-		col(devices, "serial"):      each("3f9a2c7e1b4d8a60c5e7%", digits...),
-		col(devices, "asset_path"):  each("/assets/devices/%.png", letters...),
+		// SHA-256 hex, a digest's own length: spared (T-0354). A 40-character
+		// SHA-1 column would pin the same rule, but net.ParseMAC reads 40
+		// bare hex characters as a hardware address, so the MAC validator
+		// masks it before the sweep is asked; textsig's own test holds the
+		// 40-character case.
+		col(devices, "serial"):     each("3f9a2c7e1b4d8a60c5e79d02b7e4a1c86f35e0d41d8cd98f00b204e9800998%", digits...),
+		col(devices, "asset_path"): each("/assets/devices/%.png", letters...),
 		// A colour enumeration with a dictionary surname in it (green) under
 		// the weak ratio, so nothing else decides it: the guard is what
 		// keeps it swept.
@@ -156,6 +162,11 @@ func TestSweepSparesEnumIdentifierAndUniqueColumns(t *testing.T) {
 		// A ZIP+4 and a local phone number that do parse as phone numbers:
 		// the guessed-region phone signal masks them first, and whichever
 		// decides, they must not be copied.
+		// The T-0311 review's hex probe (T-0354): 15-character hex tokens,
+		// each seen once, are no digest's length, so they are an API key,
+		// a reset token or an invite code as far as the samples say, and
+		// the sweep masks them as it did before T-0311.
+		col(devices, "ext_b"):  each("3f9a2c7e1b4d8%", digits...),
 		col(devices, "code_c"): twelve("94105-1234", 3, "10001-0001", 3, "555-1234", 3, "555-9876", 3),
 	}
 
@@ -209,7 +220,7 @@ func TestSweepSparesEnumIdentifierAndUniqueColumns(t *testing.T) {
 		col(devices, "colour"), col(devices, "home_dir"),
 		col(devices, "born_dotted"), col(devices, "born_slashed"), col(devices, "dir_b"),
 		col(devices, "grp"), col(devices, "status2"), col(devices, "zone"), col(devices, "day"),
-		col(devices, "tag_c"), col(devices, "code_b"),
+		col(devices, "tag_c"), col(devices, "code_b"), col(devices, "ext_b"),
 	} {
 		d := decision(t, cls, c)
 		if !d.Masked {

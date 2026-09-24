@@ -1624,6 +1624,20 @@ the control be copied. Logins (`jsmith`) and attributes outside the closed
 lists stay THREAT_MODEL.md T1's stated residual, with the page-clustered
 sampling that makes "each seen twice" easy for them to meet.
 
+**A hex column is spared only at a digest's length (T-0354).** The review of
+T-0311 found `HexDigest` accepted 8 to 128 characters, and `LooksSecret`
+claims hex only from 32, so a 15-character hex token column (an API key, a
+reset token, an invite code) beside a certain email was copied as "hex
+digests". `textsig.HexDigest` now takes 8 to 12 characters or exactly 32, 40,
+64 or 128 where `LooksSecret` does not claim the value; everything else is
+swept. `TestSweepSparesEnumIdentifierAndUniqueColumns` carries the probe
+(`devices.ext_b`, swept) and a SHA-256 `serial` (spared); the spared column
+is SHA-256 rather than SHA-1 because `net.ParseMAC` reads 40 (and 12 and 16)
+bare hex characters as a MAC address, so a SHA-1 column is masked
+`network_id` before the sweep is asked — safe, wrong category, filed as
+T-0363. THREAT_MODEL.md T1's T-0354 amendment states the residual: a hex
+token of exactly a digest's length.
+
 **Every threshold is a claim about all the samples, never a ratio**, and the
 guards are what keep it from being the T1 hole: the ASCII-token rule is what
 keeps a repeated native-script name (regressions `030`, `035`; the control in
