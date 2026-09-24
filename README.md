@@ -296,7 +296,14 @@ another column in the same table is at likely or above, because a
 personal-shaped table tends to be personal throughout. And a character column
 with no name or value signal at all — nothing to raise, and not a unique or
 key column — is still swept into free-text masking when it sits beside a
-column the classifier is certain identifies a person. A signal-less column
+column the classifier is certain identifies a person, unless its samples say
+plainly what it is: an enumeration (at most 20 distinct values in 10 or more
+samples, each seen at least twice — a `role`, a `state`, a log level) or all
+one identifier shape (a UUID, a hex digest, a version, a hostname, a path).
+Such a column is copied, and its reason line says which; a value carrying a
+dictionary name, a special-category term, a gender term, a blood group or
+marital status, or reading as a date, a postcode or a phone-number-like run of digits is never
+spared that way. A signal-less column
 that isn't character-typed — an integer, numeric, date or uuid column, the
 shape of a surrogate key like `customers.id` above — is copied verbatim
 regardless of its neighbours; the sweep only ever reaches columns free-text
@@ -401,7 +408,10 @@ residuals are accepted rather than hidden:
    email, phone, national ID, IBAN, card number, IP or MAC address, a
    credential's entropy, a name, an address, ordinary prose, a
    special-category term. Anything else, in a column with no name signal and
-   no personal neighbour in its table, is copied.
+   no personal neighbour in its table, is copied — and so is such a column
+   beside a personal neighbour when its samples read as an enumeration or an
+   identifier shape (a username repeated across a handful of staff rows, a
+   hostname a device's owner chose), which the neighbour rule spares.
 5. **The marker-bound reload window.** The first load into a fresh target
    checks the whole target, under the run's lease, for a table that appeared
    after the plan was approved. A *reload* — the ordinary daily case, since

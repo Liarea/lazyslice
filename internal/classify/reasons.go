@@ -206,6 +206,34 @@ var fragments = []*fragment{
 			` columns at certain and nothing is known about this column's contents`,
 	},
 	{
+		// T-0311: the three skips of the sweep above, each naming what it
+		// found. They never raise anything; a column carrying one is copied,
+		// and the line says why the certain neighbour did not change that.
+		name: "spared_unique",
+		format: "not swept by the neighbouring-column rule (%s has %d columns at certain): " +
+			"under a unique index, which free_text could not keep distinct",
+		pattern: `not swept by the neighbouring-column rule \(` + reQualified + ` has ` + reCount +
+			` columns at certain\): under a unique index, which free_text could not keep distinct`,
+	},
+	{
+		name: "spared_identifier",
+		format: "not swept by the neighbouring-column rule (%s has %d columns at certain): " +
+			"all %d samples are %s, an identifier shape and not free text",
+		pattern: `not swept by the neighbouring-column rule \(` + reQualified + ` has ` + reCount +
+			` columns at certain\): all ` + reCount + ` samples are (?:` + identifierAlternation +
+			`), an identifier shape and not free text`,
+	},
+	{
+		name: "spared_enum",
+		format: "not swept by the neighbouring-column rule (%s has %d columns at certain): " +
+			"enum-like, %d distinct values in %d samples and each seen at least twice " +
+			"(the rule spares at most %d distinct values in %d or more samples)",
+		pattern: `not swept by the neighbouring-column rule \(` + reQualified + ` has ` + reCount +
+			` columns at certain\): enum-like, ` + reCount + ` distinct values in ` + reCount +
+			` samples and each seen at least twice \(the rule spares at most ` + reCount +
+			` distinct values in ` + reCount + ` or more samples\)`,
+	},
+	{
 		name:    "fk_propagation",
 		format:  "propagated through foreign key %s from %s",
 		pattern: `propagated through foreign key ` + reIdent + ` from ` + reQualified,
@@ -401,8 +429,16 @@ var fragments = []*fragment{
 var phraseAlternation = buildPhraseAlternation()
 
 func buildPhraseAlternation() string {
-	quoted := make([]string, 0, len(validatorPhrases))
-	for _, p := range validatorPhrases {
+	return alternation(validatorPhrases)
+}
+
+// identifierAlternation is spare.go's closed identifier-shape vocabulary
+// (T-0311), built the same way and for the same reason.
+var identifierAlternation = alternation(identifierPhrases)
+
+func alternation(phrases []string) string {
+	quoted := make([]string, 0, len(phrases))
+	for _, p := range phrases {
 		quoted = append(quoted, regexp.QuoteMeta(p))
 	}
 	return strings.Join(quoted, "|")

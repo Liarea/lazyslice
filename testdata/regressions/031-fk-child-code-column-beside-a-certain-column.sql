@@ -1,6 +1,6 @@
 -- root:   public.reg031_members
 -- take:   20
--- expect: exit 12 plan.refused.unique_domain
+-- expect: ok
 -- found:  the T-0239 fix-round review, corrected by the round-5 red team (T-0253)
 -- why:    unknownColumnsBesideCertain used to exclude a validated foreign
 --         key's character-family columns outright, both ends, and left real
@@ -8,6 +8,8 @@
 --         names rather than currency codes (round-5 red team, T-0253,
 --         testdata/regressions/035); this schema is the control that pins
 --         the correct outcome for the shape the exclusion was written for
+-- not-masked: public.reg031_members.currency, public.reg031_currencies.code
+-- equal-masked: public.reg031_members.currency = public.reg031_currencies.code
 --
 -- T-0239 lowered unknownColumnsBesideCertain's declared-length floor from
 -- sixteen characters to two, so that a short character column with no name or
@@ -67,10 +69,24 @@
 -- schema load with mismatched values would be the T-0132 defect all over
 -- again.
 --
--- reg031_members.email carries the addresses every `expect: ok` regression
--- would need for the leak check; this file expects a refusal instead, so the
--- harness checks the exit code and event code only (README.md, "What each
--- file asserts").
+-- **T-0311 (2026-09-24) moved this file from that refusal to `expect: ok`,
+-- and the outcome is the one the paragraph above says was always the point.**
+-- reg031_members.currency is twenty samples of four ISO codes, each seen five
+-- times: an enumeration by internal/classify's T-0311 rule (at least ten
+-- samples, at most twenty distinct values, each seen at least twice, every
+-- value an ASCII token carrying no name). So unknownColumnsBesideCertain
+-- spares it -- once fkPairs has agreed its partner could have been raised with
+-- it, so a partner carrying a decision of its own still refuses (037) -- and
+-- neither end is raised: both are copied, the same values on both sides of
+-- the foreign key, which is the agreement T-0132 asks for, reached without
+-- masking anything. `not-masked:` pins both ends copied, and `equal-masked:`
+-- -- which only asserts that every child value is a parent value -- pins the
+-- join, so a change that masked one end alone would still fail here.
+-- `035` and `036`, the same shape carrying native-script names, still refuse
+-- at exit 12: a non-ASCII value is never an enumeration member.
+--
+-- reg031_members.email carries the addresses the leak check every `expect:
+-- ok` regression gets is run over (README.md, "What each file asserts").
 
 CREATE TABLE public.reg031_currencies (
     code varchar(3) PRIMARY KEY,

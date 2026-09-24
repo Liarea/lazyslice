@@ -1004,8 +1004,24 @@ regression `013`, a fixture none of these three schemas touches.
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | django | 44 | 9 | 12 | 9 | 3 | 0 | **0.750** | **1.000** |
 | rails-activestorage | 36 | 7 | 15 | 7 | 8 | 0 | **0.467** | **1.000** |
-| supabase-auth | 271 | 50 | 81 | 50 | 31 | 0 | **0.617** | **1.000** |
-| all three | 351 | 66 | 108 | 66 | 42 | 0 | **0.611** | **1.000** |
+| supabase-auth | 271 | 50 | 78 | 50 | 28 | 0 | **0.641** | **1.000** |
+| all three | 351 | 66 | 105 | 66 | 39 | 0 | **0.629** | **1.000** |
+
+**T-0311 (2026-09-24) moved supabase-auth by three false positives and no
+true positive**, and the table above carries it. The neighbouring-column
+rule's second arm no longer sweeps a signal-less character column whose
+samples are an enumeration or all one identifier shape (ARCHITECTURE.md §4's
+T-0311 amendment), and three supabase-auth columns were exactly that:
+`auth.users.aud` and `auth.users.role` (the single value `authenticated`)
+and `auth.identities.provider` (three provider names), all labelled
+not-personal — 81 → 78 predicted, 31 → 28 false positives, precision 0.617 →
+0.641, recall unchanged at 1.000. django and rails-activestorage did not
+move. This was measured as a before/after delta rather than re-scored from a
+full run: each schema loaded from its four scripts and classified by
+`lazyslice classify --json` with the binary before the change and after,
+every column's masked-or-copied verdict compared. The other seven schemas,
+which have no truth set, moved 24 columns between them and none is personal
+data; THREAT_MODEL.md T1's T-0311 amendment lists them.
 
 The first measurement of this table, before T-0104, was supabase-auth 62
 predicted, 40 TP, 22 FP, 10 FN — precision 0.645, recall 0.800 — and all three
