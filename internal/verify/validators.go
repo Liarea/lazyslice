@@ -265,34 +265,95 @@ var secretExemptColumns = map[string]bool{
 // names count as the credential entry's hits again. See fileTally.
 const namedFileShare = 0.2
 
-// snakeColumnName lower-cases a column name and breaks it into words at a
-// lower-case letter or digit followed by a capital and at every character
-// that is not a letter or a digit, joining them with "_": the subset of
-// internal/classify's normaliseName that secretExemptColumns' three names
-// need, so that `componentName` is exempt here exactly when it is there.
+// snakeColumnName lower-cases a column name and breaks it into words at every
+// boundary snakeNeedsBreak names, and at every character that is not a letter
+// or a digit, joining them with "_": internal/classify's normaliseName
+// (rulepack.go), ported rune-for-rune rather than shared, so that
+// `componentName`, `TYpe`, `KLass` and `ComponentNAme` are all exempt here
+// exactly when their normaliseName form is exempt there.
+//
+// It is a port, not a call, because this package's import graph does not
+// reach internal/classify, and internal/textsig -- the leaf both packages
+// already share for value validators -- is outside the paths T-0361 (and this
+// finding, its review round) authorized; moving the fold there so both
+// packages call one function is filed separately (see tracker note below).
+// Until then the two copies are kept in step by hand, like the rest of this
+// file: a change to normaliseName's word-boundary rules must be mirrored here.
+//
+// An underscore is kept wherever it appears, including a leading one, exactly
+// as normaliseName keeps it: normaliseName's isNameRune treats '_' as a name
+// character in its own right, not as a separator to be folded away at a
+// boundary, so "_type" normalises to "_type" there and must not become "type"
+// here. An earlier version of this function ran every non-alphanumeric byte
+// -- '_' included -- through the "insert a separator, but only once there is
+// something to separate" branch, which silently dropped one at the start of
+// the name: "_type" became "type" here while staying "_type" in
+// internal/classify, so a Rails polymorphic `_type` column (not on either
+// package's exempt list) read as the exempt `type` in this net alone --
+// looser than the classifier, T-0361, the T-0315 review round's finding 1.
+//
+// A second, narrower gap survived that fix (T-0361's own review round): this
+// function only ever broke on a lower-or-digit-to-upper transition, where
+// normaliseName's needsBreak also breaks on a letter-to-digit transition, a
+// digit-to-letter transition, and the second capital of an acronym run
+// followed by a lower-case letter ("IDToken" -> "id_token"). Without the
+// acronym-run rule, `TYpe` folded to `t_ype` here but `type` in
+// internal/classify -- exempt there, not exempt here, so a quoted `"TYpe"`
+// column of credential-shaped values was skipped by internal/classify and
+// then refused by this net for the same reason T-0361 exists: the two
+// packages disagreeing about what a name means. snakeNeedsBreak below ports
+// all four of needsBreak's rules so the two functions break identically.
 func snakeColumnName(s string) string {
-	var b strings.Builder
-	b.Grow(len(s) + 4)
-	prev := byte(0)
-	for i := 0; i < len(s); i++ {
-		c := s[i]
+	runes := []rune(s)
+	out := make([]rune, 0, len(runes)+4)
+	for i, r := range runes {
+		if i > 0 && snakeNeedsBreak(runes, i) && len(out) > 0 && out[len(out)-1] != '_' {
+			out = append(out, '_')
+		}
 		switch {
-		case c >= 'A' && c <= 'Z':
-			if (prev >= 'a' && prev <= 'z') || (prev >= '0' && prev <= '9') {
-				b.WriteByte('_')
-			}
-			b.WriteByte(c - 'A' + 'a')
-		case (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c >= 0x80:
-			b.WriteByte(c)
+		case r >= 'A' && r <= 'Z':
+			out = append(out, r-'A'+'a')
+		case snakeIsNameRune(r):
+			out = append(out, r)
 		default:
-			if b.Len() > 0 && prev != '_' {
-				b.WriteByte('_')
-				c = '_'
+			if len(out) > 0 && out[len(out)-1] != '_' {
+				out = append(out, '_')
 			}
 		}
-		prev = c
 	}
-	return b.String()
+	return string(out)
+}
+
+// snakeIsNameRune is internal/classify's isNameRune (rulepack.go): see
+// snakeColumnName's doc comment for why this is a port and not a call.
+func snakeIsNameRune(r rune) bool {
+	return r == '_' || (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') ||
+		(r >= 'A' && r <= 'Z') || r > 127
+}
+
+// snakeNeedsBreak is internal/classify's needsBreak (rulepack.go): a token
+// boundary falls immediately before runes[i] on a lower-or-digit-to-upper
+// transition ("EmailAddress"), a letter-or-upper-to-digit transition
+// ("address2"), a digit-to-letter transition ("2fa" -> "2_fa"), and on the
+// second capital of an acronym run immediately followed by a lower-case
+// letter ("IDToken" -> "id_token"). See snakeColumnName's doc comment for why
+// this is a port and not a call.
+func snakeNeedsBreak(runes []rune, i int) bool {
+	prev, cur := runes[i-1], runes[i]
+	upper := func(r rune) bool { return r >= 'A' && r <= 'Z' }
+	lower := func(r rune) bool { return r >= 'a' && r <= 'z' }
+	digit := func(r rune) bool { return r >= '0' && r <= '9' }
+	switch {
+	case (lower(prev) || digit(prev)) && upper(cur):
+		return true
+	case (lower(prev) || upper(prev)) && digit(cur):
+		return true
+	case digit(prev) && (lower(cur) || upper(cur)):
+		return true
+	case upper(prev) && upper(cur) && i+1 < len(runes) && lower(runes[i+1]):
+		return true
+	}
+	return false
 }
 
 // validators is the set: internal/classify's twelve value validators, in its

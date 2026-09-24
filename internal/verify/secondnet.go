@@ -560,11 +560,6 @@ func (s *state) netColumn(ctx context.Context, col ref.ColumnRef, mode netMode) 
 			// T-0316: the card entry this column's name does not select.
 			continue
 		}
-		if val.exemptColumns[snakeColumnName(col.Column)] {
-			// T-0315: a class or component name column, which
-			// internal/classify never asks this validator about either.
-			continue
-		}
 		if val.requiresCorroboration && !corroborated {
 			// T-0187 third review round, finding 1: this validator's ratio,
 			// however tuned, cannot tell a sparse column of assigned
@@ -583,9 +578,25 @@ func (s *state) netColumn(ctx context.Context, col ref.ColumnRef, mode netMode) 
 		// zero and scoreHits says nothing about it), and a text column holding
 		// a document is judged twice over two sets of values that have nothing
 		// to do with each other.
-		ownHits := files.credentialHits(val, own.hits[i], own.nonNull)
-		if !scoreHits(val, ownHits, own.nonNull, distinctHits) &&
-			!scoreHits(val, leaf.hits[i], leaf.nonNull, 0) {
+		//
+		// exemptColumns (T-0315, narrowed T-0361) is asked of the column's own
+		// values only, never of leaf.hits: internal/classify's entropyExemptNames
+		// exempts a `type`/`klass`/`component_name` *column's own scalar value*
+		// -- a Rails STI class name the application constantizes -- and says
+		// nothing about a document a same-named jsonb column happens to hold.
+		// classify's jsonSignal never reads the exemption at all (it has no
+		// column-name context at a leaf), so a jsonb `type` column whose leaves
+		// carry a credential-shaped string is a leak neither net may wave
+		// through: skipping leaf.hits here on the strength of the column's own
+		// name would be looser than the classifier, which is exactly what
+		// T-0315's review found and T-0361 closes.
+		var ownHits int64
+		ownFails := false
+		if !val.exemptColumns[snakeColumnName(col.Column)] {
+			ownHits = files.credentialHits(val, own.hits[i], own.nonNull)
+			ownFails = scoreHits(val, ownHits, own.nonNull, distinctHits)
+		}
+		if !ownFails && !scoreHits(val, leaf.hits[i], leaf.nonNull, 0) {
 			continue
 		}
 		s.fail(&Refusal{

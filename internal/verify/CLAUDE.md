@@ -1667,6 +1667,62 @@ must still refuse: five secret-shaped values in an ordinary column, a column
 of file names half of which carry a dictionary name, and a column of dotted
 handles (`katherine.johnson84`) under a neutral name.
 
+**Two ways this net had drifted looser than the classifier, both closed at
+T-0361 (the T-0315 review's finding).**
+
+- **`snakeColumnName` used to drop a leading underscore, so `_type` read as
+  the exempt `type`.** `internal/classify`'s `normaliseName` keeps every
+  underscore, leading or not, because its `isNameRune` treats `_` as a name
+  character rather than a separator; `snakeColumnName` ran `_` through the
+  "insert one separator, but only once there is something to separate"
+  branch like any other punctuation, which silently drops one at position
+  zero. `normaliseName("_type")` is `"_type"` (not on `entropyExemptNames`,
+  three exact keys and no more); `snakeColumnName("_type")` used to be
+  `"type"` (on `secretExemptColumns`) — a Rails polymorphic `_type` column
+  read as exempt here while the classifier would still ask the entropy
+  question about it. `snakeColumnName` now keeps `_` unconditionally, the
+  same case the letter/digit branch already handles, and
+  `TestTheSecondNetAgreesWithTheClassifierAboutEntropy`'s `"a _type column"`
+  case pins that a column literally named `_type` still refuses on five
+  secret-shaped values.
+- **`exemptColumns` used to skip a column's JSON-leaf tally along with its
+  own value.** The scoring loop's `continue` on an exempt name skipped both
+  `own.hits` (a `type`/`klass`/`component_name` column's own scalar value —
+  what T-0315 exists for) and `leaf.hits` (the string leaves of a
+  *document* the same column holds, if it is `json`/`jsonb`/`hstore`).
+  `internal/classify`'s exemption is read at `entropyExemptNames[normaliseName(col.Name)]`
+  before `bestSignal` ever runs, which answers only the column's own
+  direct-value question; `internal/classify`'s document path (`jsonSignal`,
+  `classify.go`'s leaf walk) carries no column-name context at all and never
+  reads the exemption, so a `jsonb` column named `type` whose leaves hold a
+  credential-shaped string is exactly as unmasked there as any other
+  document's leaves. Skipping `leaf.hits` here on the strength of the
+  column's own name was this net agreeing with a question the classifier
+  never asked. `netColumn` now reads `exemptColumns` only when computing
+  `ownHits`; `leaf.hits` is scored unconditionally, as it is for every other
+  entry. `TestTheSecondNetScansDocumentLeavesOfAnExemptColumnName` pins a
+  `jsonb` column named `type` whose leaf carries a secret-shaped string.
+- **`snakeColumnName` still did not break on an acronym run, so `TYpe`,
+  `KLass` and `ComponentNAme` read as the exempt `type`, `klass` and
+  `component_name` here while `internal/classify`'s `normaliseName` folds
+  them to `t_ype`, `k_lass` and `component_n_ame` — none on
+  `entropyExemptNames` — because `normaliseName`'s `needsBreak` also breaks
+  on the second capital of an acronym run immediately followed by a
+  lower-case letter, a rule `snakeColumnName` never had (T-0361's own review
+  round, finding 1). The fix ports `needsBreak` and `isNameRune` into this
+  package rather than sharing them through `internal/textsig`: that package
+  is the leaf `internal/classify` and this package already share for the
+  *value* validators, and moving the *name*-folding rule there so both
+  callers run one function instead of two kept in step by hand would close
+  this class of drift for good, but `internal/textsig` was outside this
+  task's paths, so it is filed instead (T-0365, E9). Until that lands,
+  `snakeNeedsBreak` and `snakeIsNameRune` in `validators.go` are
+  `normaliseName`'s `needsBreak` and `isNameRune`, copied rune-for-rune, and
+  a change to either in `internal/classify/rulepack.go` must be mirrored
+  here by hand. `TestTheSecondNetAgreesWithTheClassifierAboutEntropy`'s
+  `"TYpe"`, `"KLass"` and `"ComponentNAme"` cases pin that all three still
+  refuse five secret-shaped values instead of reading as exempt.
+
 ## The card entries are split by column name (T-0316)
 
 `internal/classify`'s card entry now wants a known issuer prefix
