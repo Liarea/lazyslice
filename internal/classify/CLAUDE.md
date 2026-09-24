@@ -58,6 +58,10 @@ exemption; add a way for a category's confidence to be lowered by config.
 - `classify.go` — the six passes: base signals, bytea in a person-shaped table,
   the neighbouring-column rule, the two foreign-key passes (`keyChildren`, then
   FK propagation and shared names), the yml prior, then the threshold.
+- `spare.go` — what spares a signal-less column from the neighbouring-column
+  sweep (T-0311): the enumeration thresholds, the identifier shapes it reads
+  from `internal/textsig`, and the dictionary, special-category and gender
+  guard every spare gives way to. See the T-0311 section below.
 - `codes.go` — the five `event.Code`s the classify stage renders; each has a row
   in `internal/event/catalogue.yml`.
 - `framework.go` — no file of that name here; see the T-0314 section below for
@@ -1553,3 +1557,101 @@ and `TestFKPairRefusedWhenPartnerHasTypeConflict` still hold this package's
 own half of it — neither column masked, both `Refused` naming the other —
 and `internal/plan/fkpair_test.go`'s `TestFKPairIsRefusedAtPlan` holds the
 exit-12 refusal that Decision now drives.
+
+## The sweep spares enumerations and identifier shapes (T-0311)
+
+Dogfood session 1 ran a production Rails schema of 143 tables, and
+`unknownColumnsBesideCertain` swept every signal-less character column of any
+table with a `certain` email, IP or search-token column into `free_text`:
+`role`, `ui_mode`, `os_type`, `state`, `log_level`, `timezone`, a text uuid,
+colours, asset paths. The copy held filler where the application expects
+`admin` or `linux` and did not boot. Those columns are not what the rail was
+written for — a free-text column nobody could look inside — because their
+samples say what they are.
+
+`base` now records `work.spare` (`sparedBy`, `spare.go`) for every character
+column with no decision of its own. Three things spare a column, each with its
+own reason fragment (`spared_unique`, `spared_identifier`, `spared_enum` in
+`reasons.go`), and a spared column is left at `CatNone` and copied. The order
+in the sweep is load-bearing: the unique-index skip runs first, where
+`raisableUnknown` always ran it; then `fkPairs`; and only when `fkPairs`
+agrees does `spared` get asked about the two sample shapes. A first draft
+asked `spared` before `fkPairs`, and `make torture` caught what that cost:
+`testdata/regressions/037`'s child is an enumeration of placeholder strings
+whose FK parent is a name-matched `dob` carrying a type conflict, and sparing
+the child skipped the T-0257 pair refusal and copied both ends under exit 0.
+A partner's own decision is evidence about the values on both sides of the
+join, so it outranks the child's sample shape. `031` went the other way and
+correctly: its child is four ISO codes repeated, its partner is
+signal-less, so the pair is spared, both ends copied in agreement, and the
+file moved from `exit 12` to `ok` with `not-masked:` and `equal-masked:`.
+
+- **A unique index.** `raisableUnknown` always skipped it; it was the one
+  silent skip, and the check moved into `spared` so the line says so.
+- **Every sample one identifier shape**, at `minSamples` or more:
+  `textsig.ValidUUID`, `HexDigest`, `SemanticVersion`, `HostnameShape`,
+  `PathShape`, tried in that order. The two made of words (hostname, path)
+  are refused on any value carrying a dictionary name or a special-category
+  term (`carriesAPerson`): `/home/grace/...` is still swept.
+- **An enumeration**: `enumMinSamples` (10) non-NULL samples or more, at
+  most `enumMaxDistinct` (20) distinct values, every one seen at least twice,
+  every value an `enumTokenRE` token (ASCII, no whitespace, at most 64
+  characters), and none carrying a person (`carriesAPerson`), a gender or
+  title term (`genderTerms`), a blood group or marital status
+  (`attributeTerms`), a run of four digits or more, hyphens, dots, slashes and `+` allowed between them (`digitRun`: a postcode, a ZIP+4, a local phone number), or a date
+  (`datelike`).
+
+**The T-0311 review round.** The first landing was probed with personal
+columns under neutral names beside a certain email, and each was spared and
+copied where it had been swept: unpadded dotted dates of birth
+(`5.3.1985`) as semantic versions, `05/Mar/1985` and `/home/jsmith` as paths,
+and blood groups, marital status, ZIP codes, ISO dates, logins and CamelCase
+handles as enumerations. `textsig.SemanticVersion` now refuses a dotted date
+with a four-digit year and `textsig.PathShape` wants an application-path
+marker (its doc comment has them); here, `attributeTerms`, the four-digit
+floor and `datelike` guard the enumeration, and `carriesAPerson` splits a
+CamelCase value at its case boundaries before the dictionary reads it, which
+guards the hostname and path shapes too. A second review round found the
+four-digit floor read only a bare digit run, so a ZIP+4 (`94105-1234`) or a
+local phone number (`555-1234`), two parts where `datelike` wants three, was
+still an enumeration at `sparedBy`; `digitRun` now counts digits across the
+separators. End to end those two parsed as phone numbers under a guessed
+region and were masked anyway, so the control that proves the guard uses
+ZIP+4 codes no guessed region parses (`00501-0001`). `TestSweepSparesEnumIdentifierAndUniqueColumns`
+has one control per guard, each confirmed by removing the guard and watching
+the control be copied. Logins (`jsmith`) and attributes outside the closed
+lists stay THREAT_MODEL.md T1's stated residual, with the page-clustered
+sampling that makes "each seen twice" easy for them to meet.
+
+**Every threshold is a claim about all the samples, never a ratio**, and the
+guards are what keep it from being the T1 hole: the ASCII-token rule is what
+keeps a repeated native-script name (regressions `030`, `035`; the control in
+`043` and in `TestSweepSparesEnumIdentifierAndUniqueColumns`) swept however
+often it repeats, and the dictionary guard is what keeps a colour enumeration
+with `green` in it swept. Removing either guard fails that test's controls —
+checked by reverting them, not assumed.
+
+**What it moves beyond the rail.** `sameColumnName` shares a category between
+same-named columns, and the category it shared from a swept column was
+`free_text` reached on no evidence; with the swept column spared, a
+same-named column elsewhere that had nothing of its own is copied too.
+Measured over the torture corpus that is twenty columns (metabase's `type`,
+odoo's `model`, calcom's `weekStart`), none personal. The reverse still
+holds: a spared column that a same-named column *with* evidence reaches is
+raised by `sameColumnName` as before, and its line carries both fragments.
+THREAT_MODEL.md T1's T-0311 amendment has the whole measurement and the
+residual; ARCHITECTURE.md §4's T-0311 amendment states the rule.
+
+**A committed lazyslice.yml keeps the old mask.** The yml records each
+column's confidence, and `applyPrior` raises a column back to what the file
+says (`yml_column`; ADR-004 lets a committed file only tighten). So a project
+whose yml was written before T-0311 still masks a column this rule now
+spares, until the file is regenerated with `--reconfigure` or the entry is
+edited — the safe direction, and deliberately not special-cased here.
+
+**Owed outside this package (T-0350).** `testdata/regressions/043` pins the
+spared columns with the `not-masked:` key, whose failure message in
+`internal/invariants/torture_test.go` was written for T-0221 and always says a
+guessed-region phone hit was masked. A regression of this rule would fail
+there correctly but name the wrong cause; the harness is outside this task's
+paths.

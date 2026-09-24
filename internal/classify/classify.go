@@ -142,6 +142,11 @@ type work struct {
 	// and this fallback still covers every other one). It is never acted on
 	// without corroboration.
 	guessedPhone *valueSignal
+	// spare is what the samples of a signal-less character column say it is
+	// -- one identifier shape throughout, or an enumeration -- set in base()
+	// and read only by unknownColumnsBesideCertain, which spares such a column
+	// from its sweep into free_text and prints why (T-0311; spare.go).
+	spare spareShape
 }
 
 // state is one Classify call.
@@ -845,6 +850,13 @@ func (st *state) base() {
 					float64(hit.matched)/float64(hit.total) >= validatorThreshold {
 					w.guessedPhone = hit
 				}
+			}
+			// T-0311: only a column the sweep could reach is described --
+			// character family, no decision of its own. Whether it is then
+			// spared is unknownColumnsBesideCertain's call, which alone knows
+			// whether the table has a certain neighbour at all.
+			if isCharacterFamily(ct.Family) && w.d.Category == pipeline.CatNone && w.d.Confidence == pipeline.ConfNone {
+				w.spare = sparedBy(dict, values)
 			}
 		}
 	}
@@ -1711,7 +1723,7 @@ func (st *state) neighbouringColumns() {
 // raises a column with evidence of its own, because this arm has no evidence
 // about *this* column to weigh against the false positive.
 //
-// Five exclusions, and each is a run this rule must not break rather than a
+// The exclusions, each a run this rule must not break rather than a
 // softening of it:
 //
 //   - A never-masked column (a generated column, a surrogate key, a FK
@@ -1727,6 +1739,13 @@ func (st *state) neighbouringColumns() {
 //     domain of two characters and reads as an unknown text column to every
 //     signal in §4; masking one is a plan refusal for the same reason, and it
 //     is not personal data.
+//
+//   - A column whose samples are an enumeration or all one identifier shape
+//     (T-0311, dogfood session 1: a production Rails copy that did not boot
+//     because `role`, `state` and a text uuid held free_text filler). This
+//     and the unique-index exclusion above are skipped in the sweep loop, and each
+//     prints why on the column's line; spare.go has the thresholds and the
+//     guard that keeps a name out of both.
 //
 //   - A column at either end of a validated foreign key used to be excluded
 //     outright here (`indexFKColumns`, T-0239's fix-round review), on the
@@ -1853,7 +1872,29 @@ func (st *state) unknownColumnsBesideCertain() {
 			if !st.raisableUnknown(cref, w) {
 				continue
 			}
+			if st.unique[cref] {
+				// Skipped before fkPairs, exactly as raisableUnknown used to
+				// skip it; T-0311 only makes the line say so.
+				w.frags = append(w.frags, render("spared_unique", quoteTable(t.Ref), certain))
+				continue
+			}
 			partners, blocked, ok := st.fkPairs(cref)
+			if ok {
+				if frag := st.spared(w, t.Ref, certain); frag != "" {
+					// T-0311: the column's own samples, or its unique index,
+					// say the sweep would be wrong here; the line says which.
+					// A spared column is not raised and its foreign-key
+					// partners are not touched on its account, so no pair is
+					// split either. It is asked only once fkPairs has agreed:
+					// a partner carrying a decision of its own (a name hit, a
+					// type conflict -- testdata/regressions/037's `dob`) is
+					// evidence about the values on both ends of the join, and
+					// the child's enumeration-shaped samples must not copy
+					// the pair past the T-0257 refusal below.
+					w.frags = append(w.frags, frag)
+					continue
+				}
+			}
 			if !ok {
 				// T-0253: cref is at either end of a validated foreign key
 				// and its direct partner cannot be raised the same way
@@ -2105,9 +2146,9 @@ func (st *state) raisableUnknown(cref ref.ColumnRef, w *work) bool {
 	if !isCharacterFamily(w.family) {
 		return false
 	}
-	if st.unique[cref] {
-		return false
-	}
+	// The unique-index exclusion that stood here is the sweep loop's now (T-0311), so
+	// that a column the sweep skips for it says so on its line.
+	//
 	// T-0253: a validated foreign key no longer excludes cref outright here.
 	// unknownColumnsBesideCertain's own fkPairs is what a column at either
 	// end of one is checked against, after this gate — raised together with
@@ -2118,6 +2159,39 @@ func (st *state) raisableUnknown(cref ref.ColumnRef, w *work) bool {
 		return false
 	}
 	return true
+}
+
+// spared is the two skips dogfood session 1 asked unknownColumnsBesideCertain
+// for (T-0311), returning the reason fragment that says why the column was not
+// swept, or "" when nothing spares it. The column has already passed
+// raisableUnknown, is not under a unique index (the third skip, older than
+// T-0311 and silent until it, which the caller prints itself ahead of
+// fkPairs, where it always ran), and fkPairs has agreed its partners could be
+// raised with it:
+//
+//   - Every sample one identifier shape (spare.go's identifierShapes: uuid,
+//     hex digest, semantic version, hostname, path), the hostname and path
+//     shapes only when no value carries a dictionary name or a
+//     special-category term.
+//   - An enumeration: at least enumMinSamples non-NULL samples, at most
+//     enumMaxDistinct distinct values, each seen at least twice, every value
+//     an ASCII token with no whitespace, and none a dictionary name, a
+//     special-category term or a gender term.
+//
+// Neither moves the decision: the column stays at CatNone and is
+// copied, exactly as a column in a table with no certain neighbour is, and the
+// line it gets beside "nothing recognised in N samples" is the account of why
+// the neighbour did not change that. THREAT_MODEL.md T1's T-0311 amendment is
+// the measurement and the residual.
+func (st *state) spared(w *work, table ref.TableRef, certain int) string {
+	switch {
+	case w.spare.identifier != shapeNothing:
+		return render("spared_identifier", quoteTable(table), certain, w.spare.total, w.spare.identifier)
+	case w.spare.enum:
+		return render("spared_enum", quoteTable(table), certain,
+			w.spare.distinct, w.spare.total, enumMaxDistinct, enumMinSamples)
+	}
+	return ""
 }
 
 // isCharacterFamily is the set free_text's masker can write into: rules.yml's

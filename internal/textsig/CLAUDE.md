@@ -91,6 +91,23 @@ blocking control until T-0122 lands. That is the concrete form of the rule above
 **a validator narrowed here is narrowed for both nets, and both need an answer
 in the same change.**
 
+**The identifier shapes are not validators** (`identifier.go`, T-0311).
+`HexDigest`, `SemanticVersion`, `HostnameShape` and `PathShape` (with
+`ValidUUID`, which was already here) answer whether a value is a machine
+identifier, and nothing masks a column because one matches: `internal/classify`
+reads them only to *spare* a signal-less column from the neighbouring-column
+sweep, and it owns the minimum count and the dictionary guard over the two
+shapes made of words. `internal/verify` does not call them, so they narrow
+nothing in the second net. Each errs towards refusing a value that could be
+personal — a slashed date (with a month name or without) is not a path, nor
+is a path with no application-path marker (a file extension, a leading `/`
+with three segments, an IANA `Area/Location` zone), `first.last` is not a
+hostname, an all-digit run is not a hex digest, and a version that also reads
+as a dotted date with a four-digit year (`5.3.1985`) is not a version
+(`DottedDate`, the T-0311 review) — and `TestIdentifierShapesRefusePersonalLookalikes`
+holds those edges. `DottedDate` is a guard in the same sense: nothing masks
+on it.
+
 **Test.** `go test ./internal/textsig/...`. `textsig_test.go` holds T-0100's
 rule in both directions — a URL is a URL and is not a secret, and the two secret
 shapes stay secrets. `nationalid_test.go` (T-0187) is the twelve formats' own
