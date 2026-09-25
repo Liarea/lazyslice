@@ -27,12 +27,19 @@ const maxRootCandidates = 5
 // It asks nothing at all, and takes the default silently, whenever any of
 // these hold: --root was given; this request pins a Reviewed root from an
 // earlier --tui pass (Request.Reviewed, T-0271 review finding 5); a committed
-// lazyslice.yml already names a root; the run is headless by discover's own
-// definition (--yes, or no controlling terminal); or discovery already asked
-// Q1 or Q1' this run (r.askedQ1, from discover.Result.Asked — the
-// one-question rule). Whatever happens, the chosen table is printed as a
-// decision beside --root, exactly as the source and target decisions already
-// print regardless of how their own endpoint was decided.
+// lazyslice.yml already names a root; or the run is headless by discover's
+// own definition (--yes, or no controlling terminal). Whatever happens, the
+// chosen table is printed as a decision beside --root, exactly as the source
+// and target decisions already print regardless of how their own endpoint was
+// decided.
+//
+// Whether discovery asked Q1 or Q1' earlier in the same run is deliberately
+// not one of those conditions. ADR-008's one-question rule let Q1 take the
+// run's only question and Q2 then defaulted silently, which in dogfood
+// session 3 left the root as a decision line nobody read as a choice they
+// could have made (T-0331). ADR-017 (proposed) replaces the rule with "no
+// question whose default was already shown": the target question never shows
+// a root, so a first run at a terminal with both open asks both (T-0343).
 //
 // The ranking is internal/plan's own (RankRoots, over CollapseForRanking's
 // collapsed tables and foreign keys), exported for exactly this: this
@@ -98,7 +105,7 @@ func (r *run) rootQuestion() error {
 	def := ranked[0]
 	table, reason := def.Table, def.Reason()
 
-	if !r.askedQ1 && !discover.Headless(discover.Options{
+	if !discover.Headless(discover.Options{
 		Yes: r.req.Yes, Prompter: r.req.prompter, NoControllingTerminal: r.req.noTerminal,
 	}) {
 		chosen, err := r.askRoot(def, ranked, scoped)

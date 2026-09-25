@@ -130,7 +130,8 @@ one (ADR-010's recall boundary), so there is nothing for the reason to name
 `root public.customers (named by --root) — --root` is the one line `--root`
 answers outright: without it (and with no root already recorded in
 `lazyslice.yml`), this run would have stopped at a terminal to ask
-`root table? [customers]` first — ADR-008's one blocking question — and
+`root table? [customers]` first — ADR-008's Q2, the only question open once
+both endpoints are named (ADR-017) — and
 printed the same decision line either way once it had an answer.
 
 ## Masked values differ from the source

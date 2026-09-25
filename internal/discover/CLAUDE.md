@@ -35,8 +35,11 @@ why. `pipeline.Provisioner` is removed: it was dead, nothing implemented it.
   called unconditionally. `Options.dial` builds a **read-only** Docker client
   (`dockerAPI` has `Ping`, `ContainerList`, `ContainerInspect` and nothing
   else); `Options.provisioner` is the separate seam that can write.
-- One blocking question per run, and Q1 and Q1′ are mutually exclusive
-  branches of the same no-target state. A prompt is written to stderr and read
+- One blocking question per ladder item, and Q1 and Q1′ are mutually
+  exclusive branches of the same no-target state. The target question no
+  longer spends the whole run's budget: ADR-017 (proposed, T-0343) lets
+  `internal/core` ask Q2 after Q1 or Q1′ at a terminal, so `Result.Asked` is
+  still reported but nothing in core reads it. A prompt is written to stderr and read
   from the controlling terminal; `os.Stdin` is never touched.
   `TestPipedStdinIsNotAnAnswer` is ADR-008 §7's own owed test and the one that
   matters — a pipe holding `y`, a terminal that answers nothing, and the
@@ -66,7 +69,7 @@ candidate.
 - **`Resolve` is the first-run entry point, beside `Discover`.**
   `pipeline.Discoverer.Discover` returns candidates and decides nothing, which
   is right for a stage interface and not enough for first run: §9's selection
-  rules, the one blocking question, the controlling terminal and an ADR-005
+  rules, the target question, the controlling terminal and an ADR-005
   exit code have no carrier on that interface. `Resolve(ctx, Options, sink)
   (Result, error)` is that carrier, and `Discover` is implemented in terms of
   the same ladder walk.

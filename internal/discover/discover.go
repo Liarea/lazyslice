@@ -4,8 +4,8 @@
 // variables and .env files, libpq settings, running Postgres containers,
 // exited containers, compose service names (ARCHITECTURE.md §9, ADR-008).
 //
-// Discovery is why the first run asks at most one question. Source is never a
-// question: it is the most-local reachable candidate with the most tables that
+// Discovery is why the first run asks so little: at most the target question,
+// and only when nothing target-shaped was found. Source is never a question: it is the most-local reachable candidate with the most tables that
 // is not the target, and no source at all is exit 3 with the ladder printed and
 // a command to run.
 //
@@ -15,7 +15,7 @@
 // is the gate's job, in internal/pg, after discovery.
 //
 // Rungs 0 to 4 are here; rung 5 (compose service names) is a naming source and
-// contributes no candidate. The one blocking question is here too: Q1 offers to
+// contributes no candidate. The target question is here too: Q1 offers to
 // create a target container and Q1' offers to start a stopped one, both through
 // internal/discover/provision, which is the only code in the tree that creates
 // or starts one (ADR-008 §6).
@@ -158,7 +158,7 @@ type Options struct {
 	// starting a container is internal/discover/provision's alone, and nothing
 	// outside this file may hand this package a client that can write.
 	provisioner func(dockerctx.Endpoint) (provision.Provisioner, error)
-	// Prompter answers the one blocking question. Nil means decide from --yes
+	// Prompter answers the target question (Q1 or Q1'). Nil means decide from --yes
 	// and the controlling terminal as today (ADR-008 §7); a test — in this
 	// package, or internal/core's own (T-0184, ADR-013 review, the 2026-09-16
 	// reverify) — supplies its own so that isHeadless finds somebody to ask
@@ -226,10 +226,10 @@ type Result struct {
 
 	// Asked is true when this call put Q1 or Q1' to the controlling terminal —
 	// whatever the answer, and regardless of whether the run went on to
-	// provision or start anything. It carries no identifier, on purpose:
-	// ADR-008's one-question rule only needs a caller with a question of its
-	// own (internal/core's Q2, ADR-008 §6) to know that this run's one
-	// question has already been spent, not which one it was. It is false for
+	// provision or start anything. It carries no identifier, on purpose.
+	// internal/core once read it to skip its own Q2 under ADR-008's
+	// one-question rule; ADR-017 (proposed, T-0343) asks Q2 after Q1 or Q1'
+	// when both are open, so nothing in core reads it now. It is false for
 	// --create-target (a flag is an answer, never a question) and for every
 	// path that never reaches a terminal at all: headless, no usable Docker
 	// endpoint, both endpoints named outright.
@@ -279,8 +279,8 @@ func (ladder) Discover(ctx context.Context, workdir string, sink event.Sink) ([]
 	return out, nil
 }
 
-// Resolve walks the ladder and answers the one blocking question, returning the
-// source and target the run should use.
+// Resolve walks the ladder and answers the target question when there is one,
+// returning the source and target the run should use.
 //
 // It is the first-run entry point ARCHITECTURE.md §9 describes, and it is what
 // `lazyslice` with no arguments runs. An endpoint the operator named

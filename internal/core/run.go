@@ -290,14 +290,13 @@ type run struct {
 	// target (T-0184, ADR-013 review finding 3); it is false, and unused,
 	// whenever both endpoints were named and the ladder never ran.
 	headless bool
-	// askedQ1 is discover.Result.Asked (resolveEndpoints): true when the
-	// ladder actually put Q1 or Q1' to the controlling terminal this run,
-	// whatever the answer. rootQuestion (ADR-008 §6's Q2) reads it so the run
-	// asks at most one blocking question: it is false, correctly, for every
-	// mode that never calls discover.Resolve at all (resolveEndpoints's own
-	// early return for anything but ModeRun) — those modes never asked Q1 or
-	// Q1' because no ladder walk with a target-shaped decision ever ran.
-	askedQ1 bool
+	// resolve is the ladder resolveEndpoints calls: nil, which is every real
+	// run, is discover.Resolve. It exists for one test (questions_test.go,
+	// T-0343) that needs Q1 put to a terminal and answered yes before Q2, a
+	// state discover.Resolve reaches only by dialling a real source for its
+	// major and provisioning a real container. Like Request's prompter and
+	// noTerminal, no flag and no caller outside this package's tests sets it.
+	resolve func(context.Context, discover.Options, event.Sink) (discover.Result, error)
 	// qRoot is Q2's own answer when it is a genuine override — named at the
 	// prompt, whether typed directly or after a "?" — kept as a resolved
 	// ref.TableRef rather than fed back through r.req.Root as a re-rendered
@@ -760,7 +759,11 @@ func (r *run) resolveEndpoints(ctx context.Context) error {
 		// a Q1 that should never fire would open /dev/tty and wait.
 		NoControllingTerminal: r.req.noTerminal,
 	}
-	res, err := discover.Resolve(ctx, opts, r.sink)
+	resolve := discover.Resolve
+	if r.resolve != nil {
+		resolve = r.resolve
+	}
+	res, err := resolve(ctx, opts, r.sink)
 	if err != nil {
 		return refusalStop(err)
 	}
@@ -768,11 +771,9 @@ func (r *run) resolveEndpoints(ctx context.Context) error {
 	r.req.Target, r.targetProv, r.targetLabel = res.Target, res.TargetProvenance, res.TargetLabel
 	r.targetContainerID = res.TargetContainerID
 	r.targetNamed = res.TargetNamed
-	// ADR-008's one-question rule, for rootQuestion (Q2): res.Asked is true
-	// only when Q1 or Q1' actually reached the controlling terminal, so a
-	// headless Q1/Q1' that took its default with nobody to ask still leaves
-	// Q2 free to ask its own.
-	r.askedQ1 = res.Asked
+	// res.Asked is not kept. ADR-008's one-question rule once read it to
+	// stop rootQuestion (Q2) asking after Q1 or Q1' had; ADR-017 (proposed,
+	// T-0343) asks both when both are open, so nothing here needs to know.
 	// Kept for openTarget's gate step (T-0184, ADR-013 review finding 3):
 	// discover.Headless(opts) over the same Options the ladder was resolved
 	// with, rather than a second discover.Options literal built later —

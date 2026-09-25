@@ -356,32 +356,6 @@ func TestRootQuestionYmlRoot(t *testing.T) {
 	}
 }
 
-// TestRootQuestionQ1AlreadyAsked is ADR-008's one-question rule: once
-// discovery has put Q1 or Q1' to the terminal this run, Q2 asks nothing at
-// all and takes the default, whatever prompter is sitting there.
-func TestRootQuestionQ1AlreadyAsked(t *testing.T) {
-	c := &eventCollector{}
-	r := &run{
-		req:     normalise(Request{prompter: &fakeQ2Prompter{answers: []string{"public.orders"}}}),
-		sink:    c,
-		schema:  rootQuestionSchema(),
-		askedQ1: true,
-	}
-	if err := r.rootQuestion(); err != nil {
-		t.Fatalf("rootQuestion: %v", err)
-	}
-	if n := countEvents(c, CodeRootCandidate); n != 0 {
-		t.Errorf("%s sent %d time(s), want 0: Q1/Q1' already spent this run's one question", CodeRootCandidate, n)
-	}
-	d := rootDecision(t, c)
-	if got := d.Args[event.ArgTable]; got != "public.customers" {
-		t.Errorf("root = %q, want public.customers (the default, taken silently)", got)
-	}
-	if r.req.Root != "" {
-		t.Errorf("r.req.Root = %q, want empty: nothing was asked, so nothing was answered", r.req.Root)
-	}
-}
-
 // partitionedRootSchema reproduces the T-0271 review's finding 2: a
 // partitioned root (public.events) whose own leaf (public.events_2024_01,
 // Table.Parent set) carries a huge row count and the only inbound foreign

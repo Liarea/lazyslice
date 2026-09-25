@@ -81,7 +81,7 @@ func TestTheProjectsOwnRunningContainerIsChosenWithoutAQuestion(t *testing.T) {
 				t.Errorf("questions = %q, want none: the container this directory made is the target", asked.questions)
 			}
 			if res.Asked {
-				t.Error("Result.Asked is true, which would take Q2's one question away for nothing")
+				t.Error("Result.Asked is true, but no question was put to the terminal")
 			}
 			if _, ref, perr := dsn.Parse(res.Target); perr != nil || ref.Port != 5433 || ref.Database != "postgres" {
 				t.Errorf("target = %s (%v), want the running container's own database on 5433", ref, perr)

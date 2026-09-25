@@ -30,25 +30,24 @@ import (
 //     on someone else's daemon publishes on that host's interfaces, is not
 //     local, and lazyslice never removes a container.
 //  2. --create-target, which creates without asking. A flag is an answer, so
-//     the run's one blocking question is not spent on it.
+//     no question is asked for it.
 //  3. No usable Docker endpoint, and so nothing that could be started or
 //     created: an item with no safe default is not asked, the run stops, and
-//     it names --target (ARCHITECTURE.md §9's one-question rule).
+//     it names --target (ARCHITECTURE.md §9's question rule).
 //  4. Q1', when the only target-shaped candidate is a stopped container. It is
 //     asked *before* the gate runs, because a stopped container is not
 //     reachable and reachability is the precondition of every gate rule.
 //  5. Q1 otherwise.
 //
-// Q1 and Q1' are mutually exclusive, which is what keeps the run to one
-// blocking question.
+// Q1 and Q1' are mutually exclusive, which is what keeps the target to one
+// blocking question. The root question (Q2, internal/core) is asked after it
+// when it is open too (ADR-017, proposed, T-0343).
 //
 // The second return is Result.Asked: true only when Q1 or Q1' actually put a
 // question to the controlling terminal, whatever the answer. Every branch
 // that never reaches a terminal — --create-target (a flag is an answer, not a
 // question), no usable Docker endpoint, a headless Q1 or Q1' that took its
-// default with nobody to ask — reports false, which is what lets Q2
-// (internal/core, ADR-008 §6) tell "the one question was already spent" apart
-// from "nobody was there to spend it on".
+// default with nobody to ask — reports false.
 func noTarget(ctx context.Context, o Options, cands []found, source *found, dock dockerEndpoint, sink event.Sink) (*found, bool, error) {
 	if o.CreateTarget && !dock.usable() {
 		return nil, false, refuseDockerNotLocal(dock, sink)
@@ -104,8 +103,7 @@ func askQ1(ctx context.Context, o Options, source *found, dock dockerEndpoint, s
 	// source for a major it will not use and without claiming a port it will
 	// not publish. Nobody to ask is also nothing asked (Result.Asked stays
 	// false): the headless failure below is the same stop the answer "no"
-	// would produce, and it must not tell Q2 that this run's one question was
-	// spent when nobody was at a terminal to spend it.
+	// would produce, and nobody was at a terminal to ask.
 	p, done, ok := prompterFor(o)
 	if !ok {
 		return nil, false, refuse()
@@ -217,8 +215,8 @@ func provisionWith(ctx context.Context, o Options, dock dockerEndpoint, sink eve
 // the developer already has is neither creating nor destroying, so
 // THREAT_MODEL.md T2's headless rule does not require a flag for it. No is the
 // same stop the same state produces headlessly for Q1: exit 4 naming
-// --create-target, since one blocking question has already been asked and Q1
-// cannot be the follow-up.
+// --create-target, since Q1 and Q1' are one question about one target and Q1
+// cannot be the follow-up (ADR-008 §6 step 5, unchanged by ADR-017).
 //
 // database is the database a committed record names (ADR-016 §3), or empty for
 // the ladder's own Q1', which loads into the container's POSTGRES_DB. Without

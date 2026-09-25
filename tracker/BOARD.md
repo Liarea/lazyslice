@@ -8,8 +8,8 @@
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 0 | 0 | 108 | 0 | 0 |
-| E6 Launch | 6 | 11 | 0 | 35 | 0 | 0 |
-| E9 Later | later | 132 | 0 | 40 | 8 | 0 |
+| E6 Launch | 6 | 10 | 0 | 36 | 0 | 0 |
+| E9 Later | later | 133 | 0 | 40 | 8 | 0 |
 
 ## Open and in progress
 
@@ -114,7 +114,6 @@
 - T-0328 [open] E6 · The free_text masker fits its output to the input's length (opus)
 - T-0330 [open] E9 · internal/plan's chooseGroupMasker overwrites every masked column's masker with mask.Pick's default, including one the yml or a build named (sonnet)
 - T-0332 [open] E9 · internal/invariants/CLAUDE.md's contract says the suite imports only internal/testutil of ours; I2 now imports the mask module (T-0302) (haiku)
-- T-0333 [open] E6 · --create-target's container name doubles the prefix for a directory named lazyslice-* (sonnet)
 - T-0335 [open] E9 · Move internal/verify's tests off the deprecated mask.RoleWords, then delete it ()
 - T-0336 [open] E9 · tools/names still generates a words_corpus.go header saying no masker reads the Census lists ()
 - T-0338 [open] E9 · Bring the name-list docs outside mask/ in step with T-0304's Census switch ()
@@ -156,6 +155,7 @@
 - T-0381 [open] E9 · Amend README.md and SECURITY.md residual 4 for T-0317's network_id/phone name-veto widening ()
 - T-0382 [open] E9 · discover: T-0334 follow-ups: one 'ours' predicate; found.own exempts only postgres; the own container's rank against the name pattern; the second-run test proves run 2 loaded (sonnet)
 - T-0383 [open] E9 · free_text gets the ADR-015 vocabulary gate and redraw ()
+- T-0384 [open] E9 · CONCEPT.md's zero-config sentence still says a first run asks at most one blocking question ()
 
 ## Recently closed
 
@@ -175,6 +175,7 @@
 - T-0326 [done] E6 · A stray positional argument is a usage error, not 'the source did not report a server version' → done
 - T-0327 [done] E6 · A committed yml whose target is a container lazyslice created reconnects or re-provisions, and says which → done
 - T-0331 [done] E6 · Decide whether a first run may ask both the target question and the root question → done
+- T-0333 [done] E6 · --create-target's container name doubles the prefix for a directory named lazyslice-* → done
 - T-0334 [done] E6 · Discovery does not choose the empty target container lazyslice itself created, and offers to start a duplicate on the next port → done
 - T-0337 [cancelled] E9 · Move internal/verify's tests off mask.RoleWords, then delete RoleWords in the next mask minor → cancelled
 - T-0348 [done] E9 · verify's second net has no exemption for a framework metadata column that validates strongly → done
@@ -183,4 +184,3 @@
 - T-0361 [done] E6 · The second net's secret exemption agrees with the classifier: the '_type' normalisation and the JSON leaves → done
 - T-0364 [done] E6 · classify: apply a yml mask or raise before FK propagation, so a masked natural key masks its children → done
 - T-0368 [done] E9 · Reconcile ARCHITECTURE.md and docgen fixtures with T-0326's removal of the positional DSN → done
-- T-0369 [done] E6 · verify: the second_net hint names a --mask category the column's type accepts, or semi_structured for a json column → done
