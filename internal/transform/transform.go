@@ -70,6 +70,12 @@ type colPlan struct {
 	// name from one the masker never produced. Never for a document: a JSON
 	// leaf is masked under its own category and is never explained.
 	emits bool
+	// leaves is what a document column's leaves are decided under: the
+	// decision's per-leaf map through pipeline.Decision.LeafMap (T-0272), nil
+	// for any column whose own decision is not the classifier's plain
+	// semi_structured one, which masks every leaf, and the run's phone region.
+	// Read by json.go's leafRule.
+	leaves leafPolicy
 }
 
 // Transform masks the batch in place and returns it.
@@ -152,6 +158,7 @@ func (t transformer) plan(
 		plans[i].mask = true
 		plans[i].cat = d.Category
 		plans[i].id = d.Masker
+		plans[i].leaves = leafPolicy{keys: d.LeafMap(), region: cls.PhoneRegion}
 		if d.UniqueIndex {
 			plans[i].shape.constraints.Unique = true
 		}
@@ -178,7 +185,7 @@ func (t transformer) plan(
 // cell masks one value.
 func (t transformer) cell(p colPlan, v any, key mask.Key, res pipeline.Residual) (any, error) {
 	if p.document {
-		return t.maskDocument(p.col, p.shape, v, key, res)
+		return t.maskDocument(p.col, p.shape, p.leaves, v, key, res)
 	}
 	if elems, ok := v.([]any); ok && p.shape.array {
 		return t.maskArray(p, elems, key, res)

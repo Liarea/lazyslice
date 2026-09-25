@@ -141,7 +141,15 @@ issue.
    number or a credit-card number, in which case it is masked through that
    category's own masker (T-0137). An arbitrary identifier used as a key — a
    UUID, a slug, a customer number — is not named by any of the three and
-   still survives. Values never survive: every leaf value is masked.
+   still survives. A leaf *value* is copied when nothing marks it personal:
+   every key above it appeared in the sampled documents, no name rule names
+   any of them, and no value validator recognises the value (T-0272). That
+   keeps configuration documents working; the cost is a personal value no
+   rule and no validator knows, inside a document, which is copied too. A key
+   the samples never showed, or a document with no key, is still masked, and
+   so is every leaf of a column whose own name marks it personal (a `jsonb`
+   `medical_history`) or that was raised with `--mask
+   TABLE.COL=semi_structured` or the yml.
 9. `NULL` and the empty string, which survive and reveal that much, and the
    approximate length of a value masked as free text: its filler is fitted to
    the input's length, so an application's short values (`admin`, `linux`)

@@ -288,6 +288,7 @@ func (classifier) Classify(schema *pipeline.Schema, s pipeline.Sampler, prior *p
 		cls.Decisions[col] = w.d
 	}
 	cls.Fingerprint = fingerprintOf(st.pack.Version, cls.Decisions)
+	cls.PhoneRegion = region
 	return cls, nil
 }
 
@@ -874,6 +875,13 @@ func (st *state) base() {
 				vs = withoutNetworkID(vs)
 			}
 			sig := bestSignal(dict, values, st.pack, ct.Family, vs)
+			if (ct.Family == famJSON || ct.Family == famJSONB) && !ct.Array && st.sampler != nil {
+				// T-0272: the per-leaf half of the decision, from the raw
+				// samples (jsonKeyCategories says why not from values). An
+				// hstore is replaced whole by internal/transform and has no
+				// leaves to categorise; a json[] has no leaf walk either.
+				w.d.LeafKeys = jsonKeyCategories(st.pack, st.sampler.Samples(cref))
+			}
 			st.decide(w, col, ct, values, sig)
 			st.appendContext(w, t, ct, sig.total)
 			st.markNeverMasked(w, t, col, ct)

@@ -294,6 +294,10 @@ type leaf struct {
 	// both, because internal/transform records both; the second net reads the
 	// string leaves only, which is what ARCHITECTURE.md section 6 item 4 names.
 	str bool
+	// keys is the leaf's enclosing object keys, root first, in the target's
+	// spelling: what jsonleaf.go's leafRule reads against the decision's
+	// per-leaf map (T-0272). An array index is not a key.
+	keys []string
 }
 
 // leaves walks a decoded document and returns every leaf internal/transform
@@ -309,7 +313,7 @@ func leaves(v any) []leaf {
 		return nil
 	}
 	var out []leaf
-	walk("$", doc, &out)
+	walk("$", nil, doc, &out)
 	return out
 }
 
@@ -331,22 +335,24 @@ func decodeDocument(v any) (any, bool) {
 	return out, true
 }
 
-func walk(path string, node any, out *[]leaf) {
+func walk(path string, keys []string, node any, out *[]leaf) {
 	switch n := node.(type) {
 	case map[string]any:
 		for name, child := range n {
-			walk(path+"."+name, child, out)
+			// The full slice expression makes append copy, so no two
+			// siblings' chains share a backing array.
+			walk(path+"."+name, append(keys[:len(keys):len(keys)], name), child, out)
 		}
 	case []any:
 		for i, item := range n {
-			walk(path+"["+strconv.Itoa(i)+"]", item, out)
+			walk(path+"["+strconv.Itoa(i)+"]", keys, item, out)
 		}
 	case string:
-		*out = append(*out, leaf{path: path, text: n, str: true})
+		*out = append(*out, leaf{path: path, text: n, str: true, keys: keys})
 	case json.Number:
-		*out = append(*out, leaf{path: path, text: n.String()})
+		*out = append(*out, leaf{path: path, text: n.String(), keys: keys})
 	case float64:
-		*out = append(*out, leaf{path: path, text: strconv.FormatFloat(n, 'g', -1, 64)})
+		*out = append(*out, leaf{path: path, text: strconv.FormatFloat(n, 'g', -1, 64), keys: keys})
 	}
 }
 

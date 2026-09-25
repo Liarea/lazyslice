@@ -2058,3 +2058,62 @@ first), a text key and an opted-out child; it fails with the rerun removed.
 child propagation cannot mask (its type refuses the parent's category, or
 the edge's parent column is not a key or unique): after the rerun it fires
 only for those.
+
+## The per-leaf half of a JSON decision (T-0272)
+
+`base` sets `Decision.LeafKeys` on every `json`/`jsonb` column (never an
+`hstore`, which transform collapses, nor an array of either) from
+`jsonKeyCategories` (`validators.go`): every object key in the samples, at any
+depth up to `jsonMaxDepth` and inside arrays of objects, mapped to `match`'s
+category for its normalised name or `CatNone`. `internal/transform` masks or
+**copies** each leaf from that map (ARCHITECTURE.md §4's T-0272 amendment,
+the maintainer's T-0143 decision) and `internal/verify` reads it back, so
+this package is where the name rules reach a leaf without either of them
+importing this package.
+
+- **It reads the raw samples, not `values`.** pgx hands a jsonb sample back
+  decoded, as a `map[string]any` or `[]any`, and `scalars`/`asText` render
+  neither, so the string path sees nothing of an object document from a real
+  database. `TestAJSONColumnsDecisionCarriesItsLeafKeys` samples decoded maps
+  for that reason.
+- **A key that is itself an email, phone or Luhn-valid number is left out**
+  (`strongKeyShape`, the same three textsig validators transform's
+  `keyCategory` uses): transform masks such a key, so it is a value, and
+  leaving it out means every leaf beneath it is masked on both sides.
+- **At most `jsonKeyLimit` (4096) keys**; a key past it is simply unknown, and
+  a leaf beneath an unknown key is masked. Which keys are kept is decided over
+  the *sorted* set of every key the samples showed (the T-0272 review round,
+  finding 3): `collectJSONKeys` only gathers, and `jsonKeyCategories` sorts
+  before it cuts, so neither a Go map's iteration order nor the order samples
+  arrive in reaches the map
+  (`TestJSONKeyCategoriesPastTheLimitIsTheSameEveryTime`).
+- **The map is read only for a plain `semi_structured` decision.**
+  `pipeline.Decision.LeafMap` returns nil when this package decided the column
+  under any other category (a `jsonb` named `medical_history` is
+  `special_category` on its name) or when a yml raise decided it
+  (`ByYmlRaise`, which `--mask` and a `mask:` block become), so every leaf of
+  such a column is masked. The map is still set on those decisions; nothing
+  reads it there.
+- **`Classification.PhoneRegion` is the region `Classify` ran under**
+  (`prior.PhoneRegion`), set for `internal/transform`, whose per-leaf value
+  half reads a phone number under it the way `internal/verify`'s net does.
+- **It changes no column decision.** `Category`, `Confidence` and `Masked` are
+  what they were; the map is read by transform only for a column already
+  masked. `TestClassificationIsDeterministic` compares decisions with
+  `reflect.DeepEqual` now, because a map makes `Decision` incomparable with
+  `==`, and the map is part of what has to come out the same.
+- **Not in `Classification.Fingerprint`, and stated so in ARCHITECTURE.md §5
+  "Determinism scope"** (the T-0272 review round, finding 3). A change in the
+  keys the samples show moves which leaves are copied without printing
+  "classification changed". Covering the map would make the fingerprint move
+  with the source's data rather than with the rule pack and the plan, and the
+  value that reaches the yml is `internal/core`'s `refingerprint`, not
+  `fingerprintOf`, so a change here alone would not reach it anyway.
+
+**Found while here, not fixed (outside this task's brief):** `jsonSignal` —
+the column-level leaf signal that raises a JSON column from `possible` to
+`likely` — reads `values`, which is the string path above, so on a real
+database it sees no object document at all and a JSON column is decided on
+its type alone. The column is masked either way; what is lost is `likely`,
+which the neighbouring-column rule and `byteaInPersonShapedTable` count.
+

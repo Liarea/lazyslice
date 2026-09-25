@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 	"time"
 
@@ -463,6 +464,127 @@ func walkJSON(key string, v any, out *[]jsonLeaf, depth int) {
 			*out = append(*out, jsonLeaf{Key: key, Value: s})
 		}
 	}
+}
+
+// jsonKeyLimit bounds how many distinct keys one column's map may hold. A key
+// past it is simply not in the map, which internal/transform reads as a key the
+// samples never showed: every leaf beneath it is masked (pipeline.Decision's
+// LeafKeys). A column whose documents are keyed by identifiers — one key per
+// customer — reaches it quickly, and that is the shape where copying anything
+// on the strength of a key name is least safe anyway.
+//
+// Which keys are kept past the limit is decided in sorted order over every key
+// the samples showed, never in the order a Go map or the sampler hands them
+// over (T-0272 review round, finding 3; ARCHITECTURE.md's determinism rule),
+// so one sample set always gives one map.
+const jsonKeyLimit = 4096
+
+// jsonKeyCategories is the per-leaf half of a json or jsonb column's decision
+// (T-0272, the maintainer's T-0143 decision of 2026-09-24): every object key
+// in the sampled documents, at any depth up to jsonMaxDepth, mapped to the
+// category the rule pack's name rules give it, or CatNone when no rule names
+// it. It is what lets internal/transform copy a configuration leaf and still
+// mask an email leaf with the email masker, and what lets internal/verify ask
+// the same question of the target.
+//
+// It reads the raw samples and not scalarsOf's strings: pgx hands a json or
+// jsonb sample back already decoded, as a map[string]any or a []any, and
+// asText renders neither, so the string path sees nothing of an object
+// document read from a real database.
+//
+// A key that parses as an email address, a phone number or a Luhn-valid
+// number is left out. internal/transform masks exactly those keys
+// (json.go's keyCategory, the same three textsig validators, unspaced), so
+// such a key is a value, not a name, and leaving it out means a leaf beneath
+// it is always masked -- on the transform side under the source key and on
+// the verify side under the masked one, which is never in the map either,
+// because each of the three maskers emits a value its own validator accepts.
+//
+// nil when no sample held an object key, which internal/transform reads the
+// same way as an empty map: nothing is known about any key, so every leaf is
+// masked.
+func jsonKeyCategories(p *compiledPack, samples []any) map[string]pipeline.Category {
+	seen := map[string]struct{}{}
+	for _, v := range samples {
+		doc, ok := decodeSampleDocument(v)
+		if !ok {
+			continue
+		}
+		collectJSONKeys(doc, seen, 0)
+	}
+	if len(seen) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(seen))
+	for k := range seen {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	out := map[string]pipeline.Category{}
+	for _, k := range keys {
+		if len(out) == jsonKeyLimit {
+			break
+		}
+		if strongKeyShape(k) {
+			continue
+		}
+		cat := pipeline.CatNone
+		if pat, ok := p.match(normaliseName(k)); ok {
+			cat = pat.Category
+		}
+		out[k] = cat
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// decodeSampleDocument is jsonLeaves' decoding, for one raw sample.
+func decodeSampleDocument(v any) (any, bool) {
+	var doc any
+	switch t := v.(type) {
+	case nil:
+		return nil, false
+	case []byte:
+		if json.Unmarshal(t, &doc) != nil {
+			return nil, false
+		}
+	case string:
+		if json.Unmarshal([]byte(t), &doc) != nil {
+			return nil, false
+		}
+	default:
+		doc = v
+	}
+	return doc, true
+}
+
+// collectJSONKeys adds every object key of v, to jsonMaxDepth, to seen. It
+// only gathers: the order a map ranges in decides nothing, because
+// jsonKeyCategories sorts the whole set before the limit is applied.
+func collectJSONKeys(v any, seen map[string]struct{}, depth int) {
+	if depth > jsonMaxDepth {
+		return
+	}
+	switch t := v.(type) {
+	case map[string]any:
+		for k, child := range t {
+			seen[k] = struct{}{}
+			collectJSONKeys(child, seen, depth+1)
+		}
+	case []any:
+		for _, child := range t {
+			collectJSONKeys(child, seen, depth+1)
+		}
+	}
+}
+
+// strongKeyShape is internal/transform's keyCategory question (json.go):
+// whether a key parses as an email address, a phone number or a Luhn-valid
+// number, which is when transform masks the key itself.
+func strongKeyShape(k string) bool {
+	return textsig.ValidEmail(k) || textsig.ValidPhone(k) || textsig.ValidLuhn(k)
 }
 
 // jsonLeafIsPersonal reports whether a leaf carries personal data, by the same

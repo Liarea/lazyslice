@@ -492,6 +492,15 @@ JSON path (§6 item 1), which is what makes one surviving leaf findable inside a
 document that otherwise changed. Silently shipping the document unchanged is
 the failure this trap catches.
 
+**Amended 2026-09-25 (T-0272, §4's amendment of that date).** The document is
+now masked per leaf rather than every leaf: the classifier records every key
+the samples show on the decision, `profile.contact.email` and
+`profile.contact.phone` are masked by the email and phone maskers (their keys
+name the category, and their values validate), and `profile.locale` and `tags[]`
+— keys the samples showed, no rule names, values no validator recognises — are
+copied. What the trap requires is unchanged: no address or phone number from the
+source survives in the target, and the residual scan finds none.
+
 **16b. JSONB in an event table, collapsed to `{}`** — `events.payload`.
 
 Different required behaviour, from the same §4 paragraph: "Wildly varying keys,

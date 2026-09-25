@@ -109,6 +109,8 @@ statement allowlist this stage needs registered before `Verify` runs, as
 - `sql.go`, `shapes.go` — every statement, and the shapes the source ones match.
 - `columns.go`, `value.go` — the type families, the JSON leaf walk, and the
   rendering that reproduces the residual filter's key material.
+- `jsonleaf.go` — `internal/transform`'s per-leaf rule restated (T-0272), read
+  by the second net only; see the T-0272 section at the end.
 
 ## Decisions made during implementation
 
@@ -513,7 +515,9 @@ was chosen and is recorded here rather than only in a comment.
       reopen finding 3's own gap for the other two strong categories and
       both shape guesses, on exactly the column class THREAT_MODEL.md T1
       calls a blocking control.
-    - **Leaves have the same question and not the same answer.** A masked
+    - **Leaves have the same question and not the same answer** — *as of
+      T-0172; T-0272 changed the premise, and the section at the end of this
+      file has the answer that replaced it.* A masked
       document's string leaves are `leafCategory`'s (`json.go`) — every
       string leaf is masked as `free_text` regardless of its key, a decision
       `internal/transform/CLAUDE.md` records — and `free_text`'s filler
@@ -1848,3 +1852,80 @@ reachable through `validators` as it stands. Nothing here widens or narrows
 what is masked, and the four codes' `exit: 9` and `stage: verify` are
 identical, so `checkSecondNet`'s pass/fail bookkeeping (`noCheckBothWays`,
 above) does not need to know which of the four fired.
+
+## Per-leaf categories: the net leaves a category-masked leaf to the residual scan (T-0272)
+
+`internal/transform` no longer masks every leaf of a document as `free_text`
+(ARCHITECTURE.md §4's T-0272 amendment, the maintainer's T-0143 decision): a
+leaf is masked under a category an enclosing key names or its value validates
+for, and **copied** when every enclosing key was seen in the samples with no
+category and nothing validates. The decision carries the keys
+(`pipeline.Decision.LeafKeys`, read through `LeafMap`), and `jsonleaf.go` restates transform's
+`leafRule`, `leafValueCategory` and `leafMasker` over the *target's* spelling
+of each leaf's enclosing keys, which `leaves()` now carries (`leaf.keys`).
+
+- **The residual scan did not change.** Transform records a masked string leaf
+  under `free_text`'s canonical form whichever masker replaced it, and a copied
+  leaf not at all, so `documentHits` tests every string leaf as before and a
+  copied one is simply not in the filter.
+- **The second net skips one kind of leaf, and only on a masked document whose
+  decision carries a map** (`replacedByCategoryMasker`, read in `netStrings`):
+  a leaf the rule says a category's own masker replaced. It is T-0172's key
+  argument applied to a leaf — the email masker's output is an email address,
+  and counting it would refuse every run with an email in a document — with the
+  residual scan as the check that the source did not survive. A copied leaf, a
+  `free_text` leaf and every key are still read; a masked document with no map
+  had only filler leaves and is read exactly as before (the control in
+  `TestTheSecondNetLeavesACategoryMaskedLeafToTheResidualScan`).
+- **Why the skip cannot hide a copied source value.** `leafValueCategory` holds
+  every validator `applies` admits for a leaf (email, both national-id text
+  readings and the corroboration-gated digits one, phone, IP/MAC, both card
+  entries, IBAN, URL, the entropy check, address shape, special-category
+  vocabulary), the phone entry under the run's region included, plus the
+  classifier's leaf questions, so a leaf the rule calls
+  copied hits none of the net's validators, and a leaf it calls
+  category-masked was recorded by transform, because the rule is a function of
+  the key chain and the value and a copied value is the same on both sides.
+  `TestLeafValueCategoryCoversTheNetsLeafValidators` fails when a validator is
+  added to `validators.go` and not to `leafValueCategory`; the fix is both
+  packages' copy, in one commit, because transform's copy is what decides what
+  gets masked. `TestLeafValueCategoryIsPinned` carries one table in both.
+- **A generated column over a masked document's leaves** (`netMode.
+  derivedFromMaskedLeaves`, `generatedFromMaskedLeaves`, `leafMaskerEmits`).
+  `make torture` found it on the first run: Supabase's `auth.identities.email`
+  is `lower((identity_data ->> 'email'))`, the leaf it reads is now replaced
+  by the email masker, and the net refused every Supabase run at exit 9 as
+  `email` on the masker's own addresses. ADR-015's rail
+  (`derivedFromMasked`, above) skipped only the dictionary rule; for a
+  generated column over masked columns only, one of them a masked document
+  with a per-leaf map, the net now also skips the validators whose category a
+  leaf's own category masker emits, and runs every other one (a
+  special-category term there is still refused).
+  `TestAGeneratedColumnOverAMaskedDocumentsLeafIsTheMaskersOutput` pins both
+  directions and the no-map control. What it does not see: an expression that
+  assembles a personal value from copied leaves none of which is personal on
+  its own — §6 item 6's quasi-identifier false negative. The same shape over a
+  *scalar* masked column (`lower(email)` over a masked `email`) is not covered
+  by this and still refuses, as it did before T-0272; it is reported rather
+  than widened here.
+- **The phone question under `--phone-region`** (the T-0272 review round,
+  finding 2). The net's phone entry also reads `Options.PhoneRegion`
+  (T-0221), and the first version of the value half did not, so a
+  national-format number in a leaf transform copied was refused here at exit
+  9 on a correct run. Both restatements now ask `ValidPhoneRegion` under the
+  region: transform reads `pipeline.Classification.PhoneRegion`, which
+  `internal/classify` fills from the same `Config` `internal/core` builds
+  `Options.PhoneRegion` from, and this package reads the *classification's*
+  region too, not `Options`', so that if the two ever differ the rule here
+  calls a copied number copied and the net's own region check refuses it --
+  the failure closes. `TestLeafValueCategoryCoversTheNetsLeafValidators` asks
+  the net's own `count` under no region and under three, so it sees what the
+  net sees; **T-0390** (filed for this in E9) is done by this change and can
+  be closed.
+- **The column's own decision comes first** (the T-0272 review round,
+  finding 1). The map is read through `pipeline.Decision.LeafMap`, nil unless
+  the column's decision is the classifier's plain `semi_structured` one;
+  transform masks every leaf of a `special_category`-named document or a
+  yml-raised one as `free_text`, so the net reads every leaf of such a column
+  as it always did, and `generatedFromMaskedLeaves` asks `LeafMap` too.
+

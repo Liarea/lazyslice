@@ -171,6 +171,53 @@ type Decision struct {
 	// testdata/regressions/021 exists to keep passing. See
 	// internal/verify/secondnet.go's own comment on the point.
 	NeverMasked bool
+	// LeafKeys is the per-leaf half of a json or jsonb column's decision
+	// (T-0272; the maintainer's arbitrary-JSON decision in T-0143, 2026-09-24).
+	// It maps every object key internal/classify saw in the column's sampled
+	// documents, spelled exactly as sampled, to the category the rule pack's
+	// name rules give that key, or CatNone when no rule names it. A key that
+	// itself parses as an email address, a phone number or a Luhn-valid number
+	// is never entered: internal/transform masks such a key (json.go's
+	// keyCategory), so it is a value and not a name.
+	//
+	// internal/transform reads it per leaf and internal/verify reads the same
+	// map back from the target, which is why it lives here and not in either
+	// stage: a leaf under a key the map names with a category is masked by that
+	// category's masker; a leaf whose value a validator recognises is masked by
+	// the validator's category; a leaf whose every enclosing key is in the map
+	// as CatNone and whose value no validator recognises is copied; every other
+	// leaf -- a key the samples never showed, or no key at all -- is masked as
+	// free_text, as every leaf was before. nil (no samples, a decision nothing
+	// sampled, a column that is not json or jsonb) keeps that last rule for
+	// every leaf, so a missing map masks more and never less.
+	//
+	// It holds key names read from production documents, so it is in-memory
+	// only: internal/emit writes named fields of a Decision and not this one,
+	// and nothing renders it into an event, a reason or the yml.
+	//
+	// Nothing reads the field directly: internal/transform and internal/verify
+	// read it through LeafMap, which is what makes the column's own decision
+	// the root of every leaf's chain.
+	LeafKeys map[string]Category
+}
+
+// LeafMap is LeafKeys as internal/transform and internal/verify read it
+// (T-0272 review round, finding 1): the map only when the column's own
+// decision is the classifier's semi_structured verdict, the one a column gets
+// for being a document and nothing more (internal/classify's typeSignals), and
+// nil otherwise, which masks every leaf. A column whose own name the rule pack
+// scores with a personal category (`medical_history`, `diagnosis`: a
+// special_category column is masked on its name alone, THREAT_MODEL.md T1)
+// holds that category in every leaf, whatever the leaf's own key says; and a
+// yml raise, a committed `mask:` block or --mask (ByYmlRaise) is an operator
+// saying the document is personal, which per-leaf copying would quietly undo.
+// Both come back nil, so every leaf of such a column is masked as it was
+// before per-leaf categories existed.
+func (d Decision) LeafMap() map[string]Category {
+	if d.Category != CatSemiStruct || d.Source != ByClassifier {
+		return nil
+	}
+	return d.LeafKeys
 }
 
 // Classification is every decision for one run.
@@ -204,6 +251,13 @@ type Classification struct {
 	// direction -- the warning is about values that may differ -- but it is the
 	// reason the line can fire without the rule pack or the schema moving.
 	Fingerprint string
+	// PhoneRegion is the libphonenumber region internal/classify ran under
+	// (Config.PhoneRegion: --phone-region, else the yml's phone_region; empty
+	// for international-only). internal/transform reads it when it decides
+	// whether a JSON leaf's value is a phone number, so a national-format
+	// number the second net would read under the same region is masked and
+	// never copied (T-0272 review round, finding 2).
+	PhoneRegion string
 }
 
 // Sampler hands the classifier the samples introspect already took. The
