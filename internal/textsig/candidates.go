@@ -73,9 +73,14 @@ var (
 )
 
 // Candidates returns the value as it stands followed by the canonical
-// spellings of the de-obfuscations this file recognises, without duplicates.
-// The first element is always the input, so a caller that stops at the first
-// match behaves exactly as it did before this existed.
+// spellings of the de-obfuscations this file recognises, without duplicates:
+// the folk spellings below, and since T-0403 the code-point spellings and
+// reversible encodings in encodings.go (NFKC, format characters, Unicode
+// dashes, underscore and slash separators, a mailto:, tel: or sms: scheme,
+// percent and backslash-u escapes, a trailing root dot, base64), each decoded
+// once and then given the folk spellings too. The first element is always the
+// input, so a caller that stops at the first match behaves exactly as it did
+// before this existed.
 //
 // It is exported because internal/classify and internal/verify both need the
 // same list — one to decide a column, one to refuse a loaded target — and a
@@ -83,7 +88,7 @@ var (
 // (tracker T-0055).
 func Candidates(s string) []string {
 	out := []string{s}
-	if len(s) == 0 || len(s) > maxCandidateLen || !mayBeObfuscated(s) {
+	if len(s) == 0 || len(s) > maxCandidateLen {
 		return out
 	}
 	add := func(c string) {
@@ -97,26 +102,74 @@ func Candidates(s string) []string {
 		}
 		out = append(out, c)
 	}
-	spelled := s
-	if at := atRE.ReplaceAllString(s, "@"); at != s {
-		spelled = at
+	deobfuscate(s, add)
+	// The code-point and reversible-encoding spellings (encodings.go, the
+	// 2026-09-25 JSON red team's entries 16 and 21): the same value in
+	// fullwidth forms, with a zero-width character inside it, behind a
+	// mailto:, tel: or sms: scheme, percent-encoded, backslash-u escaped,
+	// with a trailing root dot, or base64-encoded. Each is decoded at most
+	// once and then offered to the same de-obfuscations as the raw value, so
+	// a percent-encoded address spelled with AT is still an address; nothing
+	// decoded is decoded again, which is what bounds the cost.
+	canonical, hasCanonical := canonicalSpelling(s)
+	if hasCanonical {
+		add(canonical)
+		deobfuscate(canonical, add)
 	}
-	if dot := dotRE.ReplaceAllString(spelled, "."); dot != spelled {
-		spelled = dot
+	decoded, ok := base64Text(s)
+	if !ok && hasCanonical {
+		decoded, ok = base64Text(canonical)
 	}
-	if m := angleRE.FindStringSubmatch(spelled); m != nil {
-		add(m[1])
-	}
-	add(spelled)
-	// The separator-only dodge: a passport number, a card number or an IBAN
-	// written with spaces between the characters or between the groups.
-	if collapsed, ok := collapseGroups(spelled); ok {
-		add(collapsed)
-	}
-	if digits, ok := spelledDigits(s); ok {
-		add(digits)
+	if ok {
+		add(decoded)
+		deobfuscate(decoded, add)
+		if c, ok := canonicalSpelling(decoded); ok {
+			add(c)
+			deobfuscate(c, add)
+		}
 	}
 	return out
+}
+
+// deobfuscate offers v's folk spellings to add: the at/dot words, the address
+// inside a display name, a value grouped with spaces, a value grouped with
+// punctuation separators, and spelled-out digits. It is the whole of what
+// Candidates did before the encodings in encodings.go, and it runs over the
+// raw value and over each decoded spelling alike.
+func deobfuscate(v string, add func(string)) {
+	if mayBeObfuscated(v) {
+		spelled := v
+		if at := atRE.ReplaceAllString(v, "@"); at != v {
+			spelled = at
+		}
+		if dot := dotRE.ReplaceAllString(spelled, "."); dot != spelled {
+			spelled = dot
+		}
+		if m := angleRE.FindStringSubmatch(spelled); m != nil {
+			add(m[1])
+		}
+		add(spelled)
+		// The separator-only dodge: a passport number, a card number or an
+		// IBAN written with spaces between the characters or between the
+		// groups.
+		if collapsed, ok := collapseGroups(spelled); ok {
+			add(collapsed)
+		}
+		if digits, ok := spelledDigits(v); ok {
+			add(digits)
+		}
+	}
+	// The same dodge with punctuation between the groups (encodings.go):
+	// an en dash, an underscore or a slash where a card or an identifier
+	// would print a space or a hyphen.
+	if hasGroupSeparator(v) {
+		if collapsed, ok := collapseSeparatedGroups(v); ok {
+			add(collapsed)
+		}
+		if hyphenated, ok := hyphenatedGroups(v); ok {
+			add(hyphenated)
+		}
+	}
 }
 
 // collapseGroups joins a value written as short space-separated groups —

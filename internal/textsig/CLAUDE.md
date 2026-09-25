@@ -13,8 +13,12 @@ and shared; its set is unexported, so no caller can add a word to a dictionary
 every other caller reads.
 
 **Rules.**
-- It is a leaf. It imports the standard library and
-  `github.com/nyaruka/phonenumbers` and nothing from this repository at all —
+- It is a leaf. It imports the standard library,
+  `github.com/nyaruka/phonenumbers` and, since T-0403,
+  `golang.org/x/text/unicode/norm` (the `mask` module's own NFKC dependency,
+  already in `go.mod`, which `go mod tidy` moves from indirect to direct;
+  ARCHITECTURE.md's dependency table still gives `mask` as its only reason,
+  **tracker T-0418**), and nothing from this repository at all —
   not `ref`, not `pipeline`. internal/CLAUDE.md's import graph allows a leaf
   under `internal/` that imports only `ref` and `pipeline` (that is what `ref`
   and `event` already are); this one is stricter than the rule permits, and it
@@ -489,3 +493,70 @@ pin is first shown to pass the bare check digit.
 residual 4) and SECURITY.md (residual 2) do not yet say the card signal wants
 an issuer prefix, or what a card outside the table costs; neither file was in
 T-0316's paths — **tracker T-0358** carries the clause.
+
+## T-0403 (2026-09-25, the JSON red team's round 1, entries 16 and 21): a known shape in another code point or a reversible encoding (`encodings.go`)
+
+`docs/reviews/2026-09-25-redteam-json/round1.json` wrote known shapes the way
+a program or a foreign keyboard writes them, under neutral JSON keys and in a
+plain text column, and every one crossed at exit 0: an address with a
+fullwidth at sign, a fullwidth international number, a card grouped with en
+dashes or underscores, an address with the DNS root's trailing dot, an address
+behind `mailto:` and a percent-encoded number. `Candidates` now also offers:
+
+- **`canonicalSpelling`**, one decoded spelling of the value: `\uXXXX`
+  escapes undone (surrogate pairs included), `%XX` escapes undone when the
+  result is UTF-8 (a `+` stays a `+`), NFKC, every Unicode `Cf` format
+  character removed (zero-width space, joiners, word joiner, BOM, soft
+  hyphen, bidi controls), every Unicode `Pd` dash and U+2212 written as `-`,
+  a leading `mailto:`, `tel:` or `sms:` removed with the hfields or
+  parameters after it, and a trailing root dot removed. Its gate is one scan
+  for a non-ASCII byte, `%`, `\`, a trailing dot or one of the three
+  schemes, so a plain value costs nothing new.
+- **`collapseSeparatedGroups`** and **`hyphenatedGroups`**: a value grouped
+  with a dash (the ASCII hyphen included), `_` or `/` is joined under
+  `collapseGroups`' own four-character bound, and written with hyphens,
+  because a US SSN is a shape only with its hyphens. Both need a digit in the
+  value. **A calendar date is not joined** (`separatedDate`: three digit
+  groups with a year from 1800 to 2199 first or last): eight bare digits is a
+  length TFN and BSN read, and a date column would clear one of them about
+  one time in ten. `2026-09-24` is pinned copied in both
+  `TestLeafValueCategoryIsPinned` tables, and `2026/09/24` and `24/09/2026`
+  beside it.
+- **`base64Text`**: the decode of an 8-to-`maxBase64Len`-character value in
+  one base64 alphabet, when it is valid UTF-8 of 6 to 320 bytes and every rune
+  is printable. ASCII whitespace in the value is removed first, because a
+  MIME or PEM encoder and Postgres's `encode(..., 'base64')` wrap their
+  output into lines, and a trailing `\r` or `\n` in the decode is removed
+  before the printable check, because `echo addr | base64` encodes the
+  newline too (the T-0403 review round). Measured over 100,000 random
+  alphanumeric tokens per length, 0.8% of eight-character ones decode to
+  printable text and none from twenty-four up; one of 600,000 then parsed as
+  anything.
+
+Each decoded spelling is decoded once and then given the old folk spellings
+(`deobfuscate`), so a percent-encoded address written with `AT` is still an
+address; nothing decoded is decoded again (`TestEncodedSpellingsAreBounded`).
+`TestEncodedSpellingsStillParse` shows each spelling fails the bare parser
+first and validates after; `TestEncodedSpellingsDoNotInventValues` holds the
+dates, identifiers, tokens and prose that must stay negative.
+
+It only adds candidates, so it only widens what the four parse-backed
+validators, `ValidCard`, `CardShape`, `ValidPhoneRegion` and the two
+national-identifier halves accept, for both nets and for
+`internal/transform`'s `leafValueCategory` at once, which is why the red
+team's values are in both packages' pinned tables. It also widens the
+DDL-literal passes (`internal/plan`'s and `internal/verify`'s), which call
+the same validators on a literal: a `DEFAULT 'mailto:someone@example.org'`
+is now read as the address it holds, exactly as the bare address already
+was.
+
+**What it does not do.** A decoded value is offered whole, never scanned for
+tokens: base64 of a JSON object holding a phone number is text that parses as
+nothing (entry 20's embedded-token scan is a different residual). HTML
+entities (`&#64;`), `\x40` and other escape syntaxes are not decoded, and a
+homoglyph that NFKC does not fold (a Cyrillic `а` in a domain) is not
+normalised: THREAT_MODEL.md T1's A2 amendment lists what is covered.
+`ValidNationalIDDigits` still reads no candidate, for the reason its own
+section above gives. `testdata/regressions/053` runs every spelling end to
+end.
+

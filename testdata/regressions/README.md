@@ -448,6 +448,30 @@ an operator's own `--unmask` excepted -- and is pinned by that package's own
 unit tests rather than by this file, since a refused plan never reaches a
 target to check.
 
+**053 is the same round's encoded-spellings finding** (entries 16 and 21,
+attacker 2's A7/A7b and A8; **T-0403**), on the same precedent: an address
+with a fullwidth at sign, a fullwidth international number, a card grouped
+with en dashes, underscores or zero-width spaces, an address with the DNS
+root's trailing dot, an address behind `mailto:`, a percent-encoded number
+and a US SSN grouped with en dashes, each in a neutral column of a table with
+no personal column and under a neutral key of a document beside them, were
+copied at exit 0 because `textsig.Candidates` undid dictated spellings and no
+code point or encoding. `internal/textsig/encodings.go` now offers each value
+once decoded, so both nets and the per-leaf rule read the shape it is.
+`not-copied:` names all nine columns and the document; measured against the
+parent commit's `internal/textsig`, every one crossed. A second table holds a
+backslash-u escaped address, a percent-encoded address, a base64 address and
+a number behind `sms:`, which the entropy check masked as credentials before
+the fix by accident; `not-copied:` pins them masked by what they are. The
+email lives in the root, `reg053_people`, because a certain column beside the
+nine would have swept them into `free_text` before the fix and hidden it. A
+third table, `reg053_wrapped`, is the T-0403 review round's: base64 with the
+trailing newline `echo | base64` keeps, wrapped into 76-character lines as
+Postgres's `encode(..., 'base64')` writes it. No validator read it before that
+round; it was masked by accident, as a postal-address shape and as a whole
+document, and the file's header records the `classify` reasons before and
+after.
+
 The files are loaded and run by `make torture` (`internal/invariants`'s
 `TestTortureRegressions`, behind the `integration` and `torture` build tags), so
 a regression that comes back fails a build rather than being rediscovered by the
@@ -647,6 +671,7 @@ until T-0221. It is what 025 and 048 set.
 | `049-generated-columns-assembled-from-document-leaves.sql` | the 2026-09-25 JSON red team, round 1 (entry 24), tracker T-0397, not a torture-schema reduction — see this file's own prose above | **an address, a phone number and a card number assembled by generated columns at exit 0**: the second net skipped the leaf maskers' validators for any generated column over a masked document with per-leaf categories, whichever leaf it read, so columns built from copied leaves (`u || '@' || h`, `'+' || cc || nsn`, `bin || tail`) passed; the net now skips a hit only when the value is its own row's category-masked leaf, and the classifier masks the keys a generated column reads when its samples validate |
 | `050-camelcase-and-activity-log-shaped-tables.sql` | the 2026-09-25 JSON red team, round 1 (entry 26), tracker T-0398, not a torture-schema reduction — see this file's own prose above | **two documents reported "replaced whole" and walked leaf by leaf instead, at exit 0**: `internal/classify`'s rule pack and `internal/transform`'s own copy of the log-shaped-table rule disagreed — the rule pack matches a CamelCase `"AuditLog"` table (Prisma's default) and an `*_activity` table, transform's own word list matched neither — so both documents' signal-free leaves crossed verbatim while the plan's own reasons line said the document was replaced whole; fixed by `pipeline.Decision.LogShaped`, set once by the classifier from the same rule-pack call and read by transform and verify in place of their own copies |
 | `052-json-number-leaf-past-float64-precision.sql` | the 2026-09-25 JSON red team, round 1 (entry 14), tracker T-0402, not a torture-schema reduction — see this file's own prose above | **a card number's own digits rounded away before any validator ran, at exit 0**: `internal/extract` and `internal/introspect` both scan a json or jsonb column generically into a `*any`, and pgx's own JSON codec decodes that with plain `Unmarshal`, which turns an integer past 2^53 into a rounded `float64` — a 19-digit Luhn-valid card number under a key no rule pack pattern names lost its trailing digits, the rounded spelling failed the Luhn check, and the leaf read clean and was copied; fixed by `internal/pg`'s source reader handing back a json or jsonb column's exact source text instead of letting pgx decode it, so `internal/transform`'s, `internal/classify`'s and `internal/verify`'s own copies of `decodeDocument` — which already decode a string with `encoding/json`'s `Decoder` and `UseNumber` — take that path for every number leaf, not only a domain over jsonb's |
+| `053-encoded-spellings-under-neutral-keys.sql` | the 2026-09-25 JSON red team, round 1 (entries 16 and 21), tracker T-0403, not a torture-schema reduction — see this file's own prose above | **known shapes in another code point or a reversible encoding copied at exit 0**: a fullwidth address and phone number, a card grouped with en dashes, underscores or zero-width spaces, a trailing-dot domain, a `mailto:` address, a percent-encoded number and an en-dash SSN parsed as nothing under neutral column names and neutral document keys, and a base64, percent-encoded or backslash-u escaped address was masked only as a credential by its entropy; fixed by `textsig.Candidates` offering each value once decoded — NFKC, format characters removed, dashes, underscores and slashes read as group separators, the three schemes stripped, percent and backslash-u escapes undone, a trailing dot dropped, a plausible base64 decode — so both nets and `internal/transform`'s per-leaf rule read the shape it is |
 
 009's header now says `ok`. It did not always: `arrayArrivesAsLiteral` in
 `internal/plan/writeback.go` was written as a stand-in for the element-wise

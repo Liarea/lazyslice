@@ -43,7 +43,7 @@ A run holds the source snapshot from the start of introspect to the end of extra
 
 Package `internal/pipeline`. Engine-facing interfaces are implemented in `internal/pg`; classify, plan and transform are engine-agnostic. `ctx` is `context.Context` throughout.
 
-**Import graph.** `internal/ref` is a leaf package holding only `TableRef` and `ColumnRef` and importing nothing. `internal/event` imports `ref`. `internal/pipeline` imports `ref`, `event`, `dsn` and `mask`. `internal/textsig` is a second leaf (the value-only halves of the classifier's validators and the embedded name dictionary) importing only `ref` and `pipeline`, so `classify` and `verify` share one implementation without importing each other (T-0055, 2026-09-08). The stage packages import `pipeline`. `event` never imports `pipeline`, so the graph is acyclic; `TestImportGraph` in phase 3 fails on any edge added in the other direction. `Config` and every type in this section live in `pipeline` and nowhere else; `internal/emit` implements `Emitter` over `pipeline.Config` and holds no type of its own.
+**Import graph.** `internal/ref` is a leaf package holding only `TableRef` and `ColumnRef` and importing nothing. `internal/event` imports `ref`. `internal/pipeline` imports `ref`, `event`, `dsn` and `mask`. `internal/textsig` is a second leaf (the value-only halves of the classifier's validators and the embedded name dictionary) importing only `ref` and `pipeline`, so `classify` and `verify` share one implementation without importing each other (T-0055, 2026-09-08), and, since T-0403, `golang.org/x/text/unicode/norm` for NFKC folding of value spellings. The stage packages import `pipeline`. `event` never imports `pipeline`, so the graph is acyclic; `TestImportGraph` in phase 3 fails on any edge added in the other direction. `Config` and every type in this section live in `pipeline` and nowhere else; `internal/emit` implements `Emitter` over `pipeline.Config` and holds no type of its own.
 
 ```go
 package pipeline
@@ -1451,7 +1451,7 @@ internal/event/         Event, Sink, Code catalogue (catalogue.yml is the source
 internal/discover/      ladder, candidate verification, de-duplication; dockerctx/ resolves the Docker endpoint;
                         provision/ creates and starts the --create-target container (§9 "Provisioning")
 internal/introspect/    Postgres catalog queries producing *Schema; TABLESAMPLE sampling, leaf-partition sampling
-internal/textsig/       value validators and the embedded name dictionary shared by classify and verify; a leaf importing only ref and pipeline
+internal/textsig/       value validators and the embedded name dictionary shared by classify and verify; a leaf importing only ref, pipeline and golang.org/x/text/unicode/norm (T-0403)
 internal/classify/      rule pack (embedded YAML), scoring, reasons.go templates over textsig's validators; pure
 internal/plan/          FIFO worklist, identity fallback, root default, unreadable tables, SCC/topo order, estimates; pure
 internal/extract/       chunked typed unnest joins over the snapshot into chan RowBatch, one table at a time
@@ -1493,7 +1493,7 @@ Every version below was checked against proxy.golang.org (and go.dev/dl for the 
 | `charm.land/lipgloss/v2` | v2.0.6 | Styling for those screens and the line printer's colour |
 | `charm.land/bubbles/v2` | v2.2.1 | Table and viewport components |
 | `github.com/spf13/pflag` | v1.0.9 | Imported directly by `cmd/lazyslice` for the per-stage `--help` groups |
-| `golang.org/x/text` | v0.41.0 | NFKC normalisation and case folding before hashing (`mask` module) |
+| `golang.org/x/text` | v0.41.0 | NFKC normalisation and case folding before hashing (`mask` module); NFKC folding of a value's spelling before the validators read it (`internal/textsig`, T-0403) |
 | `github.com/nyaruka/phonenumbers` | v1.8.1 | E.164 canonicalisation and validity for phones (`mask` module and classifier validator) |
 | `github.com/testcontainers/testcontainers-go` | v0.44.0 | Test only: Postgres 14 and 18 containers for integration and invariants |
 
