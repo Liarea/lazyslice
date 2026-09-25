@@ -84,14 +84,30 @@ func (p *run) checkWriteBack() error {
 				// already moving. The refusal is here, before a key is fetched,
 				// and it prints the two escapes an operator has: drop the
 				// table, or say in writing that the record is not personal.
-				r := refuse(CodeUnwritable, exitPlan, t.Ref,
-					fmt.Sprintf("%s.%s is masked as %s and its type %s is a composite, which no masker can write into",
-						t.Ref, col.Name, d.Category, base),
+				msg := fmt.Sprintf("%s.%s is masked as %s and its type %s is a composite, which no masker can write into",
+					t.Ref, col.Name, d.Category, base)
+				reason := "the type " + base + " is a composite and no masker can write a record: " +
+					"--skip-table " + t.Ref.String() + ", or --unmask " + t.Ref.String() + "." + col.Name + "=REASON"
+				// T-0399: name the field too, when the reason a masked
+				// composite cannot be trusted is that one of its own fields
+				// is a document (json, jsonb or hstore, nested composites
+				// included) -- compositeSignal never reads inside that
+				// field's own text, only over it as one whole value
+				// (documentField's own comment, compositedoc.go), which is a
+				// stronger claim than "the type is a composite" alone and
+				// the message should say so, not merely why a masker cannot
+				// write the whole record.
+				if holder, field, fam, dok := documentField(p.schema, base); dok {
+					msg = fmt.Sprintf("%s.%s is masked as %s: its type %s is a composite whose %s field %s -- a document no validator reads inside, only its own text as a whole",
+						t.Ref, col.Name, d.Category, holder, fam, field)
+					reason = "field " + field + " of type " + holder + " is " + fam + ", and no validator reads inside it, only over its own text as a whole: " +
+						"--skip-table " + t.Ref.String() + ", or --unmask " + t.Ref.String() + "." + col.Name + "=REASON"
+				}
+				r := refuse(CodeUnwritable, exitPlan, t.Ref, msg,
 					event.Args{
 						event.ArgTable:  t.Ref.String(),
 						event.ArgColumn: col.Name,
-						event.ArgReason: "the type " + base + " is a composite and no masker can write a record: " +
-							"--skip-table " + t.Ref.String() + ", or --unmask " + t.Ref.String() + "." + col.Name + "=REASON",
+						event.ArgReason: reason,
 					})
 				r.Column = col.Name
 				p.collect(r)

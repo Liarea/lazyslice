@@ -424,6 +424,30 @@ from the identical rule-pack call the reasons line uses, and read by
 `internal/transform` and `internal/verify` in place of their own copies.
 `not-copied:` names both documents; before the fix both crossed whole.
 
+**051 is the same round's composite-document finding** (entry 14, attacker
+2's A13; **T-0399**), on the same precedent: a composite column whose own
+type held a jsonb field carried an email inside that field's document, and
+`compositeSignal` -- which reads the composite's *sampled record text*,
+split back into its fields -- never sees it, because the record's own text
+form quotes the field and doubles every quote inside it. THREAT_MODEL.md
+T1's composite row promised a refusal on any field's value hit and said
+nothing about a document field's own contents, so `reg051_widgets.w` was
+decided `none` and copied under the round's own reproduction. Fixed by a
+structural check ahead of the sample-based one: a composite whose type
+holds a json, jsonb or hstore field -- or a nested composite that does -- is
+`possible` on the type alone, whatever the samples say, the same outcome a
+value hit already produces (`internal/classify`'s `compositeDocumentField`),
+so `internal/plan`'s existing exit-12 refusal now fires whatever the samples
+are and names the field and its family as well as the column. This file's
+`expect:` is `exit 12 plan.refused.unwritable` rather than `ok`, on
+`020`'s own precedent (a refusal rather than a mask is the safe-direction
+outcome for this shape), so none of the optional keys apply.
+`internal/verify`'s second net carries the identical structural check as an
+independent backstop, for a copy that reaches the target with one anyway --
+an operator's own `--unmask` excepted -- and is pinned by that package's own
+unit tests rather than by this file, since a refused plan never reaches a
+target to check.
+
 The files are loaded and run by `make torture` (`internal/invariants`'s
 `TestTortureRegressions`, behind the `integration` and `torture` build tags), so
 a regression that comes back fails a build rather than being rediscovered by the

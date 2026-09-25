@@ -93,6 +93,17 @@ const (
 	// docs/reviews/2026-09-09 finding 5 demonstrated under exit 0.
 	CodeRefusedCatalogLiteral event.Code = "verify.refused.catalog_literal"
 
+	// CodeRefusedCompositeDocument is exit 9: a composite column the target
+	// holds is declared over a type carrying a json, jsonb or hstore field (or
+	// a nested composite that does), so the field's document text is quoted
+	// and every quote inside it doubled in the record's own text form and no
+	// validator can read a bare value out of it (T-0399, THREAT_MODEL.md T1,
+	// the 2026-09-25 JSON red team round 1's entry 14). internal/plan already
+	// refuses this at exit 12 before a key is fetched; this is the same second
+	// look every other row-side control gets, for a copy that somehow reached
+	// the target anyway -- an operator's own --unmask excepted.
+	CodeRefusedCompositeDocument event.Code = "verify.refused.composite_document"
+
 	// CodeRefusedRowCount is exit 7: a step does not hold the rows the plan
 	// says it holds. ADR-005's table has no code of its own for this, and a
 	// count that disagrees with the plan is a failure of the movement of rows;
