@@ -351,6 +351,14 @@ func (s *state) keyHits(col ref.ColumnRef, v any) []hit {
 // internal/transform already masked, and a confirmed hit there has no
 // `--unmask` escape (THREAT_MODEL.md T12), so a shape guess here would be a
 // refusal on a loaded target with no way past it at all.
+//
+// Since T-0394 transform's keyCategory reads a phone key under the run's
+// --phone-region as well, and this stays international-only on purpose: the
+// phone masker's output is always the international form
+// (mask/gen_phone.go), so every key transform masked still matches here, and
+// the second net's key skip (secondnet.go) must not be wider than that — a
+// national-format key in the target can only be one transform left, which
+// the net reads under the region and refuses.
 func strongKeyCategory(name string) (pipeline.Category, bool) {
 	s := strings.TrimSpace(name)
 	switch {

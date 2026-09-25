@@ -494,16 +494,21 @@ const jsonKeyLimit = 4096
 //
 // A key that parses as an email address, a phone number or a Luhn-valid
 // number is left out. internal/transform masks exactly those keys
-// (json.go's keyCategory, the same three textsig validators, unspaced), so
-// such a key is a value, not a name, and leaving it out means a leaf beneath
-// it is always masked -- on the transform side under the source key and on
-// the verify side under the masked one, which is never in the map either,
-// because each of the three maskers emits a value its own validator accepts.
+// (json.go's keyCategory, the same three textsig validators, unspaced, the
+// phone one under region), so such a key is a value, not a name, and leaving
+// it out means a leaf beneath it is always masked -- on the transform side
+// under the source key and on the verify side under the masked one, which is
+// never in the map either, because each of the three maskers emits a value
+// its own validator accepts.
+//
+// region is the run's configured phone region (Classify's st.region, which
+// becomes pipeline.Classification.PhoneRegion and is what transform's
+// keyCategory reads, T-0394); empty is the international-only reading.
 //
 // nil when no sample held an object key, which internal/transform reads the
 // same way as an empty map: nothing is known about any key, so every leaf is
 // masked.
-func jsonKeyCategories(p *compiledPack, samples []any) map[string]pipeline.Category {
+func jsonKeyCategories(p *compiledPack, samples []any, region string) map[string]pipeline.Category {
 	seen := map[string]struct{}{}
 	for _, v := range samples {
 		doc, ok := decodeSampleDocument(v)
@@ -525,7 +530,7 @@ func jsonKeyCategories(p *compiledPack, samples []any) map[string]pipeline.Categ
 		if len(out) == jsonKeyLimit {
 			break
 		}
-		if strongKeyShape(k) {
+		if strongKeyShape(k, region) {
 			continue
 		}
 		cat := pipeline.CatNone
@@ -582,9 +587,121 @@ func collectJSONKeys(v any, seen map[string]struct{}, depth int) {
 
 // strongKeyShape is internal/transform's keyCategory question (json.go):
 // whether a key parses as an email address, a phone number or a Luhn-valid
-// number, which is when transform masks the key itself.
-func strongKeyShape(k string) bool {
-	return textsig.ValidEmail(k) || textsig.ValidPhone(k) || textsig.ValidLuhn(k)
+// number, which is when transform masks the key itself. The phone question
+// reads the run's configured region, as keyCategory does (T-0394): a
+// national-format key ("07911 123456" under GB) is masked by transform, so it
+// is a value and not a name, and a leaf beneath it must not be copied on the
+// strength of a map entry for it.
+func strongKeyShape(k, region string) bool {
+	return textsig.ValidEmail(k) || textsig.ValidPhoneRegion(k, region) || textsig.ValidLuhn(k)
+}
+
+// guessedPhoneLeafKeys is the value half of jsonKeyCategories (T-0394, the
+// 2026-09-25 JSON red team's A26): the entries of keys, in sorted order, whose
+// string leaves across the samples parse as phone numbers under
+// phoneGuessRegions at the scalar path's own ratio -- guessedPhoneHit's
+// question, at least minSamples leaves and validatorThreshold of them
+// matching. A leaf counts toward the nearest object key enclosing it, which
+// is the key leafRule reads first, and an array's elements count toward the
+// key holding the array. Only a key the map calls CatNone is asked: a key
+// with a category already masks every leaf beneath it, and a key that is not
+// in the map (a strong shape, or past jsonKeyLimit) is unknown, which masks
+// them too.
+//
+// It decides nothing by itself. guessedPhoneLeafColumns gives these keys
+// CatPhone only with the scalar path's corroboration, so that a document of
+// ten-digit order numbers is not masked on a numbering plan's coincidence any
+// more than a column of them is (guessedPhoneColumns). A configured region is
+// not read here: leafValueCategory already masks every leaf that parses under
+// it, one value at a time, without corroboration.
+func guessedPhoneLeafKeys(samples []any, keys map[string]pipeline.Category) []string {
+	if len(keys) == 0 {
+		return nil
+	}
+	leaves := map[string][]string{}
+	for _, v := range samples {
+		doc, ok := decodeSampleDocument(v)
+		if !ok {
+			continue
+		}
+		collectKeyStrings(doc, "", leaves, 0)
+	}
+	names := make([]string, 0, len(leaves))
+	for k := range leaves {
+		if cat, ok := keys[k]; ok && cat == pipeline.CatNone {
+			names = append(names, k)
+		}
+	}
+	sort.Strings(names)
+	var out []string
+	for _, k := range names {
+		if guessedPhoneRatio(leaves[k]) {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+// guessedPhoneRatio is guessedPhoneHit's own test -- at least minSamples
+// values and validatorThreshold of them matching some region in
+// phoneGuessRegions -- stopping as soon as the misses already rule the ratio
+// out, because a document column can hold far more leaves than a scalar
+// column holds samples, and a key of words is decided on its first few.
+func guessedPhoneRatio(values []string) bool {
+	n := len(values)
+	if n < minSamples {
+		return false
+	}
+	missed := 0
+	for _, v := range values {
+		if matchesAnyGuessRegion(v) {
+			continue
+		}
+		missed++
+		// The best the rest can do is match every one; below the threshold
+		// even then, the key is out. The comparison is guessedPhoneColumns'
+		// own, over that best case.
+		if float64(n-missed)/float64(n) < validatorThreshold {
+			return false
+		}
+	}
+	return true
+}
+
+// keyStringCap bounds how many string leaves collectKeyStrings keeps for one
+// key. The ratio over the first keyStringCap is the ratio the key is judged
+// by; the samples are already bounded, so this only bounds a document that
+// repeats one key thousands of times inside arrays.
+const keyStringCap = 4096
+
+// collectKeyStrings adds every non-empty string leaf of v, to jsonMaxDepth,
+// to out under the nearest object key enclosing it (key; "" for a leaf with
+// none, which no map entry names). An object's keys are walked in sorted
+// order, so which leaves keyStringCap keeps is the same on every run
+// (ARCHITECTURE.md's determinism rule, the reason jsonKeyCategories sorts).
+func collectKeyStrings(v any, key string, out map[string][]string, depth int) {
+	if depth > jsonMaxDepth {
+		return
+	}
+	switch t := v.(type) {
+	case map[string]any:
+		names := make([]string, 0, len(t))
+		for k := range t {
+			names = append(names, k)
+		}
+		sort.Strings(names)
+		for _, k := range names {
+			collectKeyStrings(t[k], k, out, depth+1)
+		}
+	case []any:
+		for _, child := range t {
+			collectKeyStrings(child, key, out, depth+1)
+		}
+	case string:
+		if key != "" && t != "" && len(out[key]) < keyStringCap {
+			out[key] = append(out[key], t)
+		}
+	}
 }
 
 // jsonLeafIsPersonal reports whether a leaf carries personal data, by the same

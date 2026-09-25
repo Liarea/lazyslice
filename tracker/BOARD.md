@@ -8,8 +8,8 @@
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 0 | 0 | 108 | 0 | 0 |
-| E6 Launch | 6 | 5 | 0 | 44 | 0 | 0 |
-| E9 Later | later | 141 | 0 | 40 | 8 | 0 |
+| E6 Launch | 6 | 10 | 0 | 44 | 0 | 0 |
+| E9 Later | later | 143 | 0 | 40 | 8 | 0 |
 
 ## Open and in progress
 
@@ -159,6 +159,13 @@
 - T-0394 [open] E6 · The phone region reaches document keys and leaves, and a key whose sampled leaves are phone numbers masks them (opus)
 - T-0395 [open] E9 · A national-format phone number used as a JSON object key is masked under the run's --phone-region, as the second net already reads it ()
 - T-0396 [open] E9 · Decide whether a document column named just 'name' needs corroboration before every leaf is masked, as a text column does ()
+- T-0397 [open] E6 · The second net's generated-column skip covers only the leaf the expression reads (opus)
+- T-0398 [open] E6 · One log-shape rule: the classifier's replaced-whole verdict is the one transform and verify apply (sonnet)
+- T-0399 [open] E6 · A composite type holding a json, jsonb or hstore field is refused at plan, not classified over its record text (sonnet)
+- T-0400 [open] E9 · A document keyed by many phone numbers refuses at exit 7 on a masked-key collision ()
+- T-0401 [open] E9 · A national-format phone number used as a JSON key survives with no --phone-region ()
+- T-0402 [open] E6 · Document numbers are decoded exactly, so a card number stored as a json number keeps its digits (sonnet)
+- T-0403 [open] E6 · textsig candidates cover fullwidth digits, dash-separated groups, mailto and tel schemes, percent-encoding and base64 (opus)
 
 ## Recently closed
 

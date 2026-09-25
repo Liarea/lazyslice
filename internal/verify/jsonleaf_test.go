@@ -443,3 +443,53 @@ func TestAGeneratedColumnOverANameHitDocumentsLeafIsTheMaskersOutput(t *testing.
 		})
 	}
 }
+
+// T-0394 (the 2026-09-25 JSON red team, round 1, A11): under --phone-region
+// GB the net reads a masked document's keys under the region, and transform's
+// keyCategory now masks a national-format key under the same region, so what
+// the target holds is the phone masker's international output, which the
+// net's international-only key skip leaves to the residual scan -- the run
+// that refused at exit 9 with --skip-table as the only remedy now passes.
+// The skip is not widened to the region: a national key that did survive can
+// only be one transform failed to mask, and the net still refuses it.
+func TestTheSecondNetPassesANationalPhoneKeyTransformMaskedUnderTheRegion(t *testing.T) {
+	for _, c := range []struct {
+		name, doc, wantFail string
+	}{
+		{"the keys transform writes", `{"+12015550142": "ledger matrix", "+13055550117": "node profile", "whatsApp": "+14155550123"}`, ""},
+		{"a national key that survived", `{"07911 120001": "ledger matrix", "+13055550117": "node profile", "whatsApp": "+14155550123"}`, "phone"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			table := customers()
+			col := ref.ColumnRef{Table: table, Column: "entries"}
+			// The GB map internal/classify builds: no phone key is in it, and
+			// whatsApp is phone from its sampled leaves.
+			dec := pipeline.Decision{
+				Col: col, Category: pipeline.CatSemiStruct, Masked: true,
+				LeafKeys: map[string]pipeline.Category{"whatsApp": pipeline.CatPhone},
+			}
+			s := &state{
+				opts:   Options{PhoneRegion: "GB"},
+				schema: &pipeline.Schema{},
+				target: oneColumn{vals: []any{c.doc}},
+				steps:  []pipeline.Step{{Table: table, Mode: pipeline.ChildOK}},
+				tables: map[ref.TableRef]*pipeline.Table{
+					table: {Ref: table, Columns: []pipeline.Column{{Name: col.Column, TypeName: "jsonb"}}},
+				},
+				cls: &pipeline.Classification{PhoneRegion: "GB", Decisions: map[ref.ColumnRef]pipeline.Decision{col: dec}},
+			}
+			if err := s.secondNet(context.Background()); err != nil {
+				t.Fatalf("secondNet: %v", err)
+			}
+			if c.wantFail == "" {
+				if len(s.failures) != 0 {
+					t.Fatalf("the net failed %s as %q on the phone masker's own output", col, s.failures[0].Reason)
+				}
+				return
+			}
+			if len(s.failures) != 1 || s.failures[0].Reason != c.wantFail {
+				t.Fatalf("the net recorded %d failures, want one naming %s: a national key in the target is a copy", len(s.failures), c.wantFail)
+			}
+		})
+	}
+}

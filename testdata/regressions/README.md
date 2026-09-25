@@ -380,6 +380,21 @@ for each whole source document — sees every one of them cross whole before
 the fix; `medical_history`, a `special_category` name that was always masked,
 is the control.
 
+**047 and 048 are the same round's two phone findings** (attacker 3's
+national-format number under a leaf key the name rules miss, and attacker
+1's A11 run 2; **T-0394**), on the same precedent, and they need two files
+because the harness passes one `--phone-region` per file. 047 runs with no
+region: a `whatsApp` key whose values are national-format numbers was copied
+while the scalar `whatsapp` column beside it, corroborated by the table's
+`email`, was masked on a guessed-region hit; the leaf map now gives such a
+key `phone` on the scalar path's ratio and corroboration, and `not-copied:`
+over the whole documents sees the fix. 048 runs under `--phone-region GB`: a
+document keyed by national-format numbers refused the run at exit 9 because
+the key masker read only the international form while the second net read
+the keys under the region; the key masker now reads the region too, so the
+run loads, and `not-copied:` pins both the named `by_phone` column and the
+same documents under the neutral `entries`.
+
 The files are loaded and run by `make torture` (`internal/invariants`'s
 `TestTortureRegressions`, behind the `integration` and `torture` build tags), so
 a regression that comes back fails a build rather than being rediscovered by the
@@ -526,7 +541,7 @@ It exists because a defect can be specific to the region-aware phone reading
 rather than to the classifier's ordinary name or value signals, and the
 harness's fixed argument list (`--source`, `--target`, `--root`, `--take`,
 `--secret-file`, `--config`, `--yes`) had no room for a flag beyond those
-until T-0221. It is what 025 sets.
+until T-0221. It is what 025 and 048 set.
 
 ## Files
 
@@ -574,6 +589,8 @@ until T-0221. It is what 025 sets.
 | `044-bare-name-columns-of-label-tables.sql` | dogfood session 1, tracker T-0313, not a torture-schema reduction — see this file's own prose above | **a person's name where the application expects a label**: the rule pack's bare `name` word masked every column called `name` — a tag, a folder, a language, an AI model — and every `*_file_name` column as `person_name`, and a unique-indexed one refused the plan; `bare_name` now needs a word for people in the table or column name or samples the name dictionary carries, `not-masked:` pins five label columns copied and `not-copied:` pins a users table's `name` (corroborated by its table) and an orders table's `name` (corroborated by its samples) still masked |
 | `045-application-values-that-look-like-secrets.sql` | dogfood session 1, tracker T-0315, not a torture-schema reduction — see this file's own prose above | **a copy whose class names raised on load**: the entropy validator masked file names, MD5 and SHA-256 digests, STI `type` class names, formatter class paths, a component name, an environment variable's name and a four-sample column to the fixed credential literal; the four shapes are spared, a `type`/`klass`/`component_name` column is not asked, and a column needs five samples, while four real secrets and a column of file names named after their owners are still masked |
 | `046-document-column-whose-own-name-is-personal.sql` | the 2026-09-25 JSON red team, round 1, tracker T-0393, not a torture-schema reduction — see this file's own prose above | **names, streets, passwords and birth dates copied inside documents at exit 0**: a `jsonb` column whose own name matched a personal rule its type did not satisfy was decided `semi_structured` by the type and its leaves were decided by the per-leaf map, which copied every signal-free leaf; the name's category is now carried on the decision, the map is not read, and every leaf is masked under that category through the leaf masker (`free_text` for `person_name`, `person_date` and `free_text` names), with `medical_history` as the always-masked control |
+| `047-guessed-region-phone-under-an-unnamed-leaf-key.sql` | the 2026-09-25 JSON red team, round 1, tracker T-0394, not a torture-schema reduction — see this file's own prose above | **phone numbers copied inside documents at exit 0 beside their masked scalar twin**: with no `--phone-region`, a national-format number under a key no name rule names was copied, while the same values in a scalar column beside a personal neighbour were masked on a guessed-region hit; a key whose sampled values parse under the guessed regions at the scalar path's ratio is now `phone` in the leaf map when the scalar path's corroboration holds or the document carries a personal key, and every leaf under it is masked |
+| `048-national-format-phone-keys-under-a-phone-region.sql` | the 2026-09-25 JSON red team, round 1 (A11, run 2), tracker T-0394, not a torture-schema reduction — see this file's own prose above | **a refusal with only `--skip-table` for a remedy**: under `--phone-region GB` a document keyed by national-format numbers exited 9, `verify.refused.second_net_document_masked`, because the key masker read a phone key in international form only and the net read it under the region; the key masker and the classifier's leaf map now read the run's region, so the national key is masked and the run loads |
 
 009's header now says `ok`. It did not always: `arrayArrivesAsLiteral` in
 `internal/plan/writeback.go` was written as a stand-in for the element-wise

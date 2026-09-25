@@ -2078,8 +2078,25 @@ importing this package.
   for that reason.
 - **A key that is itself an email, phone or Luhn-valid number is left out**
   (`strongKeyShape`, the same three textsig validators transform's
-  `keyCategory` uses): transform masks such a key, so it is a value, and
-  leaving it out means every leaf beneath it is masked on both sides.
+  `keyCategory` uses, the phone one under the run's `--phone-region` since
+  T-0394): transform masks such a key, so it is a value, and leaving it out
+  means every leaf beneath it is masked on both sides.
+- **The map has a value half for guessed-region phone numbers** (T-0394, the
+  JSON red team's A26). `guessedPhoneLeafKeys` (`validators.go`) finds, in
+  `base`, the keys the map calls `none` whose string leaves across the
+  samples clear `guessedPhoneHit`'s own test (at least `minSamples`, at
+  `validatorThreshold`, some region in `phoneGuessRegions`), a leaf counting
+  toward its nearest enclosing key; `guessedPhoneLeafColumns` (pass 3b,
+  beside `guessedPhoneColumns` and gated the same way) gives them
+  `CatPhone` when `Decision.TableHasLikelyPersonalColumn` holds or the map
+  has a key `identifiesAPerson` names. Transform then masks every leaf under
+  such a key through the phone masker, and verify's net, reading the same
+  map, leaves them to the residual scan. It only turns `none` into `phone`,
+  so it only masks more. `phoneGuessVetoed` (T-0317) is not applied to a
+  leaf key: it keeps a key-shaped *column* from getting a phone number's
+  shape, and a leaf key it would veto was copied before this pass, so
+  applying it would only choose copying over masking. `t0394_test.go` pins both halves and
+  testdata/regressions/047 and 048 end to end.
 - **At most `jsonKeyLimit` (4096) keys**; a key past it is simply unknown, and
   a leaf beneath an unknown key is masked. Which keys are kept is decided over
   the *sorted* set of every key the samples showed (the T-0272 review round,

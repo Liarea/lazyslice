@@ -852,7 +852,9 @@ func (s *state) netStrings(v any, mode netMode) (direct, fromLeaves []string) {
 				// matches one of the three strongKeyCategory validators is
 				// never a surviving source value — json.go's maskKey ran
 				// every key through keyCategory, the same three-validator
-				// question, and replaced every match with that category's own
+				// question (under the run's --phone-region too since T-0394,
+				// whose masked output is still international), and replaced
+				// every match with that category's own
 				// masker output; a category masker's output is by
 				// construction a value of that category (mask.CLAUDE.md,
 				// financialAccountMasker's own comment), so the masked key

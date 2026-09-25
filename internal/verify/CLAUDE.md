@@ -497,6 +497,19 @@ was chosen and is recorded here rather than only in a comment.
       tests canonical equality against the *source*, not "does this look
       like the category", and it already proves no source key survived at
       that path without this change.
+    - **Since T-0394 `keyCategory` reads a phone key under the run's
+      `--phone-region` too, and `strongKeyCategory` stays
+      international-only on purpose.** The argument above still holds:
+      every number the international reading accepts is one the region
+      reading accepts, so an unchanged key that matches `strongKeyCategory`
+      would have been masked; and the phone masker's output is the
+      international form, so a national key transform masked comes back
+      matching `strongKeyCategory` and is skipped. Widening the skip to the
+      region would drop exactly the keys that can only be copies — a
+      national-format key in the target is one transform left — which the
+      net's own region check reads and refuses
+      (`TestTheSecondNetPassesANationalPhoneKeyTransformMaskedUnderTheRegion`,
+      `jsonleaf_test.go`; testdata/regressions/048 end to end).
     - **What stays in the net's input, and why the fix is scoped to keys and
       not to columns.** A key that does not match `strongKeyCategory` is
       kept regardless of `docMasked`, because `keyCategory` never masks it
