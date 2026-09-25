@@ -153,7 +153,26 @@ const (
 // Name is the container ARCHITECTURE.md section 9 names for a project. It is
 // exported because the questions and refusals that mention the container are
 // written outside this package and must not spell the name a second way.
-func Name(project string) string { return namePrefix + project }
+//
+// A project name that already starts with "lazyslice-" or "lazyslice_" (the
+// compose project name from a directory called lazyslice-<something>, or a
+// committed lazyslice.yml with such a name) has that leading segment
+// stripped before namePrefix is added, so the container name doesn't read
+// "lazyslice-target-lazyslice-<something>" (T-0333). Only the container name
+// built here is affected; the project name itself — what's read from or
+// written to lazyslice.yml — is untouched.
+func Name(project string) string { return namePrefix + stripLazyslicePrefix(project) }
+
+// stripLazyslicePrefix removes one leading "lazyslice-" or "lazyslice_" from
+// project, if present.
+func stripLazyslicePrefix(project string) string {
+	for _, p := range [...]string{"lazyslice-", "lazyslice_"} {
+		if rest, ok := strings.CutPrefix(project, p); ok && rest != "" {
+			return rest
+		}
+	}
+	return project
+}
 
 // IsName reports whether name is shaped like a container Name produced: the
 // lazyslice-target- prefix followed by one or more characters of Docker's

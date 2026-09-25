@@ -4,6 +4,7 @@ package discover
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -220,5 +221,69 @@ func TestQ1NeverProposesANameThatIsTaken(t *testing.T) {
 				t.Error("a container lazyslice did not create was started")
 			}
 		})
+	}
+}
+
+// T-0335: --create-target names lazyslice-target-<project> the same way Q1
+// does, and since T-0333 that name strips a leading "lazyslice-"/"lazyslice_"
+// segment from the project — so "shop" and "lazyslice-shop", checked out in
+// different directories, both name lazyslice-target-shop. --create-target
+// never asks a question and so never went through reuseOwn's name_taken
+// guard; this pins that provisionTarget refuses instead of adopting, starting
+// or loading into the other directory's container.
+func TestCreateTargetRefusesAnotherProjectsSameNamedContainer(t *testing.T) {
+	quietEnvironment(t)
+	shopDir := filepath.Join(t.TempDir(), "shop")
+	if err := os.Mkdir(shopDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// otherDir is a different directory whose project name is "lazyslice-shop"
+	// so provision.Name strips the prefix and collides with shopDir's own
+	// "shop" -> lazyslice-target-shop.
+	otherDir := filepath.Join(t.TempDir(), "lazyslice-shop")
+	if err := os.Mkdir(otherDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if projectName(shopDir) == projectName(otherDir) {
+		t.Fatalf("test setup: projects must differ (%q, %q)", projectName(shopDir), projectName(otherDir))
+	}
+	name := provision.Name(projectName(shopDir))
+	if name != provision.Name(projectName(otherDir)) {
+		t.Fatalf("test setup: both projects must name %s", name)
+	}
+
+	api := &fakeDocker{
+		// otherDir's own container already answers to the collided name.
+		list: []container.Summary{pgContainer("other", "/"+name, "postgres:16", 5433, ownLabels(otherDir))},
+		env:  map[string][]string{"other": ownEnv},
+	}
+	p := &fakeProvisioner{result: provisioned("postgres://postgres:q7Rk2vXw9LmP4tZs@127.0.0.1:5433/postgres")}
+	var events []event.Event
+	sink := event.SinkFunc(func(e event.Event) { events = append(events, e) })
+
+	_, err := Resolve(t.Context(), Options{
+		Workdir: shopDir, NeedTarget: true, CreateTarget: true,
+		Source:        "postgres://app@127.0.0.1:1/shop",
+		DockerHost:    localDockerHost,
+		dial:          fakeDial(api),
+		dialCandidate: sayVersion(16),
+		provisioner:   handOut(p),
+	}, sink)
+
+	if len(p.provisioned) != 0 {
+		t.Errorf("provisioned %d container(s), want none", len(p.provisioned))
+	}
+	if len(p.started) != 0 {
+		t.Errorf("started = %v, want none — the other directory's container must not be started", p.started)
+	}
+	r, ok := AsRefusal(err)
+	if !ok || r.Code != CodeTargetNameTaken || r.Exit != exitTarget {
+		t.Fatalf("err = %v, want %s exit 4", err, CodeTargetNameTaken)
+	}
+	if r.Args[event.ArgContainer] != name || r.Args[event.ArgFlag] != "--target" {
+		t.Errorf("args = %v, want the container and --target", r.Args)
+	}
+	if !hasError(events, CodeTargetNameTaken, exitTarget) {
+		t.Error("the refusal never reached the sink")
 	}
 }

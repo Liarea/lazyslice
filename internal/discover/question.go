@@ -139,7 +139,22 @@ func askQ1(ctx context.Context, o Options, source *found, dock dockerEndpoint, s
 
 // provisionTarget is --create-target: the same work as Q1's yes, with no
 // question, because the flag is the answer.
+//
+// It checks the name the container would carry against a same-named container
+// that already exists before doing anything else (T-0335): reuseOwn's
+// name_taken guard above only fires on the path that asks Q1, which
+// noTarget never reaches for --create-target (it returns from this function
+// instead). Without this check here, provision.Name's own prefix-stripping
+// (T-0333) makes two different directories collide on one container name —
+// "shop" and "lazyslice-shop" in different directories both name
+// lazyslice-target-shop — and provision.Provision adopts whatever already
+// answers to that name with no ownership check of its own, loading into and
+// starting another project's container with the credential that project's
+// directory remembered.
 func provisionTarget(ctx context.Context, o Options, source *found, dock dockerEndpoint, sink event.Sink) (*found, error) {
+	if taken := nameTakenBySomeoneElse(ctx, o, dock); taken != "" {
+		return nil, refuseNameTaken(sink, taken)
+	}
 	major, err := sourceMajor(ctx, o, source, sink)
 	if err != nil {
 		return nil, err
@@ -150,6 +165,31 @@ func provisionTarget(ctx context.Context, o Options, source *found, dock dockerE
 		Major:    major,
 		Progress: progressOf(o),
 	})
+}
+
+// nameTakenBySomeoneElse looks up the container provision.Name would propose
+// for this project and reports its name when one already exists and is not
+// ours (T-0334's ownContainer: the same check reuseOwn makes before Q1), or
+// "" otherwise. A lookup that fails, or finds nothing, is not evidence the
+// name is taken — the caller proceeds exactly as it would have with no
+// container present, and provision.Provision makes the same byName check
+// again before it creates or adopts anything.
+func nameTakenBySomeoneElse(ctx context.Context, o Options, dock dockerEndpoint) string {
+	name := provision.Name(projectName(o.Workdir))
+	api, err := dialDocker(o, dock.endpoint)
+	if err != nil {
+		return ""
+	}
+	look, cancel := context.WithTimeout(ctx, listBudget)
+	defer cancel()
+	c, err := containerByName(look, api, name)
+	if err != nil || c == nil {
+		return ""
+	}
+	if !ownContainer(*c, o.Workdir) {
+		return name
+	}
+	return ""
 }
 
 // provisionWith runs the provisioner and turns what it made into a candidate

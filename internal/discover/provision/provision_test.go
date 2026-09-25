@@ -25,6 +25,25 @@ import (
 	"github.com/moby/moby/client"
 )
 
+// T-0333: a project name that already starts with "lazyslice-" (or
+// "lazyslice_") doesn't read twice in the container name — the leading
+// segment is stripped once before namePrefix is added. A name that merely
+// contains "lazyslice" elsewhere, or is that prefix alone, is untouched.
+func TestNameStripsALeadingLazysliceSegment(t *testing.T) {
+	for _, tc := range []struct{ project, want string }{
+		{"shop", "lazyslice-target-shop"},
+		{"lazyslice-dogfood3", "lazyslice-target-dogfood3"},
+		{"lazyslice_dogfood3", "lazyslice-target-dogfood3"},
+		{"my-lazyslice-fork", "lazyslice-target-my-lazyslice-fork"},
+		{"lazyslice", "lazyslice-target-lazyslice"},
+		{"lazyslice-", "lazyslice-target-lazyslice-"},
+	} {
+		if got := Name(tc.project); got != tc.want {
+			t.Errorf("Name(%q) = %q, want %q", tc.project, got, tc.want)
+		}
+	}
+}
+
 // The whole of ARCHITECTURE.md section 9's create path, against a fake daemon:
 // the image is pulled because it is absent, the volume is named, the binding is
 // loopback and nothing else, the password is random and reaches both the

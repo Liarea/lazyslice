@@ -23,6 +23,7 @@ import (
 	"github.com/moby/moby/client"
 
 	"github.com/Liarea/lazyslice/internal/discover/dockerctx"
+	"github.com/Liarea/lazyslice/internal/discover/provision"
 	"github.com/Liarea/lazyslice/internal/dsn"
 	"github.com/Liarea/lazyslice/internal/event"
 	"github.com/Liarea/lazyslice/internal/pipeline"
@@ -107,6 +108,25 @@ func TestProjectNameFallsBackToTheDirectory(t *testing.T) {
 	}
 	if got := readCompose(dir).Name; got != "myshop" {
 		t.Errorf("project name = %q, want %q", got, "myshop")
+	}
+}
+
+// T-0333, dogfood session 3: a directory named lazyslice-<something> gives a
+// project name that already starts with "lazyslice-", so prefixing it with
+// "lazyslice-target-" would read "lazyslice-target-lazyslice-dogfood3". The
+// container name strips that leading segment once; the project name itself
+// (what readCompose/projectName return, and what a compose file's own
+// `name:` would carry into lazyslice.yml) is untouched.
+func TestContainerNameDoesNotDoubleTheLazysliceProjectPrefix(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "lazyslice-dogfood3")
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		t.Fatalf("%v", err)
+	}
+	if got := projectName(dir); got != "lazyslice-dogfood3" {
+		t.Errorf("project name = %q, want %q (unchanged)", got, "lazyslice-dogfood3")
+	}
+	if got := provision.Name(projectName(dir)); got != "lazyslice-target-dogfood3" {
+		t.Errorf("container name = %q, want %q", got, "lazyslice-target-dogfood3")
 	}
 }
 
