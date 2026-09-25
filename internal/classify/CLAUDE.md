@@ -58,7 +58,8 @@ exemption; add a way for a category's confidence to be lowered by config.
 - `reasons.go` — the reason fragment set and `ParseReason`.
 - `classify.go` — the six passes: base signals, bytea in a person-shaped table,
   the neighbouring-column rule, the two foreign-key passes (`keyChildren`, then
-  FK propagation and shared names), the yml prior, then the threshold.
+  FK propagation and shared names), the yml prior, FK propagation once more
+  when the prior raised anything (T-0364), then the threshold.
 - `spare.go` — what spares a signal-less column from the neighbouring-column
   sweep (T-0311): the enumeration thresholds, the identifier shapes it reads
   from `internal/textsig`, and the dictionary, special-category and gender
@@ -2010,3 +2011,50 @@ already spelled out (the `columns`-based gate on verify's `network_id` entry,
 mirroring `networkIDVetoed`, plus the verify-level test) rather than only
 "do the mirror"; the sequencing decision the review round asked for is
 recorded here for whoever next holds the tracker.
+
+## A yml raise on a key reaches its FK children (T-0364)
+
+`applyPrior` runs after `keyChildren` and `foreignKeys`, so a raise — a
+`lazyslice.yml` pattern or column entry, and what `internal/core` makes of
+`--mask` and a committed `mask:` block — on a natural key used to leave its
+children as the first sweep found them: the parent's values in clear on the
+child side (THREAT_MODEL.md T1) and two maskers, or one and none, across one
+join (T8). A uuid or integer child `markNeverMasked` had exempted as a key
+column could not be raised either, so `internal/core`'s stop-gap refusal of
+such a run (T-0319's review round) had no `--mask` that cleared it.
+
+- **`Classify` runs `foreignKeys()` again after `applyPrior`, only when a raise
+  applied** (`state.priorRaised`, set from `raiseFromConfig`'s new `bool`).
+  Same edges, same rule: the child converges on the parent's category and
+  masker, and a key exemption is lifted exactly as for a key the classifier
+  masked itself. Gating on a raise keeps every run with no prior, or with one
+  that raised nothing, byte-identical — including a cycle of disagreeing
+  masked keys the first sweep's cap cut off, which a second sweep would move.
+- **This was chosen over moving the raise ahead of `keyChildren`.** The raise
+  was not moved because `keyChildren` is the one pass that masks less: run
+  after a raise, or rerun after one, it hands the key exemption back to a
+  column the file itself raised whenever that column's parent is an exempt
+  key. So only propagation is rerun; `keyChildren` still runs once, before
+  the prior, and a raise still skips a column that is `neverMask` (a key the
+  yml cannot contradict), as `applyPrior`'s own comment says.
+- **A child the prior raised under another category converges on the
+  parent's.** Before, the later raise won and the join broke; now the
+  child's category is the parent's, and `internal/core`'s `checkMasks`
+  already refuses a `--mask` whose category did not come out as named.
+- **A child with its own honoured opt-out is skipped** (`w.unmasked` in
+  `propagateKeys`): it is copied whatever its category says, and its Source
+  and reason keep naming the opt-out. `unmasked` is set only in
+  `applyPrior`, so the first sweep is unchanged.
+- **The second sweep names an edge once**: when a raise lifted only the
+  parent's confidence, the child's `fk_propagation` fragment is not appended a
+  second time.
+- **`sameColumnName` is not rerun.** The task is FK children; a raise does
+  not export to same-named columns elsewhere, as before.
+
+`TestAYmlRaiseOnANaturalKeyPropagatesToItsChildren` (`t0364_test.go`) pins a
+uuid key chain (the exempt child and a grandchild, grandchild edge listed
+first), a text key and an opted-out child; it fails with the rerun removed.
+`internal/core` keeps its `unmaskedChildren` refusal as the backstop for a
+child propagation cannot mask (its type refuses the parent's category, or
+the edge's parent column is not a key or unique): after the rerun it fires
+only for those.

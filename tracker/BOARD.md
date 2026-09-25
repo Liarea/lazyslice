@@ -8,7 +8,7 @@
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 0 | 0 | 108 | 0 | 0 |
-| E6 Launch | 6 | 17 | 0 | 29 | 0 | 0 |
+| E6 Launch | 6 | 16 | 0 | 30 | 0 | 0 |
 | E9 Later | later | 120 | 0 | 39 | 8 | 0 |
 
 ## Open and in progress
@@ -111,7 +111,6 @@
 - T-0310 [open] E9 · A minimal docs site (mkdocs-material on GitHub Pages) once the first ten issues show what strangers look for (sonnet)
 - T-0322 [open] E9 · Infer foreign keys from naming conventions as virtual_fks candidates, so a Rails schema is reachable (opus)
 - T-0324 [open] E9 · Geo leaves inside JSON get in-range numbers (sonnet)
-- T-0325 [open] E6 · --unmask on a first run must not put it on the re-run path; the drift message names the real decision (sonnet)
 - T-0326 [open] E6 · A stray positional argument is a usage error, not 'the source did not report a server version' (sonnet)
 - T-0327 [open] E6 · A committed yml whose target is a container lazyslice created reconnects or re-provisions, and says which (opus)
 - T-0328 [open] E6 · The free_text masker fits its output to the input's length (opus)
@@ -165,6 +164,7 @@
 - T-0319 [done] E6 · After a second-net refusal the operator can mask the column: --mask, and every failing column reported at once → done
 - T-0320 [done] E6 · A green run prints one verify summary line and how to reach the target → done
 - T-0321 [done] E6 · The reasons dump and the plan end with a summary, and a re-run from a committed yml is quiet → done
+- T-0325 [done] E6 · --unmask on a first run must not put it on the re-run path; the drift message names the real decision → done
 - T-0331 [done] E6 · Decide whether a first run may ask both the target question and the root question → done
 - T-0337 [cancelled] E9 · Move internal/verify's tests off mask.RoleWords, then delete RoleWords in the next mask minor → cancelled
 - T-0348 [done] E9 · verify's second net has no exemption for a framework metadata column that validates strongly → done
@@ -177,4 +177,3 @@
 - T-0304 [done] E6 · Masked given names, surnames, full names and email local parts draw from the Census lists (ADR-015, mask half; mask/v0.3.0) → done
 - T-0323 [done] E9 · Decide the free_text masker's length policy for short enum-like values → done
 - T-0329 [done] E9 · internal/core/core_test.go's recorder Residual double needs AddEmitted and Emitted (T-0302 blocks make check) → done
-- T-0065 [done] E6 · 20-second VHS GIF of the first run on Pagila → done
