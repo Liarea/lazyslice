@@ -395,6 +395,20 @@ the keys under the region; the key masker now reads the region too, so the
 run loads, and `not-copied:` pins both the named `by_phone` column and the
 same documents under the neutral `entries`.
 
+**049 is the same round's generated-column finding** (entry 24, attacker
+3; **T-0397**), on the same precedent: Supabase's `auth.identities` shape
+with four generated columns beside its `email`, each assembled from
+document leaves no name rule and no validator recognises alone. The per-leaf
+map copied the leaves, the target recomputed a real address, E.164 number
+and card number in every row, and the second net's generated-column skip
+(T-0272) let all four through at exit 0 because it covered the whole column
+whichever leaf the expression read. The classifier now gives the keys a
+generated column reads the column's own category when its samples validate,
+so those leaves are masked, and the net skips a hit only when the value is
+its own row's category-masked leaf, which the Supabase column still is.
+`not-copied:` names the document and all five generated columns; before the
+fix `joined`, `dial`, `dial_n` and `pan` crossed whole.
+
 The files are loaded and run by `make torture` (`internal/invariants`'s
 `TestTortureRegressions`, behind the `integration` and `torture` build tags), so
 a regression that comes back fails a build rather than being rediscovered by the
@@ -591,6 +605,7 @@ until T-0221. It is what 025 and 048 set.
 | `046-document-column-whose-own-name-is-personal.sql` | the 2026-09-25 JSON red team, round 1, tracker T-0393, not a torture-schema reduction — see this file's own prose above | **names, streets, passwords and birth dates copied inside documents at exit 0**: a `jsonb` column whose own name matched a personal rule its type did not satisfy was decided `semi_structured` by the type and its leaves were decided by the per-leaf map, which copied every signal-free leaf; the name's category is now carried on the decision, the map is not read, and every leaf is masked under that category through the leaf masker (`free_text` for `person_name`, `person_date` and `free_text` names), with `medical_history` as the always-masked control |
 | `047-guessed-region-phone-under-an-unnamed-leaf-key.sql` | the 2026-09-25 JSON red team, round 1, tracker T-0394, not a torture-schema reduction — see this file's own prose above | **phone numbers copied inside documents at exit 0 beside their masked scalar twin**: with no `--phone-region`, a national-format number under a key no name rule names was copied, while the same values in a scalar column beside a personal neighbour were masked on a guessed-region hit; a key whose sampled values parse under the guessed regions at the scalar path's ratio is now `phone` in the leaf map when the scalar path's corroboration holds or the document carries a personal key, and every leaf under it is masked |
 | `048-national-format-phone-keys-under-a-phone-region.sql` | the 2026-09-25 JSON red team, round 1 (A11, run 2), tracker T-0394, not a torture-schema reduction — see this file's own prose above | **a refusal with only `--skip-table` for a remedy**: under `--phone-region GB` a document keyed by national-format numbers exited 9, `verify.refused.second_net_document_masked`, because the key masker read a phone key in international form only and the net read it under the region; the key masker and the classifier's leaf map now read the run's region, so the national key is masked and the run loads |
+| `049-generated-columns-assembled-from-document-leaves.sql` | the 2026-09-25 JSON red team, round 1 (entry 24), tracker T-0397, not a torture-schema reduction — see this file's own prose above | **an address, a phone number and a card number assembled by generated columns at exit 0**: the second net skipped the leaf maskers' validators for any generated column over a masked document with per-leaf categories, whichever leaf it read, so columns built from copied leaves (`u || '@' || h`, `'+' || cc || nsn`, `bin || tail`) passed; the net now skips a hit only when the value is its own row's category-masked leaf, and the classifier masks the keys a generated column reads when its samples validate |
 
 009's header now says `ok`. It did not always: `arrayArrivesAsLiteral` in
 `internal/plan/writeback.go` was written as a stand-in for the element-wise

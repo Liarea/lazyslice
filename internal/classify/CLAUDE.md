@@ -64,6 +64,9 @@ exemption; add a way for a category's confidence to be lowered by config.
   sweep (T-0311): the enumeration thresholds, the identifier shapes it reads
   from `internal/textsig`, and the dictionary, special-category and gender
   guard every spare gives way to. See the T-0311 section below.
+- `generated.go` — the document keys a generated column's expression reads,
+  raised to its category when its samples validate (T-0397; the section on
+  the per-leaf half of a JSON decision, below).
 - `codes.go` — the five `event.Code`s the classify stage renders; each has a row
   in `internal/event/catalogue.yml`.
 - `framework.go` — no file of that name here; see the T-0314 section below for
@@ -2111,6 +2114,26 @@ importing this package.
   (`ByYmlRaise`, which `--mask` and a `mask:` block become), so every leaf of
   such a column is masked. The map is still set on those decisions; nothing
   reads it there.
+- **A generated column whose samples validate raises the keys it reads**
+  (`generated.go`, T-0397, the 2026-09-25 JSON red team's round 1, entry
+  24). `base` records `work.generatedValue` — the category of the validator
+  that decided a generated column's samples (`bestSignal`'s strong branch,
+  never a document family's `jsonSignal`) — and `generatedLeafKeys`, run
+  after `sameColumnName` and before `applyPrior`, gives every key the
+  expression reads through `->` or `->>` (`generatedReads`: identifiers as
+  `internal/verify`'s `exprIdentifiers` reads them, plus the string literal
+  right of each arrow) the generated column's own category (its
+  `Category`, else the validator's) in the `LeafKeys` of every `json`/`jsonb`
+  column of the table the expression names. Only a key the map calls `none`
+  moves; a named key keeps its category, and a key the map does not hold —
+  never sampled, or a `strongKeyShape` key transform masks as a value — is
+  left out, because its leaves are masked already and entering it could put
+  the two packages' spellings out of step. It only masks more, changes no
+  column decision, and is not fingerprinted (`LeafKeys` is not). A key read
+  through `#>`, `#>>` or `jsonb_extract_path` is not raised; `internal/verify`'s
+  net still refuses the assembled value there, and tracker **T-0405** owes it. `t0397_test.go` pins the red
+  team's table, the no-validation and ordinary-column controls, and the
+  parser; testdata/regressions/049 runs it end to end.
 - **A rejected name hit is carried on the decision** (`Decision.NameHit`,
   T-0393, the 2026-09-25 JSON red team). `decide`'s `hasName &&
   !nameAccepted` branch records the hit's category on every arm, so a `jsonb`

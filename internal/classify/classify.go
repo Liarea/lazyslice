@@ -148,6 +148,12 @@ type work struct {
 	// clear validatorThreshold under phoneGuessRegions, set in base() and
 	// acted on only with corroboration, by guessedPhoneLeafColumns.
 	guessedPhoneLeaves []string
+	// generatedValue is, for a generated column whose samples a validator
+	// decided (bestSignal's strong branch, on a family that is not a
+	// document), that validator's category, set in base() and read only by
+	// generatedLeafKeys (T-0397): the evidence that the document leaves the
+	// expression reads hold a value of it.
+	generatedValue pipeline.Category
 	// spare is what the samples of a signal-less character column say it is
 	// -- one identifier shape throughout, or an enumeration -- set in base()
 	// and read only by unknownColumnsBesideCertain, which spares such a column
@@ -266,6 +272,9 @@ func (classifier) Classify(schema *pipeline.Schema, s pipeline.Sampler, prior *p
 	st.keyChildren()
 	st.foreignKeys()
 	st.sameColumnName()
+	// T-0397: a generated column whose samples validate raises the document
+	// keys its expression reads (generated.go).
+	st.generatedLeafKeys()
 	cls, err := st.applyPrior(prior)
 	if err != nil {
 		return nil, err
@@ -888,6 +897,10 @@ func (st *state) base() {
 				raw := st.sampler.Samples(cref)
 				w.d.LeafKeys = jsonKeyCategories(st.pack, raw, st.region)
 				w.guessedPhoneLeaves = guessedPhoneLeafKeys(raw, w.d.LeafKeys)
+			}
+			if col.Generated != "" && sig.strong != nil && !isJSONFamily(ct.Family) &&
+				sig.strong.cat != pipeline.CatNone && sig.strong.cat != pipeline.CatSemiStruct {
+				w.generatedValue = sig.strong.cat
 			}
 			st.decide(w, col, ct, values, sig)
 			st.appendContext(w, t, ct, sig.total)

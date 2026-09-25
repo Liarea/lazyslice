@@ -8,8 +8,8 @@
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 0 | 0 | 108 | 0 | 0 |
-| E6 Launch | 6 | 10 | 0 | 44 | 0 | 0 |
-| E9 Later | later | 143 | 0 | 40 | 8 | 0 |
+| E6 Launch | 6 | 11 | 0 | 45 | 0 | 0 |
+| E9 Later | later | 145 | 0 | 40 | 8 | 0 |
 
 ## Open and in progress
 
@@ -89,7 +89,6 @@
 - T-0266 [open] E9 · The second net's surrogate-key exemption is measured against a key with no sequence or identity default (opus)
 - T-0267 [open] E9 · Workflow scripts carry the checkout's absolute home path in a REPO constant (sonnet)
 - T-0268 [open] E9 · lazyslice doctor prints the stated false negatives, as ARCHITECTURE.md says it does (sonnet)
-- T-0272 [open] E6 · Per-leaf categories for JSON documents on the Decision, so an email leaf is replaced by a fake email rather than filler (opus)
 - T-0274 [open] E9 · The root decision line and the plan's own RootReason give different reasons when a name preference breaks a tie (sonnet)
 - T-0275 [open] E9 · tracker.py: close writes the archive file before it closes the issue, and every gh call has a timeout (sonnet)
 - T-0276 [open] E9 · tracker.py: five small robustness findings from T-0196's review (sonnet)
@@ -166,9 +165,14 @@
 - T-0401 [open] E9 · A national-format phone number used as a JSON key survives with no --phone-region ()
 - T-0402 [open] E6 · Document numbers are decoded exactly, so a card number stored as a json number keeps its digits (sonnet)
 - T-0403 [open] E6 · textsig candidates cover fullwidth digits, dash-separated groups, mailto and tel schemes, percent-encoding and base64 (opus)
+- T-0404 [open] E6 · A committed yml pins which document keys are copied, and a key the samples newly show counts as drift (opus)
+- T-0405 [open] E9 · A generated column's path-operator reads raise the document keys they read, as its arrow reads do ()
+- T-0406 [open] E9 · A second-net refusal on a generated column names a remedy that works on a generated column ()
+- T-0407 [open] E6 · The v0.4.0 truth pass over README, SECURITY, CONCEPT, the quickstart transcript and the launch drafts (sonnet)
 
 ## Recently closed
 
+- T-0272 [done] E6 · Per-leaf categories for JSON documents on the Decision, so an email leaf is replaced by a fake email rather than filler → done
 - T-0343 [done] E6 · A first run asks both the target question and the root question when both are open (ADR-016 narrows ADR-008's one-question rule) → done
 - T-0345 [done] E6 · The screens' exit keys: esc inside help quits the program, enter runs unconfirmed, ctrl+c exits 0 → done
 - T-0346 [done] E6 · A lookup step is shown with 0 rows while the estimate counts its rows → done
@@ -193,4 +197,3 @@
 - T-0326 [done] E6 · A stray positional argument is a usage error, not 'the source did not report a server version' → done
 - T-0327 [done] E6 · A committed yml whose target is a container lazyslice created reconnects or re-provisions, and says which → done
 - T-0331 [done] E6 · Decide whether a first run may ask both the target question and the root question → done
-- T-0333 [done] E6 · --create-target's container name doubles the prefix for a directory named lazyslice-* → done
