@@ -130,6 +130,57 @@ func TestContainerNameDoesNotDoubleTheLazysliceProjectPrefix(t *testing.T) {
 	}
 }
 
+// T-0385: the test above only composes projectName and provision.Name
+// directly — it never drives Q1 or a provision request, so a bug in how
+// either one actually uses those two functions would not show up here. This
+// runs the same lazyslice-dogfood3 shape end to end: Q1's own prompt text
+// must not double the prefix, and the create request's Project — which
+// becomes provision.LabelProject on the real container
+// (internal/discover/provision/provision.go) — must still carry the full,
+// unstripped project name, since that label is what own_container_test.go's
+// reuseOwn matches a second run's own container by.
+func TestQ1AndTheCreateRequestForADogfoodDirectoryDoNotDoubleThePrefix(t *testing.T) {
+	quietEnvironment(t)
+	dir := filepath.Join(t.TempDir(), "lazyslice-dogfood3")
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		t.Fatalf("%v", err)
+	}
+	p := &fakeProvisioner{result: provisioned("postgres://postgres:pw@127.0.0.1:5433/postgres")}
+	asked := &fakePrompter{answer: true}
+
+	_, err := Resolve(t.Context(), Options{
+		Workdir: dir, NeedTarget: true,
+		Source:        "postgres://app@127.0.0.1:1/shop",
+		DockerHost:    localDockerHost,
+		dial:          fakeDial(&fakeDocker{}),
+		dialCandidate: sayVersion(16),
+		provisioner:   handOut(p),
+		Prompter:      asked,
+	}, event.Discard)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+
+	if len(asked.questions) != 1 {
+		t.Fatalf("asked %d questions, want exactly one: %q", len(asked.questions), asked.questions)
+	}
+	q := asked.questions[0]
+	if !strings.Contains(q, "lazyslice-target-dogfood3") {
+		t.Errorf("Q1 = %q, want it to name lazyslice-target-dogfood3", q)
+	}
+	if strings.Contains(q, "lazyslice-target-lazyslice-dogfood3") {
+		t.Errorf("Q1 = %q, the project prefix must not be doubled", q)
+	}
+
+	if len(p.provisioned) != 1 {
+		t.Fatalf("provisioned %d times, want once", len(p.provisioned))
+	}
+	if got := p.provisioned[0].Project; got != "lazyslice-dogfood3" {
+		t.Errorf("create request Project = %q, want the full, unstripped project name %q (it becomes provision.LabelProject)",
+			got, "lazyslice-dogfood3")
+	}
+}
+
 // A container publishing 0.0.0.0:5432 and a $DATABASE_URL naming localhost:5432
 // are one database. The lower-numbered rung wins the printed provenance and the
 // discarded one is shown in parentheses (ADR-008 §4).

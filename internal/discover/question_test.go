@@ -273,6 +273,60 @@ func TestASecondRunRecoversTheProvisionedTargetsPassword(t *testing.T) {
 	}
 }
 
+// T-0385: a lazyslice.yml committed before T-0333 recorded the unstripped
+// container name (project lazyslice-foo, TargetLabel
+// "lazyslice-target-lazyslice-foo") — the maintainer's own dogfood
+// directories are exactly this shape. provision.Name(project) has stripped
+// the leading "lazyslice-" since T-0333 and now reads
+// "lazyslice-target-foo", so the naive comparison in rung0Target no longer
+// matched the file's own label at all: the container and its remembered
+// password went unfound and a run that used to need no password regressed
+// to "password authentication failed". rung0Target must recognise the
+// legacy name too, and read the password back from the name that was
+// actually recorded.
+func TestASecondRunRecoversALegacyPreT0333Password(t *testing.T) {
+	quietEnvironment(t)
+	dir := filepath.Join(t.TempDir(), "lazyslice-foo")
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		t.Fatalf("%v", err)
+	}
+	state := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", state)
+
+	legacy := provision.LegacyName(projectName(dir))
+	if legacy != "lazyslice-target-lazyslice-foo" {
+		t.Fatalf("legacy name = %q, want the unstripped pre-T-0333 form", legacy)
+	}
+	if got := provision.Name(projectName(dir)); got == legacy {
+		t.Fatalf("Name(%q) = %q, want it to differ from the legacy name for this test to mean anything", projectName(dir), got)
+	}
+	targets := filepath.Join(state, "lazyslice", "targets")
+	if err := os.MkdirAll(targets, 0o700); err != nil {
+		t.Fatalf("creating %s: %v", targets, err)
+	}
+	if err := os.WriteFile(filepath.Join(targets, legacy+".password"), []byte("minted\n"), 0o600); err != nil {
+		t.Fatalf("writing the remembered password: %v", err)
+	}
+
+	res, err := Resolve(t.Context(), Options{
+		Workdir: dir, NeedTarget: true,
+		Source: "postgres://app@127.0.0.1:1/shop",
+		Config: &pipeline.Config{
+			Target:      pipeline.FromContainer,
+			TargetLabel: legacy,
+			TargetRef:   mustRef(t, "postgres://postgres@127.0.0.1:5433/postgres"),
+		},
+		dial:        fakeDial(&fakeDocker{}),
+		provisioner: refuseToProvision(t),
+	}, event.Discard)
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if res.Target != "postgres://postgres:minted@127.0.0.1:5433/postgres" {
+		t.Errorf("target = %q, want the remembered credential put back for the legacy container name", res.Target)
+	}
+}
+
 // The remembered credential is only ever read for a container name this run
 // would itself have used. The label in lazyslice.yml is committed text, so a
 // file naming somebody else's container — or a path — must not become a file

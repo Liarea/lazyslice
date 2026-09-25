@@ -639,3 +639,23 @@ from `targetShaped`.
   `lazyslice-target-<project>` whether or not lazyslice created it
   (`provision.Provision`'s `byName` checks no label), filed as **T-0373**.
 
+## Recognising a pre-T-0333 container name (T-0385)
+
+`provision.Name` (T-0333, above) strips one leading `lazyslice-`/`lazyslice_`
+segment from the project before adding `lazyslice-target-`, so a directory
+named `lazyslice-foo` names its container `lazyslice-target-foo`, not
+`lazyslice-target-lazyslice-foo`. A `lazyslice.yml` committed before T-0333
+recorded the unstripped form as its `target_label`, and that container — and
+the password `--create-target` remembered for it — still carry that name;
+comparing only against today's `provision.Name` left `rung0Target` unable to
+match either one, so a second run against such a file (the maintainer's own
+`lazyslice-dogfood*` directories are this shape) stopped dialling with no
+password at all where it used to need none — a regression for an existing
+user, not a new-file case. `rung0Target` now compares `TargetLabel` against
+both `provision.Name(project)` and `provision.LegacyName(project)` (the
+pre-T-0333, unstripped form), and reads the remembered password back from
+whichever one matched — the file and the state-dir password were written
+together, so they always agree. ARCHITECTURE.md §9 carries the amendment
+recording that `provision.Name` is not injective and why; this is the reader
+side of that fact.
+
