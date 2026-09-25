@@ -1982,7 +1982,7 @@ func (r *run) planStage(ctx context.Context) error {
 			Args: event.Args{
 				event.ArgTable:  s.Table.String(),
 				event.ArgCount:  strconv.FormatInt(stepRows(s), 10),
-				event.ArgReason: modeName(s.Mode) + "; " + s.Why,
+				event.ArgReason: modeName(s.Mode) + "; " + stepWhy(s),
 			},
 		})
 	}

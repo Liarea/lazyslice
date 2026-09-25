@@ -375,13 +375,37 @@ func modeName(m pipeline.Mode) string {
 	}
 }
 
-// stepRows is how many rows a step will move, or -1 where the plan does not know
-// (a lookup is copied whole; a schema-only table moves none).
+// stepRows is how many rows a step will move: the walked key count for
+// ChildOK/ParentOnly, 0 for a table the plan never reaches (SchemaOnly), and
+// a Lookup step's own row count. A Lookup step's Keys is nil by design
+// (ARCHITECTURE.md §2 — it is copied whole, not walked), so that count has
+// nowhere else to come from: T-0346 (the Orchestrator's Pagila evaluation)
+// found a lookup's plan.step line reading "0 rows" while the plan's own
+// estimate already added its rows in, because this function looked at
+// nothing but Keys. internal/plan packs the count into the step's own Why
+// (plan.ParseLookupRows's doc comment says where and why); stepWhy below is
+// the same step's Why with that packing undone, for display.
 func stepRows(s pipeline.Step) int64 {
-	if s.Keys == nil {
-		return 0
+	if s.Keys != nil {
+		return int64(s.Keys.Len())
 	}
-	return int64(s.Keys.Len())
+	if _, n, ok := plan.ParseLookupRows(s.Why); ok {
+		return n
+	}
+	return 0
+}
+
+// stepWhy is a step's Why as an operator reads it, with the row count
+// internal/plan packed into a Lookup step's Why (plan.ParseLookupRows, T-0346)
+// stripped back off: the plan.step line already carries that number in its
+// own {count} slot (docs/ERRORS.md), and printing it a second time inside the
+// sentence would say "109 rows, lookup; copied whole (109 rows)" for what a
+// reader wants to read as "109 rows, lookup; copied whole".
+func stepWhy(s pipeline.Step) string {
+	if why, _, ok := plan.ParseLookupRows(s.Why); ok {
+		return why
+	}
+	return s.Why
 }
 
 // hexKey is the text form of a masking key, which is what ./lazyslice.secret

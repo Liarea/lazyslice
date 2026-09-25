@@ -1550,3 +1550,67 @@ package's own tests.
   masked column under a unique index too narrow to widen into — driven through
   one `New().Plan()` call, and asserts the four refusals arrive in the order
   the checks that produce them run.
+
+## A Lookup step's row count travels packed into its own Why, and owes a proper field (T-0346)
+
+The Orchestrator's evaluation of `--tui` against Pagila found `public.country`
+— a parent reached only as a lookup (no outgoing edge, an incoming one from
+`city`, few rows, no masked column) — printed `0 rows, lookup; lookup` on its
+plan line and its plan-screen row, while the estimate two lines below already
+added `country`'s 109 rows in. `stepRows` (`internal/core/names.go`) looked at
+nothing but `Step.Keys`, which is nil for a `Lookup` step by design (§2 — it is
+copied whole, not walked), so it had nowhere to read a row count from; the
+count this package computes in `findLookups` (`p.lookupRows`) reached the
+estimate's running total and never a `pipeline.Step` a caller outside this
+package can read.
+
+**The proper fix — a `Rows int64` field on `pipeline.Step` — is outside this
+task's paths.** `pipeline.Step` is declared in `internal/pipeline/plan.go`,
+which T-0346's paths did not include (`internal/plan`, `internal/core`,
+`internal/tui`, `internal/render`, `ARCHITECTURE.md`, `docs/`,
+`testdata/regressions/`), and `Step` already documents its four non-`Table`/
+`Mode` fields precisely (`Keys` nil for `Lookup`/`SchemaOnly`, `Cap` "0 when
+unused", `Depth`) — none of them is spare for a row count, and repurposing one
+would be exactly the kind of silent deviation root CLAUDE.md forbids. Filed as
+**T-0379**.
+
+**What ships instead: `assemble` packs the count into `Why`, and
+`internal/core` reads it back off.** `lookupWhyWithRows(why, n)` appends
+`" (N rows)"` to a `Lookup` step's own `Why` — the same carrier §3.7's root
+line already uses for `"200 chosen, 4 pulled in by references"` — and
+`ParseLookupRows` is its one inverse, exported for `internal/core`'s `stepRows`
+(the number) and `stepWhy` (the same `Why`, with the suffix stripped so a
+lookup's plan line does not say `"109 rows, lookup; copied whole (109 rows)"`).
+`ordinary lookup`'s `Why` is also now `"copied whole"` rather than the bare
+`"lookup"` T-0346 found — `frameworkMetadataWhy`'s own sentences (T-0314)
+already said `"copied whole"` for the same shape, and a reader could not tell a
+lookup that copied 109 rows from one that copied none from `"lookup"` alone.
+`TestPlanPagilaLookupCountryCarriesItsRowCount` (`plan_integration_test.go`)
+pins the shape: `country`'s step over the Pagila fixture, `Mode == Lookup`,
+`Keys == nil`, and `ParseLookupRows` recovering both `"copied whole"` and the
+table's actual row count (checked against a direct `count(*)`, not a hardcoded
+literal, so the pin survives the fixture's own drift).
+
+**When T-0379 lands:** `assemble`'s `Lookup` case sets `Step.Rows` directly
+instead of calling `lookupWhyWithRows`; `lookupWhyWithRows` and
+`ParseLookupRows` are deleted from this file, and
+`internal/core/names.go`'s `stepRows`/`stepWhy` read `s.Rows` instead of
+parsing `s.Why` (`stepWhy` then collapses to returning `s.Why` unchanged, or
+is deleted and its one call site in `run.go` reverts to `s.Why`).
+
+**The packed count itself was wrong above the ceiling (T-0346 review round,
+finding 1).** `assemble` packed `p.lookupRows[t.Ref]` straight onto every
+`Lookup` step's `Why`, including a framework metadata table's. Above
+`lookupRowCeiling`, that value is `findLookups`' `boundedCount` answer, capped
+at `countProbeLimit` (1,001) — not the table's real size — while
+`frameworkMetadataWhy`'s own sentence right next to it already says "only the
+first 1000 ... are copied". A Rails `schema_migrations` past 1,000 migrations
+therefore planned with a line reading `1001 rows, lookup; framework metadata
+table, has more than 1000 rows -- only the first 1000 ... are copied`: a
+number that contradicts the sentence beside it and matches neither the source
+count nor what the sentence says is copied. `planRows` now caps the reported
+count at `lookupRowCeiling` whenever `boundedCount`'s answer exceeds it, so
+the number agrees with the sentence; the exact count
+`internal/extract`'s Lookup read actually yields for such a table stays
+T-0347's call. `TestPlanFrameworkMetadataTableOverTheLookupCeilingSaysSo` now
+also checks `ParseLookupRows`' own count.
