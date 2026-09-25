@@ -420,6 +420,20 @@ var fragments = []*fragment{
 		pattern: `composite type: no field value was read, so only its name was checked`,
 	},
 	{
+		// T-0399, the 2026-09-25 JSON red team round 1, entry 14: a
+		// composite's own type holds a json, jsonb or hstore field (or a
+		// nested composite that does). compositeSignal runs every validator
+		// over each field's text as one whole value -- not over the
+		// document underneath it -- so a bare value inside the document is
+		// read only by chance, not by a control. The column is refused on
+		// the type alone, the same as a composite compositeSignal did find
+		// a hit on, because there is no sample size that makes that chance
+		// safe.
+		name:    "composite_document_field",
+		format:  "composite type %s has %s field %s, whose document a validator never reads inside -- only the field's own text as a whole",
+		pattern: `composite type ` + reIdent + ` has ` + reFamily + ` field ` + reIdent + `, whose document a validator never reads inside -- only the field's own text as a whole`,
+	},
+	{
 		name:    "json_log_shaped",
 		format:  "jsonb in a log-shaped table: the document is replaced whole",
 		pattern: `jsonb in a log-shaped table: the document is replaced whole`,

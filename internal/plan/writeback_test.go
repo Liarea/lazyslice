@@ -223,6 +223,170 @@ func TestMaskedCompositeIsRefusedAtPlan(t *testing.T) {
 	}
 }
 
+// documentCompositeTable is T-0399's shape (the 2026-09-25 JSON red team,
+// round 1, entry 14): a composite column whose own type holds a jsonb field,
+// which internal/classify's decideComposite now refuses on the type alone,
+// whatever the samples say.
+func documentCompositeTable() (ref.TableRef, *pipeline.Schema) {
+	t := ref.TableRef{Schema: "public", Name: "widgets"}
+	return t, &pipeline.Schema{
+		Composites: []pipeline.NamedDef{{
+			Name: "public.wrap",
+			Def:  "CREATE TYPE public.wrap AS (tag text, doc jsonb)",
+		}},
+		Tables: []pipeline.Table{{
+			Ref: t,
+			Columns: []pipeline.Column{
+				{Name: "id", TypeName: "bigint", TypeOID: 20},
+				{Name: "w", TypeName: "public.wrap"},
+			},
+			PK: []string{"id"},
+		}},
+	}
+}
+
+// TestCompositeWithADocumentFieldNamesTheFieldInTheMessage is T-0399: the
+// exit-12 message for a composite masked because it structurally holds a
+// document field names the field and its family, not only the composite
+// type -- "the type is a composite" alone sends an operator looking at every
+// field, and the whole point of this refusal is that only one of them is the
+// problem.
+func TestCompositeWithADocumentFieldNamesTheFieldInTheMessage(t *testing.T) {
+	t.Parallel()
+	tbl, schema := documentCompositeTable()
+	// pipeline.CatSemiStruct is what internal/classify's decideComposite
+	// assigns on this branch (classify.go); the category is not what this
+	// check is exercising, so it is reproduced here rather than imported.
+	cls := masking(tbl, "w", pipeline.CatSemiStruct, mask.MaskerFreeText)
+
+	_, err := New().Plan(context.Background(), &countingReader{}, schema, cls, pipeline.PlanRequest{Root: &tbl})
+	var refusal *Refusal
+	if !errors.As(err, &refusal) {
+		t.Fatalf("Plan returned %v, want a *plan.Refusal", err)
+	}
+	if refusal.Code != CodeUnwritable {
+		t.Errorf("Code = %q, want %q", refusal.Code, CodeUnwritable)
+	}
+	if refusal.Exit != 12 {
+		t.Errorf("Exit = %d, want 12", refusal.Exit)
+	}
+	for _, want := range []string{"public.widgets.w", "public.wrap", "jsonb", "field doc"} {
+		if !strings.Contains(refusal.Error(), want) {
+			t.Errorf("message %q does not name %q", refusal.Error(), want)
+		}
+	}
+	for _, want := range []string{"--skip-table public.widgets", "--unmask public.widgets.w=REASON"} {
+		if !strings.Contains(refusal.Args[event.ArgReason], want) {
+			t.Errorf("args[reason] = %q does not offer %q", refusal.Args[event.ArgReason], want)
+		}
+	}
+}
+
+// domainOverJSONBFieldCompositeTable is the fix-round finding on
+// TestCompositeWithADocumentFieldNamesTheFieldInTheMessage's shape: the
+// composite's document field is not itself jsonb, but a domain declared
+// `AS jsonb`. documentFieldWalk must resolve the field's type through
+// Schema.Domains before the family check, the way typeOf already does for a
+// column's own declared type -- otherwise this reads as an ordinary text
+// field and the column is copied, or masked as free_text and dies at load.
+func domainOverJSONBFieldCompositeTable() (ref.TableRef, *pipeline.Schema) {
+	t := ref.TableRef{Schema: "public", Name: "widgets"}
+	return t, &pipeline.Schema{
+		Domains: []pipeline.NamedDef{{
+			Name: "public.docdom",
+			Def:  "CREATE DOMAIN public.docdom AS jsonb",
+		}},
+		Composites: []pipeline.NamedDef{{
+			Name: "public.wrap",
+			Def:  "CREATE TYPE public.wrap AS (tag text, doc public.docdom)",
+		}},
+		Tables: []pipeline.Table{{
+			Ref: t,
+			Columns: []pipeline.Column{
+				{Name: "id", TypeName: "bigint", TypeOID: 20},
+				{Name: "w", TypeName: "public.wrap"},
+			},
+			PK: []string{"id"},
+		}},
+	}
+}
+
+// domainOverCompositeFieldCompositeTable is the fix-round finding's other
+// half: the field holding the document is not a composite directly, but a
+// domain over one. documentFieldWalk must resolve the domain before asking
+// whether the resolved name is itself a composite, or the walk never
+// descends into it at all.
+func domainOverCompositeFieldCompositeTable() (ref.TableRef, *pipeline.Schema) {
+	t := ref.TableRef{Schema: "public", Name: "widgets"}
+	return t, &pipeline.Schema{
+		Domains: []pipeline.NamedDef{{
+			Name: "public.wrapdom",
+			Def:  "CREATE DOMAIN public.wrapdom AS public.wrap",
+		}},
+		Composites: []pipeline.NamedDef{
+			{Name: "public.wrap", Def: "CREATE TYPE public.wrap AS (tag text, doc jsonb)"},
+			{Name: "public.outer_wrap", Def: "CREATE TYPE public.outer_wrap AS (label text, inner public.wrapdom)"},
+		},
+		Tables: []pipeline.Table{{
+			Ref: t,
+			Columns: []pipeline.Column{
+				{Name: "id", TypeName: "bigint", TypeOID: 20},
+				{Name: "o", TypeName: "public.outer_wrap"},
+			},
+			PK: []string{"id"},
+		}},
+	}
+}
+
+// TestCompositeWithADomainOverAJSONBFieldIsRefused is the fix-round finding:
+// a field typed as a domain over jsonb (not jsonb directly) must be caught
+// the same way a bare jsonb field is.
+func TestCompositeWithADomainOverAJSONBFieldIsRefused(t *testing.T) {
+	t.Parallel()
+	tbl, schema := domainOverJSONBFieldCompositeTable()
+	cls := masking(tbl, "w", pipeline.CatSemiStruct, mask.MaskerFreeText)
+
+	_, err := New().Plan(context.Background(), &countingReader{}, schema, cls, pipeline.PlanRequest{Root: &tbl})
+	var refusal *Refusal
+	if !errors.As(err, &refusal) {
+		t.Fatalf("Plan returned %v, want a *plan.Refusal", err)
+	}
+	if refusal.Code != CodeUnwritable {
+		t.Errorf("Code = %q, want %q", refusal.Code, CodeUnwritable)
+	}
+	for _, want := range []string{"public.widgets.w", "public.wrap", "jsonb", "field doc"} {
+		if !strings.Contains(refusal.Error(), want) {
+			t.Errorf("message %q does not name %q", refusal.Error(), want)
+		}
+	}
+}
+
+// TestCompositeWithADomainOverANestedCompositeIsRefused is the fix-round
+// finding's other half: a field typed as a domain over a composite that
+// itself holds a document field must still be walked into.
+func TestCompositeWithADomainOverANestedCompositeIsRefused(t *testing.T) {
+	t.Parallel()
+	tbl, schema := domainOverCompositeFieldCompositeTable()
+	cls := masking(tbl, "o", pipeline.CatSemiStruct, mask.MaskerFreeText)
+
+	_, err := New().Plan(context.Background(), &countingReader{}, schema, cls, pipeline.PlanRequest{Root: &tbl})
+	var refusal *Refusal
+	if !errors.As(err, &refusal) {
+		t.Fatalf("Plan returned %v, want a *plan.Refusal", err)
+	}
+	if refusal.Code != CodeUnwritable {
+		t.Errorf("Code = %q, want %q", refusal.Code, CodeUnwritable)
+	}
+	for _, want := range []string{"public.widgets.o", "public.wrap", "jsonb", "field doc"} {
+		if !strings.Contains(refusal.Error(), want) {
+			t.Errorf("message %q does not name %q", refusal.Error(), want)
+		}
+	}
+	if strings.Contains(refusal.Error(), "outer_wrap") {
+		t.Errorf("message %q names the outer wrapper instead of the field's own type", refusal.Error())
+	}
+}
+
 // TestUnmaskedCompositeIsNotRefusedAtPlan, and neither is a type that merely has
 // no tag. The refusal is on the composite *and* on the decision to mask it: a
 // composite the classifier found nothing in is copied, which is the other half

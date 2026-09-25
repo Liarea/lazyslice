@@ -141,6 +141,206 @@ func TestCompositeAddressAcrossFieldsFailsClosed(t *testing.T) {
 	}
 }
 
+// TestCompositeHoldingADocumentFieldFailsClosedWithNoHit is T-0399 (the
+// 2026-09-25 JSON red team, round 1, entry 14): a composite whose type holds a
+// jsonb field carried an email inside that field's document, and
+// compositeSignal never saw it. Not because of the record's own quoting --
+// splitCompositeLiteral already unquotes the field and undoes its doubled
+// quotes, so `row('a','{"k":"x@y.test"}')` reaches a validator as the bare
+// text `{"k": "x@y.test"}` -- but because compositeSignal asks whether the
+// *whole* field matches ValidEmail's shape, and a JSON document is never
+// itself a bare address however deep one is nested inside it. The fix does
+// not try to walk into the document: any composite whose type holds a json,
+// jsonb or hstore field is refused on the type alone, the same as one
+// compositeSignal did find a hit on -- so this must refuse even over a
+// sample with no value hit at all, and even with no sample to read.
+func TestCompositeHoldingADocumentFieldFailsClosedWithNoHit(t *testing.T) {
+	t.Parallel()
+
+	schema := &pipeline.Schema{
+		Composites: []pipeline.NamedDef{
+			{Name: "public.wrap", Def: "CREATE TYPE public.wrap AS (tag text, doc jsonb)"},
+		},
+		Tables: []pipeline.Table{tt("public", "widgets", []string{"id"},
+			tc("id", "bigint"), tc("w", "public.wrap"), tc("w2", "public.wrap"))},
+		Fingerprint: "wrap",
+	}
+	s := mapSampler{}
+	tWidgets := ref.TableRef{Schema: "public", Name: "widgets"}
+	// w: an ordinary field carries the email, which compositeSignal already
+	// caught before this fix.
+	s[ref.ColumnRef{Table: tWidgets, Column: "w"}] = anyOf(
+		`(ana.fake@example.org,"{""k"": ""v""}")`)
+	// w2: the email is only inside the jsonb field's own quoted text -- no
+	// field of the record is itself a bare address -- so before this fix
+	// compositeSignal found nothing and the column was copied.
+	s[ref.ColumnRef{Table: tWidgets, Column: "w2"}] = anyOf(
+		`(a,"{""k"": ""ana.fake@example.org""}")`)
+
+	cls, err := New().Classify(schema, s, nil)
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+	for _, col := range []string{"w", "w2"} {
+		d := decision(t, cls, ref.ColumnRef{Table: tWidgets, Column: col})
+		if !d.Masked {
+			t.Errorf("%s: not masked: %+v", col, d)
+		}
+		if d.Confidence < pipeline.ConfPossible {
+			t.Errorf("%s: Confidence = %v, want possible or above", col, d.Confidence)
+		}
+		if want := render("composite_document_field", quoteIdent("public.wrap"), "jsonb", quoteIdent("doc")); !strings.Contains(d.Reason, want) {
+			t.Errorf("%s: reason = %q, want it to carry %q", col, d.Reason, want)
+		}
+		if bad, ok := ParseReason(d.Reason); !ok {
+			t.Errorf("%s: reason %q does not parse: %q", col, d.Reason, bad)
+		}
+	}
+}
+
+// TestCompositeHoldingADocumentFieldFailsClosedWithNoSample is the same rule
+// with nothing sampled at all: a composite structurally carrying a document
+// field is refused whatever the table holds, never a "no samples" copy.
+func TestCompositeHoldingADocumentFieldFailsClosedWithNoSample(t *testing.T) {
+	t.Parallel()
+
+	schema := &pipeline.Schema{
+		Composites: []pipeline.NamedDef{
+			{Name: "public.wrap", Def: "CREATE TYPE public.wrap AS (tag text, doc jsonb)"},
+		},
+		Tables: []pipeline.Table{tt("public", "widgets", []string{"id"},
+			tc("id", "bigint"), tc("w", "public.wrap"))},
+		Fingerprint: "wrap-empty",
+	}
+	cls, err := New().Classify(schema, mapSampler{}, nil)
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+	d := decision(t, cls, ref.ColumnRef{Table: ref.TableRef{Schema: "public", Name: "widgets"}, Column: "w"})
+	if !d.Masked {
+		t.Fatalf("no samples: not masked: %+v", d)
+	}
+	if unwanted := render("composite_no_sample"); strings.Contains(d.Reason, unwanted) {
+		t.Errorf("reason = %q claims %q for a structural refusal", d.Reason, unwanted)
+	}
+	if bad, ok := ParseReason(d.Reason); !ok {
+		t.Errorf("reason %q does not parse: %q", d.Reason, bad)
+	}
+}
+
+// TestCompositeHoldingANestedDocumentFieldFailsClosed: the field itself may be
+// another composite that holds the document, one level down.
+func TestCompositeHoldingANestedDocumentFieldFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	schema := &pipeline.Schema{
+		Composites: []pipeline.NamedDef{
+			{Name: "public.wrap", Def: "CREATE TYPE public.wrap AS (tag text, doc jsonb)"},
+			{Name: "public.outer_wrap", Def: "CREATE TYPE public.outer_wrap AS (label text, inner public.wrap)"},
+		},
+		Tables: []pipeline.Table{tt("public", "widgets", []string{"id"},
+			tc("id", "bigint"), tc("o", "public.outer_wrap"))},
+		Fingerprint: "wrap-nested",
+	}
+	cls, err := New().Classify(schema, mapSampler{}, nil)
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+	d := decision(t, cls, ref.ColumnRef{Table: ref.TableRef{Schema: "public", Name: "widgets"}, Column: "o"})
+	if !d.Masked {
+		t.Fatalf("nested document field: not masked: %+v", d)
+	}
+	if want := render("composite_document_field", quoteIdent("public.wrap"), "jsonb", quoteIdent("doc")); !strings.Contains(d.Reason, want) {
+		t.Errorf("reason = %q, want it to carry %q", d.Reason, want)
+	}
+	if bad, ok := ParseReason(d.Reason); !ok {
+		t.Errorf("reason %q does not parse: %q", d.Reason, bad)
+	}
+}
+
+// TestCompositeHoldingADomainOverAJSONBFieldFailsClosed is the fix-round
+// finding on T-0399: the document field is not itself jsonb, but a domain
+// declared `AS jsonb`. documentFieldWalk must resolve a field's type through
+// Schema.Domains before the family check, the way typeOf already does for a
+// column's own declared type, or a domain one level down defeats the whole
+// structural refusal.
+func TestCompositeHoldingADomainOverAJSONBFieldFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	schema := &pipeline.Schema{
+		Domains: []pipeline.NamedDef{
+			{Name: "public.docdom", Def: "CREATE DOMAIN public.docdom AS jsonb"},
+		},
+		Composites: []pipeline.NamedDef{
+			{Name: "public.domwrap", Def: "CREATE TYPE public.domwrap AS (tag text, doc public.docdom)"},
+		},
+		Tables: []pipeline.Table{tt("public", "widgets", []string{"id"},
+			tc("id", "bigint"), tc("w", "public.domwrap"))},
+		Fingerprint: "domain-wrap",
+	}
+	cls, err := New().Classify(schema, mapSampler{}, nil)
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+	d := decision(t, cls, ref.ColumnRef{Table: ref.TableRef{Schema: "public", Name: "widgets"}, Column: "w"})
+	if !d.Masked {
+		t.Fatalf("domain over jsonb field: not masked: %+v", d)
+	}
+	if want := render("composite_document_field", quoteIdent("public.domwrap"), "jsonb", quoteIdent("doc")); !strings.Contains(d.Reason, want) {
+		t.Errorf("reason = %q, want it to carry %q", d.Reason, want)
+	}
+}
+
+// TestCompositeHoldingADomainOverANestedCompositeFailsClosed: the field
+// holding the document is not a composite directly, but a domain over one.
+// documentFieldWalk must resolve the domain before asking whether the
+// resolved name is itself a composite to walk into.
+func TestCompositeHoldingADomainOverANestedCompositeFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	schema := &pipeline.Schema{
+		Domains: []pipeline.NamedDef{
+			{Name: "public.wrapdom", Def: "CREATE DOMAIN public.wrapdom AS public.wrap"},
+		},
+		Composites: []pipeline.NamedDef{
+			{Name: "public.wrap", Def: "CREATE TYPE public.wrap AS (tag text, doc jsonb)"},
+			{Name: "public.outer_wrap", Def: "CREATE TYPE public.outer_wrap AS (label text, inner public.wrapdom)"},
+		},
+		Tables: []pipeline.Table{tt("public", "widgets", []string{"id"},
+			tc("id", "bigint"), tc("o", "public.outer_wrap"))},
+		Fingerprint: "domain-wrap-nested",
+	}
+	cls, err := New().Classify(schema, mapSampler{}, nil)
+	if err != nil {
+		t.Fatalf("Classify: %v", err)
+	}
+	d := decision(t, cls, ref.ColumnRef{Table: ref.TableRef{Schema: "public", Name: "widgets"}, Column: "o"})
+	if !d.Masked {
+		t.Fatalf("domain over nested composite: not masked: %+v", d)
+	}
+	if want := render("composite_document_field", quoteIdent("public.wrap"), "jsonb", quoteIdent("doc")); !strings.Contains(d.Reason, want) {
+		t.Errorf("reason = %q, want it to carry %q", d.Reason, want)
+	}
+}
+
+// TestCompositeWithNoDocumentFieldIsUnaffected: money_amount and
+// postal_address, T-0094's own fixtures, hold no json/jsonb/hstore field, so
+// TestCompositeWithNoSignalIsCopiedAndSaysSo above must still pass -- this
+// pins compositeDocumentField itself returning false for them, so a
+// regression there fails here directly rather than only through that test's
+// unrelated assertions.
+func TestCompositeWithNoDocumentFieldIsUnaffected(t *testing.T) {
+	t.Parallel()
+
+	schema := compositeSchema()
+	if _, _, _, ok := compositeDocumentField(schema, "public.money_amount"); ok {
+		t.Errorf("money_amount has no document field")
+	}
+	if _, _, _, ok := compositeDocumentField(schema, "public.postal_address"); ok {
+		t.Errorf("postal_address has no document field")
+	}
+}
+
 // TestCompositeWithNoSampleSaysSo: the copy reason must not claim a check that
 // did not run. A composite in a table nothing could be read from takes the same
 // copy branch, and "its fields were read and none is personal data; no samples"

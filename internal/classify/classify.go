@@ -1292,7 +1292,7 @@ func (st *state) decide(w *work, col pipeline.Column, ct columnType, values []st
 		return
 	}
 	if ct.Family == famComposite {
-		st.decideComposite(w, col, sig)
+		st.decideComposite(w, col, ct, sig)
 		return
 	}
 	best := sig.strong
@@ -1686,7 +1686,28 @@ func regionAssumed(sig signals) bool {
 // known, and what is known is that something in the record looked personal.
 // Nothing downstream reads it above the threshold -- the refusal is on
 // Decision.Masked -- and the operator's escape is a flag either way.
-func (st *state) decideComposite(w *work, col pipeline.Column, sig signals) {
+func (st *state) decideComposite(w *work, col pipeline.Column, ct columnType, sig signals) {
+	// T-0399: a composite whose type holds a json, jsonb or hstore field (or
+	// a nested composite that does) is refused on the type alone, whatever
+	// the samples say. compositeSignal cannot see a document field's
+	// contents -- not because the record's own quoting hides it (splitCompositeLiteral
+	// already unquotes a field and undoes its doubled quotes before a
+	// validator sees it), but because compositeSignal runs each whole-value
+	// validator over a field's text as one opaque value and never walks
+	// inside it, so a bare email inside a jsonb field is read only by chance
+	// (the 2026-09-25 JSON red team, round 1, entry 14) -- and no sample size
+	// makes that chance safe. This runs before
+	// the name and value checks below and wins over both, the same way a
+	// hit from either of them already does: THREAT_MODEL.md T1's composite
+	// row calls this case out by name.
+	if holder, field, fam, ok := compositeDocumentField(st.schema, ct.Elem); ok {
+		w.d.Category = pipeline.CatSemiStruct
+		w.d.Confidence = pipeline.ConfPossible
+		w.frags = append(w.frags,
+			render("composite_document_field", quoteIdent(holder), fam, quoteIdent(field)),
+			render("composite_refused"))
+		return
+	}
 	hit, hasName := st.pack.matchColumn(normaliseName(w.table.Name), normaliseName(col.Name))
 	best := sig.strong
 	switch {

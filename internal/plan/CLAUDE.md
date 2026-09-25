@@ -561,6 +561,42 @@ reason for each.
     `TestMaskedCompositeIsRefusedAtPlan` and
     `TestUnmaskedCompositeIsNotRefusedAtPlan` hold both sides, including that an
     ltree is still not refused.
+    - **The message names the field too, when that is why the composite is
+      masked** (T-0399, 2026-09-25 JSON red team round 1, entry 14). Before
+      this, "is a composite, which no masker can write into" was the whole
+      claim, true of every composite whatever the reason `internal/classify`
+      masked it — a value hit in an ordinary text field, a name hit, or (new
+      with T-0399) a structural finding that the type itself holds a `json`,
+      `jsonb` or `hstore` field, which `compositeSignal`'s record-text scan can
+      never read through (see that package's own CLAUDE.md section for the
+      full account). `documentField` (`compositedoc.go`) is this package's own
+      copy of `internal/classify`'s walk over `Schema.Composites` — duplicated
+      because a stage package may not import another — read only to add the
+      field's name and family to the message when it finds one:
+      `TestCompositeWithADocumentFieldNamesTheFieldInTheMessage`. It changes
+      no refusal this check already made, only what the message says about
+      one; a composite with no document field still gets the plain sentence.
+    - **`internal/verify` carries the identical structural check as a second,
+      independent look** (`internal/verify/compositedoc.go`,
+      `CodeRefusedCompositeDocument`, exit 9): a copy that somehow reached the
+      target holding a composite with a document field, an operator's own
+      `--unmask` excepted, is refused there too rather than trusted because
+      this check said so. That package had no composite-type awareness at all
+      before T-0399; see its own CLAUDE.md section.
+    - **Fix-round finding, same day: a field's own type can be a domain**
+      (`CREATE DOMAIN docdom AS jsonb` used as a field's type, or a domain
+      over a composite that holds a document field), and `documentFieldWalk`
+      did not resolve one, so a domain one level down defeated the check.
+      It now resolves a field's type through `Schema.Domains` first (a
+      package-level `domainBase` in `compositedoc.go`, duplicated from
+      `(*run).domainBase` in `writeback.go` for the same reason every other
+      function here is its own copy), the way `compositeType` already does
+      for a column's own declared type. `internal/classify`'s own CLAUDE.md
+      section carries the fuller account, including that the message text
+      above ("can never read through") was, before this round, attributed to
+      the record's own quoting rather than to the real gap — `compositeSignal`
+      never reading inside a field's text at all — and was corrected there,
+      in `THREAT_MODEL.md` T1 and in the `051` regression fixture together.
   - **An array whose samples arrive as a text literal is no longer refused
     here** (T-0127). `arrayArrivesAsLiteral` was a stand-in for the masker half
     of T-0103: pgx hands such a column back as the single string

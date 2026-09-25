@@ -8,8 +8,8 @@
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 0 | 0 | 108 | 0 | 0 |
-| E6 Launch | 6 | 8 | 0 | 48 | 0 | 0 |
-| E9 Later | later | 146 | 0 | 40 | 9 | 0 |
+| E6 Launch | 6 | 7 | 0 | 49 | 0 | 0 |
+| E9 Later | later | 148 | 0 | 40 | 9 | 0 |
 
 ## Open and in progress
 
@@ -153,7 +153,6 @@
 - T-0391 [open] E9 · core: T-0343 follow-ups: a terminal run asks Q1 then Q2 against a live Docker daemon; ARCHITECTURE section 9's Q4 cell after ADR-017 (sonnet)
 - T-0392 [open] E9 · discover: T-0385 follow-ups: the section 9 amendment says what service: records; the namePrefix comment names ownContainer; LabelProject asserted in a provision test; trailing blank line (sonnet)
 - T-0396 [open] E9 · Decide whether a document column named just 'name' needs corroboration before every leaf is masked, as a text column does ()
-- T-0398 [open] E6 · One log-shape rule: the classifier's replaced-whole verdict is the one transform and verify apply (sonnet)
 - T-0399 [open] E6 · A composite type holding a json, jsonb or hstore field is refused at plan, not classified over its record text (sonnet)
 - T-0400 [open] E9 · A document keyed by many phone numbers refuses at exit 7 on a masked-key collision ()
 - T-0401 [open] E9 · A national-format phone number used as a JSON key survives with no --phone-region ()
@@ -167,6 +166,8 @@
 - T-0409 [open] E9 · verify/docs: T-0393 follow-ups: an hstore column's name hit does not narrow the second net; SECURITY item 8 names which categories mask as filler; fixture 046 pins every leaf (sonnet)
 - T-0410 [open] E9 · classify/transform: T-0394 follow-ups: fixture 048 sees the leaf under the national key; the value half applies the T-0317 name veto; guessedPhoneRatio's cost; the key-collision wording (sonnet)
 - T-0411 [open] E9 · verify/classify: T-0397 follow-ups: only the last arrow operand is raised; a generated column copying a subdocument is documented; btrim, NULL and two-document cases tested (sonnet)
+- T-0412 [open] E9 · classify/docs: T-0398 follow-ups: the section 4 amendment says which package had the copy; one test runs the classifier's verdict through transform (sonnet)
+- T-0413 [open] E9 · compositeSignal never reads inside a field: nested composites and embedded values still leak (sonnet)
 
 ## Recently closed
 
@@ -183,6 +184,7 @@
 - T-0394 [done] E6 · The phone region reaches document keys and leaves, and a key whose sampled leaves are phone numbers masks them → done
 - T-0395 [cancelled] E9 · A national-format phone number used as a JSON object key is masked under the run's --phone-region, as the second net already reads it → cancelled
 - T-0397 [done] E6 · The second net's generated-column skip covers only the leaf the expression reads → done
+- T-0398 [done] E6 · One log-shape rule: the classifier's replaced-whole verdict is the one transform and verify apply → done
 - T-0143 [done] E9 · Decide the arbitrary-JSON policy: structure-preserving masking versus whole-document replacement → done
 - T-0311 [done] E6 · The neighbouring-column sweep spares enum-like, identifier-shaped and unique-indexed columns → done
 - T-0312 [done] E6 · The same-column-name rule does not propagate a decision that was itself only a neighbour sweep → done
@@ -194,4 +196,3 @@
 - T-0318 [done] E6 · The plan reports every refusal in one run, and a no-identity hint names the columns → done
 - T-0319 [done] E6 · After a second-net refusal the operator can mask the column: --mask, and every failing column reported at once → done
 - T-0320 [done] E6 · A green run prints one verify summary line and how to reach the target → done
-- T-0321 [done] E6 · The reasons dump and the plan end with a summary, and a re-run from a committed yml is quiet → done

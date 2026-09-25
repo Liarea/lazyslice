@@ -2002,3 +2002,97 @@ of each leaf's enclosing keys, which `leaves()` now carries (`leaf.keys`).
   (`jsonleaf_test.go`) pins the generated-column skip against a decision that
   carries both `LogShaped` and a per-leaf map, since `internal/classify`
   computes the map without asking whether the table is log-shaped.
+
+## A composite holding a document field: the second net's own copy (T-0399, 2026-09-25 JSON red team round 1, entry 14)
+
+This package had no composite-type awareness at all before this: a
+composite-typed column is not one of the character, uuid, inet, cidr or
+macaddr families the second net's row scan reads, so it was simply never a
+subject of anything here — the "same blind spot" the round's finding named is
+a slight overstatement of that, since there was no composite *path* to share
+a blind spot with; what was true is that a composite reaching the target held
+nothing that read it a second time, the way every other row-side control in
+this package gets one (the catalog pass beside the second net).
+
+`compositedoc.go`'s `compositeDocuments` closes that, as a purely structural
+check with no SQL of its own, called from `Verify` right beside the catalog
+pass: for every column of every table this run actually loaded (`s.steps`,
+not the whole schema — a `SchemaOnly` table still recreates a composite type
+but copies no row of one), it asks whether the column's declared type is a
+composite holding a `json`, `jsonb` or `hstore` field, walking into a field
+that is itself a composite the same way `internal/classify`'s own
+`compositeDocumentField` does (that package's own CLAUDE.md section has the
+full account of why a document field's contents are invisible to a value
+scan of the record's text). A hit that the column's own `Decision` does not
+carry an `--unmask` opt-out for (`optedOut`) is `CodeRefusedCompositeDocument`,
+exit 9, `checkCatalog` — the operator's own opt-out is the accepted risk that
+escape exists for, and this net does not second-guess it, the same rule the
+catalog pass's own exemptions already follow.
+
+- **It reads `Schema.Composites` and nothing else of the target.**
+  ARCHITECTURE.md §11.1 recreates a composite type verbatim, so the schema
+  this package is handed — the source's own, the same object
+  `internal/classify` and `internal/plan` read at plan time — already
+  describes the target's type exactly; there is no second catalog read to
+  add, unlike the DDL-literal catalog pass above, which genuinely needs the
+  target's own `pg_attrdef`/`pg_constraint`/`pg_index` because a masked
+  column's default is *rewritten* between the two ends.
+- **`compositeTypeOf`, `documentField` and the small field-list parser beneath
+  it are this package's own copies of `internal/plan`'s and
+  `internal/classify`'s functions of the same names**, duplicated for the
+  reason every other copy in this package already is (`stripTypmod`,
+  `unquoteType`, `bareTypeName`, this file's own T-0055 section): a stage
+  package may not import another. `documentField`'s first return is the type
+  the field is actually declared on — the column's own type for a direct
+  field, a nested composite's own name one or more levels down for a nested
+  one — never the outer wrapper alone, pinned by
+  `TestCompositeDocumentsWalksANestedComposite`.
+- **This is genuinely a second, independent look, not a restatement of
+  `internal/plan`'s refusal.** By the time a run reaches this package,
+  `internal/plan`'s own refusal (`writeback.go`, T-0094 plus this task) has
+  already run over the identical structural rule and stopped a run that would
+  otherwise mask such a column — so the *ordinary* path to this code is
+  unreachable in a single run: what it catches is an operator's own
+  `--unmask` (deliberately let through, and not refused here — see
+  `TestCompositeDocumentsHonoursUnmask`) turning out to be wrong, a future
+  change to `internal/classify`'s decision that stops setting `Masked` here
+  without this net moving with it, or a composite that reaches the target by
+  a route the plan never judged. `internal/verify/compositedoc_test.go` drives
+  the function directly rather than through a live run, the way this
+  package's other structural checks are pinned in isolation
+  (`catalog_test.go`'s own doubles), because there is no live scenario in this
+  tree today where the plan lets such a column through unmasked.
+
+`testdata/regressions/051-composite-holding-a-json-field.sql` is the reduced
+fixture for the plan-side refusal this all sits behind; it never reaches a
+target, so it exercises `internal/plan` and not this file, and this package's
+own unit tests are what pin `compositeDocuments` itself.
+
+- **Fix-round finding, same day: the `SchemaOnly` skip claimed above was not
+  actually in the code.** `compositeDocuments` walked every step in
+  `s.steps` — `s.tables` holds every table in the schema — with no check on
+  `step.Mode`, so a table `--skip-table` dropped to `SchemaOnly` (or one the
+  run could not reach or read) still got refused for a column whose row it
+  never copied: exit 9 for an operator who had correctly followed the plan's
+  own advice to skip the table. `compositeDocuments` now skips a
+  `pipeline.SchemaOnly` step before it looks the table up, matching
+  `shapes.go` and `counts.go`; the paragraph above now describes the code as
+  it actually behaves.
+- **A field's own type can be a domain**, and `documentField`'s walk did not
+  resolve one, so `CREATE DOMAIN docdom AS jsonb` used as a composite field's
+  type — or a domain over a composite that holds a document field — defeated
+  the check. It now resolves a field's type through `Schema.Domains` first
+  (`documentFieldDomainBase` in `compositedoc.go`, this package's own copy of
+  `(*state).domainBase` in `columns.go`, for the same reason every other
+  function here is its own copy), the way `s.domainBase` already does for a
+  column's own declared type.
+- **The claim above and in `THREAT_MODEL.md` T1's composite row that
+  `compositeSignal` is blocked by "the record's own quoting" was wrong.**
+  `splitCompositeLiteral` already unquotes a field and undoes its doubled
+  quotes, so the document reaches a validator as bare text; the real gap,
+  which `internal/classify`'s own CLAUDE.md section now states correctly, is
+  that `compositeSignal` runs every validator over a field's whole text and
+  never walks inside it. This fix closes only the json/jsonb/hstore case; a
+  nested composite with a plain personal-data field and no document field of
+  its own is a separate, still-open gap, filed as **T-0413**
+  (`tracker/epics/E9`).

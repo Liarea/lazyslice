@@ -715,6 +715,130 @@ The decision has two outcomes and no third:
 The category on a hit is the first validator in precedence order that matched.
 It is what the refusal names and nothing masks with it.
 
+## A composite holding a document field fails closed on the type alone (T-0399, 2026-09-25 JSON red team round 1, entry 14)
+
+`compositeSignal` above is a value scan: it reads the composite's own sampled
+record text and runs every validator over each field and over the whole
+literal. That misses a whole shape of personal data, found by the round's own
+probe schema: a `jsonb` field's value is itself a small document, and a
+validator asks whether the *whole* field matches its shape, never whether a
+value is embedded somewhere inside it — so a value hit read over the *field's
+own text* is asking a different, narrower question than reading the
+*document's* own contents would be. (The record's own quoting is not the
+obstacle: `splitCompositeLiteral` already unquotes a field and undoes its
+doubled quotes before any validator sees it, so the review round that
+followed this fix corrected an earlier draft of this paragraph, and of
+`THREAT_MODEL.md` T1's composite row, the reason string in `reasons.go`, and
+several other code comments, that had all said so.) `reg051_widgets.w` (a
+`(tag text, doc jsonb)` composite whose `doc` field held nothing but an email
+address inside a JSON object) never scored a hit from any field or from the
+whole literal and was decided `none` — copied, with the address inside it,
+under exit 0. THREAT_MODEL.md T1's composite row promised a refusal on a
+value hit at `possible` or above and said nothing about this case; the fix
+closes it, not by teaching `compositeSignal` to decode a document field (that
+would need a second leaf walk keyed by the field's own type, the way
+`jsonSignal` already walks a plain `json`/`jsonb` column, and is a feature
+rather than the fail-closed answer this row needs), but by refusing the
+column structurally, before any sample is read.
+
+- **`compositeDocumentField` (types.go) parses the composite's own `CREATE
+  TYPE ... AS (...)` definition text** — `Schema.Composites`, the same catalog
+  read `isComposite` already resolves a type name against — rather than a
+  sample: `compositeFields` splits the field list on top-level commas
+  (`splitTopLevelCommas`, quote- and paren-aware, so a field's own `numeric(12,2)`
+  typmod does not look like a second field) and `splitFieldNameType` reads each
+  field's `quote_ident`-rendered name and `pg_catalog.format_type` type text the
+  way `sqlComposites` (`internal/introspect/sql.go`) wrote them. A field whose
+  type, after its array suffix and typmod are stripped, resolves to `json`,
+  `jsonb` or `hstore` (`documentFamilies`, the row-side document families
+  ARCHITECTURE.md §4 and THREAT_MODEL.md T1 already name) is a hit; a field
+  that is itself a composite is walked one level down, with a `seen` set
+  against two composites that reference each other. It is a reader and not a
+  parser, `literal.go`'s own words for `splitCompositeLiteral`: a definition
+  text it cannot make sense of is skipped rather than guessed at, because the
+  only cost of missing a shape here is the ordinary sample-based check still
+  running underneath it.
+- **`decideComposite` calls it first, ahead of the name and value checks, and
+  it wins over both** — the same way a value hit from `compositeSignal`
+  already wins over the copy branches. A hit sets `Category = semi_structured`
+  (there is a document in the record, which is the closest existing category
+  to what was found) and `Confidence = possible`, with a new reason fragment,
+  `composite_document_field` (reasons.go): `composite type %s has %s field
+  %s, whose document text a validator cannot read through the record's own
+  quoting`. `possible` is above §4's mask threshold and reaches
+  `internal/plan`'s existing composite refusal exactly as a value hit does —
+  there is no second refusal path, only a second route into the one that
+  already existed.
+- **The return carries the type the field is actually declared on, not only
+  the column's own composite type** — `holderType` in `compositeDocumentField`'s
+  signature. For a direct field this is the column's own type; for a nested
+  one it is the inner composite's name, never the outer wrapper's: a message
+  naming `public.outer_wrap` for a field that is actually
+  `public.wrap.doc` sends an operator looking at the wrong `CREATE TYPE`.
+  `TestCompositeHoldingANestedDocumentFieldFailsClosed` pins this.
+- **`internal/plan`'s `checkWriteBack` names the field too, not only the
+  type** (`writeback.go`, `compositedoc.go`). Its composite branch already
+  refused any masked composite before this landed, with a message naming only
+  the type ("its type %s is a composite, which no masker can write into");
+  this task added `documentField` — the same walk, over the same
+  `Schema.Composites`, duplicated here because a stage package may not import
+  another (`internal/CLAUDE.md`) — so that when the reason the composite is
+  masked is this structural one, the message instead reads "its type %s is a
+  composite whose %s field %s cannot be read through the record's own
+  quoting", and the `{reason}` argument names the field the same way. The two
+  escapes are unchanged: `--skip-table` and a reasoned `--unmask`.
+- **`internal/verify` carries the identical structural check as a second,
+  independent look** (`compositedoc.go`, `CodeRefusedCompositeDocument`, exit
+  9), the same "second net" shape every other row-side control in that
+  package already has (the catalog pass beside the second net). It reads only
+  `Schema.Composites` — the same catalog ARCHITECTURE.md §11.1 recreates
+  verbatim, so the target's own type holds the identical fields — over every
+  table the run actually loaded, and it honours an operator's own `--unmask`
+  for the column (`optedOut`): that is the accepted risk the escape exists
+  for, not a hole this net should close behind their back. Nothing in
+  `internal/verify` reached a composite type at all before this; there was no
+  narrower check to preserve.
+- **The v1 cut line is unchanged: field-wise masking of a composite is still
+  later work.** This closes a way a composite's own record text could hide
+  personal data from the *scan*, not the standing decision that a composite
+  can only be refused or copied whole, never masked in place.
+  `testdata/regressions/051-composite-holding-a-json-field.sql` is the reduced
+  fixture, `expect: exit 12 plan.refused.unwritable`; none of the optional
+  regression header keys apply, because a refused plan never reaches a target
+  to check.
+
+**Fix-round findings (T-0399, same day).** Three review findings landed
+alongside the original fix:
+
+- **`internal/verify`'s own copy skipped nothing for a `SchemaOnly` step**
+  (a table `--skip-table` dropped, or one the run could not reach or read).
+  Such a step recreates the type but copies no row of it, the same as
+  `shapes.go` and `counts.go` already assume, but `compositeDocuments`
+  walked every step regardless and refused a run that had correctly skipped
+  the table it would otherwise have refused on — exit 9 for following the
+  plan's own advice. `compositeDocuments` now skips a `pipeline.SchemaOnly`
+  step first, before it looks the table up.
+- **A field's own type can be a domain** — `CREATE DOMAIN docdom AS jsonb`
+  used as a composite field's type, or a domain over a composite that holds
+  a document field — and none of the three copies of `documentFieldWalk`
+  resolved it, so a domain one level down defeated the whole check. Each
+  copy now resolves a field's type through `Schema.Domains` (the same
+  lookup `typeOf` already does for a column's own declared type) before the
+  family and composite checks, the way `compositeType`/`p.domainBase` and
+  `s.domainBase` already do at the column level.
+- **The root-cause text above, `THREAT_MODEL.md` T1's composite row, the
+  `051` fixture header and several code comments all blamed the record's own
+  quoting.** They were wrong: `splitCompositeLiteral` already undoes a
+  field's doubled quotes, so the document reaches a validator as bare text.
+  The actual gap, corrected above and in every one of those places, is that
+  `compositeSignal` (and its plan/verify mirrors) run each validator over a
+  field's whole text and never walk inside it. **This still only closes the
+  json/jsonb/hstore case.** A nested composite with no document field of its
+  own — a plain `email` field two levels down, read only by
+  `compositeSignal`'s whole-value scan the same way any embedded value is —
+  is a real, separate gap, filed as **T-0413** (`tracker/epics/E9`) rather
+  than folded into this fix.
+
 ## An array whose sample arrives as one string (T-0103, T-HARD-B)
 
 `scalarsOf` splits a Postgres array literal when the column's type says array

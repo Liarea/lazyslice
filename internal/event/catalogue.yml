@@ -741,6 +741,13 @@
   message: "the target's schema carries a literal that parses as personal data in {table}.{column}: {reason}"
   args: [table, column, count, reason]
 
+- code: verify.refused.composite_document
+  kind: error
+  stage: verify
+  exit: 9
+  message: "{table}.{column} is a composite type holding a document field no validator can read: {reason}"
+  args: [table, column, count, reason]
+
 - code: verify.refused.row_count
   kind: error
   stage: verify

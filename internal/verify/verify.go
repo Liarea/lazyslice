@@ -186,6 +186,11 @@ func (v verifier) Verify(
 	if err := s.catalog(ctx); err != nil {
 		return nil, err
 	}
+	// T-0399: a structural check over the same catalog Schema.Composites
+	// already carries, and no SQL of its own -- compositedoc.go's own
+	// comment has why this runs beside the catalog pass rather than inside
+	// it.
+	s.compositeDocuments()
 	if err := s.foreignKeys(ctx); err != nil {
 		return nil, err
 	}

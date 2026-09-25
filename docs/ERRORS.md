@@ -66,6 +66,7 @@ One row per code in the catalogue, in the file's own order. Exit is only meaning
 | `verify.refused.second_net_document_masked` | verify | 9 | {table}.{column} is already masked and {count} of its values still validate as {reason}: --mask cannot change its category, so leave its table out with --skip-table {table} |
 | `verify.refused.second_net_type_conflict` | verify | 9 | {table}.{column} is not masked and {count} of its values validate as {reason}, a category this column's type does not accept: mask it with --mask {table}.{column}=special_category instead, which internal/classify/rules.yml accepts on every type, or leave its table out with --skip-table {table} |
 | `verify.refused.catalog_literal` | verify | 9 | the target's schema carries a literal that parses as personal data in {table}.{column}: {reason} |
+| `verify.refused.composite_document` | verify | 9 | {table}.{column} is a composite type holding a document field no validator can read: {reason} |
 | `verify.refused.row_count` | verify | 7 | {table} holds {count} rows in the target: {reason} |
 | `verify.refused.sequence` | verify | 7 | the sequence behind {table}.{column} was not reset: {reason} |
 | `verify.residual.unconfirmed` | verify | - | {count} residual hits in {table}.{column} are absent from the source: a filter false positive, or the source changed since the snapshot |
