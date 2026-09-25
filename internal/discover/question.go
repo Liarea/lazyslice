@@ -10,9 +10,12 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/moby/moby/api/types/container"
+
 	"github.com/Liarea/lazyslice/internal/discover/provision"
 	"github.com/Liarea/lazyslice/internal/dsn"
 	"github.com/Liarea/lazyslice/internal/event"
+	"github.com/Liarea/lazyslice/internal/pipeline"
 )
 
 // noTarget answers the state Q1 and Q1' exist for: a source was found and
@@ -64,6 +67,9 @@ func noTarget(ctx context.Context, o Options, cands []found, source *found, dock
 	}
 	if stopped := onlyStopped(cands, source); stopped != nil {
 		return startStopped(ctx, o, stopped, dock, sink, "")
+	}
+	if f, asked, ok, err := reuseOwn(ctx, o, dock, sink); ok {
+		return f, asked, err
 	}
 	return askQ1(ctx, o, source, dock, sink, q1Lead, func() error {
 		return refuseNoTarget(sink, "--create-target")
@@ -216,6 +222,95 @@ func adopted(ctx context.Context, o Options, res provision.Result, sink event.Si
 	o.probe(ctx, f)
 	emitCandidate(sink, *f)
 	return f
+}
+
+// reuseOwn is what happens instead of Q1 when the container Q1 would propose,
+// lazyslice-target-<project>, already exists (T-0334). Q1 never proposes a
+// name that is taken: dogfood session 3's second run was offered "start one?
+// ... as lazyslice-target-<project> on port 5434" with that container
+// running, and "yes" created nothing, because provisioning reuses a container
+// of that name.
+//
+// It is reached only when the ladder did not already choose the container,
+// which since T-0334 it does whenever the container is running, answers the
+// dial and carries this project's label (found.own). What is left is a
+// container the ladder could not rank: stopped beside other candidates, still
+// booting past the 1 s dial, or kept off the candidate list by the working-dir
+// filter. So:
+//
+//   - not ours (ownContainer: no provision.LabelProject for this project, or
+//     a provision.LabelWorkingDir that is not this directory): somebody
+//     else's container, or another checkout's with the same basename, holds
+//     the name. It is not read, started or reused; exit 4 naming --target
+//     (target.refused.name_taken), at a terminal and headless alike.
+//   - ours and stopped: ADR-008 §6's Q1', in its own words and with its own
+//     default, which headless is to start it.
+//   - ours and running: started-if-needed and waited for through
+//     provision.Start, which creates nothing, with no question — it is the
+//     container this directory already made.
+//
+// handled is false when no container has the name, or when Docker would not
+// list (a daemon that answered a ping and then would not list is not evidence
+// the name is taken): the caller asks Q1 as before. Whatever this returns,
+// Target.Gate still runs every rule on the container afterwards.
+func reuseOwn(ctx context.Context, o Options, dock dockerEndpoint, sink event.Sink) (f *found, asked, handled bool, err error) {
+	project := projectName(o.Workdir)
+	name := provision.Name(project)
+	api, err := dialDocker(o, dock.endpoint)
+	if err != nil {
+		return nil, false, false, nil
+	}
+	look, cancel := context.WithTimeout(ctx, listBudget)
+	defer cancel()
+	c, err := containerByName(look, api, name)
+	if err != nil || c == nil {
+		return nil, false, false, nil
+	}
+	if !ownContainer(*c, o.Workdir) {
+		return nil, false, true, refuseNameTaken(sink, name)
+	}
+	if c.State != container.StateRunning {
+		stopped := &found{
+			stopped: true, containerID: name, own: true,
+			cand: pipeline.Candidate{
+				Provenance: pipeline.FromStoppedContainer,
+				Label:      name,
+				Local:      true,
+				ConnectErr: stoppedReason,
+			},
+		}
+		started, startAsked, startErr := startStopped(ctx, o, stopped, dock, sink, "")
+		return started, startAsked, true, startErr
+	}
+	p, err := provisionerFor(o, dock)
+	if err != nil {
+		return nil, false, true, err
+	}
+	res, err := p.Start(ctx, name, provision.Request{
+		Project:  project,
+		Workdir:  o.Workdir,
+		Progress: progressOf(o),
+	})
+	if err != nil {
+		return nil, false, true, provisionRefusal(err, sink)
+	}
+	return adopted(ctx, o, res, sink), false, true, nil
+}
+
+// refuseNameTaken is exit 4: the container Q1 would have proposed already
+// exists and lazyslice did not create it for this directory (T-0334) —
+// somebody else made it, or another checkout with the same basename did.
+func refuseNameTaken(sink event.Sink, name string) error {
+	r := &Refusal{
+		Code: CodeTargetNameTaken, Exit: exitTarget,
+		Args: event.Args{
+			event.ArgContainer: name,
+			event.ArgFlag:      "--target",
+		},
+		Message: "a container named " + name + " already exists and lazyslice did not create it for this directory",
+	}
+	sendError(sink, r)
+	return r
 }
 
 // onlyStopped is Q1's precondition: exactly one candidate is target-shaped and

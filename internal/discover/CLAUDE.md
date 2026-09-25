@@ -465,7 +465,8 @@ and is wired now, `CodeTargetSameCluster`).
 
 Two changes in `chooseTarget`, and one deliberate non-change.
 
-- **A maintenance database is never target-shaped.** `postgres`, `template0`
+- **A maintenance database is never target-shaped** — except in lazyslice's
+  own container for this project (T-0334, below). `postgres`, `template0`
   and `template1` are the databases a cluster is created with; `postgres` exists
   so that a client has something to connect to in order to create another one.
   Ranking it is what let the ladder land a slice there.
@@ -587,3 +588,51 @@ refused "no source" before `internal/core`'s own call was ever reached.
   that is a role's real password, so it actually reaches `emit` and greps
   `lazyslice.yml` — the sink THREAT_MODEL.md T5 cares about most — which the
   first landing's single failing-canary run never did.
+
+## The next run chooses the container the first one made (T-0334)
+
+Dogfood session 3: a second run from the directory whose first run answered
+Q1 listed `lazyslice-target-<project>` (`0 table(s), probably empty`) and
+then asked Q1 again for the same name on the next port; headless it stopped
+at exit 4 `target.refused.none`. Provisioning creates the container with
+`POSTGRES_DB=postgres`, and the red team's rule above dropped that database
+from `targetShaped`.
+
+- **`found.own` lifts the maintenance rule for one container.** `containers`
+  sets it (`ownContainer`) when a container's `provision.LabelProject` equals
+  this working directory's `projectName` *and* its `provision.LabelWorkingDir`
+  is this directory (absolute and clean, or equal once symlinks resolve). The
+  project label alone is the basename, so two checkouts named alike share
+  `lazyslice-target-<project>`; without the working-dir half the second one
+  took the first one's container with no question. `collapse` keeps it when a lower rung names
+  the same database. `targetShaped` then ranks that container's `postgres`
+  like any other candidate: ADR-008 §5's order is unchanged, `EmptyHint` is
+  still not a filter, and the gate still judges the winner. The label is not
+  trusted as proof — anyone can set it — only as the reason the name rule
+  does not apply; a container that spoofs it is still gated.
+- **"probably empty" needs no second probe.** The hint is the connected
+  database's own `pg_class` count and `relpages` statistic; it says nothing
+  about other databases in the cluster, and a load into `postgres` writes
+  none of them. No read was added to the dial.
+- **Q1 never proposes a name that is taken (`reuseOwn`).** When the ladder
+  could not rank `lazyslice-target-<project>` (stopped beside other
+  candidates, still booting past the 1 s dial, filtered out by working dir),
+  `noTarget` looks it up by name before Q1: stopped and ours is Q1′ with its
+  own words and headless default; running and ours is `provision.Start` with
+  no question (it creates nothing); present and not `ownContainer` (no
+  `LabelProject`, or another checkout's working dir) is exit 4
+  `target.refused.name_taken` naming `--target`, at a terminal too, and the
+  container is not read or started. A lookup that fails is not evidence the name is taken, and
+  Q1 is asked as before. In ADR-016's missing-record state the same lookup
+  runs at a terminal only, because headless the file names a different
+  container and ADR-016's `target.refused.container_missing` stands.
+- **Tests.** `own_container_test.go` pins the running container chosen with
+  no question (at a terminal, headless, and carrying the marker), the stopped
+  one still Q1′, and the taken name never proposed (including by another
+  checkout with the same basename, reachable or not). `internal/core`'s
+  `TestTwoRunsFromOneDirectoryReuseTheContainerTheFirstMade` runs two headless
+  runs with nothing but `--source` against a provisioned container.
+- **Not changed, and owed:** `--create-target` reuses a container named
+  `lazyslice-target-<project>` whether or not lazyslice created it
+  (`provision.Provision`'s `byName` checks no label), filed as **T-0373**.
+

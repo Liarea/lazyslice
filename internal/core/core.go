@@ -182,7 +182,8 @@ type Request struct {
 	// sets it (T-0184, ADR-013 review, the 2026-09-16 reverify).
 	prompter discover.Prompter
 	// noTerminal, when true, is copied onto discover.Options.NoControllingTerminal
-	// by rootQuestion and askRoot (root.go) instead of letting the ladder probe
+	// by rootQuestion and askRoot (root.go), and since T-0334 by
+	// resolveEndpoints (run.go) for Q1 and Q1', instead of letting the ladder probe
 	// the real controlling terminal. Like prompter above, there is no flag for
 	// it and today only a test sets it: unlike prompter, whose presence always
 	// means "somebody answers", this is the one way to make "there is nobody

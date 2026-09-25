@@ -159,3 +159,4 @@ One row per code in the catalogue, in the file's own order. Exit is only meaning
 | `target.refused.headless_same_cluster` | discover | 4 | every reachable candidate is on {host}, the source's own cluster: pass {flag} to write there on purpose |
 | `target.refused.gate_same_cluster` | discover | 4 | the target on {host} is on the source's own cluster: pass {flag} to write there on purpose |
 | `target.refused.container_missing` | discover | 4 | ./lazyslice.yml's target is the container {container}, which this machine's docker does not have: pass --create-target to start a new one for this directory, or --target to name another database |
+| `target.refused.name_taken` | discover | 4 | a container named {container} already exists and lazyslice did not create it for this directory, so no target can be started under that name: pass {flag} to name a database |

@@ -120,6 +120,16 @@ const (
 	// and removed-container cases of T-0327, which used to reach the target's
 	// recorded port with no password and stop at a bare SQLSTATE 28P01.
 	CodeTargetContainerMissing event.Code = "target.refused.container_missing"
+
+	// CodeTargetNameTaken is T-0334's stop: Q1 would propose starting
+	// lazyslice-target-<project>, a container of that name already exists, and
+	// it does not carry this directory's provision.LabelProject and
+	// provision.LabelWorkingDir, so lazyslice did not create it for this
+	// directory (another checkout with the same basename may have).
+	// Q1 never proposes a name that is taken, and a container somebody else
+	// made is not read, started or reused under lazyslice's name; exit 4,
+	// naming the container and --target.
+	CodeTargetNameTaken event.Code = "target.refused.name_taken"
 )
 
 // The ADR-005 exit codes this package returns. They are repeated here rather

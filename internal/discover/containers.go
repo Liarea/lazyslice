@@ -86,6 +86,7 @@ func containers(ctx context.Context, api dockerAPI, workdir string, local bool) 
 		if !ok {
 			continue
 		}
+		f.own = ownContainer(c, workdir)
 		out = append(out, f)
 	}
 	return out, matchedProject, nil
@@ -135,6 +136,50 @@ func filterToProject(cs []container.Summary, workdir string) (out []container.Su
 		return cs, false
 	}
 	return out, true
+}
+
+// ownContainer reports whether c is the container lazyslice provisioned for
+// this working directory (T-0334): its provision.LabelProject names workdir's
+// project, and its provision.LabelWorkingDir is workdir itself.
+//
+// The project label alone is not enough. It is only the directory's basename,
+// so two checkouts named alike (~/work/app and a worktree at ~/wt/app) share
+// lazyslice-target-app; the working-dir label is what tells the other
+// checkout's container from this one's, and a slice from here must not
+// overwrite it with no question. Equal, not an ancestor: the container is
+// named after this directory, not after one above it.
+//
+// Neither label is proof of anything a gate needs — anybody who can create a
+// container can set them — and they are not used as one: they only let the
+// container's `postgres` database be ranked as a target at all, and
+// Target.Gate still runs every rule on it afterwards (ADR-008 §5).
+func ownContainer(c container.Summary, workdir string) bool {
+	got := c.Labels[provision.LabelProject]
+	if got == "" || got != projectName(workdir) {
+		return false
+	}
+	return sameDir(workdir, c.Labels[provision.LabelWorkingDir])
+}
+
+// sameDir reports whether dir names the working directory: equal once both
+// are absolute and clean, or once both have their symlinks resolved, so a
+// checkout reached through a symlink is still the directory that made the
+// container. An empty or relative dir is never the working directory.
+func sameDir(workdir, dir string) bool {
+	if dir == "" || !filepath.IsAbs(dir) {
+		return false
+	}
+	abs, err := filepath.Abs(workdir)
+	if err != nil {
+		return false
+	}
+	dir = filepath.Clean(dir)
+	if abs == dir {
+		return true
+	}
+	a, errA := filepath.EvalSymlinks(abs)
+	b, errB := filepath.EvalSymlinks(dir)
+	return errA == nil && errB == nil && a == b
 }
 
 // underOrEqual reports whether dir is the working directory or one of its

@@ -871,3 +871,14 @@ none of them printed on the identical run with no `--unmask` flag at all.
   hand), so the sentence covers both kinds; **owed** to `internal/pg` — filed
   as tracker debt — is that reason on `Eligibility`, after which the sentence
   names the one cause (T-0370).
+
+## The ladder honours `noTerminal` too (T-0334)
+
+`resolveEndpoints` now copies `Request.noTerminal` onto
+`discover.Options.NoControllingTerminal`, as `rootQuestion` and `askRoot`
+already did. Without it a test of a headless run with no `--yes` could not
+reach the ladder's Q1/Q1′ path without depending on whether `go test` had a
+controlling terminal. It is still a test seam with no flag.
+`TestTwoRunsFromOneDirectoryReuseTheContainerTheFirstMade`
+(`second_run_integration_test.go`) is the caller: two runs from one directory
+with nothing but `--source`, against the container a first run's Q1 made.

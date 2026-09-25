@@ -135,6 +135,15 @@ func recordedTarget(ctx context.Context, o Options, name string, source *found, 
 		return nil, false, false, nil
 	}
 	if c == nil {
+		// Q1 below proposes this directory's own container, and it must not
+		// propose one that exists (T-0334). Interactive only: headless keeps
+		// ADR-016's stop, because the file names a different container and
+		// nobody is at a terminal to see the run move to this one.
+		if own := provision.Name(projectName(o.Workdir)); own != name && !isHeadless(o) {
+			if f, asked, ok, err := reuseOwn(ctx, o, dock, sink); ok {
+				return f, false, asked, err
+			}
+		}
 		f, asked, err := askQ1(ctx, o, source, dock, sink, missingLead(name), func() error {
 			return refuseContainerMissing(sink, name)
 		})

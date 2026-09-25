@@ -1552,3 +1552,16 @@
   exit: 4
   message: "./lazyslice.yml's target is the container {container}, which this machine's docker does not have: pass --create-target to start a new one for this directory, or --target to name another database"
   args: [container]
+
+# T-0334 (dogfood session 3): Q1 proposes starting lazyslice-target-<project>,
+# and a container of that name already exists without this directory's
+# lazyslice.project and lazyslice.working_dir labels: somebody else made it, or
+# another checkout with the same basename did. Q1 never offers a name that is
+# taken, and lazyslice does not read, start or reuse a container it did not
+# create for this directory.
+- code: target.refused.name_taken
+  kind: error
+  stage: discover
+  exit: 4
+  message: "a container named {container} already exists and lazyslice did not create it for this directory, so no target can be started under that name: pass {flag} to name a database"
+  args: [container, flag]
