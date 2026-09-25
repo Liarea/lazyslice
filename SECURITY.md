@@ -82,7 +82,12 @@ issue.
    rule matches and whose table holds no other column already decided
    personal, is copied. This is the general case; the next two are the two
    specific instances of it that an adversarial red team found worth naming
-   on their own.
+   on their own. The entropy check itself now passes four more shapes
+   through, in a column no credential name rule matches: a secret that is a
+   hex run of exactly 32, 40 or 64 characters, a secret column of one to
+   four non-NULL rows, a secret in a column named `type`, `klass` or
+   `component_name`, and a file named after a person in a column where
+   fewer than a fifth of the file names carry a word the dictionary holds.
 3. **A name — or any other value — in a script the built-in dictionaries do
    not carry**, in a column also named in that script. The name, address,
    phone and email name-patterns and the name dictionary are Latin-script
