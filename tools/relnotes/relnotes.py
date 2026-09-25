@@ -71,6 +71,10 @@ def main(argv):
             continue
         m = re.match(r"^([a-z][a-z0-9/-]*):\s*(.*?)(?:\s*\((T-\d+[^)]*)\))?$", subject)
         stage, title, task = (m.group(1), m.group(2), m.group(3)) if m else ("other", subject, None)
+        # A workflow prefixes the stage to a task title that already began with it ("verify: verify: ...", 02c918f and
+        # c40546a, 2026-09-24); the note shows the stage once.
+        if title.lower().startswith(stage + ": "):
+            title = title[len(stage) + 2:]
         bs = bullets(body)
         # tools/relnotes/overrides.json maps a commit's short or full sha to the bullets its body should have had;
         # a pushed commit on a protected branch cannot be rewritten (T-0213's body was one letter, 2026-09-16).
