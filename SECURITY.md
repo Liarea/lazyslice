@@ -137,7 +137,10 @@ issue.
    category's own masker (T-0137). An arbitrary identifier used as a key — a
    UUID, a slug, a customer number — is not named by any of the three and
    still survives. Values never survive: every leaf value is masked.
-9. `NULL` and the empty string, which survive and reveal that much.
+9. `NULL` and the empty string, which survive and reveal that much, and the
+   approximate length of a value masked as free text: its filler is fitted to
+   the input's length, so an application's short values (`admin`, `linux`)
+   stay short. Every character of it is still replaced.
 10. Masked columns with a small admissible domain, where the substitution is
     recoverable by frequency. The tool lists these under `small_domain:`
     rather than hiding them.

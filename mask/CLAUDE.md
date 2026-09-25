@@ -45,7 +45,9 @@ Domain(c Constraints) int64
 - **`h` is the only source of variation.** Every choice a generator makes —
   which word from an embedded list, the local part, the digits, the length of
   a free-text filler — is derived from `h`. No global seed, no clock, no
-  `math/rand`, no `gofakeit`, and never the input's length.
+  `math/rand`, no `gofakeit`, and never the input's length — with one
+  stated exception since T-0328: `free_text` fits its filler to the input's
+  length (below). Every character it emits is still drawn from `h`.
 - **`Domain(c)` is the number of distinct outputs** the generator can emit
   under `c`. The planner compares it against the column's own admissible
   domain and refuses a unique column the generator cannot carry (exit 12);
@@ -60,10 +62,10 @@ Domain(c Constraints) int64
 - **Nothing survives a mask**: no prefix, no length, no first character, no
   real domain. Emails land in `example.com`/`.net`/`.org`; phones in the
   fictional `555-01XX` range (see "Phones are always North American" below);
-  IPs in the documentation ranges; URLs under `example.invalid`. Free-text filler takes
-  its length from `h` within `[1, min(atttypmod, 4096)]`, so a 1,247-character
-  bio and a two-word note are indistinguishable —
-  `TestFreeTextLengthUncorrelated` asserts that for a fixed key.
+  IPs in the documentation ranges; URLs under `example.invalid`. Free-text
+  filler is **about as long as the input** since T-0328 ("Free text is fitted
+  to the input's length", below) — the one length this module lets survive,
+  approximately, beside `NULL` and `''`.
 - **The two exceptions are stated, not incidental**: `NULL` stays `NULL` and
   `''` stays `''`, and both are listed as false negatives in ARCHITECTURE.md §6
   item 6. Do not add a third.
@@ -188,6 +190,108 @@ comment says it is on its way out (without Go's formal `Deprecated:` marker,
 which would fail the parent's lint on those same callers); **T-0337** moves
 the callers off it and deletes it in the next mask minor.
 
+## Free text is fitted to the input's length (T-0328, `mask/v0.5.0`)
+
+The maintainer decided on 2026-09-23 (T-0323), from dogfood session 1: for a
+short input, `free_text` emits a value about as long as the input, not a
+column-width run of words. A users `role` column with three short values
+had masked to three distinct 255-character paragraphs, and `os_type`,
+`log_level`, `timezone` and `state` the same way, so the copy could not boot
+an application even where masking the column was right. `freeTextMasker`
+(`gen_text.go`) now reads the input's length — `freeTextInputLen`: the rune
+count of `fold(in)`, which is free_text's canonical form, and at least one —
+and nothing else of it. The canonical length alone, so spellings that hash
+alike are fitted alike (`STRASSE` and `straße`, `file` and its ligature
+spelling; `TestFreeTextCanonicalSpellingsMaskAlike`), as `fold` promises; an
+earlier draft took the raw length when it was shorter and broke that promise
+(T-0328's review):
+
+- **A column that holds the longest filler word** (`fittedFillers.longest()`,
+  nine) gets whole words, one space apart (`fillerAbout`): from the first word
+  boundary at or past the input's length, never past `max(length, 9)`, so
+  between four characters short of the input and that bound. `admin` becomes
+  one word, a sentence a run of them.
+- **A narrower column** gets exactly the input's length, cut from the same
+  words (`fillerFrom(fittedFillers, …)`), because a whole word may not fit.
+- **An input whose canonical form is longer than the column allows** keeps
+  the column-width behaviour (a length from `h` inside `[1, min(MaxLen,
+  4096)]`): an unbounded `text` column past the 4,096 cap, or a value NFKC or
+  case folding lengthened past its own `varchar` (ß becomes ss). An
+  exact-length `CHECK` keeps its length. Both draw from the whole filler list,
+  byte-identical to before.
+- **The first two draw from `fittedFillers`**, the filler list less
+  `fillerStateWords` (`default input level output session stage system token
+  trace value`): words an application is likely to store as a state, level or
+  mode of its own. A short input is one filler word, so drawing them would let
+  a `log_level` column's `debug` mask to another row's real `trace`, and the
+  residual scan would stop the run at exit 9 on every re-run under that key
+  (T-0328's review). `TestFreeTextNeverEmitsAStateWord` pins it, including
+  that no kept word begins with one, which a narrow column's cut would expose.
+
+**Determinism and the equality-group rule.** Same key, same canonical value,
+same output — and the column's width decides nothing but which side of nine it
+is on, because a canonical form no longer than the raw value fits every
+column that holds it. Two foreign-key-linked columns holding one value
+therefore mask it alike when both are nine or wider (or both narrower), and
+`internal/plan/equality.go`'s fourth question (the same `Domain()` in every
+member) passes exactly then. Before this, a free-text `varchar(25)` and a
+`text` column joined by a key were refused at plan with exit 12 on that
+question; now they pass and mask alike. **The one exception, stated:** a
+value whose canonical form folding made longer than the narrower of two such
+columns (a `varchar(6)` holding `straße`, canonically seven, keyed to a
+`varchar(8)`) takes the over-long branch there and not in the other, so the
+key does not validate at load. It needs an expanding character, a free-text
+foreign key between columns of different declared widths, and a width
+between the raw and the canonical length; the alternative, the raw length,
+broke every canonical pair of different length instead.
+
+**`Domain()` and `Admissible`.** The length comes from the value and `Domain`
+sees only the column, so it reports the narrowest length, one character: one
+of the 80 fitted filler words (`len(fittedFillers.words)`) in a column of nine
+or more, one of their 21 first letters (`fillerInitials`) in a narrower one.
+Every longer input has at least as many outputs, because its first word (or
+first letter) already tells them apart. `Admissible` is therefore
+`min(ColumnDomain, 80)`
+or `min(ColumnDomain, 21)` for every open free-text column, where it was
+22,505 for a `varchar(255)` and 368,195 for `text`; the exact-length and
+closed-column answers are unchanged. **A unique free-text column may now
+refuse at plan with `d = 80` where the old figure was larger — but it refused
+anyway**: `d_required` is 500,000 at one row, and no free-text column's old
+figure reached it, so the refusal set is the same and only the printed `d`
+moved. `TestDomainMatchesWhatTheGeneratorEmits` counts both figures exactly.
+**`Small` now answers true** for a free-text column with more than 40
+distinct sampled values, or a narrower-than-nine column with none counted
+(`TestSmallDomainIsReported`); the parent does not call `Small` today (T-0341),
+so no `small_domain:` line changes with this, and T-0341 will have to decide
+whether that figure is the one to report for a column of paragraphs.
+
+**What does not change.** `special_category`'s text branch (`generic`) and
+`semi_structured`'s own string leaves still draw their length from `h`, and
+their `Domain()` is the old figure, now `fillerRangeDomain`, so neither
+changes a value or a collapse decision. JSON string leaves that
+`internal/transform` masks as `free_text` do change, with every other
+`free_text` value.
+
+**What it costs, stated.** The approximate length survives, a third stated
+exception beside `NULL` and `''` (ARCHITECTURE.md §5 and §6 item 6,
+THREAT_MODEL.md "Positions", SECURITY.md). A short value becomes one filler
+word, so a source column that already holds a fitted filler word (`batch`,
+`report`, `record`; the state and level words are left out, above) can
+receive a masked value equal to one of its own source values, and the
+residual scan confirms it at exit 9: a false positive that fails closed, the
+same surface the documentation IP ranges and `example.com` addresses have. A
+masked short value can also equal its **own** source value (one in 80 for a
+fitted filler word); the passthrough guard lets it
+through, as it does any keyed coincidence, and the residual scan refuses it.
+Giving free_text the ADR-015 vocabulary and redraw would explain the first
+and remove the second (owed: **T-0383**).
+
+**For the release notes: `mask/v0.5.0` changes every masked `free_text`
+value**, under every key — columns and JSON string leaves alike — and no other
+category's output. It is cut with `make tag TAG=mask/v0.5.0` and the root
+`go.mod` moved to it before the tool's next tag (item 3 of "Workspace and
+release", below).
+
 ## The vocabulary gate and the redraw (ADR-015, T-0302)
 
 ADR-015 (proposed) lets `internal/verify` explain a residual hit — a masked
@@ -308,7 +412,9 @@ in `internal/transform`.
 
 Every generator needs the §5 test vectors that make it a contract rather than
 a guess: the colliding-pair encoding fixtures, `Domain()` against its own
-output space, and the length-uncorrelated free-text check.
+output space, and, for free text, the length bound
+(`TestFreeTextLengthFollowsTheInput`, which replaced the length-uncorrelated
+check in T-0328).
 
 `corpus_test.go` is one row per registered masker, and
 `TestCorpusCoversTheRegistry` fails on a generator with no row: the
@@ -369,8 +475,9 @@ next change to this module argues with a decision rather than rediscovering it.
   §5's worked example (a unique `varchar(15)` phone column) still resolves to
   `phone_unique` or a refusal, never to a collision at load.
 - **`Domain()` is a lower bound where it cannot be exact**, never an upper one.
-  `free_text` counts one output per admissible length plus the words that open
-  it; `semi_structured` reports one string leaf's worth. Under-reporting
+  `free_text` counts the outputs of its narrowest input length, one character
+  (T-0328); `semi_structured` reports one string leaf's worth, still through
+  `fillerRangeDomain`, which was free_text's figure before T-0328. Under-reporting
   refuses more columns than strictly necessary. Over-reporting is a collision
   at load under a green tick, so it is the one direction that is forbidden.
 - **A generator that branches on the value reports the narrowest branch the
@@ -733,7 +840,8 @@ next change to this module argues with a decision rather than rediscovering it.
 
 Import anything under `internal/`; add a dependency outside the three ADR-006
 names without amending that ADR; make a generator read the clock, a global
-seed or the input's length; add a masker that can be selected by a file path
+seed or the input's length (free_text's length is the one stated exception,
+T-0328; it reads the length and never a character); add a masker that can be selected by a file path
 or an expression; let a masked value keep any part of the original; add a
 `Domain()` that reports more than the generator can actually emit — the
 planner's refusal is only as honest as that number; give a masker the
