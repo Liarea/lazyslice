@@ -1377,6 +1377,16 @@ func (st *state) decide(w *work, col pipeline.Column, ct columnType, values []st
 		w.frags = append(w.frags,
 			render("name_match", quoteIdent(hit.Name)),
 			render("type_conflict", ct.Family, string(hit.Category)))
+		// T-0393 (the 2026-09-25 JSON red team, round 1, A11 to A13): the
+		// name did not decide the category, but it is still what the column
+		// holds. A jsonb `full_name` is decided semi_structured by its type
+		// below, and without this its decision was indistinguishable from a
+		// jsonb nothing names, so pipeline.Decision.LeafMap handed transform
+		// the per-leaf map and every leaf with no signal of its own -- the
+		// name, the address, the password -- was copied. Carried on every
+		// arm here; only a plain semi_structured decision reads it
+		// (Decision.LeafNameCategory).
+		w.d.NameHit = hit.Category
 		switch cat, hasType := typeSignals[ct.Family]; {
 		case best != nil:
 			w.d.Category = best.cat

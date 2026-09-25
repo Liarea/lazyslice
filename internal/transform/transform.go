@@ -73,8 +73,9 @@ type colPlan struct {
 	// leaves is what a document column's leaves are decided under: the
 	// decision's per-leaf map through pipeline.Decision.LeafMap (T-0272), nil
 	// for any column whose own decision is not the classifier's plain
-	// semi_structured one, which masks every leaf, and the run's phone region.
-	// Read by json.go's leafRule.
+	// semi_structured one, which masks every leaf, the category the column's
+	// own name gave every leaf when the type decided it (T-0393), and the
+	// run's phone region. Built by json.go's policyOf, read by its leafRule.
 	leaves leafPolicy
 }
 
@@ -158,7 +159,7 @@ func (t transformer) plan(
 		plans[i].mask = true
 		plans[i].cat = d.Category
 		plans[i].id = d.Masker
-		plans[i].leaves = leafPolicy{keys: d.LeafMap(), region: cls.PhoneRegion}
+		plans[i].leaves = policyOf(d, cls.PhoneRegion)
 		if d.UniqueIndex {
 			plans[i].shape.constraints.Unique = true
 		}

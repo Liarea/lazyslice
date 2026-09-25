@@ -2094,6 +2094,19 @@ importing this package.
   (`ByYmlRaise`, which `--mask` and a `mask:` block become), so every leaf of
   such a column is masked. The map is still set on those decisions; nothing
   reads it there.
+- **A rejected name hit is carried on the decision** (`Decision.NameHit`,
+  T-0393, the 2026-09-25 JSON red team). `decide`'s `hasName &&
+  !nameAccepted` branch records the hit's category on every arm, so a `jsonb`
+  `full_name` or `passwords` that its type decided `semi_structured` is not
+  mistaken for a document nothing names: `LeafMap` is nil for it and
+  `LeafNameCategory` tells transform and verify to mask every leaf under the
+  name's category. It changes no column decision (`Category`, `Confidence`,
+  `Masked` are what the branch always set) and is not emitted or
+  fingerprinted, like `LeafKeys`. A bare `name` hit is carried as it stands,
+  without T-0313's corroboration, because the column is masked by its type
+  either way; whether a label table's document should need it is T-0396.
+  `TestADocumentWhoseOwnNameIsPersonalCarriesTheNameHit` (`t0393_test.go`)
+  pins the eight names over testdata/regressions/046's own documents.
 - **`Classification.PhoneRegion` is the region `Classify` ran under**
   (`prior.PhoneRegion`), set for `internal/transform`, whose per-leaf value
   half reads a phone number under it the way `internal/verify`'s net does.

@@ -26,8 +26,9 @@ import (
 // under keys the samples showed is copied, and every other leaf is replaced as
 // every leaf was before. The map is read through pipeline.Decision.LeafMap, so
 // a column whose own decision names a personal category (a jsonb
-// `medical_history`) or that an operator raised has no map, and every one of
-// its leaves is replaced. A replaced string leaf goes through its category's
+// `medical_history`), whose own name matched a personal rule its type did not
+// satisfy (a jsonb `full_name` or `passwords`, T-0393), or that an operator
+// raised has no map, and every one of its leaves is replaced. A replaced string leaf goes through its category's
 // masker (leafMasker) or free_text; a replaced number leaf becomes a number of
 // the same kind derived from h; a replaced boolean leaf becomes a boolean
 // derived from h; null stays null; arrays and objects keep their shape.
@@ -117,21 +118,34 @@ type leafVerdict struct {
 // leafPolicy is what one document column's leaves are decided under: the
 // decision's per-leaf map, read through pipeline.Decision.LeafMap so that the
 // column's own category and source come first (nil for any column that is not
-// the classifier's plain semi_structured verdict), and the phone region the
-// run classified under (pipeline.Classification.PhoneRegion), which the value
-// half reads.
+// the classifier's plain semi_structured verdict), the category the column's
+// own name gave it when that name did not decide the column
+// (pipeline.Decision.LeafNameCategory, T-0393; empty otherwise), and the
+// phone region the run classified under (pipeline.Classification.PhoneRegion),
+// which the value half reads.
 type leafPolicy struct {
 	keys   map[string]pipeline.Category
+	name   pipeline.Category
 	region string
+}
+
+// policyOf is the leaf policy a masked document column's decision gives, the
+// one place transform reads the decision's leaf half.
+func policyOf(d pipeline.Decision, region string) leafPolicy {
+	return leafPolicy{keys: d.LeafMap(), name: d.LeafNameCategory(), region: region}
 }
 
 // leafRule is T-0272's per-leaf decision, in this order:
 //
 //  1. p.keys is nil — the decision carries no map, because nothing was
 //     sampled or nothing set one, or the column's own decision is a personal
-//     category or an operator's raise (pipeline.Decision.LeafMap) — and every
-//     leaf is masked as free_text, exactly as before per-leaf categories
-//     existed.
+//     category, an operator's raise, or a name hit its type did not accept
+//     (pipeline.Decision.LeafMap) — and every leaf is masked: under the
+//     column's own name's category through leafMasker when p.name holds one
+//     (T-0393: every leaf of a jsonb `emails` gets the email masker, every
+//     leaf of a jsonb `full_name` free_text), and as free_text otherwise,
+//     exactly as before per-leaf categories existed. The value is not read:
+//     the name has already said what every leaf holds.
 //  2. The nearest enclosing key the map names with a category, walking out
 //     from the leaf's own key to the document's root, masks the leaf under
 //     that category (an "address" object's "line1" is an address).
@@ -153,6 +167,9 @@ type leafPolicy struct {
 func leafRule(p leafPolicy, chain []string, text string, valued bool) leafVerdict {
 	keys := p.keys
 	if keys == nil {
+		if p.name != "" {
+			return leafVerdict{cat: leafMasker(p.name)}
+		}
 		return leafVerdict{cat: leafCategory}
 	}
 	for i := len(chain) - 1; i >= 0; i-- {

@@ -1929,3 +1929,19 @@ of each leaf's enclosing keys, which `leaves()` now carries (`leaf.keys`).
   yml-raised one as `free_text`, so the net reads every leaf of such a column
   as it always did, and `generatedFromMaskedLeaves` asks `LeafMap` too.
 
+- **A document whose own name is personal (T-0393, the 2026-09-25 JSON red
+  team, round 1).** A `jsonb` `full_name`, `emails` or `passwords` is decided
+  `semi_structured` by its type because its name's category does not accept
+  `jsonb`, and `LeafMap` is nil for it now: the decision carries the name's
+  category (`pipeline.Decision.NameHit`, read through `LeafNameCategory`),
+  and transform masks every leaf under that category through `leafMasker`,
+  never copying one. `jsonleaf.go`'s `policyOf` builds the same policy and
+  `leafRule`'s nil-map arm reads the name category the same way, so the net
+  leaves a leaf the name's own masker replaced (an email, phone, address,
+  national id or credential) to the residual scan and still reads `free_text`
+  filler (`person_name`, `person_date`, `free_text` names).
+  `leafPolicy.categorised` is the one question both `replacedByCategoryMasker`
+  and `generatedFromMaskedLeaves` ask: a per-leaf map, or a name category
+  whose leaf masker is its own. `TestTheSecondNetReadsANameHitDocumentAsTransformMaskedIt`
+  and `TestAGeneratedColumnOverANameHitDocumentsLeafIsTheMaskersOutput` pin
+  the eight names and both directions.

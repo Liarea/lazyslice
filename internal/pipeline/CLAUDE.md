@@ -172,3 +172,13 @@ binary that does not compile runs nothing. `IsZero()` is field-wise, matching
 need to be: `IsZero()` is a value method on a type this package already owns —
 field comparisons only, no query, no masker, no renderer — the same footing
 `Provenance`'s own constants stand on.
+
+**`Decision` has a `NameHit` and a `LeafNameCategory()` (T-0393,
+2026-09-25).** ARCHITECTURE.md §2 prints both, as the rule above requires.
+`NameHit` is the name rules' category for a column whose own name matched a
+rule its type does not satisfy (a `jsonb` `full_name`); `LeafNameCategory` is
+that category when the decision is the classifier's plain `semi_structured`
+one, and `LeafMap` is nil whenever it is set, so every leaf of such a document
+is masked under it rather than decided by the per-leaf map. Like `LeafKeys` it
+is in memory only; `internal/emit` does not write it. Both methods are field
+comparisons, on the footing `LeafMap` already stood on.

@@ -339,3 +339,125 @@ func TestANationalNumberIsMaskedUnderTheRunsPhoneRegion(t *testing.T) {
 		}
 	}
 }
+
+// T-0393 (the 2026-09-25 JSON red team, round 1, A11 to A13): a jsonb column
+// whose own name matched a personal rule that does not accept jsonb is decided
+// plain semi_structured by its type, and before this fix that decision handed
+// transform its per-leaf map, so every leaf with no signal of its own -- a
+// given name, a street, a password, a birth date -- was copied at exit 0. The
+// decision now carries the name's category (pipeline.Decision.NameHit), the
+// map is not read, and every leaf is masked under that category through
+// leafMasker. The map below names every key and calls each one `none`, which
+// is the map that copied every leaf before the fix.
+var nameHitColumns = []struct {
+	column string
+	cat    pipeline.Category
+}{
+	{"full_name", pipeline.CatPersonName},
+	{"home_address", pipeline.CatAddress},
+	{"passwords", pipeline.CatCredential},
+	{"date_of_birth", pipeline.CatPersonDate},
+	{"national_id", pipeline.CatNationalID},
+	{"emails", pipeline.CatEmail},
+	{"notes", pipeline.CatFreeText},
+	{"by_phone", pipeline.CatPhone},
+}
+
+func nameHitDocument() map[string]any {
+	return map[string]any{
+		"given": "Wren", "family": "Calloway", "street": "Larkspur Row",
+		"current": "hunter2x", "d": "1987-03-14", "v": "AB 12 34 56 X",
+		"entry": "Wren Calloway seen for follow-up", "n": float64(7), "ok": true,
+	}
+}
+
+func nameHitKeys() map[string]pipeline.Category {
+	keys := map[string]pipeline.Category{}
+	for k := range nameHitDocument() {
+		keys[k] = pipeline.CatNone
+	}
+	return keys
+}
+
+func TestADocumentWhoseOwnNameIsPersonalHasEveryLeafMasked(t *testing.T) {
+	stringLeaves := []string{"$.given", "$.family", "$.street", "$.current", "$.d", "$.v", "$.entry"}
+	for _, c := range nameHitColumns {
+		t.Run(c.column, func(t *testing.T) {
+			k := key(t, 0x93)
+			cls := classification()
+			d := cls.Decisions[col("people", "contact")]
+			d.NameHit, d.LeafKeys = c.cat, nameHitKeys()
+			cls.Decisions[col("people", "contact")] = d
+
+			if d.LeafMap() != nil {
+				t.Fatalf("LeafMap() = %v, want nil for a column whose own name is %s", d.LeafMap(), c.cat)
+			}
+			lp := policyOf(d, "")
+			for _, name := range []string{"given", "d", "entry"} {
+				v := leafRule(lp, []string{name}, nameHitDocument()[name].(string), true)
+				if v.copy || v.cat != leafMasker(c.cat) {
+					t.Errorf("leafRule(%s) = %+v, want masked under %s", name, v, leafMasker(c.cat))
+				}
+			}
+
+			b := peopleBatch()
+			b.Rows = b.Rows[:1]
+			b.Rows[0][4] = nameHitDocument()
+			res := &recorder{inner: NewResidual(100)}
+			out, err := New(fixture()).Transform(b, cls, &k, res)
+			if err != nil {
+				t.Fatalf("Transform: %v", err)
+			}
+			got := leaves(t, out.Rows[0][4])
+			src := leaves(t, nameHitDocument())
+			for _, path := range append(stringLeaves, "$.n") {
+				if reflect.DeepEqual(got[path], src[path]) {
+					t.Errorf("%s was copied as %v: the column's own name says every leaf is %s", path, got[path], c.cat)
+				}
+			}
+			if c.cat == pipeline.CatEmail {
+				// The name's own masker ran, not free_text's filler.
+				if s, _ := got["$.given"].(string); !textsig.ValidEmail(s) {
+					t.Errorf("$.given = %q, want the email masker's output under a column named emails", s)
+				}
+			}
+			// Every masked string and number leaf is in the filter under
+			// free_text's canonical form, whichever masker replaced it, so
+			// verify's residual scan finds any of them that survived.
+			recorded := map[string]string{}
+			for _, a := range res.adds {
+				if a.col == col("people", "contact") {
+					recorded[a.path] = a.canonical
+				}
+			}
+			for _, path := range stringLeaves {
+				canon, _, err := mask.Canonical(mask.Category(pipeline.CatFreeText), mask.Value{Text: src[path].(string)}, leafConstraints())
+				if err != nil {
+					t.Fatalf("canonical of %s: %v", path, err)
+				}
+				if recorded[path] != canon.Text {
+					t.Errorf("%s filter entry = %q, want free_text's canonical form %q", path, recorded[path], canon.Text)
+				}
+			}
+			if _, ok := recorded["$.n"]; !ok {
+				t.Error("$.n has no filter entry: it was copied, not masked")
+			}
+		})
+	}
+
+	// The controls: a raised document keeps free_text for every leaf whatever
+	// its name, and a document nothing names keeps the per-leaf map, so a
+	// signal-free leaf under a key the samples showed is still copied.
+	t.Run("a raised document keeps free_text", func(t *testing.T) {
+		d := pipeline.Decision{Category: pipeline.CatSemiStruct, Source: pipeline.ByYmlRaise, NameHit: pipeline.CatEmail, LeafKeys: nameHitKeys()}
+		if v := leafRule(policyOf(d, ""), []string{"given"}, "Wren", true); v.copy || v.cat != leafCategory {
+			t.Errorf("leafRule = %+v, want free_text", v)
+		}
+	})
+	t.Run("a document nothing names keeps its map", func(t *testing.T) {
+		d := pipeline.Decision{Category: pipeline.CatSemiStruct, LeafKeys: nameHitKeys()}
+		if v := leafRule(policyOf(d, ""), []string{"given"}, "Wren", true); !v.copy {
+			t.Errorf("leafRule = %+v, want copied", v)
+		}
+	})
+}

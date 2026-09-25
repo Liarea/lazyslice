@@ -199,6 +199,45 @@ type Decision struct {
 	// read it through LeafMap, which is what makes the column's own decision
 	// the root of every leaf's chain.
 	LeafKeys map[string]Category
+	// NameHit is the category rules.yml's name rules gave this column's own
+	// name when the column's type is not one that category accepts, so the
+	// name did not decide the category (internal/classify's decide, the
+	// `hasName && !nameAccepted` branch; T-0393). It is empty when no rule
+	// matched the name or the rule's category accepted the type.
+	//
+	// A jsonb `full_name`, `home_address`, `passwords`, `emails` or `notes`
+	// is such a column: only special_category and semi_structured accept a
+	// document, so the name loses to the type and the decision is the plain
+	// semi_structured one a column with no name at all gets. Before T-0393
+	// that decision carried the per-leaf map and every leaf with no signal of
+	// its own was copied (the 2026-09-25 JSON red team, round 1, A11 to A13).
+	// This field is what lets LeafMap and LeafNameCategory tell the two
+	// apart: a document whose own name marks it personal has every leaf
+	// masked, under the name's category.
+	//
+	// It is in memory only, like LeafKeys: internal/emit writes named fields
+	// of a Decision and not this one, and every run re-derives it.
+	NameHit Category
+}
+
+// LeafNameCategory is the category every leaf of a document column is masked
+// under because the column's own name marked it personal (T-0393): NameHit,
+// when the column's decision is the classifier's plain semi_structured verdict
+// and NameHit names a category; empty otherwise. internal/transform and
+// internal/verify hand it to their leafMasker, so a leaf takes that category's
+// own masker where it has one a leaf can use and free_text where it has not.
+// A special_category name (`medical_history`) is not this case -- that
+// category accepts every type, so its decision is special_category and its
+// leaves are free_text through LeafMap's nil -- and neither is a document an
+// operator raised (ByYmlRaise), which keeps free_text for every leaf.
+func (d Decision) LeafNameCategory() Category {
+	if d.Category != CatSemiStruct || d.Source != ByClassifier {
+		return ""
+	}
+	if d.NameHit == "" || d.NameHit == CatNone || d.NameHit == CatSemiStruct {
+		return ""
+	}
+	return d.NameHit
 }
 
 // LeafMap is LeafKeys as internal/transform and internal/verify read it
@@ -213,8 +252,14 @@ type Decision struct {
 // saying the document is personal, which per-leaf copying would quietly undo.
 // Both come back nil, so every leaf of such a column is masked as it was
 // before per-leaf categories existed.
+//
+// So does a document whose own name matched a personal rule that does not
+// accept its type (T-0393: a jsonb `full_name`, `passwords` or `notes`):
+// its decision is plain semi_structured because the type decided it, but
+// the name still says what every leaf holds, and LeafNameCategory carries
+// that category instead of a map.
 func (d Decision) LeafMap() map[string]Category {
-	if d.Category != CatSemiStruct || d.Source != ByClassifier {
+	if d.Category != CatSemiStruct || d.Source != ByClassifier || d.LeafNameCategory() != "" {
 		return nil
 	}
 	return d.LeafKeys

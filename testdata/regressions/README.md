@@ -366,6 +366,20 @@ alone, an unnamed base62 token on eight samples — and a column of
 `photo-<username>-<n>.jpg` file names half of which carry a dictionary name,
 which the named-file rule still masks whole.
 
+**046 is a thirtieth**, from the 2026-09-25 JSON red team's round 1
+(`docs/reviews/2026-09-25-redteam-json/round1.json`, attacker 1's A12, A13
+and A11; **T-0393**) rather than from one of the ten, on 010's precedent: a
+`jsonb` column whose own name matched a personal rule that does not accept
+`jsonb` (`full_name`, `home_address`, `passwords`, `date_of_birth`,
+`national_id`, `emails`, `notes`, `by_phone`) was decided plain
+`semi_structured` by its type, carried the per-leaf map like a document
+nothing names, and copied every leaf with no signal of its own under exit 0.
+The decision now carries the name's category and every leaf is masked under
+it. The documents are signal-free, so `not-copied:` — which greps the target
+for each whole source document — sees every one of them cross whole before
+the fix; `medical_history`, a `special_category` name that was always masked,
+is the control.
+
 The files are loaded and run by `make torture` (`internal/invariants`'s
 `TestTortureRegressions`, behind the `integration` and `torture` build tags), so
 a regression that comes back fails a build rather than being rediscovered by the
@@ -559,6 +573,7 @@ until T-0221. It is what 025 sets.
 | `043-enum-and-identifier-columns-beside-a-certain-email.sql` | dogfood session 1, tracker T-0311, not a torture-schema reduction — see this file's own prose above | **a copy that did not boot**: `unknownColumnsBesideCertain` swept a role, a state, a UI mode, an OS type, a log level, a timezone, a text uuid, a version, a hostname, a hex serial and an asset path into `free_text` beside a `certain` email column; an enumeration or an all-one-identifier-shape column is now spared and copied with a reason line saying why, while a native-script name column that is an enumeration by count alone is still swept and masked |
 | `044-bare-name-columns-of-label-tables.sql` | dogfood session 1, tracker T-0313, not a torture-schema reduction — see this file's own prose above | **a person's name where the application expects a label**: the rule pack's bare `name` word masked every column called `name` — a tag, a folder, a language, an AI model — and every `*_file_name` column as `person_name`, and a unique-indexed one refused the plan; `bare_name` now needs a word for people in the table or column name or samples the name dictionary carries, `not-masked:` pins five label columns copied and `not-copied:` pins a users table's `name` (corroborated by its table) and an orders table's `name` (corroborated by its samples) still masked |
 | `045-application-values-that-look-like-secrets.sql` | dogfood session 1, tracker T-0315, not a torture-schema reduction — see this file's own prose above | **a copy whose class names raised on load**: the entropy validator masked file names, MD5 and SHA-256 digests, STI `type` class names, formatter class paths, a component name, an environment variable's name and a four-sample column to the fixed credential literal; the four shapes are spared, a `type`/`klass`/`component_name` column is not asked, and a column needs five samples, while four real secrets and a column of file names named after their owners are still masked |
+| `046-document-column-whose-own-name-is-personal.sql` | the 2026-09-25 JSON red team, round 1, tracker T-0393, not a torture-schema reduction — see this file's own prose above | **names, streets, passwords and birth dates copied inside documents at exit 0**: a `jsonb` column whose own name matched a personal rule its type did not satisfy was decided `semi_structured` by the type and its leaves were decided by the per-leaf map, which copied every signal-free leaf; the name's category is now carried on the decision, the map is not read, and every leaf is masked under that category through the leaf masker (`free_text` for `person_name`, `person_date` and `free_text` names), with `medical_history` as the always-masked control |
 
 009's header now says `ok`. It did not always: `arrayArrivesAsLiteral` in
 `internal/plan/writeback.go` was written as a stand-in for the element-wise
