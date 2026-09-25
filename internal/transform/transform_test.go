@@ -88,6 +88,12 @@ func classification() *pipeline.Classification {
 	}
 	// person_id is a surrogate key: never masked, always explained (§4).
 	d[col("people", "person_id")] = pipeline.Decision{Col: col("people", "person_id"), Category: pipeline.CatNone}
+	// events is log-shaped (§4): LogShaped is what maskDocument now reads to
+	// replace payload whole instead of walking it (T-0398), the way
+	// internal/classify's own finalise would set it from the rule pack.
+	eventsPayload := d[col("events", "payload")]
+	eventsPayload.LogShaped = true
+	d[col("events", "payload")] = eventsPayload
 	return &pipeline.Classification{Decisions: d}
 }
 
@@ -455,6 +461,75 @@ func TestALogShapedTableCollapsesTheDocument(t *testing.T) {
 	}
 	if len(res.adds) != 1 {
 		t.Errorf("a collapsed document added %d filter entries, want 1 for the document itself", len(res.adds))
+	}
+}
+
+// T-0398: maskDocument reads Decision.LogShaped and nothing else to decide
+// between collapsing a document whole and walking it leaf by leaf --
+// internal/transform kept its own copy of §4's log-shaped rule
+// (logTableWords) until this task, a fixed eight-word list matched only on
+// '_'-separated segments, which missed a CamelCase table (Prisma's default
+// "AuditLog") and the activity/trace words internal/classify's rule pack
+// already recognised. Both cases here use the identical table name, on
+// purpose: the flag alone decides now, never the name.
+func TestLogShapedIsReadFromTheDecisionNotTheTableName(t *testing.T) {
+	table := ref.TableRef{Schema: "public", Name: "AuditLog"}
+	schema := &pipeline.Schema{Tables: []pipeline.Table{{
+		Ref: table,
+		Columns: []pipeline.Column{
+			{Name: "id", TypeName: "bigint", TypeOID: 20},
+			{Name: "changes", TypeName: "jsonb", TypeOID: 3802},
+		},
+		PK: []string{"id"},
+	}}}
+	changesCol := ref.ColumnRef{Table: table, Column: "changes"}
+
+	for _, tc := range []struct {
+		name      string
+		logShaped bool
+	}{
+		{"LogShapedTrueCollapses", true},
+		{"LogShapedFalseIsWalked", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cls := &pipeline.Classification{Decisions: map[ref.ColumnRef]pipeline.Decision{
+				changesCol: {
+					Col: changesCol, Category: pipeline.CatSemiStruct,
+					Confidence: pipeline.ConfCertain, Masker: mask.MaskerSemiStruct,
+					Masked: true, LogShaped: tc.logShaped,
+					// Both keys sampled and named CatNone: leafRule's copy
+					// arm, so a signal-free leaf survives when the column is
+					// walked (LogShaped false) -- the shape that leaked
+					// before T-0398, and the reason this test does not just
+					// check "is it {}".
+					LeafKeys: map[string]pipeline.Category{"a": pipeline.CatNone, "b": pipeline.CatNone},
+				},
+			}}
+			b := pipeline.RowBatch{
+				Table: table,
+				Cols:  []string{"id", "changes"},
+				Rows:  [][]any{{int64(1), map[string]any{"a": "no signal in this leaf", "b": "nor this one"}}},
+				Last:  true,
+			}
+			k := key(t, 0x77)
+			res := &recorder{inner: NewResidual(100)}
+			out, err := New(schema).Transform(b, cls, &k, res)
+			if err != nil {
+				t.Fatalf("Transform: %v", err)
+			}
+			got, ok := out.Rows[0][1].(map[string]any)
+			if !ok {
+				t.Fatalf(`"AuditLog".changes masked to %#v, want a map`, out.Rows[0][1])
+			}
+			switch {
+			case tc.logShaped && len(got) != 0:
+				t.Errorf(`"AuditLog".changes = %#v, want {}: LogShaped is true`, got)
+			case !tc.logShaped && len(got) == 0:
+				t.Errorf(`"AuditLog".changes = %#v, want its two leaves walked (copied, since neither carries a signal): LogShaped is false`, got)
+			case !tc.logShaped && (got["a"] != "no signal in this leaf" || got["b"] != "nor this one"):
+				t.Errorf(`"AuditLog".changes = %#v, want both signal-free leaves copied unchanged`, got)
+			}
+		})
 	}
 }
 

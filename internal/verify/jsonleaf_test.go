@@ -325,6 +325,27 @@ func TestAGeneratedColumnOverAMaskedDocumentsLeafIsTheMaskersOutput(t *testing.T
 	}
 }
 
+// T-0398: a log-shaped document is never "categorised" for the
+// generated-column skip, whatever LeafKeys or NameHit say -- internal/
+// transform's maskDocument collapses such a column to {} ahead of leafRule,
+// so nothing under it was ever replaced through a category's own masker, and
+// a generated column that reads it must be judged like any other unmasked
+// value. LeafKeys is set here anyway (internal/classify computes it without
+// asking whether the table is log-shaped) to prove the skip reads
+// Decision.LogShaped and not merely an absent map.
+func TestALogShapedDocumentIsNeverCategorisedForTheGeneratedColumnSkip(t *testing.T) {
+	gen := [][2]string{{"email", `lower((identity_data ->> 'email'::text))`}}
+	emailKey := map[string]pipeline.Category{"email": pipeline.CatEmail, "kind": pipeline.CatNone}
+	doc := `{"email":"glen.manning@example.com","kind":"standard"}`
+	dec := pipeline.Decision{
+		Category: pipeline.CatSemiStruct, Masked: true, LeafKeys: emailKey, LogShaped: true,
+	}
+	got := generatedNet(t, "identity_data", dec, gen, [][]any{{doc, "glen.manning@example.com"}})["email"]
+	if len(got) != 1 || got[0] != "email" {
+		t.Errorf("email failures %v, want one email: LogShaped must stop the skip from reading it as replaced", got)
+	}
+}
+
 // T-0397 (the 2026-09-25 JSON red team, round 1, entry 24): generated columns
 // that assemble an email, a phone number and a card number out of copied
 // leaves of a masked jsonb, beside the Supabase column over the email leaf.

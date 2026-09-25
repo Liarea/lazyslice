@@ -409,6 +409,21 @@ its own row's category-masked leaf, which the Supabase column still is.
 `not-copied:` names the document and all five generated columns; before the
 fix `joined`, `dial`, `dial_n` and `pan` crossed whole.
 
+**050 is the same round's log-shape-rule finding** (entry 26, attacker 3;
+**T-0398**), on the same precedent: `internal/classify`'s rule pack and
+`internal/transform`'s own separate copy of its log-shaped-table rule
+disagreed. The plan's reasons line reports every `jsonb` column of a
+CamelCase `"AuditLog"` table (Prisma's default) and a `reg050_account_
+activity` table as "replaced whole", because the rule pack's `log_shaped`
+regex matches both, over the normalised — case-split, lower-cased — table
+name; `internal/transform` walked both leaf by leaf instead, because its own
+`logTableWords` copy split only on `_` with no CamelCase normalisation and
+carried neither `activity` nor `trace`, so it copied every signal-free leaf
+under exit 0. Fixed by `pipeline.Decision.LogShaped`, set by the classifier
+from the identical rule-pack call the reasons line uses, and read by
+`internal/transform` and `internal/verify` in place of their own copies.
+`not-copied:` names both documents; before the fix both crossed whole.
+
 The files are loaded and run by `make torture` (`internal/invariants`'s
 `TestTortureRegressions`, behind the `integration` and `torture` build tags), so
 a regression that comes back fails a build rather than being rediscovered by the
@@ -606,6 +621,7 @@ until T-0221. It is what 025 and 048 set.
 | `047-guessed-region-phone-under-an-unnamed-leaf-key.sql` | the 2026-09-25 JSON red team, round 1, tracker T-0394, not a torture-schema reduction — see this file's own prose above | **phone numbers copied inside documents at exit 0 beside their masked scalar twin**: with no `--phone-region`, a national-format number under a key no name rule names was copied, while the same values in a scalar column beside a personal neighbour were masked on a guessed-region hit; a key whose sampled values parse under the guessed regions at the scalar path's ratio is now `phone` in the leaf map when the scalar path's corroboration holds or the document carries a personal key, and every leaf under it is masked |
 | `048-national-format-phone-keys-under-a-phone-region.sql` | the 2026-09-25 JSON red team, round 1 (A11, run 2), tracker T-0394, not a torture-schema reduction — see this file's own prose above | **a refusal with only `--skip-table` for a remedy**: under `--phone-region GB` a document keyed by national-format numbers exited 9, `verify.refused.second_net_document_masked`, because the key masker read a phone key in international form only and the net read it under the region; the key masker and the classifier's leaf map now read the run's region, so the national key is masked and the run loads |
 | `049-generated-columns-assembled-from-document-leaves.sql` | the 2026-09-25 JSON red team, round 1 (entry 24), tracker T-0397, not a torture-schema reduction — see this file's own prose above | **an address, a phone number and a card number assembled by generated columns at exit 0**: the second net skipped the leaf maskers' validators for any generated column over a masked document with per-leaf categories, whichever leaf it read, so columns built from copied leaves (`u || '@' || h`, `'+' || cc || nsn`, `bin || tail`) passed; the net now skips a hit only when the value is its own row's category-masked leaf, and the classifier masks the keys a generated column reads when its samples validate |
+| `050-camelcase-and-activity-log-shaped-tables.sql` | the 2026-09-25 JSON red team, round 1 (entry 26), tracker T-0398, not a torture-schema reduction — see this file's own prose above | **two documents reported "replaced whole" and walked leaf by leaf instead, at exit 0**: `internal/classify`'s rule pack and `internal/transform`'s own copy of the log-shaped-table rule disagreed — the rule pack matches a CamelCase `"AuditLog"` table (Prisma's default) and an `*_activity` table, transform's own word list matched neither — so both documents' signal-free leaves crossed verbatim while the plan's own reasons line said the document was replaced whole; fixed by `pipeline.Decision.LogShaped`, set once by the classifier from the same rule-pack call and read by transform and verify in place of their own copies |
 
 009's header now says `ok`. It did not always: `arrayArrivesAsLiteral` in
 `internal/plan/writeback.go` was written as a stand-in for the element-wise

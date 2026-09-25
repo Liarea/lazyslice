@@ -1743,6 +1743,10 @@ func (st *state) appendContext(w *work, t pipeline.Table, ct columnType, total i
 	case total == 0:
 		w.frags = append(w.frags, render("no_samples"))
 	}
+	// st.pack.logShapedTable is the single log-shaped rule (rules.yml's
+	// log_shaped, T-0398): finalise sets Decision.LogShaped from the same
+	// call, over every column of the table regardless of family, so this
+	// fragment and that field never disagree about which tables matched.
 	if isJSONFamily(w.family) && st.pack.logShapedTable(t.Ref.Name) {
 		w.frags = append(w.frags, render("json_log_shaped"))
 	}
@@ -3114,6 +3118,14 @@ func (st *state) finalise() {
 		if w.d.Masked && w.d.Category != pipeline.CatNone {
 			w.d.Masker = st.pack.Masker[w.d.Category]
 		}
+		// LogShaped is the table-level half of §4's log-shaped rule
+		// (T-0398): the rule pack's own regex, over the normalised table
+		// name, is the single answer appendContext's "jsonb in a log-shaped
+		// table" reason fragment already gives, and every column of such a
+		// table carries it here regardless of family so that
+		// internal/transform and internal/verify can read one flag instead
+		// of keeping their own copy of the rule.
+		w.d.LogShaped = st.pack.logShapedTable(w.table.Name)
 	}
 	st.raiseCompositeUnique()
 }

@@ -1974,3 +1974,31 @@ of each leaf's enclosing keys, which `leaves()` now carries (`leaf.keys`).
   whose leaf masker is its own. `TestTheSecondNetReadsANameHitDocumentAsTransformMaskedIt`
   and `TestAGeneratedColumnOverANameHitDocumentsLeafIsTheMaskersOutput` pin
   the eight names and both directions.
+
+- **A log-shaped document is never categorised** (`leafPolicy.logShaped`,
+  T-0398, the 2026-09-25 JSON red team's round 1, entry 26).
+  `pipeline.Decision.LogShaped` is `internal/classify`'s own answer to §4's
+  log-shaped rule — the rule pack's regex over the normalised table name, set
+  on every column of a matching table — and `jsonleaf.go`'s `policyOf` now
+  carries it onto `leafPolicy` the same way it already carries `LeafMap` and
+  `LeafNameCategory`. `categorised` reads it first: a log-shaped column is
+  never categorised, whatever `LeafKeys` or `NameHit` answer, because
+  `internal/transform`'s `maskDocument` collapses such a column to `{}` ahead
+  of `leafRule` entirely — nothing under it was ever replaced through a
+  category's own masker, so `generatedFromMaskedLeaves` must not treat one of
+  its keys as a generated column's own row value the way it would for an
+  ordinary masked document. This is the fix for the mismatch entry 26 found:
+  before it, this package's `leafPolicy` had no field for the table-name
+  half of §4's rule at all, because the residual scan does not need it
+  (`documentHits` tests both a collapse and a walk, whichever transform
+  recorded, blind to which one it expected) — only `internal/transform`
+  needed the answer, and its own copy of the rule (`logTableWords`, a fixed
+  eight-word list, matched by splitting the table name on `_` alone, with no
+  CamelCase normalisation and no `activity` or `trace`) agreed with the rule
+  pack's regex only by accident, so a CamelCase table (Prisma's default
+  `AuditLog`) or an `*_activity`/`*_trace` table was reported "replaced
+  whole" and walked leaf by leaf instead, copying every signal-free leaf.
+  `TestALogShapedDocumentIsNeverCategorisedForTheGeneratedColumnSkip`
+  (`jsonleaf_test.go`) pins the generated-column skip against a decision that
+  carries both `LogShaped` and a per-leaf map, since `internal/classify`
+  computes the map without asking whether the table is log-shaped.
