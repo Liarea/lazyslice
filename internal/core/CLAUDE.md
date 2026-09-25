@@ -781,14 +781,20 @@ for a refusal that was reaching people as an internal error.
   does not accept. Every such column is its own Error event and the returned
   Stop is marked sent, the way `reportPlanRefusals` does it.
 - **Review round: three more refusals under the same code.** (1) A masked
-  column whose FK child (any edge, as `propagateKeys` walks) is still copied
-  names each child: `internal/classify` applies the yml raise a mask becomes
-  in `applyPrior`, after `keyChildren` and `foreignKeys`, so propagation never
-  sees it. The real fix is applying masks before propagation, which is
-  `internal/classify`'s (tracker T-0364); until then a key-family child that
-  `markNeverMasked` exempted (a uuid natural key's child) is refused with no
-  `--mask` that can clear it, which fails closed. A child with its own
-  `--unmask`/`unmask:` and a generated child are left alone. (2) `--mask` on a
+  column whose FK child is still copied names each child. Since T-0364
+  `internal/classify` runs FK propagation again after the yml raise a mask
+  becomes, so the parent normally takes every child with it under one
+  category and masker, a key-family child `markNeverMasked` exempted included
+  (that child used to be refused with no `--mask` that could clear it); the
+  test is now `TestMaskOnAKeyMasksEveryChild`, and `internal/classify`'s
+  `TestAYmlRaiseOnANaturalKeyPropagatesToItsChildren` pins the propagation.
+  `unmaskedChildren` stays as the fail-closed backstop (T-0364's review
+  round) for what propagation leaves behind: a child whose type does not
+  accept the parent's category (propagation's type_conflict branch), and an
+  edge whose parent column is not a key or unique, which propagation skips
+  and this walks. `TestMaskOnAKeyRefusesAChildPropagationCannotMask` pins
+  the first. A child with its own `--unmask`/`unmask:` and a generated child
+  are left alone. (2) `--mask` on a
   column the classifier already masks under another category is refused: a
   raise would swap the masker. `maskBaseline` reclassifies with
   `buildPrior(true, false)` (everything but the `--mask` flags) to know, and

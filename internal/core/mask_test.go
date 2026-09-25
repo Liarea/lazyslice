@@ -167,11 +167,13 @@ func TestReportVerifyRefusalsSendsEveryColumn(t *testing.T) {
 	}
 }
 
-// A natural key the operator masks takes its foreign-key children with it, or
-// the run stops naming each one: internal/classify propagates across an edge
-// before a mask is applied, so without this the child ships the parent's
-// values in clear (review of T-0319).
-func TestMaskOnAKeyNamesEveryUnmaskedChild(t *testing.T) {
+// A natural key the operator masks takes its foreign-key children with it
+// (T-0364): internal/classify propagates across the edge after the raise a
+// mask becomes, so the parent alone masks the child under the same category
+// and the run goes on. Before, the child stayed in clear and the run stopped
+// naming it (review of T-0319), and a key-family child had no --mask that
+// could clear the stop.
+func TestMaskOnAKeyMasksEveryChild(t *testing.T) {
 	t.Parallel()
 	ext := ref.TableRef{Schema: "public", Name: "t319_ext"}
 	use := ref.TableRef{Schema: "public", Name: "t319_use"}
@@ -195,29 +197,23 @@ func TestMaskOnAKeyNamesEveryUnmaskedChild(t *testing.T) {
 		return &run{req: normalise(Request{Mask: mask}), sink: sink, schema: schema}, sink
 	}
 
-	r, sink := newRun(map[string]string{"t319_ext.code": ""})
-	var stop *Stop
-	if err := r.classifyStage(); !errors.As(err, &stop) || stop.Code != CodeMaskNotApplied || stop.Exit != exitUsage {
-		t.Fatalf("--mask on the parent alone: classifyStage = %v, want %s at exit %d (child %+v)",
-			err, CodeMaskNotApplied, exitUsage, r.cls.Decisions[child])
-	}
-	var reasons []string
-	for _, e := range sink.events {
-		if e.Code == CodeMaskNotApplied {
-			reasons = append(reasons, e.Args[event.ArgReason])
+	for _, mask := range []map[string]string{
+		{"t319_ext.code": ""},
+		{"t319_ext.code": "", "t319_use.ext_code": ""},
+	} {
+		r, sink := newRun(mask)
+		if err := r.classifyStage(); err != nil {
+			t.Fatalf("--mask %v: classifyStage = %v, want the run to go on", mask, err)
 		}
-	}
-	if len(reasons) != 1 || !strings.Contains(reasons[0], "--mask "+child.String()) {
-		t.Errorf("refusals %q, want one naming --mask %s", reasons, child)
-	}
-
-	both, _ := newRun(map[string]string{"t319_ext.code": "", "t319_use.ext_code": ""})
-	if err := both.classifyStage(); err != nil {
-		t.Fatalf("--mask on both ends: %v", err)
-	}
-	for _, col := range []ref.ColumnRef{parent, child} {
-		if d := both.cls.Decisions[col]; !d.Masked || d.Category != pipeline.CatFreeText {
-			t.Errorf("%s is masked=%v as %s, want masked as free_text", col, d.Masked, d.Category)
+		for _, e := range sink.events {
+			if e.Code == CodeMaskNotApplied {
+				t.Errorf("--mask %v: refused %s: %s", mask, e.Column, e.Args[event.ArgReason])
+			}
+		}
+		for _, col := range []ref.ColumnRef{parent, child} {
+			if d := r.cls.Decisions[col]; !d.Masked || d.Category != pipeline.CatFreeText {
+				t.Errorf("--mask %v: %s is masked=%v as %s, want masked as free_text", mask, col, d.Masked, d.Category)
+			}
 		}
 	}
 }
@@ -257,5 +253,53 @@ func TestMaskCannotChangeAnExistingMasker(t *testing.T) {
 	same := newRun(map[string]string{"t319_people.email": string(was.Category)})
 	if err := same.classifyStage(); err != nil {
 		t.Errorf("--mask naming the category the column is already masked as: %v", err)
+	}
+}
+
+// The backstop T-0364 keeps: a child propagation cannot mask, because its type
+// does not accept the parent's category (person_date takes text but not
+// citext), is still refused at exit 2 before any write, named for a --mask of
+// its own, rather than copied in clear beside its masked parent.
+func TestMaskOnAKeyRefusesAChildPropagationCannotMask(t *testing.T) {
+	t.Parallel()
+	ext := ref.TableRef{Schema: "public", Name: "t364_ext"}
+	use := ref.TableRef{Schema: "public", Name: "t364_use"}
+	schema := &pipeline.Schema{
+		Tables: []pipeline.Table{
+			{Ref: ext, Columns: []pipeline.Column{{Name: "code", TypeName: "text"}}, PK: []string{"code"}},
+			{Ref: use, Columns: []pipeline.Column{
+				{Name: "id", TypeName: "bigint", TypeOID: 20},
+				{Name: "ext_code", TypeName: "citext", Nullable: true},
+			}, PK: []string{"id"}},
+		},
+		FKs: []pipeline.ForeignKey{{
+			Name: "t364_use_ext_code_fkey", Child: use, ChildCols: []string{"ext_code"},
+			Parent: ext, ParentCols: []string{"code"}, Validated: true,
+		}},
+	}
+	parent := ref.ColumnRef{Table: ext, Column: "code"}
+	child := ref.ColumnRef{Table: use, Column: "ext_code"}
+	sink := &eventCollector{}
+	r := &run{req: normalise(Request{Mask: map[string]string{"t364_ext.code": "person_date"}}), sink: sink, schema: schema}
+
+	var stop *Stop
+	if err := r.classifyStage(); !errors.As(err, &stop) || stop.Code != CodeMaskNotApplied || stop.Exit != exitUsage {
+		t.Fatalf("classifyStage = %v, want %s at exit %d (parent %+v, child %+v)",
+			err, CodeMaskNotApplied, exitUsage, r.cls.Decisions[parent], r.cls.Decisions[child])
+	}
+	if d := r.cls.Decisions[parent]; !d.Masked || d.Category != pipeline.CatPersonDate {
+		t.Fatalf("precondition: %s = %+v, want the parent masked as person_date", parent, d)
+	}
+	if d := r.cls.Decisions[child]; d.Masked {
+		t.Fatalf("precondition: %s = %+v is masked, so the backstop proves nothing", child, d)
+	}
+	var reasons []string
+	for _, e := range sink.events {
+		if e.Code == CodeMaskNotApplied {
+			reasons = append(reasons, e.Args[event.ArgReason])
+		}
+	}
+	if len(reasons) != 1 || !strings.Contains(reasons[0], child.String()+" references it") {
+		t.Errorf("refusals %q, want one naming %s", reasons, child)
 	}
 }

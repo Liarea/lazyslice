@@ -25,6 +25,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -213,6 +214,11 @@ type state struct {
 	// var every prior version of this file read directly, because the phone
 	// entry's ok func now closes over a per-call value.
 	validators []validatorEntry
+	// priorRaised records that applyPrior applied at least one lazyslice.yml
+	// raise (a pattern, a column entry, or the --mask flag and the file's own
+	// `mask:` block, which internal/core folds in as column entries). Classify
+	// reads it to run FK propagation a second time (T-0364).
+	priorRaised bool
 }
 
 // Classify decides every column of every table. It is pure: it issues no SQL,
@@ -258,6 +264,23 @@ func (classifier) Classify(schema *pipeline.Schema, s pipeline.Sampler, prior *p
 	cls, err := st.applyPrior(prior)
 	if err != nil {
 		return nil, err
+	}
+	// T-0364: a yml raise -- which is also what --mask and a committed
+	// `mask:` block become -- lands after foreignKeys has run, so a natural
+	// key the file masks would leave its FK children as the first sweep found
+	// them: the parent's values in clear on the child side (THREAT_MODEL.md
+	// T1) and two different values across one join (T8). Propagation runs
+	// again, over the same edges and by the same rule, so the child converges
+	// on the parent's category and masker exactly as it would for a key the
+	// classifier masked itself, and a key-family child markNeverMasked
+	// exempted has that exemption lifted. keyChildren is deliberately not
+	// rerun: it is the one pass that masks less, and after the prior it would
+	// hand a key exemption back to a column the file itself raised. The second
+	// sweep only runs when a raise applied, so a run with no prior (or a prior
+	// that raised nothing) is byte-identical to before, including where the
+	// first sweep's cap cut off a cycle of disagreeing masked keys.
+	if st.priorRaised {
+		st.foreignKeys()
 	}
 	st.finalise()
 	cls.Decisions = make(map[ref.ColumnRef]pipeline.Decision, len(st.dec))
@@ -2638,6 +2661,14 @@ func (st *state) propagateKeys() bool {
 			if cw.generated {
 				continue
 			}
+			// A child with its own honoured opt-out (--unmask, `unmask:`) is
+			// copied whatever its category says, and its reason and Source
+			// already name the opt-out. unmasked is set only by applyPrior, so
+			// this is only ever true in the sweep Classify reruns after it
+			// (T-0364): the first sweep is unchanged.
+			if cw.unmasked {
+				continue
+			}
 			if !st.pack.accepted(pw.d.Category, cw.family) {
 				// The two ends of the key are different enough that the parent's
 				// masker cannot run on the child. Say so on the child's line
@@ -2682,7 +2713,12 @@ func (st *state) propagateKeys() bool {
 				cw.d.Confidence = pw.d.Confidence
 			}
 			cw.d.Source = pipeline.ByFKPropagation
-			cw.frags = append(cw.frags, render("fk_propagation", quoteIdent(fk.Name), quoteColumn(parent)))
+			// The sweep Classify reruns after a yml raise (T-0364) can revisit
+			// an edge the first one already propagated across, when the raise
+			// lifted only the parent's confidence; the line names the edge once.
+			if frag := render("fk_propagation", quoteIdent(fk.Name), quoteColumn(parent)); !slices.Contains(cw.frags, frag) {
+				cw.frags = append(cw.frags, frag)
+			}
 			changed = true
 		}
 	}
@@ -2796,7 +2832,9 @@ func (st *state) applyPrior(prior *pipeline.Config) (*pipeline.Classification, e
 			if pat.Confidence <= w.d.Confidence {
 				continue
 			}
-			st.raiseFromConfig(w, pat.Category, pat.Confidence, "yml_raise")
+			if st.raiseFromConfig(w, pat.Category, pat.Confidence, "yml_raise") {
+				st.priorRaised = true
+			}
 		}
 	}
 	for _, c := range st.order {
@@ -2807,7 +2845,9 @@ func (st *state) applyPrior(prior *pipeline.Config) (*pipeline.Classification, e
 			continue
 		}
 		if cc.Confidence > w.d.Confidence && (!w.neverMask || w.frameworkMetadata) {
-			st.raiseFromConfig(w, cc.Category, cc.Confidence, "yml_column")
+			if st.raiseFromConfig(w, cc.Category, cc.Confidence, "yml_column") {
+				st.priorRaised = true
+			}
 		}
 		if cc.Unmask == nil {
 			continue
@@ -2878,7 +2918,10 @@ func liftFrameworkMetadataExemption(w *work) {
 // nothing — a caller in applyPrior may call this whether or not the column is
 // currently framework-metadata-exempt, and only a raise that actually applies
 // changes that.
-func (st *state) raiseFromConfig(w *work, cat pipeline.Category, conf pipeline.Confidence, frag string) {
+//
+// It reports whether the raise applied, which is what makes Classify run FK
+// propagation again after applyPrior (T-0364).
+func (st *state) raiseFromConfig(w *work, cat pipeline.Category, conf pipeline.Confidence, frag string) bool {
 	if cat != "" && cat != pipeline.CatNone {
 		if st.pack.accepted(cat, w.family) {
 			w.d.Category = cat
@@ -2891,12 +2934,13 @@ func (st *state) raiseFromConfig(w *work, cat pipeline.Category, conf pipeline.C
 	}
 	if w.d.Category == pipeline.CatNone || w.typeConflict || !st.pack.accepted(w.d.Category, w.family) {
 		w.frags = append(w.frags, render("yml_no_category"))
-		return
+		return false
 	}
 	liftFrameworkMetadataExemption(w)
 	w.d.Confidence = conf
 	w.d.Source = pipeline.ByYmlRaise
 	w.frags = append(w.frags, render(frag))
+	return true
 }
 
 // honourOptOut reports whether a per-column opt-out still stands.

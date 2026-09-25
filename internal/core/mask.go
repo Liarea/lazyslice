@@ -208,21 +208,27 @@ func (r *run) flagMasks() map[ref.ColumnRef]pipeline.Category {
 //     type the category does not accept (rules.yml's accepts: list, so
 //     free_text on a jsonb column). A mask that silently did not apply looks
 //     exactly like one that did.
+//
 //   - --mask named a column the classifier already masks under another
 //     category. The flag is for a column the classifier left unmasked; a raise
 //     would quietly swap the existing masker (credential for online_id, say),
 //     and a mask only ever tightens (ADR-004).
+//
 //   - --mask's column came out masked under a category other than the one it
 //     named (its type refused the named one and accepted the one it already
 //     had), so the `mask:` record would contradict the decision beside it.
+//
 //   - A column that references a masked one across a foreign key is still
-//     unmasked. internal/classify's FK propagation runs before a mask is
-//     applied, so a natural key the operator masks leaves its children as the
-//     classifier found them: the operator's own values in clear on the child
-//     side (THREAT_MODEL.md T1) and a broken join (T8). Each child is named,
-//     so the operator can mask it too. A child with its own reasoned --unmask
-//     or `unmask:` is left alone, the same opt-out that beats a file's mask,
-//     and a generated child is not copied at all.
+//     unmasked. Since T-0364 internal/classify runs FK propagation again after
+//     the raise a mask becomes, so a masked natural key normally takes every
+//     child with it under the same category and masker, and this never fires.
+//     It stays as the fail-closed backstop for the children propagation
+//     leaves behind: a child whose type does not accept the parent's category,
+//     an edge whose parent column is not a key or unique. Such a child would carry the operator's own values in
+//     clear (THREAT_MODEL.md T1) across a broken join (T8), so each is named
+//     for a --mask of its own. A child with its own reasoned --unmask or
+//     `unmask:` is left alone, the same opt-out that beats a file's mask, and
+//     a generated child is not copied at all.
 func (r *run) checkMasks(cls *pipeline.Classification) error {
 	base, err := r.maskBaseline()
 	if err != nil {
@@ -315,11 +321,12 @@ func (r *run) maskBaseline() (*pipeline.Classification, error) {
 }
 
 // unmaskedChildren is every column that references parent across a foreign
-// key (any edge, the set internal/classify's own propagation walks, because
-// this only ever asks for more masking) and that this run would still copy:
-// not masked, not opted out by its own --unmask or `unmask:`, and not a
+// key (any edge, a superset of what internal/classify's propagation walks,
+// because this only ever asks for more masking) and that this run would still
+// copy: not masked, not opted out by its own --unmask or `unmask:`, and not a
 // generated column, which the target recomputes rather than receives. Sorted,
-// each once.
+// each once. After T-0364's second propagation sweep it is empty for every
+// child propagation can mask; what is left is what it cannot.
 func (r *run) unmaskedChildren(cls *pipeline.Classification, parent ref.ColumnRef) []ref.ColumnRef {
 	seen := map[ref.ColumnRef]bool{}
 	for _, fk := range r.schema.FKs {
@@ -331,14 +338,11 @@ func (r *run) unmaskedChildren(cls *pipeline.Classification, parent ref.ColumnRe
 				continue
 			}
 			child := ref.ColumnRef{Table: fk.Child, Column: fk.ChildCols[i]}
+			if child == parent || generatedColumn(r.schema, child) {
+				continue
+			}
 			d, ok := cls.Decisions[child]
-			if !ok || d.Masked || child == parent {
-				continue
-			}
-			if d.Source == pipeline.ByFlagUnmask || d.Source == pipeline.ByYmlUnmask {
-				continue
-			}
-			if generatedColumn(r.schema, child) {
+			if !ok || d.Masked || d.Source == pipeline.ByFlagUnmask || d.Source == pipeline.ByYmlUnmask {
 				continue
 			}
 			seen[child] = true

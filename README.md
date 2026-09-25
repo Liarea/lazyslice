@@ -355,9 +355,10 @@ under the column's `mask:` block with `by: flag`, and it is the answer to a
 category the check found. A column that cannot be masked that way (a key, or
 a type the category does not fit) is exit 2, never quietly copied, and so is
 a `--mask` on a column already masked under another category. Masking a key
-masks nothing on its own: a column that references it by foreign key and would
-still be copied is exit 2 too, and the refusal names it for a `--mask` of its
-own.
+masks every column that references it by foreign key as well, under the same
+category, so the join still holds; a column with its own `--unmask` is the one
+that stays copied. A referencing column whose type cannot take that category
+is exit 2, named for a `--mask` of its own.
 
 Commit that file and the next run — including CI's — needs no flag and asks
 no question. A column the file has never seen is classified fresh, exactly as
