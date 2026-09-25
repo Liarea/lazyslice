@@ -74,28 +74,16 @@ issue.
    reference to a production record — an admin URL, a ticket, a log line, a
    payment or support system — can re-identify every row exactly. A keyed remap
    is deferred past v1.
-2. **A shape none of the validators recognise, in a column no name rule
-   names.** The classifier and the second net between them parse or guess at
-   about a dozen shapes (email, phone, national ID, IBAN, card number, IP or
-   MAC address, a credential's entropy, a name, an address, ordinary prose, a
-   special-category term). A card number is only recognised inside a known
-   issuer's range and, under an id/number/version/reference column name, at
-   that issuer's own length; one from a range the table lacks, or of an
-   unlisted length under such a name, is copied. Under a version, build or
-   release column name, IP or MAC addresses that are only a minority of
-   the column's values are copied too; under a key, code, license, serial
-   or token column name, a guessed-region phone number is copied too,
-   when the table's best personal neighbour is only likely, not certain,
-   personal. A value outside that list, in a column no name
-   rule matches and whose table holds no other column already decided
-   personal, is copied. This is the general case; the next two are the two
-   specific instances of it that an adversarial red team found worth naming
-   on their own. The entropy check itself now passes four more shapes
-   through, in a column no credential name rule matches: a secret that is a
-   hex run of exactly 32, 40 or 64 characters, a secret column of one to
-   four non-NULL rows, a secret in a column named `type`, `klass` or
-   `component_name`, and a file named after a person in a column where
-   fewer than a fifth of the file names carry a word the dictionary holds.
+2. **A bare national identifier with nothing to corroborate it** — for
+   example a nine-digit number with no dashes — in a column whose name
+   matches no rule, when no other column of its table has already been
+   decided personal (masked or not). One exception inside that: a
+   contiguously issued block of national identifiers that is itself a table's
+   own primary key reads as a surrogate key and stays exempt even beside a
+   column that is masked, on the same reasoning as item 1. A key of scattered
+   identifiers is scored like any other column, and one whose name matches a
+   rule is refused at plan — see THREAT_MODEL.md T1 for the boundary and the
+   reasoning against it.
 3. **A name — or any other value — in a script the built-in dictionaries do
    not carry**, in a column also named in that script. The name, address,
    phone and email name-patterns and the name dictionary are Latin-script
@@ -115,23 +103,44 @@ issue.
    such a column, is copied. A name whose own qualifier says it is a
    person's (`legal_name`, `billing_name`, `name_on_card`) is masked on
    the name alone, as before.
-4. **A bare national identifier with nothing to corroborate it** — for
-   example a nine-digit number with no dashes — in a column whose name
-   matches no rule, when no other column of its table has already been
-   decided personal (masked or not). One exception inside that: a
-   contiguously issued block of national identifiers that is itself a table's
-   own primary key reads as a surrogate key and stays exempt even beside a
-   column that is masked, on the same reasoning as item 1. A key of scattered
-   identifiers is scored like any other column, and one whose name matches a
-   rule is refused at plan — see THREAT_MODEL.md T1 for the boundary and the
-   reasoning against it.
+4. **A shape none of the validators recognise, in a column no name rule
+   names.** The classifier and the second net between them parse or guess at
+   about a dozen shapes (email, phone, national ID, IBAN, card number, IP or
+   MAC address, a credential's entropy, a name, an address, ordinary prose, a
+   special-category term). In a column, a card number is only recognised
+   inside a known issuer's range and, under a column name ending in id,
+   number, num, no, nr, version, ref or reference, at that issuer's own
+   length. One from a range the table lacks, or of an unlisted length under
+   such a name, is copied. Under a version, build or release column name, IP
+   or MAC addresses that are only a minority of the column's values are
+   copied too; under a key, code, license, serial or token column name, a
+   guessed-region phone number is copied too, when the table's best personal
+   neighbour is only likely, not certain, personal. A value outside that
+   list, in a column no name rule matches and whose table holds no other
+   column already decided personal, is copied. So is such a column beside a
+   personal neighbour the classifier is certain of, when its samples read as
+   an enumeration or as one identifier shape: a username repeated across a
+   handful of staff rows, a hostname a device's owner chose, or a hex token
+   of exactly a digest's length (8 to 12 characters, or 32, 40, 64 or 128),
+   which the neighbouring-column rule spares. This is the general case; items
+   2 and 3 above are the two specific instances of it that an adversarial
+   red team found worth naming on their own. The entropy check itself now
+   passes four more shapes through, in a column no credential name rule
+   matches: a secret that is a hex run of exactly 32, 40 or 64 characters in
+   one case (bare, under an `md5`/`sha1`/`sha256` prefix, or as 16, 20 or 32
+   colon-separated byte pairs), a secret column of one to four non-NULL rows,
+   a secret in a column named `type`, `klass` or `component_name`, and a file
+   named after a person in a column where fewer than a fifth of the file
+   names carry a word the dictionary holds.
 5. **The marker-bound reload window.** A target lazyslice writes to for the
    first time gets a whole-target check, under the run's lease, for a table
    that was not part of the plan the gate approved. A *reload* of a target
-   lazyslice has already marked as its own does not repeat that check: a
-   table an application creates in the target strictly after one run
-   finishes and strictly before the next run's first drop is left alone,
-   untouched and unmentioned, rather than refused. See THREAT_MODEL.md T2.
+   lazyslice has already marked as its own does not repeat that check. A
+   table created before the next run's gate changes the target's catalog
+   fingerprint, so the marker no longer binds and the emptiness rule
+   applies, but a table an application creates strictly after the next
+   run's gate and strictly before its first drop is left alone, untouched
+   and unmentioned, rather than refused. See THREAT_MODEL.md T2.
 6. A leaked value that was truncated, reformatted, or embedded in a longer
    string: the residual scan tests canonical equality only.
 7. Values inside `bytea` that are not printable UTF-8 text — a genuine binary
@@ -146,9 +155,11 @@ issue.
    named by any of the three and still survives. A leaf *value* is copied
    when nothing marks it personal: every key above it appeared in the
    sampled documents, no name rule names any of them, and no value validator
-   recognises the value (T-0272). That keeps configuration documents
-   working; the cost is a personal value no rule and no validator knows,
-   inside a document, which is copied too. A key whose sampled values are
+   recognises the value (T-0272). The name dictionary and the prose check do
+   not read a leaf, so a person's name under a key like `attendee` is copied
+   too. That keeps configuration documents working; the cost is a personal
+   value no rule and no validator knows, inside a document, which is copied
+   too. A key whose sampled values are
    national-format phone numbers counts as a phone key, and every value under
    it is masked, when the table holds another personal column or the
    document holds a personal key: the same evidence a plain column of such

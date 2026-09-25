@@ -18,7 +18,8 @@ by hand is its own project.
 lazyslice is a single static Go binary: point it at a source and target
 Postgres connection, pick a root table (or let it ask once), and it
 subsets by following foreign keys, masks anything that looks like personal
-data with a deterministic keyed hash, loads the result, and verifies it —
+data deterministically under a local key, with realistic fakes rather than
+hashes, loads the result, and verifies it —
 foreign keys resolve, row counts and sequences match the plan, and a
 residual scan confirms no masked column still holds a source value. Same
 inputs, same masked outputs, every run, so the emitted `lazyslice.yml` is

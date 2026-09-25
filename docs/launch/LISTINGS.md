@@ -8,10 +8,10 @@ Ten repositories, each checked today (2026-09-22) by fetching its live
 named below, cross-checked against `gh api repos/<owner>/<repo>` for
 archived status, star count and last-push date, all run today — to confirm
 the section still exists, is still active, and to copy its exact current
-list-item format rather than guess at one. Repo description: "Subsets a
-production PostgreSQL database by a root table across foreign keys, masks
-personal data with a deterministic keyed hash, and loads a small local
-copy — one command, no config." License: `Apache-2.0`. Language: `Go`.
+list-item format rather than guess at one. Repo description: "Snapshot a
+production Postgres database into a safe local copy: subset by a root
+table, follow foreign keys, mask personal data, load." License:
+`Apache-2.0`. Language: `Go`.
 Repo URL throughout: `https://github.com/Liarea/lazyslice`.
 
 ---
@@ -144,7 +144,7 @@ Repo URL throughout: `https://github.com/Liarea/lazyslice`.
   self-promotion, and the maintainer should expect it might not be merged:
 
   ```
-  lazyslice (https://github.com/Liarea/lazyslice) ships today, refuses to load an unclassified column instead of passing it through, and has no cloud component to be acquired or archived.
+  lazyslice (https://github.com/Liarea/lazyslice) ships today, masks a column it is unsure about instead of passing it through, refuses a run whose copied columns still read as personal data, and has no cloud component to be acquired or archived.
   ```
 
 ## 9. jaywcjlove/awesome-mac

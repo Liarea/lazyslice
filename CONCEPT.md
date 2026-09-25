@@ -14,7 +14,7 @@ A bug only reproduces with real data shapes. A new teammate needs a working loca
 
 **Zero config.** First run asks only what it cannot decide, each question with a default shown (where to load when no local database is found, which table is the root when the schema does not say), and then works; headless runs ask none (ADR-017). Configuration is emitted after a run as a record of what happened, never demanded before it. A committed `lazyslice.yml` never excuses an unseen column: it is masked or the run stops. We refuse to ship any feature whose first-run path is "write a YAML file".
 
-**Safe by default.** Anything that might be personal data is masked unless the user opts a column out, and the tool explains why it masked each one. Free text and JSON columns are masked whole. When the classifier is unsure it masks more, never less. The source is opened read-only and the role's privileges are checked and printed; the target must be empty or one we wrote before. The output is pseudonymised, not anonymised, and we say so. We refuse to ship a flag, mode, or default that copies an unclassified column as-is.
+**Safe by default.** Anything that might be personal data is masked unless the user opts a column out, and the tool explains why it masked each one. Free text is masked whole; JSON columns are masked leaf by leaf, each leaf a key rule or a value validator recognises replaced and a leaf neither recognises copied, so a configuration document still works. When the classifier is unsure it masks more, never less. The source is opened read-only and the role's privileges are checked and printed; the target must be empty or one we wrote before. The output is pseudonymised, not anonymised, and we say so. We refuse to ship a flag, mode, or default that copies an unclassified column as-is.
 
 **Terminal first.** One static binary, one-line install, no native dependencies, no call to anything we operate. The same command a human types works headless in CI. The terminal UI is a thin layer over the CLI. We refuse to ship a capability that exists only in the TUI.
 
@@ -50,7 +50,7 @@ $ lazyslice
 - NoSQL and document stores.
 - Schema migration or diffing.
 - Databases other than PostgreSQL. A second engine waits until the invariant suite passes on every Postgres fixture.
-- Detecting personal data inside binary blobs. Text and JSON are not exempt; they are masked whole.
+- Detecting personal data inside binary blobs. Text is not exempt; it is masked whole. Neither is JSON, masked leaf by leaf.
 - Any unsafe or pass-through mode.
 - Anonymisation, k-anonymity, or any compliance guarantee.
 - A cloud or LLM classifier over production values.

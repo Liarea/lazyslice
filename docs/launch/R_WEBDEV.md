@@ -20,11 +20,13 @@ lazyslice is a one-command CLI: it points at your production Postgres
 database, picks a root table (your `customers` or `users` table, say),
 follows foreign keys out from there so the copy stays referentially
 complete — a `customer` with all their `orders` and `line_items`, not
-orphaned rows — masks anything that looks like personal data with a
-deterministic hash, and loads the result into an empty local or CI
-database. Zero config: it asks at most one question on first run and
-writes a `lazyslice.yml` afterwards as a record, not something you write
-by hand up front.
+orphaned rows — masks anything that looks like personal data
+deterministically, with realistic fakes (real, common names; addresses at
+example.net), and loads the result into an empty local or CI database. Zero
+config: at a terminal a first run asks only what it can't settle itself
+(which table to start from, and, if it finds no database to load into,
+whether to start one), and then it writes a `lazyslice.yml` afterwards as a
+record, not something you write by hand up front.
 
 To be upfront about it: **v0.1.0 only supports PostgreSQL** (a second
 engine is a later phase), and it **pseudonymises, not anonymises** — a few

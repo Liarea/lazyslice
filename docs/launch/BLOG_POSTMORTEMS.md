@@ -48,8 +48,9 @@ walked foreign keys in one direction, called an undirected version
 shipped
 ([issue #3227](https://github.com/nucleuscloud/neosync/issues/3227)). The
 issue is still open, on an archived repository, with nobody able to
-merge a fix. lazyslice's answer to that is to treat the graph as
-undirected from the start, not to bolt it on later.
+merge a fix. lazyslice's answer to that is to walk foreign keys in both
+directions from the start (parents to completeness, children capped), not
+to bolt it on later.
 
 **The cloud was the product, and the target users said so out loud.** On
 Neosync's own launch thread, a prospective user rejected the business
@@ -76,7 +77,9 @@ as is without transformation"*
 on the same documented screen where the PII detector's own transcript
 reads `Smart shape prediciton failed`. A failing detector plus a
 pass-through default is production data on a laptop, silently. lazyslice
-has no `unsafe` mode: an unclassified column stops the run.
+has no `unsafe` mode: a column it is unsure about is masked, and a run whose
+copied columns still read as personal data stops at exit 9 instead of
+finishing.
 
 **Complexity leaked into the config instead of staying in the code.**
 Snaplet's subset config reached nine top-level keys, with the docs
@@ -84,7 +87,8 @@ instructing users to set one (`maxCyclesLoop`) to zero and *"gradually
 increment it"* by trial and error against their own database
 ([subset docs](https://github.com/snaplet/docs-old/blob/main/docs/04-references/data-operations/04-reduce.md)).
 That's the hard problem, handed back as homework. lazyslice's plan step
-decides this itself and prints what it decided in one line.
+decides this itself, prints one line per table saying what it took and why,
+and records every cycle it found in the `lazyslice.yml` it emits.
 
 **And packaging rot killed the thing that outlived the shutdown.** A
 native dependency pinned below the Node 22 floor broke installs in
