@@ -1757,3 +1757,94 @@ met one `second_net` column per run, three runs in a row. `internal/core`'s
 validator name is the category name, `validators.go`) and `--skip-table`, so
 the green path short of `--unmask` that `Options.PhoneRegion`'s comment used to
 deny now exists. `TestEverySecondNetColumnIsReportedInOneRun` holds the order.
+**That hint is not always the flag it prints any more — see T-0369, below.**
+
+## The second net's hint names a flag that works (T-0369)
+
+T-0319's own review found the hint above a dead end in three of the shapes
+this net produces. It always spelled `--mask TABLE.COL={reason}`, `{reason}`
+being the validator's own category name, and:
+
+- the net reads a json, jsonb or hstore column's string leaves under **every**
+  category `validators.go` carries, whatever the column's own type is — so an
+  unmasked jsonb column with an email-shaped leaf printed `--mask
+  t.c=email`, and `internal/classify/rules.yml`'s `email` row accepts
+  `text`/`varchar`/`bpchar`/`citext` and nothing else: the flag it named was
+  refused at `classify.refused.mask`, exit 2, naming a category the column's
+  own type cannot hold;
+- the same leaf walk runs whether or not the document column was already
+  masked (`netMode`'s own `case document(family): ... docMasked: has &&
+  d.Masked`, above `case has && d.Masked: return netMode{}, false`, which
+  is the branch that skips every *other* masked column outright) — so an
+  already-masked jsonb column whose leaves still carried an unexempted key
+  (a national-id-shaped key, say: `json.go`'s `maskKey` only rewrites a key
+  matching email, phone or the Luhn half of `financial_account`, T-0172,
+  above) printed the identical `--mask t.c=CATEGORY` hint, which changes
+  nothing about a column already masked and refuses the same way next run;
+- a category can match a family `rules.yml` never wrote it a masker for at
+  all — `netText` (`columns.go`) offers every text validator to a `uuid`,
+  `inet`, `cidr` or `macaddr` column as well as to the four character
+  families, and `credential`'s own `accepts:` row is
+  `text`/`varchar`/`bpchar`/`citext`/`bytea`, no `uuid` — so a `LooksSecret`
+  hit on a uuid-shaped column named the same dead-end flag.
+
+`secondnet.go`'s `secondNetCode(val, mode)` picks among four codes instead of
+always naming `CodeRefusedSecondNet`, each with its own row in
+`internal/event/catalogue.yml`: the ordinary code, unchanged, for the case
+its hint already worked in (a validator's category that
+`categoryAcceptedFamilies` — `validators.go`'s own hand copy of
+`rules.yml`'s `accepts:` lists, kept in step by hand the way this file's
+other classify-derived tables already are — accepts on the column's family);
+`CodeRefusedSecondNetDocument` for an unmasked json/jsonb/hstore column,
+whose hint names `semi_structured` instead of whatever category matched a
+leaf, because that is the one category `rules.yml` accepts on every member of
+the json family; `CodeRefusedSecondNetDocumentMasked` for the same family
+already masked, whose hint drops the `--mask` suggestion entirely and offers
+`--skip-table` alone; and `CodeRefusedSecondNetTypeConflict` for a scalar
+column whose matched category the family does not accept, whose hint names
+`--mask TABLE.COL=special_category` rather than the bare form this task
+first shipped. The bare form is not a working answer: it always records
+`DefaultMaskCategory` (`internal/core/mask.go`), which is `free_text`, and
+`free_text`'s own `accepts:` row is `text`/`varchar`/`bpchar`/`citext` —
+none of the five families (`bytea`, `uuid`, `inet`, `cidr`, `macaddr`) this
+code can actually fire on, since every character-family category already
+accepts all four character families and every digits validator's category
+already accepts the numeric families it runs over. `special_category` is the
+one category guaranteed to work regardless of which of those five families
+the column turns out to be: `rules.yml`'s own row for it is `accepts: ["*"]`,
+and `categoryAcceptsFamily` answers it `true` unconditionally before it ever
+reads `categoryAcceptedFamilies` (below). `Refusal.Reason` is unchanged in
+every case — still the matched validator's own name, `val.name`, describing
+what validated, never the category the hint suggests, which the message
+template now spells as a literal `special_category` rather than a second
+argument — which is what keeps this a routing change and not a rewrite of
+what the report says validated: `TestSecondNetDocumentColumnCarriesTheDocumentCode`
+asserts exactly that (`Reason` still `"email"`, `Code` now the document one).
+
+`netMode.family` is the one field this task added to carry the answer:
+`shapeOf`'s own family string, set in every branch of `netMode` that returns
+`true`, read once by `secondNetCode` rather than asked a second time.
+`categoryAcceptsFamily` answers `true` unconditionally for
+`pipeline.CatSpecial` before it ever reads `categoryAcceptedFamilies`, the
+same way `rules.yml`'s own `special_category` row is `accepts: ["*"]`.
+
+`second_net_hint_test.go` pins `secondNetCode` and `categoryAcceptsFamily`
+directly (every routing case, including one no validator in this file's own
+table reaches today, so a category added to `validators` without a matching
+`categoryAcceptedFamilies` entry cannot fall through to the ordinary code by
+accident) and pins the wiring end to end for both document cases
+(`TestSecondNetDocumentColumnCarriesTheDocumentCode`,
+`TestSecondNetMaskedDocumentColumnCarriesTheMaskedDocumentCode`, the second
+using a national-id-shaped JSON *key* precisely because `maskKey` never
+rewrites that category and so is the one shape that still fails a masked
+document column). The scalar type-conflict case is pinned only at the
+`secondNetCode` level: no validator this net registers today mismatches its
+own family in a way a realistic value can trigger (every `digits`-family
+entry's category already accepts the numeric families it runs over), so
+driving it through a full scan would mean inventing a validator this file
+does not otherwise have reason to carry — the `uuid`/`credential` case in
+the routing test is the shape named above, not a claim that shape is
+reachable through `validators` as it stands. Nothing here widens or narrows
+what is masked, and the four codes' `exit: 9` and `stage: verify` are
+identical, so `checkSecondNet`'s pass/fail bookkeeping (`noCheckBothWays`,
+above) does not need to know which of the four fired.
