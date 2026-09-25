@@ -694,6 +694,40 @@
   message: "{table}.{column} is not masked and {count} of its values validate as {reason}: mask it with --mask {table}.{column}={reason}, or leave its table out with --skip-table {table}"
   args: [table, column, count, reason]
 
+# T-0369: the second net scans the string leaves of every json/jsonb/hstore
+# column regardless of category (internal/verify/secondnet.go's own package
+# comment), and it also scans every text/digits-family column no category but
+# {reason} itself claimed -- so the plain "--mask {table}.{column}={reason}"
+# hint above is sometimes a flag `classify.refused.mask` (exit 2) refuses: no
+# category but semi_structured accepts the json family, --mask changes
+# nothing on a column the net reads whether or not it was masked, and a
+# category can match a family rules.yml never wrote it a masker for (a
+# network_id hit on a uuid column, say). Each of the three cases below is its
+# own code, named for the hint it prints instead, and internal/verify chooses
+# among them and the ordinary code above rather than this file trying to
+# express the choice in one template.
+
+- code: verify.refused.second_net_document
+  kind: error
+  stage: verify
+  exit: 9
+  message: "{table}.{column} is not masked and {count} of its values validate as {reason}: no category but semi_structured accepts a json, jsonb or hstore column, so mask it with --mask {table}.{column}=semi_structured, or leave its table out with --skip-table {table}"
+  args: [table, column, count, reason]
+
+- code: verify.refused.second_net_document_masked
+  kind: error
+  stage: verify
+  exit: 9
+  message: "{table}.{column} is already masked and {count} of its values still validate as {reason}: --mask cannot change its category, so leave its table out with --skip-table {table}"
+  args: [table, column, count, reason]
+
+- code: verify.refused.second_net_type_conflict
+  kind: error
+  stage: verify
+  exit: 9
+  message: "{table}.{column} is not masked and {count} of its values validate as {reason}, a category this column's type does not accept: mask it with --mask {table}.{column}=special_category instead, which internal/classify/rules.yml accepts on every type, or leave its table out with --skip-table {table}"
+  args: [table, column, count, reason]
+
 # The catalog pass (internal/verify/catalog.go, T-0134). The other checks read
 # the target's rows; this reads its pg_attrdef and pg_constraint, because a
 # literal in a recreated default is a value no row scan can see and the

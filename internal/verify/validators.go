@@ -683,3 +683,52 @@ var validators = []validator{
 	// address and credential already are — see applies, secondnet.go).
 	{category: pipeline.CatSpecial, name: "special_category", text: true, ok: textsig.SpecialCategoryVocabulary},
 }
+
+// categoryAcceptedFamilies mirrors internal/classify/rules.yml's `accepts:`
+// list per category (T-0369): the one thing secondNetCode (secondnet.go)
+// needs to know is whether the category a validator names is one --mask
+// TABLE.COL=CATEGORY could actually apply, and this package may not import
+// internal/classify to ask rules.yml itself (internal/CLAUDE.md's import
+// graph). It is a hand copy, kept in step the way this file's other
+// classify-derived tables already are (cardIdentifierWords,
+// secretExemptColumns, networkIDVetoWords, above): a category rules.yml
+// gives a wider or narrower accepts: list drifts silently unless whoever
+// changes rules.yml also changes this table.
+//
+// Only the categories this file's own validators can name are listed.
+// special_category is not one of them — rules.yml spells its own accepts:
+// ["*"], and categoryAcceptsFamily answers that case before it ever reads
+// this map.
+var categoryAcceptedFamilies = map[pipeline.Category][]string{
+	pipeline.CatEmail:      {famText, famVarchar, famBpchar, famCitext},
+	pipeline.CatPersonName: {famText, famVarchar, famBpchar, famCitext},
+	pipeline.CatPhone:      {famText, famVarchar, famBpchar, famCitext, famBigint, famInteger, famNumeric},
+	pipeline.CatAddress:    {famText, famVarchar, famBpchar, famCitext},
+	pipeline.CatNationalID: {famText, famVarchar, famBpchar, famCitext, famBigint, famInteger, famNumeric},
+	pipeline.CatFinancial:  {famText, famVarchar, famBpchar, famCitext, famBigint, famInteger, famNumeric},
+	pipeline.CatNetworkID:  {famInet, famCIDR, famMacaddr, famText, famVarchar, famBpchar, famCitext},
+	pipeline.CatOnlineID:   {famText, famVarchar, famBpchar, famCitext, famUUID},
+	pipeline.CatCredential: {famText, famVarchar, famBpchar, famCitext, famBytea},
+	pipeline.CatFreeText:   {famText, famVarchar, famBpchar, famCitext},
+}
+
+// categoryAcceptsFamily answers whether internal/classify/rules.yml's
+// accepts: list for cat names family — the question --mask
+// TABLE.COL=CATEGORY is refused or honoured on (T-0369). special_category's
+// own row is ["*"], so it is answered true for every family without reading
+// categoryAcceptedFamilies at all; every other category not in that map
+// (there are none among this file's own validators, but the zero value of a
+// missing map entry is an empty slice regardless) answers false, which is
+// the safe direction — a category this table does not know about is not
+// named as a hint that would work.
+func categoryAcceptsFamily(cat pipeline.Category, family string) bool {
+	if cat == pipeline.CatSpecial {
+		return true
+	}
+	for _, f := range categoryAcceptedFamilies[cat] {
+		if f == family {
+			return true
+		}
+	}
+	return false
+}

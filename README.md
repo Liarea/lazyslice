@@ -351,10 +351,16 @@ The other direction needs no reason, because it only ever masks more:
 `--mask public.film.description` masks a column the classifier copied, as
 `free_text`, or as the category you name with `=CATEGORY`. It is recorded
 under the column's `mask:` block with `by: flag`, and it is the answer to a
-`verify.refused.second_net` refusal, whose line names the flag and the
-category the check found. A column that cannot be masked that way (a key, or
-a type the category does not fit) is exit 2, never quietly copied, and so is
-a `--mask` on a column already masked under another category. Masking a key
+`verify.refused.second_net` refusal, whose line names a `--mask` flag that
+works — the category the check found when that column's type accepts it,
+`semi_structured` for a json/jsonb/hstore column whatever category matched
+one of its values (no other category accepts the json family), the bare
+`--mask TABLE.COL` when neither applies, and `--skip-table` alone for a
+column the check found already masked, since `--mask` cannot change a
+column's category once one is recorded. A column that cannot be masked that
+way (a key, or a type the category does not fit) is exit 2, never quietly
+copied, and so is a `--mask` on a column already masked under another
+category. Masking a key
 masks every column that references it by foreign key as well, under the same
 category, so the join still holds; a column with its own `--unmask` is the one
 that stays copied. A referencing column whose type cannot take that category

@@ -40,8 +40,49 @@ const (
 	CodeRefusedUnconfirmable event.Code = "verify.refused.residual_unconfirmable"
 
 	// CodeRefusedSecondNet is exit 9: a column the target holds unmasked still
-	// validates as a category (ARCHITECTURE.md section 6 item 4).
+	// validates as a category (ARCHITECTURE.md section 6 item 4), and --mask
+	// TABLE.COL=CATEGORY naming that category is a flag that works
+	// (T-0369's own review: internal/classify/rules.yml accepts the
+	// category on the column's type family).
 	CodeRefusedSecondNet event.Code = "verify.refused.second_net"
+
+	// CodeRefusedSecondNetDocument is exit 9, the same failure as
+	// CodeRefusedSecondNet over a json, jsonb or hstore column (T-0369): the
+	// second net reads such a column's string leaves whatever category
+	// matched them, but no category but semi_structured accepts the json
+	// family (internal/classify/rules.yml), so naming the matched category
+	// in --mask would itself be refused at classify.refused.mask. The hint
+	// names semi_structured instead.
+	CodeRefusedSecondNetDocument event.Code = "verify.refused.second_net_document"
+
+	// CodeRefusedSecondNetDocumentMasked is exit 9: the json, jsonb or
+	// hstore column above is already masked. The second net reads such a
+	// column's leaves whether or not it was masked
+	// (internal/verify/CLAUDE.md), so --mask changes nothing about it and
+	// the net would fail again on the next run; the hint offers
+	// --skip-table alone.
+	CodeRefusedSecondNetDocumentMasked event.Code = "verify.refused.second_net_document_masked"
+
+	// CodeRefusedSecondNetTypeConflict is exit 9: the category that matched
+	// is not one internal/classify/rules.yml accepts on this column's own
+	// type family (T-0369) -- a network_id hit on a uuid column is the
+	// shape, since netText's uuid family reaches every text validator and
+	// rules.yml's network_id row does not list uuid. Naming that category in
+	// --mask would be refused at classify.refused.mask, so the hint cannot
+	// repeat it -- and the bare `--mask TABLE.COL` this code used to print
+	// is not a working answer either: the bare form always records
+	// DefaultMaskCategory (internal/core/mask.go), which is free_text, and
+	// free_text's own accepts: row is text/varchar/bpchar/citext -- none of
+	// bytea, uuid, inet, cidr or macaddr, the only families this code can
+	// actually fire on (every character-family category already accepts all
+	// four character families, and every digits validator's category
+	// already accepts the numeric families it runs over). The hint instead
+	// names special_category, whose rules.yml row is accepts: ["*"]
+	// (categoryAcceptsFamily answers it true unconditionally, above every
+	// other category, for exactly this reason): the one category guaranteed
+	// to be accepted no matter which of those five families the column
+	// turns out to be.
+	CodeRefusedSecondNetTypeConflict event.Code = "verify.refused.second_net_type_conflict"
 
 	// CodeRefusedCatalogLiteral is exit 9: the target's own catalog carries a
 	// string literal that parses as an email address, a telephone number or a

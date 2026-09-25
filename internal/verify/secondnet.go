@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"strings"
 
+	"github.com/Liarea/lazyslice/internal/event"
 	"github.com/Liarea/lazyslice/internal/pipeline"
 	"github.com/Liarea/lazyslice/internal/ref"
 	"github.com/Liarea/lazyslice/internal/textsig"
@@ -171,6 +172,11 @@ type netMode struct {
 	// a surname by construction — and the dictionary rule is skipped for it.
 	// Every validator that carries a parse still runs over it.
 	derivedFromMasked bool
+	// family is the column's own type family (columns.go's fam* constants),
+	// carried alongside the flags above so netColumn can choose the right
+	// verify.refused.second_net* code and hint without asking shapeOf a
+	// second time (T-0369).
+	family string
 }
 
 func (s *state) netMode(col ref.ColumnRef, c pipeline.Column) (netMode, bool) {
@@ -197,18 +203,19 @@ func (s *state) netMode(col ref.ColumnRef, c pipeline.Column) (netMode, bool) {
 		// A masked document's masker was chosen per key by name, so the net
 		// checks the leaves; an unmasked one had no masker at all, which is a
 		// stronger reason to read its leaves and not a reason to skip it.
-		return netMode{leaves: true, text: true, docMasked: has && d.Masked}, true
+		return netMode{leaves: true, text: true, docMasked: has && d.Masked, family: family}, true
 	case has && d.Masked:
 		return netMode{}, false
 	case netText(family):
 		return netMode{
 			array: array, text: true, maybeDocument: character(family),
 			derivedFromMasked: s.generatedFromMasked(col.Table, c.Generated),
+			family:            family,
 		}, true
 	case family == famBytea:
-		return netMode{array: array, text: true, bytea: true, maybeDocument: true}, true
+		return netMode{array: array, text: true, bytea: true, maybeDocument: true, family: family}, true
 	case numeric(family):
-		return netMode{array: array, digits: true}, true
+		return netMode{array: array, digits: true, family: family}, true
 	}
 	return netMode{}, false
 }
@@ -600,7 +607,7 @@ func (s *state) netColumn(ctx context.Context, col ref.ColumnRef, mode netMode) 
 			continue
 		}
 		s.fail(&Refusal{
-			Code: CodeRefusedSecondNet, Exit: exitResidual, Check: checkSecondNet,
+			Code: secondNetCode(val, mode), Exit: exitResidual, Check: checkSecondNet,
 			Table: col.Table, Column: col.Column, Count: ownHits + leaf.hits[i],
 			Reason: val.name,
 		})
@@ -610,6 +617,39 @@ func (s *state) netColumn(ctx context.Context, col ref.ColumnRef, mode netMode) 
 		return nil
 	}
 	return nil
+}
+
+// secondNetCode chooses which verify.refused.second_net* code names this
+// refusal, which is what internal/event/catalogue.yml's hint for that code
+// prints (T-0369): the ordinary code's hint, "--mask TABLE.COL={reason}", is
+// a dead end in three cases this net can produce, each named after the
+// column's own family and masked state rather than after the validator, so a
+// wrong hint is never printed even when it names the same column two
+// different validators fail it for.
+func secondNetCode(val validator, mode netMode) event.Code {
+	switch {
+	case document(mode.family):
+		// The second net reads a json, jsonb or hstore column's leaves
+		// whatever category matched them, masked or not
+		// (internal/verify/CLAUDE.md's own "Rules" section) -- but no
+		// category but semi_structured accepts the json family
+		// (internal/classify/rules.yml), and an already-masked column's
+		// category cannot be changed by --mask at all (internal/core's
+		// checkMasks). mode.docMasked is netMode's own "has && d.Masked"
+		// for exactly this family, read once there rather than re-asked.
+		if mode.docMasked {
+			return CodeRefusedSecondNetDocumentMasked
+		}
+		return CodeRefusedSecondNetDocument
+	case !categoryAcceptsFamily(val.category, mode.family):
+		// A scalar column is never scanned here once it is masked (netMode's
+		// own `case has && d.Masked: return netMode{}, false`, above), so
+		// the only two states a non-document refusal reaches are "the
+		// category accepts this family" (the ordinary code) and this one.
+		return CodeRefusedSecondNetTypeConflict
+	default:
+		return CodeRefusedSecondNet
+	}
 }
 
 // scoreHits is section 4's scoring for one validator over one denominator: true
