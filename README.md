@@ -442,7 +442,13 @@ residuals are accepted rather than hidden:
    no personal neighbour in its table, is copied — and so is such a column
    beside a personal neighbour when its samples read as an enumeration or an
    identifier shape (a username repeated across a handful of staff rows, a
-   hostname a device's owner chose), which the neighbour rule spares.
+   hostname a device's owner chose), which the neighbour rule spares. The
+   entropy check itself now passes four more shapes through, in a column no
+   credential name rule matches: a secret that is a hex run of exactly 32,
+   40 or 64 characters, a secret column of one to four non-NULL rows, a
+   secret in a column named `type`, `klass` or `component_name`, and a file
+   named after a person in a column where fewer than a fifth of the file
+   names carry a word the dictionary holds.
 5. **The marker-bound reload window.** The first load into a fresh target
    checks the whole target, under the run's lease, for a table that appeared
    after the plan was approved. A *reload* — the ordinary daily case, since
