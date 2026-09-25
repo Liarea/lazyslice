@@ -81,7 +81,12 @@ issue.
    special-category term). A card number is only recognised inside a known
    issuer's range and, under an id/number/version/reference column name, at
    that issuer's own length; one from a range the table lacks, or of an
-   unlisted length under such a name, is copied. A value outside that list, in a column no name
+   unlisted length under such a name, is copied. Under a version, build or
+   release column name, IP or MAC addresses that are only a minority of
+   the column's values are copied too; under a key, code, license, serial
+   or token column name, a guessed-region phone number is copied too,
+   when the table's best personal neighbour is only likely, not certain,
+   personal. A value outside that list, in a column no name
    rule matches and whose table holds no other column already decided
    personal, is copied. This is the general case; the next two are the two
    specific instances of it that an adversarial red team found worth naming

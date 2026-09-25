@@ -444,7 +444,14 @@ residuals are accepted rather than hidden:
    special-category term. A card number is only recognised inside a known
    issuer's range and, under an id/number/version/reference column name,
    at that issuer's own length, so one outside the table or of an unlisted
-   length under such a name is copied too. Anything else, in a column with no name signal and
+   length under such a name is copied too. Under a version, build or
+   release column name, IP or MAC addresses among the column's values are
+   copied too when they are only a minority — that name no longer offers
+   the address validators as a minority signal, though a genuine majority
+   of addresses there still masks the column as before. Under a key,
+   code, license, serial or token column name, a guessed-region phone
+   number is copied too, when the table's best personal neighbour is only
+   likely, not certain, personal. Anything else, in a column with no name signal and
    no personal neighbour in its table, is copied — and so is such a column
    beside a personal neighbour when its samples read as an enumeration or an
    identifier shape (a username repeated across a handful of staff rows, a
