@@ -3,6 +3,7 @@
 package classify
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -546,17 +547,29 @@ func jsonKeyCategories(p *compiledPack, samples []any, region string) map[string
 }
 
 // decodeSampleDocument is jsonLeaves' decoding, for one raw sample.
+//
+// A []byte or string sample is decoded with encoding/json's Decoder and
+// UseNumber, exactly as internal/transform's and internal/verify's own
+// decodeDocument do, so an integer leaf past 2^53 keeps every digit instead
+// of coming back a rounded float64 (T-0402, the 2026-09-25 JSON red team's
+// A11): a json or jsonb column now reaches this package as raw source text
+// (internal/pg's jsonTextRows), which is the same text a domain over jsonb
+// has always arrived as, and this is the one place both are decoded.
 func decodeSampleDocument(v any) (any, bool) {
 	var doc any
 	switch t := v.(type) {
 	case nil:
 		return nil, false
 	case []byte:
-		if json.Unmarshal(t, &doc) != nil {
+		dec := json.NewDecoder(bytes.NewReader(t))
+		dec.UseNumber()
+		if dec.Decode(&doc) != nil {
 			return nil, false
 		}
 	case string:
-		if json.Unmarshal([]byte(t), &doc) != nil {
+		dec := json.NewDecoder(strings.NewReader(t))
+		dec.UseNumber()
+		if dec.Decode(&doc) != nil {
 			return nil, false
 		}
 	default:

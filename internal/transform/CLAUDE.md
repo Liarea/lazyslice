@@ -279,6 +279,54 @@ sees that case and must not paper over it with a retry.
 - **`hstore` is replaced with the empty map**, never walked: nothing here parses
   hstore, and `{}` is not an empty hstore, so the value is `''`. That is the
   answer `mask`'s own `semi_structured` generator gives.
+- **A json or jsonb cell arrives as the source's own raw text now, not
+  whatever Go value pgx had already decoded it into** (`json.go`'s
+  `decodeDocument`, T-0402, the 2026-09-25 JSON red team's A11,
+  `docs/reviews/2026-09-25-redteam-json/round1.json` entry 14).
+  `decodeDocument` has always decoded a `string` with `encoding/json`'s
+  `Decoder` and `UseNumber`, exactly to keep a number leaf's every digit — that
+  was already the whole of what a domain over jsonb arrives as, since pgx has
+  no codec for an unregistered OID. `internal/pg`'s source reader
+  (`jsonTextRows`, that package's own CLAUDE.md) now hands back the identical
+  raw text for a *plain* json or jsonb column too, so every read through it —
+  `internal/extract`'s row batches, `internal/introspect`'s samples — takes
+  this package's text branch, and the `case json.Number:` arm below has always
+  handled the result correctly. Before this, pgx's own `JSONCodec` decoded a
+  `*any` destination with plain `Unmarshal`, and a Go `float64` has 52 mantissa
+  bits: a 19-digit Luhn-valid card number in a json number leaf, under a key no
+  rule pack pattern names, lost its trailing digits to that rounding before
+  `leafValueCategory` ever asked whether it parsed as one, read clean, and was
+  copied. The `case float64:` arm just below is not deleted — a value this
+  package is handed directly, bypassing a real read (every unit test's fixture
+  data, and any future carrier this repository's own tests construct by hand),
+  still arrives as whatever Go kind its caller built, and that arm is what
+  keeps such an integral leaf recognised by its value rather than by a Go kind
+  no real read produces any more. `leaf_test.go`'s
+  `TestANumberLeafPastFloat64PrecisionIsStillMasked` pins a 19-digit and a
+  16-digit card and a national-format phone number stored as a bare integer,
+  fed as the source's own text the way a real read now hands it over, and
+  fails if `UseNumber` is ever removed. **It is a control over
+  `decodeDocument`'s text branch, not a pin of the wiring change itself** --
+  a fix round on this task, finding 3: `decodeDocument` already took that
+  branch for a domain over jsonb before T-0402, so the test passes whether
+  or not `internal/pg`'s `jsonTextRows` exists. The wiring is pinned where
+  it actually changed, over a real server:
+  `internal/pg/json_integration_test.go`'s
+  `TestSourceReaderHandsBackJSONAsRawText`.
+  - **Still open: `isDocument` does not read `shapeOf`'s array flag, so a
+    `json[]`/`jsonb[]` column's own number leaves are not covered by this
+    fix.** `cell` (`transform.go`) checks `p.document` before it checks
+    `p.shape.array`, so a `jsonb[]` column is masked as one document rather
+    than element-wise — which is correct for §4's own rule, but the value
+    `maskDocument` walks is whatever `internal/pg`'s reader handed back for
+    that column, and `jsonTextRows` (that package's own CLAUDE.md) does not
+    cover the array OIDs, only the scalar ones. A number leaf inside such an
+    array can therefore still arrive already rounded to a `float64` by pgx's
+    own `ArrayCodec`, the identical bug T-0402 fixed for a scalar column.
+    **T-0416** (E9) carries the fix, on both this package's and
+    `internal/pg`'s side; not built here because it is a second carrier and
+    a wire-format split (a Postgres array literal, not JSON text), not a
+    targeted edit to this task's own change.
 - **A masked cell comes back as the Go kind it arrived as** (`value.go`). A
   masker's output is always text or bytes, and the loader has to encode it back
   into the same column, so a masked `bigint` is parsed back to an `int64`, a

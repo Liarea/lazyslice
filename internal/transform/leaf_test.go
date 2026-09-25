@@ -4,6 +4,7 @@ package transform
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/Liarea/lazyslice/internal/pipeline"
@@ -246,6 +247,90 @@ func TestAPersonalValueUnderAnImpersonalKeyIsMasked(t *testing.T) {
 		// A float64 leaf is read in its plain decimal spelling: 'g' would
 		// hand the validators 4.111111111111111e+15.
 		t.Error("a card number stored as a JSON number under a key no rule names was copied")
+	}
+}
+
+// T-0402 (the 2026-09-25 JSON red team's A11, docs/reviews/2026-09-25-
+// redteam-json/round1.json entry 14): a json or jsonb cell now reaches this
+// package as the source's own raw text (internal/pg's jsonTextRows), the same
+// text a domain over jsonb has always arrived as, so decodeDocument's text
+// branch -- json.Decoder with UseNumber -- is what every number leaf takes,
+// keeping every digit. Before the fix this package was handed whatever Go
+// value pgx's own JSON codec had already decoded, and pgx's plain
+// json.Unmarshal turns an integer past 2^53 into a rounded float64 before
+// leafValueCategory ever sees it: a 19-digit Luhn-valid card number lost its
+// last digits to that rounding, the rounded spelling failed Luhn, the leaf
+// read clean and was copied. A 16-digit card fits inside float64's exact
+// range and was never rounded either way -- the control here, and the one
+// TestAPersonalValueUnderAnImpersonalKeyIsMasked's own "count" case already
+// pins for the pre-existing Go-value carrier. A national-format phone number
+// stored as a bare integer, under --phone-region, is the third leaf T-0402
+// names; neither its shape nor its precision was ever the bug, and it is
+// pinned here so the fix's regression covers all three the tracker task
+// names in one place.
+//
+// This is a control over decodeDocument's text branch, not a pin of the fix
+// itself (a fix round on this task, finding 3): it hands the row a string
+// directly, and decodeDocument's UseNumber branch already existed before
+// T-0402 for a domain over jsonb, so this test passes on pre-T-0402 code too
+// -- reverting only internal/pg/source.go's jsonTextRows does not fail it.
+// What actually pins the fix is internal/pg/json_integration_test.go's
+// TestSourceReaderHandsBackJSONAsRawText (a real server, asserting the source
+// reader hands back a string rather than pgx's own decoded value) and
+// internal/classify's decodeSampleDocument test; this test's job is only to
+// prove that once that string arrives, masking a number leaf past
+// float64 precision still works exactly as it does for the pre-existing
+// text carrier.
+func TestANumberLeafPastFloat64PrecisionIsStillMasked(t *testing.T) {
+	const pan16 = "4111111111111111"    // Luhn-valid, 16 digits: exact in a float64
+	const pan19 = "4000123456789012343" // Luhn-valid, 19 digits: rounds past digit 16 in a float64
+	const phone = "2025551234"          // a US number with no leading zero, so it reads back as a bare integer
+
+	k := key(t, 0x76)
+	cls := classification()
+	cls.PhoneRegion = "US"
+	d := cls.Decisions[col("people", "contact")]
+	d.LeafKeys = map[string]pipeline.Category{
+		"pan16": pipeline.CatNone, "pan19": pipeline.CatNone, "phone": pipeline.CatNone,
+	}
+	cls.Decisions[col("people", "contact")] = d
+
+	b := peopleBatch()
+	b.Rows = b.Rows[:1]
+	// The raw source text internal/pg now hands back for a plain jsonb
+	// column, not a Go value this package's own decode already lost
+	// precision on -- the shape T-0402 fixes.
+	b.Rows[0][4] = `{"pan16":` + pan16 + `,"pan19":` + pan19 + `,"phone":` + phone + `}`
+
+	res := &recorder{inner: NewResidual(100)}
+	out, err := New(fixture()).Transform(b, cls, &k, res)
+	if err != nil {
+		t.Fatalf("Transform: %v", err)
+	}
+	doc, ok := out.Rows[0][4].(string)
+	if !ok {
+		t.Fatalf("people.contact masked to %T, want the source's own text form", out.Rows[0][4])
+	}
+	for _, pan := range []string{pan16, pan19} {
+		if strings.Contains(doc, pan) {
+			t.Errorf("the masked document still holds %q: a card number under a key no rule names must be "+
+				"recognised by its value and masked, whatever its digit count", pan)
+		}
+	}
+	if strings.Contains(doc, phone) {
+		t.Errorf("the masked document still holds %q: a national-format phone number stored as a bare "+
+			"integer must be masked under --phone-region", phone)
+	}
+
+	recorded := map[string]bool{}
+	for _, a := range res.adds {
+		recorded[a.path] = true
+	}
+	for _, path := range []string{"$.pan16", "$.pan19", "$.phone"} {
+		if !recorded[path] {
+			t.Errorf("%s has no filter entry: it was copied, not masked, so a real value at that path "+
+				"would never be found by the residual scan", path)
+		}
 	}
 }
 
