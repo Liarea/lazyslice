@@ -2,7 +2,7 @@
 
 Draft only. Nothing here is posted; the maintainer edits and posts it.
 
-## Title (67 characters, under the 80-character limit)
+## Title (68 characters, under the 80-character limit)
 
 Show HN: lazyslice – subset, mask and load a local Postgres snapshot
 

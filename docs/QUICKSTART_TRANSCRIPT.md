@@ -5,7 +5,7 @@
 
 # Quickstart transcript
 
-Recorded 2026-09-17 against `lazyslice` built from this commit
+Recorded 2026-09-25 against `lazyslice` built from this commit
 (`make build`), Docker 28.5.2, two `postgres:16` containers.
 
 ## Setup
@@ -97,11 +97,13 @@ $ lazyslice --source postgres://ls:pw@127.0.0.1:55701/shop?sslmode=disable \
   public.products.price_cents: no name or value signal
   public.products.sku: nothing recognised in 20 samples, not proof the column is impersonal
   public.products.title: 20/20 samples mixed digits and words; no name signal
+  17 column(s): 4 masked, 6 copied, 7 never-masked keys
   root public.customers (named by --root) — --root
   public.customers: 50 rows, child_ok; root
   public.orders: 149 rows, child_ok; child of public.customers via public.orders.customer_id
   public.products: 20 rows, parent_only; parent of public.order_items via public.order_items.product_id
   public.order_items: 298 rows, child_ok; child of public.orders via public.order_items.order_id
+  4 table(s) reached, 0 unreachable, 517 rows
   517 rows, 8 KiB of keys, 0 KiB of residual filter; the snapshot is held about 0.0s, assuming 20,000 rows/s
   dropping public.products in the target
   dropping public.orders in the target
@@ -130,7 +132,7 @@ one (ADR-010's recall boundary), so there is nothing for the reason to name
 `root public.customers (named by --root) — --root` is the one line `--root`
 answers outright: without it (and with no root already recorded in
 `lazyslice.yml`), this run would have stopped at a terminal to ask
-`root table? [customers]` first — ADR-008's Q2, the only question open once
+`root table? [public.customers]` first — ADR-008's Q2, the only question open once
 both endpoints are named (ADR-017) — and
 printed the same decision line either way once it had an answer.
 
@@ -139,11 +141,11 @@ printed the same decision line either way once it had an answer.
 ```sh
 $ psql postgres://ls:pw@127.0.0.1:55702/shop_dev \
     -c "select id, email, full_name, phone from customers order by id limit 3"
- id |          email           |      full_name      |    phone
-----+--------------------------+---------------------+--------------
-  1 | sami.gruber@example.net  | 9164 Juniper Street | +12055550183
-  2 | paulo.zhang@example.org  | 7528 Laurel Drive   | +12045550193
-  3 | freya.tanaka@example.net | 8314 Fern Place     | +16185550121
+ id |            email            |     full_name      |    phone
+----+-----------------------------+--------------------+--------------
+  1 | arthur.bridges@example.net  | 1016 Dogwood Walk  | +12515550107
+  2 | kathleen.hunter@example.net | 9275 Linden Drive  | +17045550113
+  3 | clarence.walter@example.org | 7233 Dogwood Close | +12505550171
 (3 rows)
 
 $ psql postgres://ls:pw@127.0.0.1:55701/shop \
@@ -156,10 +158,16 @@ $ psql postgres://ls:pw@127.0.0.1:55701/shop \
 (3 rows)
 ```
 
-`full_name` masks to something address-shaped rather than name-shaped in this
-build — that is `mask`'s own generator choice for `person_name` on this
-input, not a masking miss (the value is not the source's, and it is not
-another row's either).
+`full_name` masks to something address-shaped rather than name-shaped: the
+column name says `person_name`, but its 200 sample values read as street
+addresses (this schema's `full_name` values carry a trailing digit, which is
+what makes them parse that way), and when the name and the values disagree
+about the category, the values decide — `customers.full_name` reason line
+above pairs `name matches person_name` with the value evidence
+(`200/200 samples mixed digits and words`) precisely because both were
+weighed and the values won. That is deliberate, not a mismatch between what
+classify decided and what transform applied. Not a masking miss either
+way — the value is not the source's, and it is not another row's either.
 
 ## Foreign keys hold, and the marker says the run finished clean
 
@@ -174,7 +182,7 @@ $ psql postgres://ls:pw@127.0.0.1:55702/shop_dev \
 $ psql postgres://ls:pw@127.0.0.1:55702/shop_dev -c "select run_id, status from lazyslice_meta"
                 run_id                |  status
 --------------------------------------+----------
- c0fbda56-9c1c-4fff-81c8-42b46ff77bd2 | complete
+ 0b036fbf-8ded-4b36-aa82-2d942e31e3cb | complete
 (1 row)
 ```
 

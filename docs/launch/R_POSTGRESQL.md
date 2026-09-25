@@ -19,16 +19,21 @@ lazyslice opens the source in a single `REPEATABLE READ READ ONLY`
 transaction, picks a root table, walks foreign keys outward — parents to
 completeness, children capped, lookup tables kept whole, cycles named
 explicitly rather than silently broken — and streams the rows out under
-that one snapshot. Anything that looks like personal data is masked with a
-keyed hash before it lands in the target, so a `customer_id` still joins to
-the same masked `orders` rows it did in production, across tables and
-across repeated runs. Free text and JSON columns are masked whole rather
-than scanned for maybe-PII, because a classifier that is only sometimes
-right is worse than one that is boringly conservative. On load it verifies
-its own work: foreign keys resolve, sequences are reset past the max
-value it loaded, and a second short read against the source confirms no
-masked column still holds a source value. A non-zero exit means one of
-those checks failed — it does not mean "probably fine."
+that one snapshot. Anything that looks like personal data is masked deterministically
+under a local key before it lands in the target, so the same email masks to
+the same fake address in every table and on every run, while surrogate keys
+like `customer_id` are copied as-is, so they still join to the same `orders`
+rows they did in production. Free text is masked whole rather than scanned
+for maybe-PII, because a classifier that is only sometimes right is worse
+than one that is boringly conservative; JSON documents are masked leaf by
+leaf, each leaf a key rule or a value validator recognises replaced, and a
+leaf neither recognises copied so a config document still works. On load it
+verifies its own work: foreign keys resolve, sequences are reset past the max
+value it loaded, and a residual scan of the target against the source
+confirms no masked column still holds a source value, with a second net over
+every column it left unmasked. Any failed check is a non-zero exit (7 for a
+row count or sequence, 8 for a foreign key, 9 for a residual), and exit 0
+means every check passed, not "probably fine."
 
 Two companies shipped close to this exact idea and both are gone —
 Snaplet (2024) and Neosync, whose repository was archived in 2025 — so I'm

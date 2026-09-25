@@ -104,11 +104,13 @@ $ lazyslice --source postgres://ls:pw@127.0.0.1:55701/shop?sslmode=disable \
   public.customers.full_name: name matches person_name; 200/200 samples mixed digits and words
   public.customers.id: no name or value signal; surrogate key: preserved verbatim
   public.customers.phone: name matches phone
+  17 column(s): 4 masked, 6 copied, 7 never-masked keys
   root public.customers (named by --root) — --root
   public.customers: 50 rows, child_ok; root
   public.orders: 149 rows, child_ok; child of public.customers via public.orders.customer_id
   public.products: 20 rows, parent_only; parent of public.order_items via public.order_items.product_id
   public.order_items: 298 rows, child_ok; child of public.orders via public.order_items.order_id
+  4 table(s) reached, 0 unreachable, 517 rows
   517 rows, 8 KiB of keys, 0 KiB of residual filter; the snapshot is held about 0.0s, assuming 20,000 rows/s
   dropping public.products in the target
   dropping public.orders in the target
@@ -132,27 +134,31 @@ guessing — see the last example below.
 
 `--root customers` above answers the one question a run at a terminal would
 otherwise ask: a run without `--root` (and with no root already recorded in
-`lazyslice.yml`) prints `root table? [customers]` and waits for Enter, a
+`lazyslice.yml`) prints `root table? [public.customers]` and waits for Enter, a
 table name, or `?` for the ranked candidates — defaulting to the table with
 the most incoming and fewest outgoing foreign keys, which is `customers`
 here anyway. With `--yes` or no terminal to ask, it takes that default
 without printing the question at all.
 
 Every column lazyslice thought looked like personal data says why:
-`customers.email`, `.full_name` and `.phone` are masked by name; `customers.id`
-is a surrogate key and is kept, because a key with nothing in it to identify
-is not personal data on its own (row identifiers are still preserved — see
-"What a snapshot will not hide"). The masked columns hold different values in
-the target than in the source:
+`customers.email` and `.phone` are masked by name; `.full_name` is masked by
+name too, but its 200 sample values read as street addresses (this schema's
+names carry a trailing digit), and when the name and the values disagree
+about the category, the values decide — so `full_name` below comes out
+address-shaped, not Census-name-shaped. `customers.id` is a surrogate key
+and is kept, because a key with nothing in it to identify is not personal
+data on its own (row identifiers are still preserved — see "What a snapshot
+will not hide"). The masked columns hold different values in the target than
+in the source:
 
 ```sh
 $ psql postgres://ls:pw@127.0.0.1:55702/shop_dev \
     -c "select id, email, full_name, phone from customers order by id limit 3"
- id |          email           |      full_name      |    phone
-----+--------------------------+---------------------+--------------
-  1 | sami.gruber@example.net  | 9164 Juniper Street | +12055550183
-  2 | paulo.zhang@example.org  | 7528 Laurel Drive   | +12045550193
-  3 | freya.tanaka@example.net | 8314 Fern Place     | +16185550121
+ id |            email            |     full_name      |    phone
+----+-----------------------------+--------------------+--------------
+  1 | arthur.bridges@example.net  | 1016 Dogwood Walk  | +12515550107
+  2 | kathleen.hunter@example.net | 9275 Linden Drive  | +17045550113
+  3 | clarence.walter@example.org | 7233 Dogwood Close | +12505550171
 (3 rows)
 
 $ psql postgres://ls:pw@127.0.0.1:55701/shop \
@@ -168,10 +174,11 @@ $ psql postgres://ls:pw@127.0.0.1:55701/shop \
 The run above exited `0`, which is the green verify: `lazyslice_meta.status`
 is written `complete` only once every check in ARCHITECTURE.md section 6 has
 passed — foreign keys resolve, row counts and sequences match the plan, and a
-residual scan finds no source value left in a masked column. A masked name
-can equal some other row's real name, because masked names are real, common
-names drawn from the 2020 U.S. Census lists; the scan counts those and checks
-that no row kept its own.
+residual scan finds no source value left in a masked column. A column
+masked under `person_name` (not this `full_name`, which the values decided
+as `address` above) can equal some other row's real name, because masked
+names are real, common names drawn from the 2020 U.S. Census lists; the scan
+counts those too and checks that no row kept its own.
 
 ```sh
 $ psql postgres://ls:pw@127.0.0.1:55702/shop_dev -c "select status from lazyslice_meta"
@@ -238,8 +245,9 @@ The flags a first run meets. The full set, one row per registered flag grouped b
 ## Why
 
 **Zero config.** A first run at a terminal asks only what it could not settle
-on its own — which table to start from, and, when it found no database to
-load into, whether to start one — and then works; a headless run asks none. Nothing above
+on its own — when it found no database to load into, or only a stopped one,
+whether to start it, and then which table to start from — and then works; a
+headless run asks none. Nothing above
 needed a YAML file written before it could run: `lazyslice.yml` is what a run
 *emits* once it has already worked, a record to commit for next time, never a
 prerequisite for the first one. We refuse to ship any feature whose first-run
@@ -248,7 +256,8 @@ path is "write a YAML file."
 **Safe by default.** Anything that might be personal data is masked unless a
 person opts a specific column out and says why; the source above is opened
 read-only with its role's privileges checked and printed, not assumed, and the
-target has to be empty or a database lazyslice wrote before. The output is
+target has to be empty or a database lazyslice loaded before from this same
+source. The output is
 pseudonymised, not anonymised, and the section below says exactly what that
 means. We refuse to ship a flag, mode, or default that copies an unclassified
 column as-is — there is no flag and no mode that turns masking off, enforced
@@ -269,7 +278,7 @@ guessing. lazyslice's own cells describe `v0.3.0` exactly as installed above.
 | | lazyslice | Greenmask | PostgreSQL Anonymizer | Tonic Structural |
 |---|---|---|---|---|
 | Time to first snapshot | One command and no config step — the run above went from the command line to `complete` with nothing written beforehand | A config file is written first; the bundled playground's own quickstart edits its sample `config.yml` before the first `dump`[^gm-quick] | Six DDL/SQL statements before a masked read: create the extension, enable it, load a sample table, initialise masking, create a masked role, declare a rule[^pga-home] | Sign up, verify by email, create a workspace, then a sensitivity scan and a generation run — about seven to eight steps end to end[^tonic-quick] |
-| Config required before first run | None — `--no-config` above wrote nothing; a run with no flags at a terminal asks at most two questions (whether to start a target container when none is found, then which table to start from) and a headless one that cannot settle the target stops naming the flag it needs | Yes — "a configuration file is mandatory for Greenmask functioning"[^gm-quick] | Yes — masking rules are declared as `SECURITY LABEL`s on each column, a policy stored in the database, before anything is masked[^pga-rules] | An account and a workspace, always; a bundled sample workspace needs no database connection, but masking your own data does[^tonic-quick] |
+| Config required before first run | None — `--no-config` above wrote nothing; a run with no flags at a terminal asks at most two questions (whether to start a target container when none is found, or the stopped one it found, then which table to start from) and a headless one that cannot settle the target stops naming the flag it needs | Yes — "a configuration file is mandatory for Greenmask functioning"[^gm-quick] | Yes — masking rules are declared as `SECURITY LABEL`s on each column, a policy stored in the database, before anything is masked[^pga-rules] | An account and a workspace, always; a bundled sample workspace needs no database connection, but masking your own data does[^tonic-quick] |
 | Databases | PostgreSQL 14–18 only | PostgreSQL (full support); MySQL "in progress"[^gm-repo] | PostgreSQL only, plus the Postgres-compatible forks Greenplum and YugabyteDB[^pga-home] | Postgres, Oracle, Db2, MySQL, SQL Server, Redshift, Snowflake, BigQuery, MongoDB, Databricks, Spark, S3, Salesforce and flat files[^tonic-product] |
 | Masking determinism (same input, same output across runs) | Deterministic under a local key by construction — the same value always masks the same way for the same key and category (see "How it decides what is personal data" below) | Opt-in, not the default: `engine` "by default is set to `random`"; the hash engine has to be chosen explicitly for the same input to always produce the same output[^gm-engine] | Opt-in, not the default: the built-in masking functions are random; the same input is deterministic only through the separate `pseudo_*`/`hash` functions, seeded by hand[^pga-funcs] | Stated as a feature — "automated, consistent transformations that preserve relationships and referential integrity"[^tonic-product] |
 | Licence | Apache-2.0 | Apache-2.0[^gm-repo] | The PostgreSQL License[^pga-license] | Proprietary — no free or open-source tier; "Professional" and "Enterprise" are both custom-priced[^tonic-price] |
@@ -296,8 +305,8 @@ parser, libphonenumber, a Luhn check for card numbers that also wants a
 known issuer prefix (and, under an id/number/version/reference column name,
 the issuer's own length), a name dictionary
 (`200/200 samples parse as addresses`). And its **neighbours** matter, in two
-ways. A column already at low confidence is raised to suspect the moment
-another column in the same table is at likely or above, because a
+ways. A column already at `low` confidence is raised to `possible`, and so
+masked, the moment another column in the same table is at `likely` or above, because a
 personal-shaped table tends to be personal throughout. And a character column
 with no name or value signal at all — nothing to raise, and not a unique or
 key column — is still swept into free-text masking when it sits beside a
@@ -312,8 +321,10 @@ spared that way. A signal-less column
 that isn't character-typed — an integer, numeric, date or uuid column, the
 shape of a surrogate key like `customers.id` above — is copied verbatim
 regardless of its neighbours; the sweep only ever reaches columns free-text
-masking can apply to. A name hit alone is enough to mask; a value hit alone is
-enough to mask. A column with no name signal, no recognised value shape and no
+masking can apply to. A name hit alone is enough to mask, except a bare
+`name`, `display_name` or `<thing>_name`, which also needs a word for people
+in its table or column name, or a fifth of its samples in the name
+dictionary (residual 3 below); a value hit alone is enough to mask. A column with no name signal, no recognised value shape and no
 personal neighbour in its table is not "unsure" — it is copied; that gap is
 residual 4 below. Nothing here calls out to a network or a model; it runs
 entirely against the box being read.
@@ -340,7 +351,8 @@ columns:
   public.film.description:
     category: free_text
     confidence: possible
-    reason: "name matches description; neighbouring-column rule did not apply (no PII in film)"
+    reason: "name matches free_text; opt-out recorded by --unmask"
+    type: 3e51a0c2
     unmask:
       reason: "product catalogue text, no personal data"   # never empty; --unmask TABLE.COL=REASON
       by: flag                                             # or the person's name, for a hand-written entry
@@ -357,8 +369,9 @@ under the column's `mask:` block with `by: flag`, and it is the answer to a
 `verify.refused.second_net` refusal, whose line names a `--mask` flag that
 works — the category the check found when that column's type accepts it,
 `semi_structured` for a json/jsonb/hstore column whatever category matched
-one of its values (no other category accepts the json family), the bare
-`--mask TABLE.COL` when neither applies, and `--skip-table` alone for a
+one of its values (no other category accepts the json family),
+`--mask TABLE.COL=special_category`, the one category every type accepts,
+when neither applies, and `--skip-table` alone for a
 column the check found already masked, since `--mask` cannot change a
 column's category once one is recorded. A column that cannot be masked that
 way (a key, or a type the category does not fit) is exit 2, never quietly
@@ -370,10 +383,15 @@ that stays copied. A referencing column whose type cannot take that category
 is exit 2, named for a `--mask` of its own.
 
 Commit that file and the next run — including CI's — needs no flag and asks
-no question. A column the file has never seen is classified fresh, exactly as
+no question, as long as it can reach the target the file records. When that
+target is a container lazyslice started (`lazyslice-target-*`), a machine
+that does not have it asks to start one at a terminal and, headless, stops at
+exit 4 (`target.refused.container_missing`) naming `--create-target` and
+`--target` (ADR-016). A column the file has never seen is classified fresh, exactly as
 any column is: masked when the classifier lands at `possible` confidence or
-above, copied when it lands at `low` or `none`, and printed under `drift:`
-either way (ADR-004). The same holds inside a `json` or `jsonb` column: the
+above, copied when it lands at `low` or `none`, and printed either way as a
+drift line naming the file (`… is not in ./lazyslice.yml: classified fresh
+and masked`) (ADR-004). The same holds inside a `json` or `jsonb` column: the
 file lists, under the column's `leaf_keys:`, the document keys whose values
 the run copied, and a key the sampled documents show that the file does not
 list has every value under it masked and is printed under `drift:` with the
@@ -414,6 +432,11 @@ An exit `0` means the checks above passed, not that the snapshot is
 anonymous. lazyslice pseudonymises; it does not anonymise. The full list of
 stated false negatives, with the reasoning behind each, is in
 [SECURITY.md](SECURITY.md) and, in more detail, [THREAT_MODEL.md](THREAT_MODEL.md).
+Two limits sit beside that list: the residual scan tests canonical equality,
+so a source value that was truncated, reformatted or embedded in a longer
+string is not detected; and a snapshot is personal data, so regenerate every
+snapshot after an erasure request — rotating the masking key makes old
+snapshots uncorrelatable with new ones.
 After five rounds of an adversarial red team and a sixth that replayed
 everything still open with no new variants
 ([docs/reviews/2026-09-15-redteam/](docs/reviews/2026-09-15-redteam/)), five
@@ -468,7 +491,11 @@ residuals are accepted rather than hidden:
    no personal neighbour in its table, is copied — and so is such a column
    beside a personal neighbour when its samples read as an enumeration or an
    identifier shape (a username repeated across a handful of staff rows, a
-   hostname a device's owner chose), which the neighbour rule spares. The
+   hostname a device's owner chose), which the neighbour rule spares. So is
+   a hex token of exactly a digest's length — 8 to 12 characters, 32, 40 or
+   64 in one case, or 128 at an entropy the credential check does not read
+   as a secret — under a neutral column name beside a certain neighbour,
+   which that rule spares as a hex digest. The
    entropy check itself now passes four more shapes through, in a column no
    credential name rule matches: a secret that is a hex run of exactly 32,
    40 or 64 characters, a secret column of one to four non-NULL rows, a
@@ -500,12 +527,17 @@ The full table, one row per code with its message template, is
 
 `0` ok · `1` internal failure with no code of its own — run with `--debug` ·
 `2` usage — a flag names something that cannot work (this is also the code a
-same-database target is refused with: that check runs at the flag surface,
-before discovery, not as one of the `4`s below) · `3` no source · `4` target
-refused · `5` no usable source credential or masking key · `6` the source
-role can write and `--require-read-only-role` was set · `7` extract or load
-failed · `8` a foreign key does not hold · `9` a masked column still holds a
-source value, or a value that could not be confirmed either way · `10` a
+same-database target is refused with: it is the target gate's first rule,
+identity, which runs before any row is read and is the one gate refusal that
+exits `2` rather than `4`) · `3` no source · `4` target
+refused · `5` no usable credential for a named source or target, or no usable
+masking key · `6` the source
+role can write and `--require-read-only-role` was set · `7` extract, transform
+or load failed, or the target's row counts or sequences do not match the plan
+· `8` a foreign key does not hold · `9` a masked column still holds a
+source value, or one that could not be confirmed either way, or an unmasked
+column or the target's schema holds values that validate as personal data ·
+`10` a
 column, or a document key, the committed config has never seen, under
 `--strict-schema` · `11` a
 row or memory budget was exceeded · `12` the plan was refused — a column
