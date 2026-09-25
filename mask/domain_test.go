@@ -76,6 +76,12 @@ func TestDomainMatchesWhatTheGeneratorEmits(t *testing.T) {
 			Constraints{TypeTag: famEnum, EnumLabels: []string{"a", "b", "c"}}, 500},
 		{"credential", CredentialMasker, Value{Text: "x"}, Constraints{TypeTag: famText}, 100},
 		{"null", MaskerNull, Value{Text: "x"}, Constraints{TypeTag: famBytea, Nullable: true}, 100},
+		// free_text's length comes from the input since T-0328, so its Domain
+		// is its narrowest length's: one whole word in a column that holds
+		// every filler word, one letter in a narrower one.
+		{"free text one character", MaskerFreeText, Value{Text: "x"}, Constraints{TypeTag: famText}, 3_000},
+		{"free text one character narrow", MaskerFreeText, Value{Text: "x"},
+			Constraints{TypeTag: famVarchar, MaxLen: 8}, 1_000},
 	}
 	for _, tc := range cases {
 		m, _ := Get(tc.id)
@@ -285,9 +291,15 @@ func TestSmallDomainIsReported(t *testing.T) {
 	if !Small(MaskerSpecial, small) {
 		t.Fatal("eight admissible values against eight distinct samples is a small domain")
 	}
+	// Since T-0328 free_text fits its length to the value, so its domain is
+	// the one-word count (80) whatever the column's width, and 200 distinct
+	// sampled values are more than it can keep apart: Domain is handed the
+	// column, not the values, and cannot tell a column of short codes from
+	// one of paragraphs. A three-value column is not small
+	// (TestFreeTextEnumLikeColumnMasksToShortValues).
 	wide := Constraints{TypeTag: famText, MaxLen: 100, Distinct: 200}
-	if Small(MaskerFreeText, wide) {
-		t.Fatal("a free-text column is not a small domain")
+	if !Small(MaskerFreeText, wide) {
+		t.Fatal("200 distinct values against free_text's 80 one-word values is a small domain")
 	}
 	// With no samples the rule falls back to the domain itself. Reporting
 	// nothing would leave a one-label column masked, listed nowhere, and

@@ -45,6 +45,16 @@ parcel pattern phase pointer policy prefix process profile queue range record re
 request result routine sample scalar schema scope sector segment sequence series session signal
 slice socket source spectrum stack stage stream string subject summary symbol system table target
 template thread token topic trace unit value vector vertex volume window`
+
+	// fillerStateWords are the filler words an application is likely to store
+	// as a state, level, mode or kind value of its own (T-0328's review): a
+	// log_level column holding trace, a settings column holding default. The
+	// free_text masker fits a short input to one whole filler word, so drawing
+	// these would let a masked value equal a real value of the same column, and
+	// the residual scan stops the run at exit 9 on that. free_text's
+	// input-fitted branches draw from fittedFillers, the list without them;
+	// every other use of fillers is unchanged.
+	fillerStateWords = `default input level output session stage system token trace value`
 )
 
 // nanpAreaCodes are the North American area codes for which libphonenumber
@@ -127,14 +137,15 @@ func (w *wordList) longest() int { return len(w.words[len(w.words)-1]) }
 func (w *wordList) shortest() int { return len(w.words[0]) }
 
 var (
-	givenNames  = newWordList(censusGivenWords)
-	surnames    = newWordList(censusSurnameWords)
-	streets     = newWordList(streetWords)
-	suffixes    = newWordList(suffixWords)
-	fillers     = newWordList(fillerWords)
-	areaCodes   = splitThrees(nanpAreaCodes)
-	emailHosts  = []string{"example.com", "example.net", "example.org"}
-	docPrefixes = []string{"192.0.2.", "198.51.100.", "203.0.113."}
+	givenNames    = newWordList(censusGivenWords)
+	surnames      = newWordList(censusSurnameWords)
+	streets       = newWordList(streetWords)
+	suffixes      = newWordList(suffixWords)
+	fillers       = newWordList(fillerWords)
+	fittedFillers = newWordList(withoutWords(fillerWords, fillerStateWords))
+	areaCodes     = splitThrees(nanpAreaCodes)
+	emailHosts    = []string{"example.com", "example.net", "example.org"}
+	docPrefixes   = []string{"192.0.2.", "198.51.100.", "203.0.113."}
 )
 
 // RoleWords returns a copy of the word list personNameMasker draws from for
@@ -164,6 +175,21 @@ func RoleWords(r Role) []string {
 	out := make([]string, len(w.words))
 	copy(out, w.words)
 	return out
+}
+
+// withoutWords is the words of list that are not in drop, space-separated.
+func withoutWords(list, drop string) string {
+	skip := map[string]bool{}
+	for _, w := range strings.Fields(drop) {
+		skip[w] = true
+	}
+	var keep []string
+	for _, w := range strings.Fields(list) {
+		if !skip[w] {
+			keep = append(keep, w)
+		}
+	}
+	return strings.Join(keep, " ")
 }
 
 func splitThrees(s string) []string {

@@ -207,9 +207,9 @@ func genericDomain(c Constraints) int64 {
 	case famBytea:
 		return satPow(2, 64)
 	case famJSON, famJSONB, famHstore:
-		return freeTextMasker{}.Domain(Constraints{})
+		return fillerRangeDomain(Constraints{})
 	default:
-		return freeTextMasker{}.Domain(c)
+		return fillerRangeDomain(c)
 	}
 }
 

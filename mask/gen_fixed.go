@@ -76,7 +76,7 @@ func (semiStructuredMasker) Domain(c Constraints) int64 {
 	}
 	// One string leaf's worth, which is the narrowest document that is not
 	// already empty.
-	return freeTextMasker{}.Domain(Constraints{})
+	return fillerRangeDomain(Constraints{})
 }
 
 func (semiStructuredMasker) Mask(h [32]byte, in Value, c Constraints) (Value, error) {

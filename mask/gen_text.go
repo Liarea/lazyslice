@@ -4,6 +4,7 @@ package mask
 
 import (
 	"strings"
+	"unicode/utf8"
 )
 
 // titleASCII capitalises the first byte. Every embedded word is ASCII, so this
@@ -223,8 +224,8 @@ func (geoMasker) Mask(h [32]byte, _ Value, c Constraints) (Value, error) {
 
 // freeTextCap is the ceiling on a filler's length whatever the column allows,
 // so that a text column does not get a four-kilobyte value where the source
-// held a sentence — and, more to the point, so that the length carries no
-// information at all (ARCHITECTURE.md section 5).
+// held a sentence. Since T-0328 it bounds only the one branch that still draws
+// its length from h: an input longer than the column allows.
 const freeTextCap = 4096
 
 // freeTextExact is the exact length a CHECK requires, or 0 when there is
@@ -247,19 +248,130 @@ func freeTextMax(c Constraints) int {
 	return n
 }
 
-// freeTextMasker replaces the value with filler whose length is drawn from h
-// inside the column's admissible range. A 1,247-character bio and a two-word
-// note are indistinguishable afterwards, which is what
-// TestFreeTextLengthUncorrelated asserts.
+// fillerInitials is how many distinct first letters the words free_text's
+// input-fitted branches draw from have (21 over today's fittedFillers). It is
+// the number of one-character values the narrow branch below can emit, and
+// one character is that branch's narrowest length: a longer output cut to its
+// first character is one of these, so no length emits fewer.
+var fillerInitials = func() int {
+	seen := map[byte]bool{}
+	for _, w := range fittedFillers.words {
+		seen[w[0]] = true
+	}
+	return len(seen)
+}()
+
+// freeTextInputLen is the length a masked value is fitted to (T-0328): the rune
+// count of the input's canonical form — fold, which is what Canonical hashes
+// for free_text — and never less than one. The canonical form alone, so that
+// every pair of spellings that hash alike ("Admin " and "admin", "STRASSE"
+// and "straße", "file" and its ligature spelling) is also fitted alike, as
+// fold promises. NFKC and case folding can make it longer than the raw value
+// (ß becomes ss, the ﬁ ligature fi); when that takes it past the column,
+// Mask falls into its over-long branch, a length drawn from h inside the
+// column, which is also one output for every such spelling. A
+// whitespace-only value folds to nothing and is fitted to one, so it is
+// still replaced.
+func freeTextInputLen(in Value) int {
+	return max(1, utf8.RuneCountInString(fold(in.Text)))
+}
+
+// freeTextMasker replaces the value with filler about as long as the input
+// (T-0328, the maintainer's decision in T-0323): a role column holding admin,
+// user and guest masks to three short values, not to three column-width
+// paragraphs. Every character is still drawn from h; what the input decides is
+// the length alone, and only approximately in a column wide enough for every
+// filler word:
+//
+//   - a column that holds the longest filler word (nine characters) gets whole
+//     words, one space apart, from the first word boundary at or past the
+//     input's length and never past max(input length, nine) — a one-character
+//     input becomes one word, a sentence a run of words a few characters
+//     shorter than it at most (fillerAbout);
+//   - a narrower column gets exactly the input's length, cut from the same
+//     words (fillerFrom), because a whole word may not fit;
+//   - an input whose canonical form is longer than the column allows (over
+//     freeTextCap in an unbounded text column, or a value NFKC or case
+//     folding lengthened past its varchar's width) keeps the column-width
+//     behaviour: a length drawn from h inside [1, min(column, 4096)];
+//   - an exact-length CHECK keeps its length, as before.
+//
+// The first two draw from fittedFillers, the filler words less the ones an
+// application is likely to store as a state or level of its own (trace,
+// default); the last two from the whole list, byte-identical to before.
+//
+// Nothing in the first two depends on the column's width beyond which side of
+// nine it is, and a canonical form no longer than the raw value fits every
+// column that holds it: two foreign-key-linked columns holding one value mask
+// it alike whenever they fall on the same side, and their Domain() agrees
+// exactly then, which is the question internal/plan's equality-group check
+// asks. The one exception is a value whose canonical form folding made longer
+// than the narrower of two such columns (ß, a ligature): that column takes
+// the over-long branch and the other does not.
 type freeTextMasker struct{}
 
+// Domain is the narrowest length's count, because the length now comes from
+// the value and Domain is handed only the column (mask/CLAUDE.md, "a generator
+// that branches on the value reports the narrowest branch the column admits"):
+// a one-character input is one whole filler word, len(fittedFillers.words)
+// values, in a column of nine characters or more, and one letter,
+// fillerInitials values, in a narrower one. Every longer input has at least as
+// many outputs, since its first word or first character already distinguishes
+// them. So a free_text column's admissible domain is 80 or 21 whatever its
+// width, where
+// it grew with the width before; the unique-index rule refused every unique
+// free_text column at every row count before this as well (the widest,
+// unbounded text, was 368,195 against d_required = 500,000 at one row).
 func (freeTextMasker) Domain(c Constraints) int64 {
 	if d, ok := labelDomain(c); ok {
 		return d
 	}
-	// A lower bound, which is the safe direction: for each admissible length
-	// the generator emits at least as many distinct values as there are filler
-	// words short enough to open one, and outputs of different lengths differ.
+	if l := freeTextExact(c); l > 0 {
+		return int64(max(1, fillers.count(l)))
+	}
+	m := freeTextMax(c)
+	if m < 1 {
+		return 0
+	}
+	if m < fittedFillers.longest() {
+		return int64(fillerInitials)
+	}
+	return int64(len(fittedFillers.words))
+}
+
+func (freeTextMasker) Mask(h [32]byte, in Value, c Constraints) (Value, error) {
+	if v, ok := labelValue(h, c); ok {
+		return v, nil
+	}
+	s := newStream(h)
+	if l := freeTextExact(c); l > 0 {
+		return Value{Text: filler(s, l)}, nil
+	}
+	maxLen := freeTextMax(c)
+	if maxLen < 1 {
+		return Value{}, ErrNoRoom
+	}
+	n := freeTextInputLen(in)
+	switch {
+	case n > maxLen:
+		return Value{Text: filler(s, 1+int(s.intn(int64(maxLen))))}, nil
+	case maxLen < fittedFillers.longest():
+		return Value{Text: fillerFrom(fittedFillers, s, n)}, nil
+	default:
+		return Value{Text: fillerAbout(s, n)}, nil
+	}
+}
+
+// fillerRangeDomain is the lower bound on what a filler whose length is drawn
+// from h inside [1, freeTextMax(c)] emits: for each admissible length, at least
+// as many distinct values as there are filler words short enough to open one,
+// and outputs of different lengths differ. It was free_text's own Domain until
+// T-0328; special_category's generic text branch and semi_structured's string
+// leaves still draw their length that way, so they keep it.
+func fillerRangeDomain(c Constraints) int64 {
+	if d, ok := labelDomain(c); ok {
+		return d
+	}
 	if l := freeTextExact(c); l > 0 {
 		return int64(max(1, fillers.count(l)))
 	}
@@ -270,37 +382,52 @@ func (freeTextMasker) Domain(c Constraints) int64 {
 	return total
 }
 
-func (freeTextMasker) Mask(h [32]byte, _ Value, c Constraints) (Value, error) {
-	if v, ok := labelValue(h, c); ok {
-		return v, nil
-	}
-	s := newStream(h)
-	length := freeTextExact(c)
-	if length == 0 {
-		maxLen := freeTextMax(c)
-		if maxLen < 1 {
-			return Value{}, ErrNoRoom
-		}
-		length = 1 + int(s.intn(int64(maxLen)))
-	}
-	return Value{Text: filler(s, length)}, nil
-}
-
 // filler builds exactly n bytes of neutral words.
-func filler(s *stream, n int) string {
+func filler(s *stream, n int) string { return fillerFrom(fillers, s, n) }
+
+// fillerFrom builds exactly n bytes of words drawn from w.
+func fillerFrom(w *wordList, s *stream, n int) string {
 	var b strings.Builder
 	b.Grow(n + 16)
 	for b.Len() < n {
 		if b.Len() > 0 {
 			b.WriteByte(' ')
 		}
-		b.WriteString(fillers.words[s.intn(int64(len(fillers.words)))])
+		b.WriteString(w.words[s.intn(int64(len(w.words)))])
 	}
 	out := b.String()[:n]
 	if strings.HasSuffix(out, " ") {
 		out = out[:n-1] + "x"
 	}
 	return out
+}
+
+// fillerAbout builds whole filler words, one space apart, about n characters
+// long: it stops at the first word boundary at or past n, and never runs past
+// limit = max(n, the longest filler word), so the result is between n-4 and
+// limit characters long and fits any column that holds both the input and the
+// longest word. Its words come from fittedFillers: the first from the whole
+// of it, a later one only from the words that still fit under limit.
+func fillerAbout(s *stream, n int) string {
+	w := fittedFillers
+	limit := max(n, w.longest())
+	var b strings.Builder
+	b.Grow(limit)
+	for b.Len() < n {
+		room := limit - b.Len()
+		if b.Len() > 0 {
+			room-- // the separating space
+		}
+		if room < w.shortest() {
+			break
+		}
+		k := w.count(room)
+		if b.Len() > 0 {
+			b.WriteByte(' ')
+		}
+		b.WriteString(w.words[s.intn(int64(k))])
+	}
+	return b.String()
 }
 
 // ---------- online_id ----------
