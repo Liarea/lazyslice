@@ -2147,6 +2147,55 @@ importing this package.
   either way; whether a label table's document should need it is T-0396.
   `TestADocumentWhoseOwnNameIsPersonalCarriesTheNameHit` (`t0393_test.go`)
   pins the eight names over testdata/regressions/046's own documents.
+- **The table-level log-shaped rule is carried on every column, not only the
+  JSON ones** (`Decision.LogShaped`, T-0398, the 2026-09-25 JSON red team's
+  round 1, entry 26). `finalise` sets it from `st.pack.logShapedTable(w.table.
+  Name)` — the identical call `appendContext`'s "jsonb in a log-shaped table"
+  reason fragment already makes, so the field and the fragment can never
+  disagree — for every column of a table `rules.yml`'s `log_shaped` regex
+  matches, whatever the column's own family. It is the fix for a mismatch
+  entry 26 found: `internal/transform` used to keep its own copy of the rule
+  (`logTableWords`), an eight-word list matched by splitting the table name on
+  `_` alone, with no CamelCase normalisation and no `activity` or `trace` —
+  so a CamelCase table (Prisma's default `AuditLog`) or an `*_activity`/
+  `*_trace` table was reported "replaced whole" here and walked leaf by leaf
+  there, copying every signal-free leaf once T-0272's per-leaf rule made a
+  walked leaf's default anything but a mask. `internal/transform`'s
+  `maskDocument` and `internal/verify`'s own restatement of the per-leaf rule
+  both read this field now (each package's own `leafPolicy`/`policyOf`,
+  `logShaped`), in place of `logTableWords`, which is gone.
+  `TestLogShapedMatchesTheRulePackWhereverTheReasonLineDoes` (`t0398_test.go`)
+  pins the field against the reason line over the CamelCase and `activity`/
+  `trace` shapes `logTableWords` missed, and a table the rule does not match;
+  `TestLogShapedIsSetOnEveryColumnOfTheTable` pins that it is a table-level
+  fact and not gated on family. Like `NameHit`, it changes no column decision
+  and is not emitted or fingerprinted; `testdata/regressions/050` runs the
+  CamelCase and `*_activity` shapes end to end.
+  - **`logShapedTable` ORs the regex against two folds of the table name, not
+    one** (T-0398 review round, high finding). The first landing tried the
+    regex only against `normaliseName`, whose acronym-boundary rule
+    (`needsBreak`'s upper-upper-then-lower case, written for `IDToken` ->
+    `id_token`) also splits a trailing lower-case plural off an all-caps
+    word: `EVENTs` normalises to `even_ts`, `LOGs` to `lo_gs`, `AUDITs` to
+    `audi_ts`, and the same split happens with the word embedded
+    (`user_LOGs` -> `user_lo_gs`, `x_LOGs_y` -> `x_lo_gs_y`). None of those
+    match the regex's whole-word test, so those tables' jsonb columns were
+    walked leaf by leaf instead of replaced whole — the exact T1 leak this
+    task exists to close, reopened for the all-caps-plural shape, and the
+    deleted `logTableWords` copy (a plain lower-case-and-split-on-`_` word
+    match, no case-boundary splitting at all) had caught every one of them.
+    `logShapedTable` now also tries `lowerUnderscoreFold` — the same fold
+    `logTableWords` effectively was, lower-case the letters and turn every
+    other non-name rune into `_`, with no word-splitting on a case
+    boundary — and ORs the two matches. Root CLAUDE.md's "when in doubt,
+    mask it" makes the direction non-negotiable: a name either fold already
+    caught (`AuditLog`, which has no underscore for `lowerUnderscoreFold` to
+    split on and needs `normaliseName`'s CamelCase break) must keep matching,
+    so the fix adds a second fold rather than replacing the first.
+    `TestLogShapedMatchesTheRulePackWhereverTheReasonLineDoes` gained the six
+    names the deleted `logTableWords` matched that the first landing's
+    single-fold version did not (`EVENTs`, `LOGs`, `user_LOGs`,
+    `AUDIT_LOG`, `Events`, `Order_HISTORIES`).
 - **`Classification.PhoneRegion` is the region `Classify` ran under**
   (`prior.PhoneRegion`), set for `internal/transform`, whose per-leaf value
   half reads a phone number under it the way `internal/verify`'s net does.

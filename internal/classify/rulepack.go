@@ -147,8 +147,50 @@ func (p *compiledPack) accepted(cat pipeline.Category, family string) bool {
 
 // logShapedTable reports whether a table is named like the audit, log, history
 // or event tables whose jsonb ARCHITECTURE.md §4 replaces whole.
+//
+// It tries the regex against two different folds of name and ORs the result,
+// rather than against normaliseName alone (T-0398 review round, high
+// finding). normaliseName's needsBreak splits a trailing lower-case run off
+// an all-caps word ("IDToken" -> "id_token"), which is right for an acronym
+// but wrong for a plural: "EVENTs" normalises to "even_ts", "LOGs" to
+// "lo_gs", "AUDITs" to "audi_ts" -- none of which the log_shaped regex's
+// whole-word match can ever see, so a table named that way (or with the
+// upper-case word embedded, "user_LOGs", "x_LOGs_y") was reported log-shaped
+// by nothing here while the reason fragment and the deleted logTableWords
+// copy this rule replaced both called it one. lowerUnderscoreFold is
+// normaliseName without the case-driven word splitting -- lower-case the
+// letters, turn every other non-name rune into '_', and leave the rest
+// alone, the same fold logTableWords used (strings.ToLower plus a split on
+// '_') -- so the two folds together are a strict superset of either alone:
+// normaliseName still catches a CamelCase table with no underscore at all
+// ("AuditLog"), and lowerUnderscoreFold catches the all-caps-plural and
+// embedded-acronym shapes normaliseName's word-splitting defeats. Root
+// CLAUDE.md's rule is "when in doubt, mask it": this must only ever gain
+// matches over either fold alone, never lose one, so the two are ORed and
+// neither replaces the other.
 func (p *compiledPack) logShapedTable(name string) bool {
-	return p.logShaped != nil && p.logShaped.MatchString(normaliseName(name))
+	if p.logShaped == nil {
+		return false
+	}
+	return p.logShaped.MatchString(normaliseName(name)) || p.logShaped.MatchString(lowerUnderscoreFold(name))
+}
+
+// lowerUnderscoreFold lower-cases name and turns every rune that is not a
+// lower-case letter, a digit or '_' into '_', with no case-boundary word
+// splitting at all -- see logShapedTable, the one caller this exists for.
+func lowerUnderscoreFold(s string) string {
+	out := make([]rune, 0, len(s))
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '_':
+			out = append(out, r)
+		case r >= 'A' && r <= 'Z':
+			out = append(out, r-'A'+'a')
+		default:
+			out = append(out, '_')
+		}
+	}
+	return string(out)
 }
 
 // pack is the compiled rule pack. It is loaded once; a malformed pack is a

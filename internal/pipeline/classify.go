@@ -218,6 +218,34 @@ type Decision struct {
 	// It is in memory only, like LeafKeys: internal/emit writes named fields
 	// of a Decision and not this one, and every run re-derives it.
 	NameHit Category
+	// LogShaped reports that this column's table matched rules.yml's single
+	// log_shaped rule (the rule pack's own regex over the normalised --
+	// case-split, lower-cased -- table name: an underscore-bounded
+	// audit(s)/log(s)/history/histories/event(s)/activity(ies)/trace(s)
+	// word), independent of the column's own family or decision (T-0398, the
+	// 2026-09-25 JSON red team's round 1, entry 26). ARCHITECTURE.md §4:
+	// such a table's json/jsonb document is replaced whole with {}, not
+	// walked leaf by leaf.
+	//
+	// Before this field, internal/transform's maskDocument answered the same
+	// question with its own copy, logTableWords -- a fixed eight-word list
+	// with no activity or trace, matched by splitting the table name on '_'
+	// alone, with no CamelCase normalisation. The reasons line already named
+	// the rule pack's own regex ("jsonb in a log-shaped table: the document
+	// is replaced whole", appendContext), so a CamelCase table (Prisma's
+	// default "AuditLog") or an *_activity or *_trace table was reported
+	// replaced whole and walked leaf by leaf instead, copying every leaf
+	// with no signal of its own. Before T-0272 that mismatch cost nothing --
+	// every walked leaf was masked regardless -- and T-0272's per-leaf rule
+	// is what turned it into a leak.
+	//
+	// internal/transform's maskDocument and internal/verify's own
+	// restatement of the per-leaf rule (jsonleaf.go) both read this field
+	// now, through their own leafPolicy/policyOf, instead of keeping a
+	// second copy of the rule. It is in memory only, like NameHit:
+	// internal/emit writes named fields of a Decision and not this one, and
+	// every run re-derives it from the same rule pack the reason line reads.
+	LogShaped bool
 }
 
 // LeafNameCategory is the category every leaf of a document column is masked

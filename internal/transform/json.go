@@ -73,29 +73,6 @@ import (
 // document this package cannot parse becomes. It is never the source document.
 const emptyDocument = "{}"
 
-// logTableWords are the table-name words §4 names: "any jsonb in a table named
-// like audit|log|history|event" is replaced with {} rather than walked leaf by
-// leaf. Plurals are included because a table is more often called events than
-// event (testdata/README.md trap 16b is public.events).
-var logTableWords = map[string]bool{
-	"audit": true, "audits": true,
-	"log": true, "logs": true,
-	"history": true, "histories": true,
-	"event": true, "events": true,
-}
-
-// logShaped reports whether a table's name carries one of those words as a
-// word. It is matched on underscore-separated segments rather than as a
-// substring, so "catalogue" is not a log and "audit_log" is.
-func logShaped(t ref.TableRef) bool {
-	for _, part := range strings.Split(strings.ToLower(t.Name), "_") {
-		if logTableWords[part] {
-			return true
-		}
-	}
-	return false
-}
-
 // leafCategory is the category every masked JSON leaf is *canonicalised*
 // under for the residual filter (addLeaf), and the masker a leaf gets when
 // nothing names a better one. ARCHITECTURE.md §4 sends a string leaf's key name
@@ -120,19 +97,26 @@ type leafVerdict struct {
 // column's own category and source come first (nil for any column that is not
 // the classifier's plain semi_structured verdict), the category the column's
 // own name gave it when that name did not decide the column
-// (pipeline.Decision.LeafNameCategory, T-0393; empty otherwise), and the
-// phone region the run classified under (pipeline.Classification.PhoneRegion),
-// which the value half reads.
+// (pipeline.Decision.LeafNameCategory, T-0393; empty otherwise), the phone
+// region the run classified under (pipeline.Classification.PhoneRegion),
+// which the value half reads, and whether the column's table matched the rule
+// pack's log_shaped rule (pipeline.Decision.LogShaped, T-0398): maskDocument
+// reads that last field ahead of any of this, because a log-shaped table's
+// document is replaced whole and never reaches leafRule at all.
 type leafPolicy struct {
-	keys   map[string]pipeline.Category
-	name   pipeline.Category
-	region string
+	keys      map[string]pipeline.Category
+	name      pipeline.Category
+	region    string
+	logShaped bool
 }
 
 // policyOf is the leaf policy a masked document column's decision gives, the
 // one place transform reads the decision's leaf half.
 func policyOf(d pipeline.Decision, region string) leafPolicy {
-	return leafPolicy{keys: d.LeafMap(), name: d.LeafNameCategory(), region: region}
+	return leafPolicy{
+		keys: d.LeafMap(), name: d.LeafNameCategory(), region: region,
+		logShaped: d.LogShaped,
+	}
 }
 
 // leafRule is T-0272's per-leaf decision, in this order:
@@ -410,8 +394,11 @@ func (t transformer) maskDocument(
 	res pipeline.Residual,
 ) (any, error) {
 	// An hstore is replaced whole rather than walked: nothing here parses one,
-	// and a document nothing can parse must not be copied through.
-	if shape.family == famHstore || logShaped(col.Table) {
+	// and a document nothing can parse must not be copied through. A
+	// log-shaped table's document is the other unconditional collapse
+	// (§4); lp.logShaped is pipeline.Decision.LogShaped, the rule pack's own
+	// answer (T-0398) and not a second copy of it.
+	if shape.family == famHstore || lp.logShaped {
 		return t.collapseDocument(col, shape, v, key, res)
 	}
 

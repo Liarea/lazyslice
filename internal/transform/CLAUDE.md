@@ -249,13 +249,30 @@ sees that case and must not paper over it with a retry.
     (exit 7) often across a large table; this widened the set of keys that
     can reach it (**T-0400**).
 - **"Wildly varying keys" is not implemented here.** §4 names two triggers for
-  collapsing a document to `{}`; the table-name one (`audit|log|history|event`,
-  plus plurals, matched on underscore-separated words) is deterministic per
-  column and is implemented. "Wildly varying keys" is a property across a
-  column's rows, which a pure per-batch `Transform` cannot see and a classifier
-  with 200 samples can: it belongs in `internal/classify`, which would set
+  collapsing a document to `{}`; the table-name one is deterministic per column
+  and is implemented. "Wildly varying keys" is a property across a column's
+  rows, which a pure per-batch `Transform` cannot see and a classifier with 200
+  samples can: it belongs in `internal/classify`, which would set
   `Decision.Masker` to `fixed:{}` — a masker id `mask.Get` already understands.
   Reported as an open task.
+  - **The table-name trigger is `pipeline.Decision.LogShaped`, not a second
+    copy of the rule** (T-0398, the 2026-09-25 JSON red team's round 1, entry
+    26). Until this task `maskDocument` matched the table name itself
+    (`logTableWords`, a fixed eight-word list — `audit(s)`, `log(s)`,
+    `history`/`histories`, `event(s)` — matched by splitting the name on `_`
+    alone), which agreed with `internal/classify`'s own rule pack regex
+    (`rules.yml`'s `log_shaped`, `(^|_)(audit|audits|log|logs|history|
+    histories|event|events|activity|activities|trace|traces)(_|$)` over the
+    normalised — case-split, lower-cased — table name) only by accident: it
+    carried neither `activity` nor `trace`, and it never split a CamelCase
+    name, so a `*_activity`/`*_trace` table or Prisma's default `AuditLog`
+    was reported "replaced whole" by the reasons line and walked leaf by leaf
+    here instead, copying every signal-free leaf — harmless before T-0272
+    (every walked leaf was masked regardless), a leak once T-0272 shipped.
+    `maskDocument` now reads `lp.logShaped`, `leafPolicy`'s own carrier of
+    `Decision.LogShaped`, which `internal/classify`'s `finalise` sets from the
+    identical rule-pack call the reason line uses — one rule, read by both
+    packages, never a second copy.
 - **`json` is collapsed in a log-shaped table as well as `jsonb`.** §4 says
   `jsonb`; collapsing is strictly more masking than walking, and CLAUDE.md's
   rule is to mask more when in doubt.

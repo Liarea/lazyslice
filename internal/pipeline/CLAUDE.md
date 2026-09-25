@@ -182,3 +182,23 @@ one, and `LeafMap` is nil whenever it is set, so every leaf of such a document
 is masked under it rather than decided by the per-leaf map. Like `LeafKeys` it
 is in memory only; `internal/emit` does not write it. Both methods are field
 comparisons, on the footing `LeafMap` already stood on.
+
+**`Decision` has a `LogShaped` (T-0398, 2026-09-25).** ARCHITECTURE.md §2
+prints it. `internal/classify`'s `finalise` sets it from the rule pack's own
+`logShapedTable` call — the same one `appendContext`'s "jsonb in a log-shaped
+table" reason fragment already uses — on every column of a matching table,
+whatever the column's own family. It is the single answer to ARCHITECTURE.md
+§4's log-shaped rule: before this field, `internal/transform` kept a second
+copy of the rule (`logTableWords`, a fixed eight-word list split on `_` alone,
+with no CamelCase normalisation and no `activity`/`trace`) that agreed with
+the rule pack's regex only by accident, so a CamelCase table (Prisma's default
+`AuditLog`) or an `*_activity`/`*_trace` table was reported "replaced whole"
+by the plan and walked leaf by leaf instead — harmless before T-0272, because
+every walked leaf was masked regardless, and a leak once T-0272's per-leaf
+rule shipped (the 2026-09-25 JSON red team's round 1, entry 26).
+`internal/transform`'s `maskDocument` and `internal/verify`'s own restatement
+of the per-leaf rule (`jsonleaf.go`) both carry it on their own `leafPolicy`
+now (`logShaped`, set in each package's `policyOf`) instead of re-deriving it,
+the same route `LeafMap`/`LeafNameCategory` already take onto each package's
+own `leafPolicy`. It is in memory only, like `NameHit`: `internal/emit` does
+not write it, and every run re-derives it from the rule pack.

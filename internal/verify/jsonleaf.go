@@ -62,17 +62,23 @@ const leafCategory = pipeline.CatFreeText
 // leafPolicy is internal/transform's: the decision's per-leaf map through
 // pipeline.Decision.LeafMap, the category the column's own name gave every
 // leaf when its type decided the column (pipeline.Decision.LeafNameCategory,
-// T-0393), and the classification's phone region.
+// T-0393), the classification's phone region, and whether the column's table
+// matched the rule pack's log_shaped rule (pipeline.Decision.LogShaped,
+// T-0398).
 type leafPolicy struct {
-	keys   map[string]pipeline.Category
-	name   pipeline.Category
-	region string
+	keys      map[string]pipeline.Category
+	name      pipeline.Category
+	region    string
+	logShaped bool
 }
 
 // policyOf is internal/transform's: the leaf policy a masked document
 // column's decision gives.
 func policyOf(d pipeline.Decision, region string) leafPolicy {
-	return leafPolicy{keys: d.LeafMap(), name: d.LeafNameCategory(), region: region}
+	return leafPolicy{
+		keys: d.LeafMap(), name: d.LeafNameCategory(), region: region,
+		logShaped: d.LogShaped,
+	}
 }
 
 // categorised reports whether any leaf under p can have been replaced through
@@ -80,8 +86,15 @@ func policyOf(d pipeline.Decision, region string) leafPolicy {
 // name whose category keeps its own masker for a leaf (T-0393's jsonb
 // `emails`, `by_phone`, `home_address`, `passwords`, `national_id`). With
 // neither, every masked leaf is free_text filler, which the net reads.
+//
+// A log-shaped column is never categorised, whatever LeafMap or
+// LeafNameCategory answer (T-0398): internal/transform's maskDocument
+// collapses such a column to {} before leafRule ever runs, so nothing under
+// it was ever replaced through a category's own masker -- generatedFromMasked
+// leaves below must not treat one of its keys as a generated column's own
+// row value.
 func (p leafPolicy) categorised() bool {
-	return p.keys != nil || leafMaskerEmits(p.name)
+	return !p.logShaped && (p.keys != nil || leafMaskerEmits(p.name))
 }
 
 // leafVerdict is what leafRule decides for one leaf.

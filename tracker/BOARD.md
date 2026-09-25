@@ -8,8 +8,8 @@
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 0 | 0 | 108 | 0 | 0 |
-| E6 Launch | 6 | 11 | 0 | 45 | 0 | 0 |
-| E9 Later | later | 145 | 0 | 40 | 8 | 0 |
+| E6 Launch | 6 | 8 | 0 | 48 | 0 | 0 |
+| E9 Later | later | 146 | 0 | 40 | 9 | 0 |
 
 ## Open and in progress
 
@@ -146,19 +146,13 @@
 - T-0380 [open] E9 · verify: T-0369 follow-ups: bytea reaches the type-conflict route; categoryAcceptedFamilies is tested against rules.yml; the new codes' messages are rendered in a test (sonnet)
 - T-0382 [open] E9 · discover: T-0334 follow-ups: one 'ours' predicate; found.own exempts only postgres; the own container's rank against the name pattern; the second-run test proves run 2 loaded (sonnet)
 - T-0383 [open] E9 · free_text gets the ADR-015 vocabulary gate and redraw ()
-- T-0384 [open] E9 · CONCEPT.md's zero-config sentence still says a first run asks at most one blocking question ()
 - T-0386 [open] E9 · tui/cli: T-0345 follow-ups: the closing line is asserted with a target; an interrupted leave is pinned to exit 130 at the command; esc and ctrl+c compare like every other key (sonnet)
 - T-0387 [open] E9 · core/plan: T-0346 follow-ups: ParseLookupRows only on a lookup step; a core test over stepRows and stepWhy; the assemble comment and the Step.Why contract (sonnet)
 - T-0388 [open] E9 · docs: T-0357 and T-0358 follow-ups: README and SECURITY residual wording (sentence placement, the one-case hex qualifier and the sweep effect, the eight identifier suffixes, the bare check-digit callers, rewrap) (sonnet)
 - T-0389 [open] E9 · mask: T-0328 follow-ups: Domain inequality across the 9-character boundary, a bpchar-padded and a non-ASCII narrow-column case, Small's caller note (sonnet)
-- T-0390 [open] E9 · A JSON leaf reads --phone-region before it is copied, as verify's second net already does (sonnet)
 - T-0391 [open] E9 · core: T-0343 follow-ups: a terminal run asks Q1 then Q2 against a live Docker daemon; ARCHITECTURE section 9's Q4 cell after ADR-017 (sonnet)
 - T-0392 [open] E9 · discover: T-0385 follow-ups: the section 9 amendment says what service: records; the namePrefix comment names ownContainer; LabelProject asserted in a provision test; trailing blank line (sonnet)
-- T-0393 [open] E6 · A document column whose own name is personal has every leaf masked, whatever category the name matched (opus)
-- T-0394 [open] E6 · The phone region reaches document keys and leaves, and a key whose sampled leaves are phone numbers masks them (opus)
-- T-0395 [open] E9 · A national-format phone number used as a JSON object key is masked under the run's --phone-region, as the second net already reads it ()
 - T-0396 [open] E9 · Decide whether a document column named just 'name' needs corroboration before every leaf is masked, as a text column does ()
-- T-0397 [open] E6 · The second net's generated-column skip covers only the leaf the expression reads (opus)
 - T-0398 [open] E6 · One log-shape rule: the classifier's replaced-whole verdict is the one transform and verify apply (sonnet)
 - T-0399 [open] E6 · A composite type holding a json, jsonb or hstore field is refused at plan, not classified over its record text (sonnet)
 - T-0400 [open] E9 · A document keyed by many phone numbers refuses at exit 7 on a masked-key collision ()
@@ -169,6 +163,10 @@
 - T-0405 [open] E9 · A generated column's path-operator reads raise the document keys they read, as its arrow reads do ()
 - T-0406 [open] E9 · A second-net refusal on a generated column names a remedy that works on a generated column ()
 - T-0407 [open] E6 · The v0.4.0 truth pass over README, SECURITY, CONCEPT, the quickstart transcript and the launch drafts (sonnet)
+- T-0408 [open] E9 · classify/transform: T-0272 follow-ups: jsonSignal reads decoded documents; the EAV document shape is named (sonnet)
+- T-0409 [open] E9 · verify/docs: T-0393 follow-ups: an hstore column's name hit does not narrow the second net; SECURITY item 8 names which categories mask as filler; fixture 046 pins every leaf (sonnet)
+- T-0410 [open] E9 · classify/transform: T-0394 follow-ups: fixture 048 sees the leaf under the national key; the value half applies the T-0317 name veto; guessedPhoneRatio's cost; the key-collision wording (sonnet)
+- T-0411 [open] E9 · verify/classify: T-0397 follow-ups: only the last arrow operand is raised; a generated column copying a subdocument is documented; btrim, NULL and two-document cases tested (sonnet)
 
 ## Recently closed
 
@@ -181,6 +179,10 @@
 - T-0359 [done] E6 · THREAT_MODEL.md T1 owes the T-0317 amendment (network_id/version veto, phone-guess key/code/license/serial/token veto) → done
 - T-0381 [done] E6 · Amend README.md and SECURITY.md residual 4 for T-0317's network_id/phone name-veto widening → done
 - T-0385 [done] E6 · discover: a yml committed before T-0333 still finds its lazyslice-target-lazyslice-* container; ARCHITECTURE section 9 records the name rule; the Q1 and create path is tested end to end → done
+- T-0393 [done] E6 · A document column whose own name is personal has every leaf masked, whatever category the name matched → done
+- T-0394 [done] E6 · The phone region reaches document keys and leaves, and a key whose sampled leaves are phone numbers masks them → done
+- T-0395 [cancelled] E9 · A national-format phone number used as a JSON object key is masked under the run's --phone-region, as the second net already reads it → cancelled
+- T-0397 [done] E6 · The second net's generated-column skip covers only the leaf the expression reads → done
 - T-0143 [done] E9 · Decide the arbitrary-JSON policy: structure-preserving masking versus whole-document replacement → done
 - T-0311 [done] E6 · The neighbouring-column sweep spares enum-like, identifier-shaped and unique-indexed columns → done
 - T-0312 [done] E6 · The same-column-name rule does not propagate a decision that was itself only a neighbour sweep → done
@@ -193,7 +195,3 @@
 - T-0319 [done] E6 · After a second-net refusal the operator can mask the column: --mask, and every failing column reported at once → done
 - T-0320 [done] E6 · A green run prints one verify summary line and how to reach the target → done
 - T-0321 [done] E6 · The reasons dump and the plan end with a summary, and a re-run from a committed yml is quiet → done
-- T-0325 [done] E6 · --unmask on a first run must not put it on the re-run path; the drift message names the real decision → done
-- T-0326 [done] E6 · A stray positional argument is a usage error, not 'the source did not report a server version' → done
-- T-0327 [done] E6 · A committed yml whose target is a container lazyslice created reconnects or re-provisions, and says which → done
-- T-0331 [done] E6 · Decide whether a first run may ask both the target question and the root question → done
