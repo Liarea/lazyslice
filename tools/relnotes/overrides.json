@@ -20,5 +20,18 @@
  ],
  "eb4657b": [
   "No user-visible change beyond the entry above, which this commit re-lands on the published mask/v0.3.0; the tool now requires mask v0.3.0."
+ ],
+ "5a77f1b": [
+  "lazyslice.yml now lists, under a json or jsonb column's new leaf_keys: entry, the document keys whose values the run copied, so the committed file shows which keys cross in clear (a yml format change for this 0.x minor; older lazyslice versions refuse a file carrying the key)",
+  "On a re-run from a committed lazyslice.yml, a document key the source now shows that the file does not list has every value under it masked instead of copied, and is printed as drift naming the column and the key (for example prefs->'guest'), never a value",
+  "--strict-schema now exits 10 when a document key is not listed in the committed yml, not only when a whole column is new, and the re-run summary's drift count includes such keys",
+  "A document key that is not shaped like an identifier (a name with a space, a UUID) is written to lazyslice.yml and named in drift lines as a sha256: fingerprint, so a value used as a key never lands in the committed file",
+  "A lazyslice.yml written by an earlier version lists no document keys, so the first re-run from it masks and reports every copied document key once; the file that run writes lists them and later runs copy them again",
+  "README, SECURITY.md item 8, THREAT_MODEL T1/T3/T5 and ARCHITECTURE now describe leaf_keys: and key drift",
+  "A document key the committed lazyslice.yml does not list stays masked and reported as drift on every run until you add it to the column's leaf_keys: by hand; a run that rewrites the file no longer approves it for the next run",
+  "The document-key drift line now reads 'masked, not copied until the key is listed under the column's leaf_keys:', naming the step that copies the key",
+  "leaf_keys: writes fewer keys as themselves: a UUID, a dotted handle, a key with digits other than a short suffix, an all-hex key and a key over 32 bytes are written as sha256: fingerprints, and so is every key of a column whose documents show more than 64 distinct keys",
+  "README's description of leaf_keys: and SECURITY item 8 are corrected: a new key is copied only once someone lists it, and the UUID and value-shaped-key claims now match what is written",
+  "A lazyslice.yml written before this release lists no leaf keys: the first run over it masks every copied document key, reports each once as drift and writes the list into the file; a pipeline that runs with --strict-schema must run once without the flag, or run lazyslice plan, to write the list before the strict run passes again"
  ]
 }
