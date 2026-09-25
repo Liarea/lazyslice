@@ -237,8 +237,9 @@ The flags a first run meets. The full set, one row per registered flag grouped b
 
 ## Why
 
-**Zero config.** A first run asks at most one blocking question — which table
-to start from — and then works; a headless run asks none. Nothing above
+**Zero config.** A first run at a terminal asks only what it could not settle
+on its own — which table to start from, and, when it found no database to
+load into, whether to start one — and then works; a headless run asks none. Nothing above
 needed a YAML file written before it could run: `lazyslice.yml` is what a run
 *emits* once it has already worked, a record to commit for next time, never a
 prerequisite for the first one. We refuse to ship any feature whose first-run
@@ -268,7 +269,7 @@ guessing. lazyslice's own cells describe `v0.3.0` exactly as installed above.
 | | lazyslice | Greenmask | PostgreSQL Anonymizer | Tonic Structural |
 |---|---|---|---|---|
 | Time to first snapshot | One command and no config step — the run above went from the command line to `complete` with nothing written beforehand | A config file is written first; the bundled playground's own quickstart edits its sample `config.yml` before the first `dump`[^gm-quick] | Six DDL/SQL statements before a masked read: create the extension, enable it, load a sample table, initialise masking, create a masked role, declare a rule[^pga-home] | Sign up, verify by email, create a workspace, then a sensitivity scan and a generation run — about seven to eight steps end to end[^tonic-quick] |
-| Config required before first run | None — `--no-config` above wrote nothing; a run with no flags asks at most one question (which table to start from, or whether to start a target container when none is found) and otherwise stops naming the flag it needs | Yes — "a configuration file is mandatory for Greenmask functioning"[^gm-quick] | Yes — masking rules are declared as `SECURITY LABEL`s on each column, a policy stored in the database, before anything is masked[^pga-rules] | An account and a workspace, always; a bundled sample workspace needs no database connection, but masking your own data does[^tonic-quick] |
+| Config required before first run | None — `--no-config` above wrote nothing; a run with no flags at a terminal asks at most two questions (whether to start a target container when none is found, then which table to start from) and a headless one that cannot settle the target stops naming the flag it needs | Yes — "a configuration file is mandatory for Greenmask functioning"[^gm-quick] | Yes — masking rules are declared as `SECURITY LABEL`s on each column, a policy stored in the database, before anything is masked[^pga-rules] | An account and a workspace, always; a bundled sample workspace needs no database connection, but masking your own data does[^tonic-quick] |
 | Databases | PostgreSQL 14–18 only | PostgreSQL (full support); MySQL "in progress"[^gm-repo] | PostgreSQL only, plus the Postgres-compatible forks Greenplum and YugabyteDB[^pga-home] | Postgres, Oracle, Db2, MySQL, SQL Server, Redshift, Snowflake, BigQuery, MongoDB, Databricks, Spark, S3, Salesforce and flat files[^tonic-product] |
 | Masking determinism (same input, same output across runs) | Deterministic under a local key by construction — the same value always masks the same way for the same key and category (see "How it decides what is personal data" below) | Opt-in, not the default: `engine` "by default is set to `random`"; the hash engine has to be chosen explicitly for the same input to always produce the same output[^gm-engine] | Opt-in, not the default: the built-in masking functions are random; the same input is deterministic only through the separate `pseudo_*`/`hash` functions, seeded by hand[^pga-funcs] | Stated as a feature — "automated, consistent transformations that preserve relationships and referential integrity"[^tonic-product] |
 | Licence | Apache-2.0 | Apache-2.0[^gm-repo] | The PostgreSQL License[^pga-license] | Proprietary — no free or open-source tier; "Professional" and "Enterprise" are both custom-priced[^tonic-price] |

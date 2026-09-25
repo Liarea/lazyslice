@@ -22,7 +22,8 @@ import (
 // from cron takes the headless path and creates nothing.
 var ErrNoTerminal = errors.New("discover: no controlling terminal")
 
-// Prompter asks the one blocking question a run may ask.
+// Prompter asks a run's blocking questions: Q1 and Q1' here, and Q2 through
+// OpenPrompter in internal/core (ADR-008 §6, ADR-017).
 //
 // It is an interface so that a test can answer without a terminal; the only
 // implementation outside a test is the controlling-terminal one below.

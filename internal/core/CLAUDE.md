@@ -882,3 +882,24 @@ controlling terminal. It is still a test seam with no flag.
 `TestTwoRunsFromOneDirectoryReuseTheContainerTheFirstMade`
 (`second_run_integration_test.go`) is the caller: two runs from one directory
 with nothing but `--source`, against the container a first run's Q1 made.
+
+## Q2 is asked after Q1 (T-0343, ADR-017)
+
+`rootQuestion` no longer skips Q2 because discovery asked Q1 or Q1′, and
+the `askedQ1` field is gone from `run`: ADR-008's one-question rule let the
+target question take a first run's only slot, and dogfood session 3 never saw
+the root question (T-0331). ADR-017 (proposed) makes the rule "no question
+whose default was already shown". Q2 is still skipped for `--root`, a
+yml-recorded root, a reviewed `--tui` root and a headless run, and `?` still
+prints the ranked candidates. `discover.Result.Asked` is still reported and
+nothing here reads it.
+
+`run.resolve` is a test seam beside `Request.prompter` and `noTerminal`: nil
+(every real run) is `discover.Resolve`. `questions_test.go` sets it for the
+one case the real ladder cannot reach in a unit test, Q1 answered yes at a
+terminal, which needs a live source for its major and a real container. The
+headless cases, and the whole-`Run` pin that a headless run with nothing
+settled still stops at exit 4 naming `--create-target`, use the real ladder
+against an `httptest` Docker endpoint on a loopback `tcp://` address that
+answers a ping and lists no containers. CONCEPT.md's "at most one blocking
+question" sentence is outside this package's paths and owed (T-0384).
