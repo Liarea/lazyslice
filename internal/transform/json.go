@@ -19,10 +19,18 @@ import (
 
 // JSON leaf walking (ARCHITECTURE.md §4 "Free text and JSON", §6 item 1).
 //
-// Structure and key names are kept and every scalar leaf is replaced. A string
-// leaf goes through the free_text masker; a number leaf becomes a number of the
-// same kind derived from h; a boolean leaf becomes a boolean derived from h;
-// null stays null; arrays and objects keep their shape.
+// Structure and key names are kept. Which scalar leaves are replaced is the
+// decision's per-leaf map (pipeline.Decision.LeafKeys, T-0272, the
+// maintainer's T-0143 decision of 2026-09-24), read by leafRule below: a leaf
+// with a personal signal on its key or its value is replaced, a leaf with none
+// under keys the samples showed is copied, and every other leaf is replaced as
+// every leaf was before. The map is read through pipeline.Decision.LeafMap, so
+// a column whose own decision names a personal category (a jsonb
+// `medical_history`) or that an operator raised has no map, and every one of
+// its leaves is replaced. A replaced string leaf goes through its category's
+// masker (leafMasker) or free_text; a replaced number leaf becomes a number of
+// the same kind derived from h; a replaced boolean leaf becomes a boolean
+// derived from h; null stays null; arrays and objects keep their shape.
 //
 // Every masked leaf enters the residual filter *separately, keyed by its JSON
 // path*, which is what makes one surviving leaf findable inside a document that
@@ -35,16 +43,20 @@ import (
 // once, here and in internal/transform/CLAUDE.md, and every Add for a leaf goes
 // through addLeaf so there is one place to read it:
 //
-//	string leaf   mask.Canonical(free_text, the string), keyed by its path
+//	string leaf   mask.Canonical(free_text, the string), keyed by its path,
+//	              whichever category's masker replaced it
 //	number leaf   mask.Canonical(free_text, the JSON spelling), keyed by its path
 //	boolean leaf  not recorded — a two-valued domain carries no residual signal
 //	null leaf     not recorded — it is not masked
+//	copied leaf   not recorded — the target holds the same value (leafRule)
 //	document      mask.Canonical(semi_structured, the source text) under the
 //	              empty path, and only when a collapse changed it
 //
-// free_text is what §4's default gives an unrecognised key, and it is now what
-// every string leaf gets: the alternative was a second name-rule pack inside
-// this package, whose vocabulary no other package could see (see CLAUDE.md).
+// A replaced string leaf is recorded under free_text's canonical form whatever
+// masker replaced it, so the entry never depends on which category leafRule
+// chose: internal/verify tests every string leaf of the target under free_text
+// at its path, as it did before per-leaf categories existed, and a copied leaf
+// is simply not in the filter to be found.
 //
 // Key names survive masking, with one exception: a key that itself parses as
 // an email, a phone number or a credit-card number under a strong validator
@@ -83,21 +95,156 @@ func logShaped(t ref.TableRef) bool {
 	return false
 }
 
-// leafCategory is the category every JSON leaf is masked and canonicalised
-// under. ARCHITECTURE.md §4 sends a string leaf's key name "through the name
-// rules", which are the embedded rule pack in internal/classify — another stage
-// package, which internal/CLAUDE.md forbids reaching into. A hand-written table
-// here was a second rule pack: a different vocabulary, a different match, and
-// outside Classification.Fingerprint, so editing it would silently change
-// masked output; and because it was unexported, internal/verify could not
-// reproduce the canonical bytes of a leaf it classified, which is the residual
-// control failing open (THREAT_MODEL.md T12).
-//
-// So this is §4's own default and nothing more, until §14's one-level JSON key
-// collection lands in internal/classify and can set the category per leaf.
-// Every string leaf is still masked; what is lost is the shape of the fake — an
-// email leaf becomes free text rather than an address. CLAUDE.md records it.
+// leafCategory is the category every masked JSON leaf is *canonicalised*
+// under for the residual filter (addLeaf), and the masker a leaf gets when
+// nothing names a better one. ARCHITECTURE.md §4 sends a string leaf's key name
+// "through the name rules", which are the embedded rule pack in
+// internal/classify — another stage package, which internal/CLAUDE.md forbids
+// reaching into — so the name rules reach this package as data, the
+// decision's LeafKeys map, which internal/classify fills from the sampled
+// documents and internal/verify reads back (T-0272). A hand-written table here
+// would be a second rule pack outside Classification.Fingerprint, which is
+// what an earlier version of this file had and removed.
 const leafCategory = pipeline.CatFreeText
+
+// leafVerdict is what leafRule decides for one leaf: copy it, or mask it under
+// cat's masker.
+type leafVerdict struct {
+	copy bool
+	cat  pipeline.Category
+}
+
+// leafPolicy is what one document column's leaves are decided under: the
+// decision's per-leaf map, read through pipeline.Decision.LeafMap so that the
+// column's own category and source come first (nil for any column that is not
+// the classifier's plain semi_structured verdict), and the phone region the
+// run classified under (pipeline.Classification.PhoneRegion), which the value
+// half reads.
+type leafPolicy struct {
+	keys   map[string]pipeline.Category
+	region string
+}
+
+// leafRule is T-0272's per-leaf decision, in this order:
+//
+//  1. p.keys is nil — the decision carries no map, because nothing was
+//     sampled or nothing set one, or the column's own decision is a personal
+//     category or an operator's raise (pipeline.Decision.LeafMap) — and every
+//     leaf is masked as free_text, exactly as before per-leaf categories
+//     existed.
+//  2. The nearest enclosing key the map names with a category, walking out
+//     from the leaf's own key to the document's root, masks the leaf under
+//     that category (an "address" object's "line1" is an address).
+//  3. A value a validator recognises (leafValueCategory) masks the leaf under
+//     the validator's category, whatever its keys say. text is empty for a
+//     boolean, which no validator reads.
+//  4. A leaf with no enclosing key at all (a document that is a bare array or
+//     scalar) is masked as free_text: there is no name to vouch for it.
+//  5. A leaf whose every enclosing key is in the map, as CatNone, is copied.
+//  6. Anything else — a key the samples never showed — is masked as free_text.
+//
+// chain is the leaf's enclosing object keys, root first, in the source's
+// spelling. internal/verify restates this function over the target's spelling
+// (internal/verify/jsonleaf.go); the two spellings differ only for a key
+// keyCategory masked, and internal/classify never enters such a key in the
+// map, so the two sides read the same verdict for every leaf the target could
+// hold unchanged. Changing an arm here changes a contract verify is written
+// against: change both in one commit.
+func leafRule(p leafPolicy, chain []string, text string, valued bool) leafVerdict {
+	keys := p.keys
+	if keys == nil {
+		return leafVerdict{cat: leafCategory}
+	}
+	for i := len(chain) - 1; i >= 0; i-- {
+		if cat, ok := keys[chain[i]]; ok && cat != pipeline.CatNone {
+			return leafVerdict{cat: leafMasker(cat)}
+		}
+	}
+	if valued {
+		if cat, ok := leafValueCategory(text, p.region); ok {
+			return leafVerdict{cat: leafMasker(cat)}
+		}
+	}
+	if len(chain) == 0 {
+		return leafVerdict{cat: leafCategory}
+	}
+	for _, k := range chain {
+		if _, ok := keys[k]; !ok {
+			return leafVerdict{cat: leafCategory}
+		}
+	}
+	return leafVerdict{copy: true}
+}
+
+// leafValueCategory is the value half of a leaf's personal signal: the
+// category of the first validator that recognises the value, in this order.
+//
+// It is every validator internal/verify's second net runs over a document's
+// leaves (internal/verify/validators.go, every entry `applies` admits for a
+// leaf), plus the classifier's own leaf questions (internal/classify's
+// jsonLeafIsPersonal: email, phone, IP, IBAN and Luhn). The first half is what
+// keeps a copied leaf from ever being a second-net refusal on a run that
+// masked correctly — the net reads a masked document's copied leaves and
+// refuses a strong hit at exit 9 — and the second is what keeps a leaf the
+// classifier counted as personal from being copied. Each validator is taken
+// at a single value, with no ratio and no corroboration: at a leaf, one hit is
+// the signal. internal/verify/jsonleaf.go restates it; the two lists have to
+// be the same list (TestLeafValueCategoryIsPinned on both sides).
+//
+// region is the run's configured phone region. The net reads a leaf's phone
+// number under it as well as in international form (internal/verify's count,
+// T-0221), so this does too: without it a national-format number under a key
+// no rule names was copied here and refused by the net at exit 9 on a run
+// that did nothing wrong (T-0272 review round, finding 2). An empty region is
+// textsig.ValidPhone's international-only reading.
+func leafValueCategory(s, region string) (pipeline.Category, bool) {
+	switch {
+	case s == "":
+		return "", false
+	case textsig.ValidEmail(s):
+		return pipeline.CatEmail, true
+	case textsig.ValidPhoneRegion(s, region):
+		return pipeline.CatPhone, true
+	case textsig.ValidCard(s) || textsig.CardShape(s) || textsig.ValidLuhn(s) || textsig.ValidIBAN(s):
+		return pipeline.CatFinancial, true
+	case textsig.ValidIP(s) || textsig.ValidMAC(s):
+		return pipeline.CatNetworkID, true
+	case textsig.ValidNationalIDStructured(s) || textsig.ValidNationalIDChecksumOnly(s) ||
+		textsig.ValidNationalIDDigits(s):
+		return pipeline.CatNationalID, true
+	case textsig.ValidURL(s):
+		return pipeline.CatOnlineID, true
+	case textsig.LooksSecret(s):
+		return pipeline.CatCredential, true
+	case textsig.AddressShape(s):
+		return pipeline.CatAddress, true
+	case textsig.SpecialCategoryVocabulary(s):
+		return pipeline.CatSpecial, true
+	}
+	return "", false
+}
+
+// leafMasker is the category whose masker replaces a string leaf leafRule
+// masked under cat. A category keeps its own masker when that masker's output
+// is a value of the category drawn from a domain large enough that it will not
+// coincide with another row's real value at the same path: every leaf hit is
+// untestable and exit 9 (internal/verify's confirm), and a leaf is never
+// explained the way ADR-015 explains a masked name. So person_name (a
+// vocabulary of real names), person_date (about 25,000 dates) and
+// special_category (a label set) are masked as free_text, as they were
+// before, and so is every category with no text masker a leaf could take.
+func leafMasker(cat pipeline.Category) pipeline.Category {
+	switch cat {
+	case pipeline.CatEmail, pipeline.CatPhone, pipeline.CatAddress, pipeline.CatGeo,
+		pipeline.CatNationalID, pipeline.CatFinancial, pipeline.CatNetworkID,
+		pipeline.CatOnlineID, pipeline.CatCredential:
+		return cat
+	default:
+		// Every other category — a vocabulary, a small domain, or no text
+		// masker a leaf could take — is masked as free_text.
+		return leafCategory
+	}
+}
 
 // leafConstraints is what a JSON leaf's masker is given. A leaf has no column
 // type of its own: it is text inside a document.
@@ -224,10 +371,11 @@ func encodeDocument(doc any, fromText bool) (any, bool) {
 // A log-shaped table's document is replaced whole with {} — no per-leaf masker
 // runs and no per-leaf filter entry exists for it — and the document itself
 // enters the filter, so a document that survived is still found. Every other
-// document is walked.
+// document is walked, leaf by leaf, under lp (leafRule).
 func (t transformer) maskDocument(
 	col ref.ColumnRef,
 	shape columnShape,
+	lp leafPolicy,
 	v any,
 	key mask.Key,
 	res pipeline.Residual,
@@ -244,7 +392,7 @@ func (t transformer) maskDocument(
 		// through (THREAT_MODEL.md T12).
 		return t.collapseDocument(col, shape, v, key, res)
 	}
-	walked, err := t.walk(col, "$", doc, key, res)
+	walked, err := t.walk(col, lp, "$", nil, doc, key, res)
 	if err != nil {
 		return nil, err
 	}
@@ -303,12 +451,16 @@ func (t transformer) collapseDocument(
 	return out, nil
 }
 
-// walk replaces every scalar leaf of a decoded document, in sorted key order so
-// that the same document always draws the same values, and adds each masked
-// leaf to the residual filter under its own path.
+// walk replaces every scalar leaf of a decoded document leafRule masks, in
+// sorted key order so that the same document always draws the same values,
+// copies every leaf it does not, and adds each masked leaf to the residual
+// filter under its own path. chain is the enclosing object keys, root first,
+// in the source's spelling (leafRule reads them against lp).
 func (t transformer) walk(
 	col ref.ColumnRef,
+	lp leafPolicy,
 	path string,
+	chain []string,
 	node any,
 	k mask.Key,
 	res pipeline.Residual,
@@ -351,7 +503,9 @@ func (t transformer) walk(
 			if record {
 				res.Add(col, childPath, canon)
 			}
-			child, err := t.walk(col, childPath, n[name], k, res)
+			// The full slice expression makes append copy, so no two
+			// siblings' chains share a backing array.
+			child, err := t.walk(col, lp, childPath, append(chain[:len(chain):len(chain)], name), n[name], k, res)
 			if err != nil {
 				return nil, err
 			}
@@ -361,7 +515,7 @@ func (t transformer) walk(
 	case []any:
 		out := make([]any, len(n))
 		for i, item := range n {
-			child, err := t.walk(col, path+"["+strconv.Itoa(i)+"]", item, k, res)
+			child, err := t.walk(col, lp, path+"["+strconv.Itoa(i)+"]", chain, item, k, res)
 			if err != nil {
 				return nil, err
 			}
@@ -373,8 +527,18 @@ func (t transformer) walk(
 		// item 6 already lists for a NULL column.
 		return nil, nil
 	case string:
-		return t.maskLeafString(col, path, n, k, res)
+		v := leafRule(lp, chain, n, true)
+		if v.copy {
+			// No signal on any enclosing key or on the value, under keys the
+			// samples showed: copied, and not recorded, because the target
+			// holds the same value (T-0272, the T-0143 decision).
+			return n, nil
+		}
+		return t.maskLeafString(col, path, v.cat, n, k, res)
 	case bool:
+		if leafRule(lp, chain, "", false).copy {
+			return n, nil
+		}
 		// A boolean is redrawn over its own two-valued domain, so half the run
 		// keys leave it as it was. That is §6 item 6's small-domain caveat and
 		// not a leak — but it means no filter entry may be made for it: the
@@ -387,11 +551,21 @@ func (t transformer) walk(
 		}
 		return h[0]&1 == 1, nil
 	case json.Number:
+		if leafRule(lp, chain, n.String(), true).copy {
+			return n, nil
+		}
 		return t.maskLeafNumber(col, path, n.String(), func(s string) any { return json.Number(s) }, k, res)
 	case float64:
 		// A jsonb column pgx already decoded arrives with float64 leaves, so an
 		// integral leaf has to be spotted by its value and not by its Go kind.
 		in := strconv.FormatFloat(n, 'g', -1, 64)
+		// The rule reads the plain decimal spelling: 'g' writes a ten-digit
+		// phone number stored as a number as 4.155552671e+09, which no
+		// validator recognises. The filter entry keeps 'g', which is what
+		// internal/verify reproduces for a number leaf.
+		if leafRule(lp, chain, strconv.FormatFloat(n, 'f', -1, 64), true).copy {
+			return n, nil
+		}
 		return t.maskLeafNumber(col, path, in, func(s string) any {
 			f, err := strconv.ParseFloat(s, 64)
 			if err != nil {
@@ -409,14 +583,27 @@ func (t transformer) walk(
 	}
 }
 
-// maskLeafString masks one string leaf under leafCategory.
+// maskLeafString masks one string leaf under cat's masker (leafMasker chose
+// it), and under leafCategory's when cat's masker has no answer for this value:
+// a key named "phone" can hold "ask reception", and a leaf is masked either
+// way — only the shape of the fake depends on the category.
 func (t transformer) maskLeafString(
 	col ref.ColumnRef,
-	path, in string,
+	path string,
+	cat pipeline.Category,
+	in string,
 	k mask.Key,
 	res pipeline.Residual,
 ) (any, error) {
 	c := leafConstraints()
+	if cat != leafCategory {
+		if id, err := mask.Pick(mask.Category(cat), c); err == nil {
+			r, err := mask.Apply(k, mask.Category(cat), id, mask.Value{Text: in}, c)
+			if err == nil && !r.Out.Null {
+				return t.recordLeaf(col, path, id, r, in, res)
+			}
+		}
+	}
 	id, err := mask.Pick(mask.Category(leafCategory), c)
 	if err != nil {
 		return nil, &Refusal{Code: CodeMasker, Exit: exitTransform, Col: col, Path: path, Masker: string(id), Reason: err}
@@ -425,10 +612,25 @@ func (t transformer) maskLeafString(
 	if err != nil {
 		return nil, &Refusal{Code: CodeMasker, Exit: exitTransform, Col: col, Path: path, Masker: string(id), Reason: err}
 	}
+	return t.recordLeaf(col, path, id, r, in, res)
+}
+
+// recordLeaf adds a masked string leaf's source to the filter and returns the
+// masker's output.
+func (t transformer) recordLeaf(
+	col ref.ColumnRef,
+	path string,
+	id mask.ID,
+	r mask.Result,
+	in string,
+	res pipeline.Residual,
+) (any, error) {
 	if r.Masked {
-		// Through addLeaf and not res.Add(…, r.Canonical) directly: the two are
-		// the same bytes, and one call site is what lets internal/verify be
-		// written against a stated convention rather than against this file.
+		// Through addLeaf and not res.Add(…, r.Canonical) directly: r.Canonical
+		// is the source under the masker's own category, and the filter entry
+		// for a leaf is always free_text's, so that it does not depend on which
+		// category leafRule chose; one call site is what lets internal/verify
+		// be written against a stated convention rather than against this file.
 		if err := addLeaf(res, col, path, in); err != nil {
 			return nil, &Refusal{Code: CodeMasker, Exit: exitTransform, Col: col, Path: path, Masker: string(id), Reason: err}
 		}

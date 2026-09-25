@@ -145,6 +145,16 @@ type netMode struct {
 	// coverage either way; only the three the masker actually rewrites are
 	// excluded, and only when this column was masked at all.
 	docMasked bool
+	// leafRules is a masked document column's per-leaf map
+	// (pipeline.Decision.LeafMap, T-0272), nil for every other column and
+	// for a masked document whose decision carries none or whose own
+	// category is not plain semi_structured, with the classification's phone
+	// region beside it. netStrings reads it
+	// to leave a leaf a category's own masker replaced to the residual scan
+	// (jsonleaf.go's replacedByCategoryMasker), for the reason docMasked
+	// leaves a masked key: the masker's output is, by construction, still a
+	// value of the category the net would name.
+	leafRules leafPolicy
 	// bytea is true for a bytea column read as text (the 2026-09-15 red team's
 	// A4a). famBytea used to be outside netText altogether, on the same
 	// argument internal/classify's bestSignal made about its samples — a PNG
@@ -170,8 +180,19 @@ type netMode struct {
 	// is the masker's own vocabulary — `full_name GENERATED ALWAYS AS
 	// (first_name || ' ' || last_name)` over masked names is a given name and
 	// a surname by construction — and the dictionary rule is skipped for it.
-	// Every validator that carries a parse still runs over it.
+	// Every validator that carries a parse still runs over it, with the one
+	// exception derivedFromMaskedLeaves names.
 	derivedFromMasked bool
+	// derivedFromMaskedLeaves is derivedFromMasked for a generated column
+	// whose masked inputs include a document column carrying per-leaf
+	// categories (T-0272, jsonleaf.go's generatedFromMaskedLeaves). Supabase's
+	// auth.identities.email is `lower((identity_data ->> 'email'))`: the leaf
+	// it reads is now replaced by the email masker, so the column holds the
+	// masker's own addresses and the email validator would refuse every
+	// Supabase run. netColumn skips, for such a column, exactly the
+	// validators whose category a leaf's own category masker emits
+	// (leafMaskerEmits) and runs every other one.
+	derivedFromMaskedLeaves bool
 	// family is the column's own type family (columns.go's fam* constants),
 	// carried alongside the flags above so netColumn can choose the right
 	// verify.refused.second_net* code and hint without asking shapeOf a
@@ -203,14 +224,19 @@ func (s *state) netMode(col ref.ColumnRef, c pipeline.Column) (netMode, bool) {
 		// A masked document's masker was chosen per key by name, so the net
 		// checks the leaves; an unmasked one had no masker at all, which is a
 		// stronger reason to read its leaves and not a reason to skip it.
-		return netMode{leaves: true, text: true, docMasked: has && d.Masked, family: family}, true
+		mode := netMode{leaves: true, text: true, docMasked: has && d.Masked, family: family}
+		if mode.docMasked {
+			mode.leafRules = leafPolicy{keys: d.LeafMap(), region: s.cls.PhoneRegion}
+		}
+		return mode, true
 	case has && d.Masked:
 		return netMode{}, false
 	case netText(family):
 		return netMode{
 			array: array, text: true, maybeDocument: character(family),
-			derivedFromMasked: s.generatedFromMasked(col.Table, c.Generated),
-			family:            family,
+			derivedFromMasked:       s.generatedFromMasked(col.Table, c.Generated),
+			derivedFromMaskedLeaves: s.generatedFromMaskedLeaves(col.Table, c.Generated),
+			family:                  family,
 		}, true
 	case family == famBytea:
 		return netMode{array: array, text: true, bytea: true, maybeDocument: true, family: family}, true
@@ -517,6 +543,13 @@ func (s *state) netColumn(ctx context.Context, col ref.ColumnRef, mode netMode) 
 			// about the source (netMode.derivedFromMasked).
 			continue
 		}
+		if mode.derivedFromMaskedLeaves && leafMaskerEmits(val.category) {
+			// T-0272: the same argument for a document's leaves — a value of
+			// this shape is a leaf category masker's output, and the residual
+			// scan over the document itself is what proves no source leaf
+			// survived (netMode.derivedFromMaskedLeaves).
+			continue
+		}
 		if val.sequenceExempt && dense && (neverMasked || !corroboratedForSeq) {
 			// T-0187 second review round, findings 1 and 3, narrowed by
 			// T-0240 and by the two review rounds that followed it: a
@@ -786,9 +819,20 @@ func (s *state) netStrings(v any, mode netMode) (direct, fromLeaves []string) {
 		keys := documentKeys(v)
 		out := make([]string, 0, len(ls)+len(keys))
 		for _, l := range ls {
-			if l.str && l.text != "" {
-				out = append(out, l.text)
+			if !l.str || l.text == "" {
+				continue
 			}
+			if replacedByCategoryMasker(mode.leafRules, l) {
+				// T-0272: transform replaced this leaf through a category's
+				// own masker — a fake address is still an address — and
+				// recorded its source in the filter, so documentHits is what
+				// proves the source did not survive, and counting the fake
+				// here would refuse a run that masked correctly
+				// (jsonleaf.go). A copied leaf and a free_text leaf are
+				// still read.
+				continue
+			}
+			out = append(out, l.text)
 		}
 		// Object keys too, not only values (T-0137 review round, finding 3):
 		// an email, a phone number or a card used as a JSON key is exactly as

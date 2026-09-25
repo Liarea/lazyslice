@@ -461,7 +461,15 @@ residuals are accepted rather than hidden:
    40 or 64 characters, a secret column of one to four non-NULL rows, a
    secret in a column named `type`, `klass` or `component_name`, and a file
    named after a person in a column where fewer than a fifth of the file
-   names carry a word the dictionary holds.
+   names carry a word the dictionary holds. Inside a `json` or `jsonb`
+   column the same holds leaf by leaf: a value is copied when no validator
+   recognises it and no name rule names any key above it, as long as the
+   sampled documents showed those keys — so a configuration document keeps
+   working, and a personal value under a key like `attendee` or `sub` is
+   copied with it. A document column whose own name marks it personal (a
+   `jsonb` `medical_history`) has every leaf masked, and so does one you
+   raise with `--mask TABLE.COL=semi_structured`, which is the answer for a
+   document that holds personal data under keys no rule knows.
 5. **The marker-bound reload window.** The first load into a fresh target
    checks the whole target, under the run's lease, for a table that appeared
    after the plan was approved. A *reload* — the ordinary daily case, since

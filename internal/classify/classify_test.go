@@ -3,6 +3,7 @@
 package classify
 
 import (
+	"reflect"
 	"sort"
 	"strings"
 	"testing"
@@ -579,7 +580,9 @@ func TestClassificationIsDeterministic(t *testing.T) {
 		t.Errorf("fingerprint = %q, want 16 hex characters (ARCHITECTURE.md §5)", a.Fingerprint)
 	}
 	for c, d := range a.Decisions {
-		if b.Decisions[c] != d {
+		// DeepEqual rather than !=: a Decision carries LeafKeys (T-0272), a
+		// map, and the map is part of what has to come out the same.
+		if !reflect.DeepEqual(b.Decisions[c], d) {
 			t.Errorf("%s differs between runs: %+v and %+v", c, d, b.Decisions[c])
 		}
 	}

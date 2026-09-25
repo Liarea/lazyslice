@@ -39,10 +39,16 @@ sees that case and must not paper over it with a retry.
   added to the residual filter (ARCHITECTURE.md §6 item 1) — a code path that
   masks a value without calling `Residual.Add` defeats THREAT_MODEL.md T12's
   only control.
-- JSON leaf rules are exact (ARCHITECTURE.md §4 "Free text and JSON"): string
-  leaves get the `free_text` masker (see the decision below), numbers/booleans
-  are re-derived from `h`, `null` stays `null`, structure and key names survive,
-  wildly varying keys or an audit/log/history/event table's `jsonb` collapses to
+- JSON leaf rules are exact (ARCHITECTURE.md §4 "Free text and JSON" and its
+  T-0272 amendment): `json.go`'s `leafRule` decides each leaf from the
+  decision's `LeafKeys` map, read through `LeafMap` so that a column whose own
+  decision is not plain `semi_structured` masks every leaf — masked under a category an enclosing key names,
+  masked under a validator's category when its value validates, **copied** when
+  every enclosing key was sampled with no category and nothing validates, and
+  masked as `free_text` otherwise (an unseen key, no key, or no map at all). A
+  masked string leaf gets `leafMasker`'s category masker or `free_text`; masked
+  numbers/booleans are re-derived from `h`; `null` stays `null`; structure and
+  key names survive; an audit/log/history/event table's `jsonb` collapses to
   `{}`.
 - **Every `Residual.Add` follows the contract below**, and a leaf's goes through
   `addLeaf`. `internal/verify` is a different stage package that cannot import
@@ -137,8 +143,8 @@ sees that case and must not paper over it with a retry.
   the plan refuses may still survive here, and a refusal already made is not a
   bug in this package. Do not delete the refusal: a backstop that has never
   fired is what it is for.
-- **Every JSON string leaf is masked as `free_text`** (`json.go`,
-  `leafCategory`). §4 sends a leaf's key name "through the name rules", which are
+- **Superseded by T-0272, below: every JSON string leaf *was* masked as
+  `free_text`** (`json.go`, `leafCategory`). §4 sends a leaf's key name "through the name rules", which are
   the embedded rule pack in `internal/classify`; the same import ban applies, and
   a hand-written table of about 60 name→category entries stood in for it here
   until this review. It was two things at once and wrong as both: a **second
@@ -155,6 +161,57 @@ sees that case and must not paper over it with a retry.
   rules" and is reported as one; §14's one-level JSON key collection in
   `internal/classify` is what should end it, by putting the category on the
   decision where verify can see it.
+- **Per-leaf categories, and a leaf with no signal is copied** (`json.go`'s
+  `leafRule`, `leafValueCategory`, `leafMasker`; T-0272, the maintainer's
+  T-0143 decision of 2026-09-24; ARCHITECTURE.md §4's amendment and
+  THREAT_MODEL.md T1's). The name rules reach this package as data, not code:
+  `internal/classify` puts every object key it saw in the samples on
+  `pipeline.Decision.LeafKeys` with the name rules' category (or `none`), and
+  `colPlan.leaves` (a `leafPolicy`: the map through `LeafMap`, and the phone
+  region) carries it to `walk`, which threads the leaf's enclosing
+  keys (root first, the *source* spelling) down to each leaf. The value half is
+  a list of `internal/textsig` validators — the classifier's leaf questions
+  plus every validator `internal/verify`'s second net runs over a leaf, so a
+  copied leaf is never a second-net refusal — and `internal/verify/jsonleaf.go`
+  restates all three functions over the target's spelling;
+  `TestLeafValueCategoryIsPinned` carries one table in both packages. Six
+  things are deliberate:
+  - **No map, no change.** A `nil` map masks every leaf as `free_text`
+    and ignores the value's shape, exactly as before, so a decision nothing
+    sampled, or one built by hand, masks more and never less — and verify's
+    net, which reads every leaf of such a column, still sees only filler.
+  - **Key before value.** The nearest enclosing key with a category wins, then
+    a validating value; the order only chooses the fake's shape, because a
+    masked leaf's filter entry does not depend on it (next bullet).
+  - **The filter entry is `free_text`'s canonical form whatever masker ran**
+    (`addLeaf`, `recordLeaf`), so the residual-filter contract below did not
+    change for a masked leaf, and a copied leaf is not recorded — the target
+    holds it.
+  - **`leafMasker` keeps a category's own masker only where its output cannot
+    coincide with another row's real value at the same path**; a leaf hit is
+    untestable and exit 9 and is never explained, so `person_name` (a real-name
+    vocabulary), `person_date` (~25,000 dates) and `special_category` leaves
+    get `free_text`, and a category masker that has no answer for a value
+    (`Pick` or `Apply` errors, or a NULL output) falls back to `free_text` too,
+    which still masks. A float64 leaf is offered to the validators in its plain
+    decimal spelling (`'f'`), because `'g'` writes a ten-digit number in
+    exponent form; its filter entry keeps `'g'`, which verify reproduces.
+  - **The column's own decision is the root of the chain** (the T-0272
+    review round, finding 1). `plan` reads the map through
+    `pipeline.Decision.LeafMap`, which is nil unless the column's decision is
+    the classifier's plain `semi_structured` one: a `jsonb` whose own name
+    scores `special_category` (`medical_history`), or one an operator raised
+    (`ByYmlRaise`: a yml pattern or column entry, a `mask:` block,
+    `--mask`), has every leaf masked as `free_text`
+    (`TestAColumnsOwnDecisionMasksEveryLeafWhateverItsMapSays`).
+  - **The phone question reads the run's region** (finding 2).
+    `leafValueCategory` asks `textsig.ValidPhoneRegion` under
+    `pipeline.Classification.PhoneRegion`, which `internal/classify` fills
+    from the same `Config` `internal/core` hands verify's
+    `Options.PhoneRegion` from, so a national-format number the net would
+    read under `--phone-region` is masked, not copied and refused at exit 9
+    (`TestANationalNumberIsMaskedUnderTheRunsPhoneRegion`). No `internal/core`
+    change was needed, so **T-0390** is done by this and can be closed.
 - **"Wildly varying keys" is not implemented here.** §4 names two triggers for
   collapsing a document to `{}`; the table-name one (`audit|log|history|event`,
   plus plurals, matched on underscore-separated words) is deterministic per
@@ -250,10 +307,11 @@ package, so this is the whole of what it may assume. A JSON path is spelled
 | a masked scalar cell | `""` | `mask.Canonical(category, source value, constraints)` under the decision's category and the column's constraints — that is, `mask.Apply`'s own `Result.Canonical` |
 | each masked array element | `""` | the same, per element |
 | a collapsed document (log-shaped table, `hstore`, a document nothing could parse) | `""` | `mask.Canonical(semi_structured, source text)`, **omitted** when it equals what the target will hold (`{}`, or `''` for `hstore`) or is empty |
-| a masked string leaf | the leaf's path | `mask.Canonical(free_text, the string)` |
+| a masked string leaf | the leaf's path | `mask.Canonical(free_text, the string)`, whichever category's masker replaced it (T-0272) |
 | a masked number leaf | the leaf's path | `mask.Canonical(free_text, the number's JSON spelling)` |
 | a boolean leaf | — | **not recorded** (a two-valued domain) |
 | a `null` leaf | — | **not recorded** (not masked) |
+| a copied leaf (`leafRule`, T-0272) | — | **not recorded** (the target holds the same value) |
 | a leaf of a collapsed document | — | **not recorded** (no per-leaf masker ran) |
 | an emitted count (ADR-015): a masked scalar cell or array element of an emitting column | `""` | `mask.Canonical(category, masker's output, {})` into `AddEmitted`, not `Add`; never a leaf |
 | a masked object key (email, phone or credit-card shaped, T-0137) | the key's own path in the *target* (`path+"."+maskedName`) | `mask.Canonical(the matched category, the key text)` — `mask.Apply`'s own `Result.Canonical`, not `free_text`: the category is whichever of the three strong validators the key matched |
@@ -429,7 +487,11 @@ and `TestTwoKeysThatMaskAlikeAreRefused` (2026-09-14 review round) pin the two
 findings above: every residual entry under a masked key — the key's own and
 every leaf beneath it — is spelled with the masked key and not the source
 one, and two source keys that canonicalise alike are a refusal naming no
-source value rather than a silently dropped subtree.
+source value rather than a silently dropped subtree. `leaf_test.go` (T-0272)
+pins the per-leaf rule's arms, the value table verify carries too, and a
+configuration document end to end: signal-free leaves copied and unrecorded,
+an email leaf under a naming key and under a silent key both replaced by the
+email masker, and every masked leaf recorded under `free_text`'s form.
 
 **Never:** mask a cell without adding it to the residual filter; accept a
 runtime-loaded masker; let `Transform` depend on anything but its arguments

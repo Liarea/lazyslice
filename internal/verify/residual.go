@@ -268,6 +268,12 @@ func (s *state) literalHits(col ref.ColumnRef, cat pipeline.Category, text strin
 // at its own path, which is what a walk records
 // (internal/transform/CLAUDE.md, "the residual-filter contract").
 //
+// That is unchanged by per-leaf categories (T-0272): transform records a
+// masked string leaf under free_text's canonical form whichever category's
+// masker replaced it, and records nothing for a leaf it copied, so every
+// string leaf is tested here the same way and a copied one is not in the
+// filter to be found (jsonleaf.go).
+//
 // A *number* leaf is recorded in the filter too and is deliberately not tested
 // here. internal/transform redraws a number leaf over a domain of 10^6 values
 // (10^5 for a fractional one), so the target's number at that path matches the
