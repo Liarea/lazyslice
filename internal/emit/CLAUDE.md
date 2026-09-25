@@ -166,3 +166,21 @@ has no reason and no type fingerprint, unlike `unmask:`, because it only
 tightens (ADR-004): a type change can make it refuse, never make it copy.
 The merge now carries three things forward, not two: `extra_patterns`, the
 honoured `unmask:` blocks and the `mask:` blocks.
+
+## `leaf_keys:` (T-0404)
+
+A column whose decision carries a per-leaf map (`Decision.LeafMap` non-nil)
+records `leaf_keys:`, which is `Decision.RecordedLeafKeys` copied as it
+stands: `internal/classify` spells and sorts it. It holds the keys a run
+from the file may copy and, since the T-0404 review round, not a key this
+run masked as drift: classify carries a column's existing list forward and
+adds to it only when the entry had no `leaf_keys:` at all, so a new key
+joins a list by an operator's hand edit, not because a run rewrote the
+file. Emit spells nothing; a hand-edited list is sorted and de-duplicated
+on write.
+`columnDoc.LeafKeys` is a `*[]string` with `omitempty`, so a document with no
+copied key writes `leaf_keys: []` and every other column writes nothing.
+Keys are classify's spellings, so a key that is not identifier-shaped
+reaches the file as a `sha256:` fingerprint, never as itself (Rules: never a
+row value). Emit merges nothing itself: a prior file's list reaches the
+new one only because classify put it on `RecordedLeafKeys`.

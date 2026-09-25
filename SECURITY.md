@@ -159,7 +159,22 @@ issue.
    `passwords`, `date_of_birth`, `national_id`, `emails`, `notes` or
    `by_phone` under that name's own category, through the masker a leaf of
    that category gets (T-0393). Every leaf of a column raised with
-   `--mask TABLE.COL=semi_structured` or the yml is masked too.
+   `--mask TABLE.COL=semi_structured` or the yml is masked too. On a re-run
+   from a committed `lazyslice.yml`, "the sampled documents showed" means
+   the file's own `leaf_keys:` list for the column (T-0404): a key the
+   samples show that the file does not list has every value under it
+   masked and is reported as drift, and `--strict-schema` refuses it at exit
+   10, so a key that appears in production after the file was reviewed is
+   not copied until someone adds it to the column's `leaf_keys:` by hand; a
+   run does not add it itself. The one exception is a file written before
+   this list existed: its first run masks and reports every key once and
+   lists them in the file it writes. The list itself puts the copied key
+   names in the committed file; a key that is not shaped like a field name
+   (a UUID, a dotted handle, anything with a digit run) is written as a
+   `sha256:` fingerprint instead, and so is every key of a column whose
+   documents show more than 64 keys, but a word-shaped key that is itself
+   personal (a username used as a key, in a column of few keys) is written
+   as it stands, as a column of that name would be.
 9. `NULL` and the empty string, which survive and reveal that much, and the
    approximate length of a value masked as free text: its filler is fitted to
    the input's length, so an application's short values (`admin`, `linux`)

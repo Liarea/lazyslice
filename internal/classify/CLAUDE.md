@@ -2372,6 +2372,38 @@ importing this package.
   value that reaches the yml is `internal/core`'s `refingerprint`, not
   `fingerprintOf`, so a change here alone would not reach it anyway.
 
+- **A committed yml pins the copied keys** (`leafdrift.go`, T-0404, the
+  JSON red team's round 1, entry 28). The bullet above is why this was
+  needed: nothing about the map reached the file, so a re-run whose samples
+  showed a new key copied its leaves silently and `--strict-schema` passed.
+  `leafKeys` runs after `finalise` (so `LeafMap` reads the final `Category`
+  and `Source`), and, for a column the prior carries an entry for, deletes
+  from `LeafKeys` every key the map calls `none` that the entry's
+  `LeafKeys` does not name (`leafKeyListed`: by fingerprint, or by the key
+  itself when identifier-shaped), recording it on
+  `Classification.LeafDrift`. Transform and verify then read it as a key
+  the samples never showed. A column not in the prior is column drift and
+  untouched; a listed key keeps this run's verdict, so a listing never
+  copies a key this run masks. It only deletes, so it only masks more.
+  `Decision.RecordedLeafKeys` is what a run from the written file may copy,
+  spelled by `leafKeySpelling` (the key when `identifierShaped` and its
+  column holds at most `leafKeyNameLimit` keys, a `sha256:` fingerprint
+  otherwise, so a value used as a key never reaches the yml): a fresh
+  column's copied keys; an entry's own list, carried forward as it stands,
+  when it has one; every copied key, drift included, only when the entry has
+  no `leaf_keys:` at all (a pre-T-0404 file). **Review round (2026-09-25):**
+  the first draft recorded the drifted keys on every run, and every
+  non-strict run rewrites `--config`, so the pin lasted one run; and
+  `identifierShaped` let a UUID starting a-f, a dotted handle and a
+  digit-laden token through as themselves. Now a key joins an existing list
+  only by hand, digits are allowed only as a trailing run of one or two,
+  dots never, all-hex keys of eight letters or more and keys past 32 bytes
+  are fingerprinted, and a column of more than 64 keys (a map keyed by
+  data, where `jsmith` is a value) is fingerprinted whole. Such a column's
+  list is bounded only by `jsonKeyLimit`, and each new key is a drift line on
+  every run; folding those lines and capping the list is **T-0422**. The
+  spelling is this package's alone. `t0404_test.go` pins it.
+
 **Found while here, not fixed (outside this task's brief):** `jsonSignal` —
 the column-level leaf signal that raises a JSON column from `possible` to
 `likely` — reads `values`, which is the string path above, so on a real

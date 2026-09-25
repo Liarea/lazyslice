@@ -8,8 +8,8 @@
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 0 | 0 | 108 | 0 | 0 |
-| E6 Launch | 6 | 6 | 0 | 50 | 0 | 0 |
-| E9 Later | later | 150 | 0 | 40 | 9 | 0 |
+| E6 Launch | 6 | 4 | 0 | 52 | 0 | 0 |
+| E9 Later | later | 156 | 0 | 41 | 9 | 0 |
 
 ## Open and in progress
 
@@ -155,8 +155,6 @@
 - T-0396 [open] E9 · Decide whether a document column named just 'name' needs corroboration before every leaf is masked, as a text column does ()
 - T-0400 [open] E9 · A document keyed by many phone numbers refuses at exit 7 on a masked-key collision ()
 - T-0401 [open] E9 · A national-format phone number used as a JSON key survives with no --phone-region ()
-- T-0402 [open] E6 · Document numbers are decoded exactly, so a card number stored as a json number keeps its digits (sonnet)
-- T-0403 [open] E6 · textsig candidates cover fullwidth digits, dash-separated groups, mailto and tel schemes, percent-encoding and base64 (opus)
 - T-0404 [open] E6 · A committed yml pins which document keys are copied, and a key the samples newly show counts as drift (opus)
 - T-0405 [open] E9 · A generated column's path-operator reads raise the document keys they read, as its arrow reads do ()
 - T-0406 [open] E9 · A second-net refusal on a generated column names a remedy that works on a generated column ()
@@ -169,6 +167,12 @@
 - T-0413 [open] E9 · compositeSignal never reads inside a field: nested composites and embedded values still leak (sonnet)
 - T-0414 [open] E9 · classify: T-0399 follow-ups: the structural branch keeps a name-hit category and fragment; round-1 citations point at entry 13 (sonnet)
 - T-0415 [open] E9 · jsonSignal is blind to a real object- or array-shaped document's own values (sonnet)
+- T-0416 [open] E9 · json[] and jsonb[] columns still lose number-leaf precision past 2^53 ()
+- T-0417 [open] E9 · pg/classify/verify: T-0402 follow-ups: one decoder in classify; jsonTextRows.Scan restores the caller's slice; a duplicate key in an unmasked json column is named or rejected (sonnet)
+- T-0419 [open] E9 · Regression harness can re-run from the yml its first run wrote ()
+- T-0420 [open] E9 · Strict-schema and drift wording names document keys, not only columns ()
+- T-0421 [open] E9 · textsig: T-0403 follow-ups: non-ASCII decimal digits and other stops fold or are named as uncovered; Candidates computed once per value (sonnet)
+- T-0422 [open] E9 · Fold a document column's many leaf-drift lines into one, naming --mask as the remedy ()
 
 ## Recently closed
 
@@ -187,6 +191,9 @@
 - T-0397 [done] E6 · The second net's generated-column skip covers only the leaf the expression reads → done
 - T-0398 [done] E6 · One log-shape rule: the classifier's replaced-whole verdict is the one transform and verify apply → done
 - T-0399 [done] E6 · A composite type holding a json, jsonb or hstore field is refused at plan, not classified over its record text → done
+- T-0402 [done] E6 · Document numbers are decoded exactly, so a card number stored as a json number keeps its digits → done
+- T-0403 [done] E6 · textsig candidates cover fullwidth digits, dash-separated groups, mailto and tel schemes, percent-encoding and base64 → done
+- T-0418 [done] E9 · ARCHITECTURE.md dependency table: golang.org/x/text is now a direct root-module dependency through internal/textsig → done
 - T-0143 [done] E9 · Decide the arbitrary-JSON policy: structure-preserving masking versus whole-document replacement → done
 - T-0311 [done] E6 · The neighbouring-column sweep spares enum-like, identifier-shaped and unique-indexed columns → done
 - T-0312 [done] E6 · The same-column-name rule does not propagate a decision that was itself only a neighbour sweep → done
@@ -194,6 +201,3 @@
 - T-0314 [done] E6 · Framework metadata tables are copied whole and never masked (schema_migrations, ar_internal_metadata and their kin) → done
 - T-0315 [done] E6 · The entropy validator does not read filenames, hex digests, namespaced class names or a handful of samples as secrets → done
 - T-0316 [done] E6 · The Luhn check needs a card length and issuer prefix before it masks an id, number or version column → done
-- T-0317 [done] E6 · A four-part version string is not an IP address, and a digit-only license key is not a phone number → done
-- T-0318 [done] E6 · The plan reports every refusal in one run, and a no-identity hint names the columns → done
-- T-0319 [done] E6 · After a second-net refusal the operator can mask the column: --mask, and every failing column reported at once → done

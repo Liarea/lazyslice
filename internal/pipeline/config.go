@@ -117,6 +117,20 @@ type ColumnConfig struct {
 	// column still ends up unmasked. It carries no TypeFP, because a type
 	// change can only make it refuse, never make it copy.
 	Mask *Mask
+	// LeafKeys is the `leaf_keys:` list of a json or jsonb column whose
+	// decision carries a per-leaf map (T-0404): Decision.RecordedLeafKeys, the
+	// spelling of every key whose leaves a run from this file may copy. A
+	// run carries it forward as it stands; a key joins it by hand.
+	// Read back, it is the set a re-run's own copied keys are checked
+	// against: a key the samples show that it does not list is masked and
+	// reported as drift (Classification.LeafDrift), and one it lists keeps
+	// whatever this run decides for it, which can only be copy or tighter.
+	// Listing a key never copies one this run would mask. nil on every
+	// column without a per-leaf map, and on a document column in a file
+	// written before T-0404, whose every copied key is therefore drift once:
+	// that run lists them in the file it writes. An empty, non-nil list
+	// approves nothing, on every run.
+	LeafKeys []string
 }
 
 // Mask is a per-column masked decision recorded by the operator rather than

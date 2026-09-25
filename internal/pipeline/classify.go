@@ -191,14 +191,34 @@ type Decision struct {
 	// sampled, a column that is not json or jsonb) keeps that last rule for
 	// every leaf, so a missing map masks more and never less.
 	//
-	// It holds key names read from production documents, so it is in-memory
-	// only: internal/emit writes named fields of a Decision and not this one,
-	// and nothing renders it into an event, a reason or the yml.
+	// It holds key names read from production documents, so the map itself
+	// is in memory only and never rendered into a reason. What leaves the
+	// process is RecordedLeafKeys (T-0404), below: internal/classify's own
+	// spelling of the keys the map calls CatNone, a key with an identifier's
+	// shape as itself and any other as a fingerprint.
 	//
 	// Nothing reads the field directly: internal/transform and internal/verify
 	// read it through LeafMap, which is what makes the column's own decision
 	// the root of every leaf's chain.
 	LeafKeys map[string]Category
+	// RecordedLeafKeys is what internal/emit writes under the column's
+	// `leaf_keys:` (T-0404), sorted: the keys a run from the written file may
+	// copy. For a column the committed yml does not carry, the spelling of
+	// every key LeafMap called CatNone once every classify pass had run; for
+	// one whose entry lists keys, that list as it stands, so a key the run
+	// masked as drift (Classification.LeafDrift) is not added and joins the
+	// list only by an operator's edit; for one whose entry has no
+	// `leaf_keys:` at all (a file from before T-0404), every CatNone key,
+	// drift included, once. internal/classify sets it and owns the spelling:
+	// the key itself when it has an identifier's shape (an ASCII letter or
+	// underscore, then ASCII letters, underscores and hyphens, digits only as
+	// a trailing run of one or two, not eight or more letters all
+	// hexadecimal, at most 32 bytes) and its column holds no more than 64
+	// keys, and "sha256:" plus the first 16 hex characters of its SHA-256
+	// otherwise, because a key that is not a name may be a value and the yml
+	// holds none (THREAT_MODEL.md T5). nil when LeafMap is nil; empty and
+	// non-nil for a per-leaf document none of whose keys is copied.
+	RecordedLeafKeys []string
 	// NameHit is the category rules.yml's name rules gave this column's own
 	// name when the column's type is not one that category accepts, so the
 	// name did not decide the category (internal/classify's decide, the
@@ -293,10 +313,28 @@ func (d Decision) LeafMap() map[string]Category {
 	return d.LeafKeys
 }
 
+// LeafDrift is one document key a re-run's samples showed that the committed
+// lazyslice.yml does not list under the column's `leaf_keys:` (T-0404). The
+// classifier takes the key out of the decision's LeafKeys, so every leaf
+// beneath it is masked as a key the samples never showed is; internal/core
+// reports it as classify.column.drift and --strict-schema turns it into exit
+// 10, as it does a column the file has never seen.
+type LeafDrift struct {
+	Col ColumnRef
+	// Key is spelled as RecordedLeafKeys spells it: never the raw key when
+	// that is not identifier-shaped.
+	Key string
+}
+
 // Classification is every decision for one run.
 type Classification struct {
 	Decisions map[ColumnRef]Decision
 	Drift     []ColumnRef // columns the committed yml had never seen
+	// LeafDrift lists, sorted by column and then key, the document keys this
+	// run would have copied that the committed yml's entry for the column
+	// does not list (T-0404). Only a column the yml does carry an entry for
+	// is asked: a column it has never seen is in Drift and classified fresh.
+	LeafDrift []LeafDrift
 	// Expired lists the columns whose opt-out was not honoured: its TypeFP no
 	// longer matches the column's, or it records no TypeFP and no reason at
 	// all. THREAT_MODEL.md T3's control is that an opt-out records the
