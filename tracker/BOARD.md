@@ -9,7 +9,7 @@
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 0 | 0 | 108 | 0 | 0 |
 | E6 Launch | 6 | 12 | 0 | 34 | 0 | 0 |
-| E9 Later | later | 129 | 0 | 40 | 8 | 0 |
+| E9 Later | later | 130 | 0 | 40 | 8 | 0 |
 
 ## Open and in progress
 
@@ -154,6 +154,7 @@
 - T-0378 [open] E9 · classify: a propagated child with a second, unmasked FK parent; the byte-identical claim; an end-to-end fixture for --mask on a natural key (opus)
 - T-0379 [open] E9 · pipeline: give Step its own row-count field instead of packing a Lookup's count into Why (sonnet)
 - T-0380 [open] E9 · verify: T-0369 follow-ups: bytea reaches the type-conflict route; categoryAcceptedFamilies is tested against rules.yml; the new codes' messages are rendered in a test (sonnet)
+- T-0381 [open] E9 · Amend README.md and SECURITY.md residual 4 for T-0317's network_id/phone name-veto widening ()
 
 ## Recently closed
 
