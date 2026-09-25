@@ -1007,6 +1007,16 @@ regression `013`, a fixture none of these three schemas touches.
 | supabase-auth | 271 | 50 | 78 | 50 | 28 | 0 | **0.641** | **1.000** |
 | all three | 351 | 66 | 102 | 66 | 36 | 0 | **0.647** | **1.000** |
 
+**T-0403 (2026-09-25) moved nothing.** `textsig.Candidates` now also
+offers a value's NFKC, zero-width-stripped, dash/underscore/slash-grouped,
+scheme-stripped, percent- and backslash-u-decoded, trailing-dot-trimmed and
+base64-decoded spellings to the parse-backed validators (THREAT_MODEL.md T1's
+A2 amendment). The emitted `lazyslice.yml` of each of the nine schemas that
+load was captured from `TestTortureSchemas` with and without the change and
+differs only in its timestamp and ports: no column's decision, category or
+masker moved, and `make torture` exits 0 with the same twenty-eight flags. The
+table above is unchanged.
+
 **T-0316 (2026-09-24) moved nothing.** The card signal now wants a known
 issuer prefix as well as the Luhn check digit, and the issuer's own length
 under a column named for an identifier (ARCHITECTURE.md §4's T-0316

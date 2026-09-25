@@ -29,6 +29,21 @@ var pinnedLeafValues = []struct {
 	{"Qx7vR2mK9pL4tZ8wN3bH6cJ1yF5dS0aE", pipeline.CatCredential},
 	{"221 Baker Street", pipeline.CatAddress},
 	{"diagnosed with schizophrenia last spring", pipeline.CatSpecial},
+	// The JSON red team's round 1 spellings (entries 16 and 21, T-0403): a
+	// known shape in another code point or a reversible encoding, read through
+	// textsig.Candidates on both sides.
+	{"ana.fake\uff20example.org", pipeline.CatEmail},
+	{"\uff0b\uff14\uff14 \uff12\uff10 \uff17\uff19\uff14\uff16 \uff10\uff19\uff15\uff18", pipeline.CatPhone},
+	{"4111\u20131111\u20131111\u20131111", pipeline.CatFinancial},
+	{"4111_1111_1111_1111", pipeline.CatFinancial},
+	{"4111\u200b1111\u200b1111\u200b1111", pipeline.CatFinancial},
+	{"ANA.FAKE@EXAMPLE.ORG.", pipeline.CatEmail},
+	{`ana.fake\u0040example.org`, pipeline.CatEmail},
+	{"mailto:ana.fake@example.org", pipeline.CatEmail},
+	{"ana.fake%40example.org", pipeline.CatEmail},
+	{"%2B442079460958", pipeline.CatPhone},
+	{"YW5hLmZha2VAZXhhbXBsZS5vcmc=", pipeline.CatEmail},
+	{"078\u201305\u20131120", pipeline.CatNationalID},
 	{"", ""},
 	{"dark", ""},
 	{"en-GB", ""},
@@ -40,6 +55,8 @@ var pinnedLeafValues = []struct {
 	{"us-east-1", ""},
 	{"Europe/London", ""},
 	{"ad-slot-728x90", ""},
+	{"2026/09/24", ""},
+	{"24/09/2026", ""},
 }
 
 // pinnedRegionLeafValues is the phone question under a configured region
