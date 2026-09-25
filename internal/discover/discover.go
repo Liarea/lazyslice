@@ -65,6 +65,12 @@ type found struct {
 	// containerID is the container behind this candidate, empty for every rung
 	// that is not 3 or 4. It is what Q1' hands to provision.Start.
 	containerID string
+	// own marks a rung-3 or rung-4 container lazyslice provisioned for this
+	// project: its provision.LabelProject is this working directory's project
+	// name (T-0334). It is what exempts that container's `postgres` database
+	// from the maintenance-database rule in targetShaped, because that
+	// database is the one provisioning created for lazyslice to write into.
+	own bool
 }
 
 // Options is what the ladder needs from the CLI. cmd/lazyslice fills it from
@@ -1008,6 +1014,11 @@ func collapse(in []found) []found {
 			// A candidate known to be local through a route the winner did not
 			// have stays local: locality only ever grows here.
 			out[at].cand.Local = out[at].cand.Local || f.cand.Local
+			// So does being lazyslice's own container for this project: a
+			// $DATABASE_URL naming the same (host, port, database) is the same
+			// database, and the lower rung winning the printed provenance must
+			// not put it back under the maintenance-database rule (T-0334).
+			out[at].own = out[at].own || f.own
 			// A rung-4 container that collapsed into a lower rung takes its
 			// container with it, so Q1' still has something to start. It is
 			// only ever adopted by a candidate nothing could reach: a winner
@@ -1123,7 +1134,8 @@ var targetNamePattern = regexp.MustCompile(`(test|local|dev|snapshot|scratch)$`)
 
 // targetShaped returns the indices of cands that chooseTarget's tie-break may
 // rank: reachable, not the source, and not a maintenance database
-// (ARCHITECTURE.md §9 rule 1, the 2026-09-15 red team). It is factored out of
+// (ARCHITECTURE.md §9 rule 1, the 2026-09-15 red team) unless it is the one
+// in lazyslice's own container for this project (T-0334). It is factored out of
 // chooseTarget so that allOnSourceCluster (T-0184, ADR-013) asks the same
 // question chooseTarget is about to rank over, rather than a second definition
 // of "target-shaped" that could drift from it.
@@ -1137,7 +1149,7 @@ func targetShaped(cands []found, source *found) []int {
 		if source != nil && collapseKey(c.Ref) == collapseKey(source.cand.Ref) {
 			continue
 		}
-		if maintenanceDatabase(c.Ref.Database) {
+		if maintenanceDatabase(c.Ref.Database) && !cands[i].own {
 			// The 2026-09-15 red team: with --source pointing at production and
 			// no --target, the ladder chose the production container and wrote
 			// the masked slice into its `postgres` maintenance database. A
@@ -1147,6 +1159,16 @@ func targetShaped(cands []found, source *found) []int {
 			// the production server over nothing. An operator who really wants
 			// to write there says --target, which is where a run records that
 			// on purpose.
+			//
+			// The one exception is the container lazyslice provisioned for
+			// this project (found.own, T-0334): provisioning creates it with
+			// POSTGRES_DB=postgres, so `postgres` is the database it exists to
+			// be written into. Without the exception the second run from the
+			// directory that created it listed it, excluded it, and asked Q1
+			// again for a container of the same name on the next port —
+			// headless, exit 4. It is ranked like any other candidate from
+			// here on and the gate still judges it; only the name rule is
+			// lifted.
 			continue
 		}
 		shaped = append(shaped, i)

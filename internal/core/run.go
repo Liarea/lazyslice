@@ -752,6 +752,13 @@ func (r *run) resolveEndpoints(ctx context.Context) error {
 		// interactive run at all (T-0184, ADR-013 review, the 2026-09-16
 		// reverify).
 		Prompter: r.req.prompter,
+		// noTerminal is the test seam rootQuestion and askRoot already copy
+		// (core.go's doc comment on the field). The ladder needs it too: a
+		// test of a headless run with no --yes (T-0334's second run from one
+		// directory, flags none but --source) otherwise depends on whether
+		// go test has a controlling terminal, and from an interactive shell
+		// a Q1 that should never fire would open /dev/tty and wait.
+		NoControllingTerminal: r.req.noTerminal,
 	}
 	res, err := discover.Resolve(ctx, opts, r.sink)
 	if err != nil {

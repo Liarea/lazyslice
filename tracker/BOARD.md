@@ -8,7 +8,7 @@
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 0 | 0 | 108 | 0 | 0 |
-| E6 Launch | 6 | 15 | 0 | 31 | 0 | 0 |
+| E6 Launch | 6 | 14 | 0 | 32 | 0 | 0 |
 | E9 Later | later | 125 | 0 | 40 | 8 | 0 |
 
 ## Open and in progress
@@ -111,7 +111,6 @@
 - T-0310 [open] E9 · A minimal docs site (mkdocs-material on GitHub Pages) once the first ten issues show what strangers look for (sonnet)
 - T-0322 [open] E9 · Infer foreign keys from naming conventions as virtual_fks candidates, so a Rails schema is reachable (opus)
 - T-0324 [open] E9 · Geo leaves inside JSON get in-range numbers (sonnet)
-- T-0327 [open] E6 · A committed yml whose target is a container lazyslice created reconnects or re-provisions, and says which (opus)
 - T-0328 [open] E6 · The free_text masker fits its output to the input's length (opus)
 - T-0330 [open] E9 · internal/plan's chooseGroupMasker overwrites every masked column's masker with mask.Pick's default, including one the yml or a build named (sonnet)
 - T-0332 [open] E9 · internal/invariants/CLAUDE.md's contract says the suite imports only internal/testutil of ours; I2 now imports the mask module (T-0302) (haiku)
@@ -170,6 +169,7 @@
 - T-0321 [done] E6 · The reasons dump and the plan end with a summary, and a re-run from a committed yml is quiet → done
 - T-0325 [done] E6 · --unmask on a first run must not put it on the re-run path; the drift message names the real decision → done
 - T-0326 [done] E6 · A stray positional argument is a usage error, not 'the source did not report a server version' → done
+- T-0327 [done] E6 · A committed yml whose target is a container lazyslice created reconnects or re-provisions, and says which → done
 - T-0331 [done] E6 · Decide whether a first run may ask both the target question and the root question → done
 - T-0337 [cancelled] E9 · Move internal/verify's tests off mask.RoleWords, then delete RoleWords in the next mask minor → cancelled
 - T-0348 [done] E9 · verify's second net has no exemption for a framework metadata column that validates strongly → done
@@ -180,4 +180,3 @@
 - T-0064 [done] E5 · Dogfood: two sessions against a real project of the maintainer's choosing, logged in docs/DOGFOOD_LOG.md → done
 - T-0283 [done] E6 · Decide whether v0.2.0 ships a docs site (mkdocs-material on GitHub Pages) or the in-repo docs stay the docs → done
 - T-0303 [done] E6 · tools/names regenerates the masker's name lists from the 2020 Census top-1000 files (public domain), checked in CI → done
-- T-0304 [done] E6 · Masked given names, surnames, full names and email local parts draw from the Census lists (ADR-015, mask half; mask/v0.3.0) → done
