@@ -787,6 +787,7 @@ func runTUI(ctx context.Context, req core.Request, stdout io.Writer) error {
 		Request: req,
 		Events:  collector.Events(),
 		Dropped: collector.Dropped(),
+		Target:  reviewed.Target,
 		In:      os.Stdin,
 		Out:     stdout,
 	})
@@ -794,8 +795,17 @@ func runTUI(ctx context.Context, req core.Request, stdout io.Writer) error {
 		return err
 	}
 	// Leaving without running is a decision and not a failure: the plan pass
-	// wrote nothing, the transcript is in scrollback, and the exit code is 0.
+	// wrote nothing, the transcript is in scrollback, and the exit code is 0 —
+	// unless ctrl+c is what reached the screens, which is the terminal's own
+	// interrupt and not a decision (T-0345). context.Canceled is what a SIGINT
+	// during the run itself already unwinds as (main1's signal.NotifyContext),
+	// and report maps a bare one to exit 130 before it ever looks at a *core.Stop
+	// (report's own comment on why that ordering matters); returning the same
+	// sentinel here is what makes ctrl+c on the screens exit the same way.
 	if !result.Run {
+		if result.Interrupted {
+			return context.Canceled
+		}
 		return nil
 	}
 

@@ -47,6 +47,11 @@ type Input struct {
 	// Dropped is the collector's refused count, printed in the header so that a
 	// truncated screen says so.
 	Dropped int
+	// Target is the endpoint the plan pass resolved (core.Reviewed.Target),
+	// named in the confirmation Accept opens on a mode that would drop and
+	// rewrite it, and in the line printed when the operator leaves instead
+	// (T-0345). Empty for a mode that opens no target (classify, plan).
+	Target string
 	// In and Out are the terminal. Both are required in a real run; a test
 	// passes a buffer to each.
 	In  io.Reader
@@ -64,6 +69,11 @@ type Result struct {
 	// cancel. A cancel is not an error: it is a decision, and the caller prints
 	// nothing further and exits 0.
 	Run bool
+	// Interrupted reports that Run is false because ctrl+c reached the
+	// screens, rather than esc or "q". The caller reports this the same way it
+	// reports a SIGINT during the run itself: exit 130, not the plain 0 a
+	// decision to leave gets (T-0345, ADR-005).
+	Interrupted bool
 	// Transcript is what was echoed into scrollback.
 	Transcript string
 }
@@ -85,7 +95,7 @@ func Run(ctx context.Context, in Input) (Result, error) {
 		return Result{}, ErrNoTerminal
 	}
 
-	start := newModel(in.Request).seed(in.Events).setDropped(in.Dropped)
+	start := newModel(in.Request).seed(in.Events).setDropped(in.Dropped).setTarget(in.Target)
 
 	final, err := tea.NewProgram(start,
 		tea.WithContext(ctx),
@@ -105,16 +115,42 @@ func Run(ctx context.Context, in Input) (Result, error) {
 	}
 
 	out := Result{
-		Request:    done.request(),
-		Flags:      done.flags(),
-		Run:        done.accepted,
-		Transcript: done.transcript(),
+		Request:     done.request(),
+		Flags:       done.flags(),
+		Run:         done.accepted,
+		Interrupted: done.interrupted,
 	}
 	// The screen contents go into scrollback on the way out, because the two
 	// screens must not be the one part of a run that leaves nothing behind
-	// (ADR-002).
+	// (ADR-002). But that is the artefact for a run that is about to happen —
+	// on a leave, the operator did not run the screen just reviewed, and
+	// echoing it back read as a truncated second copy of a plan or a
+	// classification already in scrollback above it (T-0345, dogfood session
+	// 3, finding 4). A leave gets the one line that says what did not happen
+	// instead.
+	switch {
+	case out.Run:
+		out.Transcript = done.transcript()
+	case done.writesTarget():
+		// Only ModeRun and ModeVerify would have dropped and rewritten
+		// anything; naming a target on a leave from classify or plan would
+		// claim a write that was never going to happen.
+		out.Transcript = closingLine(in.Target)
+	default:
+		out.Transcript = "stopped before writing anything\n"
+	}
 	if _, err := io.WriteString(in.Out, out.Transcript); err != nil {
 		return out, fmt.Errorf("tui: echoing the screen: %w", err)
 	}
 	return out, nil
+}
+
+// closingLine is what a leave prints instead of the screen it leaves, on a
+// mode that would have dropped and rewritten a target: nothing was written,
+// named against the endpoint the confirmation would also have named (T-0345).
+func closingLine(target string) string {
+	if target == "" {
+		target = "the target"
+	}
+	return "stopped before writing anything; nothing changed in " + target + "\n"
 }
