@@ -139,20 +139,27 @@ issue.
    like a text column on both nets.
 8. JSON key names, unless a key itself parses as an email address, a phone
    number or a credit-card number, in which case it is masked through that
-   category's own masker (T-0137). An arbitrary identifier used as a key — a
-   UUID, a slug, a customer number — is not named by any of the three and
-   still survives. A leaf *value* is copied when nothing marks it personal:
-   every key above it appeared in the sampled documents, no name rule names
-   any of them, and no value validator recognises the value (T-0272). That
-   keeps configuration documents working; the cost is a personal value no
-   rule and no validator knows, inside a document, which is copied too. A key
-   the samples never showed, or a document with no key, is still masked, and
-   so is every leaf of a column whose own name any name rule marks personal,
-   whatever its keys say: a `jsonb` `medical_history` as filler, and a `jsonb`
-   `full_name`, `home_address`, `passwords`, `date_of_birth`, `national_id`,
-   `emails`, `notes` or `by_phone` under that name's own category, through
-   the masker a leaf of that category gets (T-0393). Every leaf of a column
-   raised with `--mask TABLE.COL=semi_structured` or the yml is masked too.
+   category's own masker (T-0137). A phone number is read in international
+   form, and in national form under `--phone-region` (T-0394); without the
+   flag a national-format key such as `07911 123456` survives. An arbitrary
+   identifier used as a key — a UUID, a slug, a customer number — is not
+   named by any of the three and still survives. A leaf *value* is copied
+   when nothing marks it personal: every key above it appeared in the
+   sampled documents, no name rule names any of them, and no value validator
+   recognises the value (T-0272). That keeps configuration documents
+   working; the cost is a personal value no rule and no validator knows,
+   inside a document, which is copied too. A key whose sampled values are
+   national-format phone numbers counts as a phone key, and every value under
+   it is masked, when the table holds another personal column or the
+   document holds a personal key: the same evidence a plain column of such
+   numbers needs (T-0394). A key the samples never showed, or a document
+   with no key, is still masked, and so is every leaf of a column whose own
+   name any name rule marks personal, whatever its keys say: a `jsonb`
+   `medical_history` as filler, and a `jsonb` `full_name`, `home_address`,
+   `passwords`, `date_of_birth`, `national_id`, `emails`, `notes` or
+   `by_phone` under that name's own category, through the masker a leaf of
+   that category gets (T-0393). Every leaf of a column raised with
+   `--mask TABLE.COL=semi_structured` or the yml is masked too.
 9. `NULL` and the empty string, which survive and reveal that much, and the
    approximate length of a value masked as free text: its filler is fitted to
    the input's length, so an application's short values (`admin`, `linux`)

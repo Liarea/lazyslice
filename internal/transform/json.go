@@ -276,11 +276,23 @@ func leafConstraints() mask.Constraints { return mask.Constraints{TypeTag: famTe
 // (internal/verify/validators.go, "strong"). An arbitrary identifier used as a
 // key — a UUID, a slug, a customer number — is not named by any of the three
 // and stays; that is what SECURITY.md's limitation is narrowed to.
-func keyCategory(name string) (pipeline.Category, bool) {
+//
+// region is the run's configured phone region (leafPolicy.region,
+// pipeline.Classification.PhoneRegion), read as leafValueCategory reads it
+// (T-0394, the 2026-09-25 JSON red team's A11). internal/verify's second net
+// reads a masked document's keys under the same region, so a national-format
+// number used as a key ("07911 123456" under GB) is masked here rather than
+// copied and refused there at exit 9 with --skip-table as the only way past.
+// The masker's output is the international form (mask/gen_phone.go), which
+// the net's own international-only key skip recognises. An empty region is
+// textsig.ValidPhone's international-only reading, as before.
+// internal/classify's strongKeyShape asks the same question with the same
+// region, so a key masked here never enters the leaf map.
+func keyCategory(name, region string) (pipeline.Category, bool) {
 	switch {
 	case textsig.ValidEmail(name):
 		return pipeline.CatEmail, true
-	case textsig.ValidPhone(name):
+	case textsig.ValidPhoneRegion(name, region):
 		return pipeline.CatPhone, true
 	case textsig.ValidLuhn(name):
 		return pipeline.CatFinancial, true
@@ -307,10 +319,10 @@ func keyCategory(name string) (pipeline.Category, bool) {
 // rather than silently dropping one — see its own comment.)
 func (t transformer) maskKey(
 	col ref.ColumnRef,
-	name string,
+	name, region string,
 	k mask.Key,
 ) (masked string, canonical []byte, record bool, err error) {
-	cat, ok := keyCategory(name)
+	cat, ok := keyCategory(name, region)
 	if !ok {
 		return name, nil, false, nil
 	}
@@ -491,7 +503,7 @@ func (t transformer) walk(
 		sort.Strings(names)
 		out := make(map[string]any, len(n))
 		for _, name := range names {
-			maskedName, canon, record, err := t.maskKey(col, name, k)
+			maskedName, canon, record, err := t.maskKey(col, name, lp.region, k)
 			if err != nil {
 				return nil, err
 			}

@@ -31,7 +31,7 @@ func TestJSONKeyCategoriesNamesEveryKeyTheSamplesShow(t *testing.T) {
 		nil,
 		"not a document",
 	}
-	got := jsonKeyCategories(p, samples)
+	got := jsonKeyCategories(p, samples, "")
 
 	want := map[string]pipeline.Category{
 		"theme":   pipeline.CatNone,
@@ -54,7 +54,7 @@ func TestJSONKeyCategoriesNamesEveryKeyTheSamplesShow(t *testing.T) {
 	if _, ok := got["grace.hopper@fixture.test"]; ok {
 		t.Error("an email address used as a key entered the map; it is a value transform masks, not a name")
 	}
-	if jsonKeyCategories(p, []any{nil, `[1,2]`, `"x"`}) != nil {
+	if jsonKeyCategories(p, []any{nil, `[1,2]`, `"x"`}, "") != nil {
 		t.Error("samples with no object key produced a map; nil is what says nothing is known")
 	}
 }
@@ -101,12 +101,12 @@ func TestJSONKeyCategoriesPastTheLimitIsTheSameEveryTime(t *testing.T) {
 		return m
 	}
 	a, b := doc("k"), doc("j")
-	first := jsonKeyCategories(p, []any{a, b})
+	first := jsonKeyCategories(p, []any{a, b}, "")
 	if len(first) != jsonKeyLimit {
 		t.Fatalf("map holds %d keys, want the limit %d", len(first), jsonKeyLimit)
 	}
 	for i := 0; i < 5; i++ {
-		if got := jsonKeyCategories(p, []any{b, a}); !reflect.DeepEqual(got, first) {
+		if got := jsonKeyCategories(p, []any{b, a}, ""); !reflect.DeepEqual(got, first) {
 			t.Fatal("the same samples in another order gave a different map")
 		}
 	}

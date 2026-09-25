@@ -228,6 +228,26 @@ sees that case and must not paper over it with a retry.
     read under `--phone-region` is masked, not copied and refused at exit 9
     (`TestANationalNumberIsMaskedUnderTheRunsPhoneRegion`). No `internal/core`
     change was needed, so **T-0390** is done by this and can be closed.
+  - **So does the key question** (T-0394, the JSON red team's A11).
+    `keyCategory` asks `textsig.ValidPhoneRegion` under the same region
+    (`leafPolicy.region`, passed to `maskKey` by `walk`), because the net
+    reads a masked document's keys under `--phone-region` too: a document
+    keyed by `07911 12nnnn` refused at exit 9 with `--skip-table` as the only
+    remedy. The phone masker's output is the international form, which
+    verify's international-only key skip (`strongKeyCategory`) recognises,
+    and the key's filter entry is `mask.Apply`'s canonical under empty
+    constraints exactly as before, so the residual-filter table below is
+    unchanged. `internal/classify`'s `strongKeyShape` reads the same region,
+    so a key masked here is never in the map. With no region a
+    national-format key survives, as SECURITY.md item 8 states; masking it
+    on the guessed regions needs a decision field outside this task's paths
+    (**T-0401**). `TestANationalPhoneKeyIsMaskedUnderTheRunsPhoneRegion` pins
+    both regions, and that a key the map calls `phone` from its sampled
+    values masks its leaf through the phone masker. **Owed:** a masked key
+    goes through the plain phone masker's 44,700-number domain, so a
+    document with tens of phone-number keys meets `walk`'s collision refusal
+    (exit 7) often across a large table; this widened the set of keys that
+    can reach it (**T-0400**).
 - **"Wildly varying keys" is not implemented here.** §4 names two triggers for
   collapsing a document to `{}`; the table-name one (`audit|log|history|event`,
   plus plurals, matched on underscore-separated words) is deterministic per

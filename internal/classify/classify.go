@@ -143,6 +143,11 @@ type work struct {
 	// and this fallback still covers every other one). It is never acted on
 	// without corroboration.
 	guessedPhone *valueSignal
+	// guessedPhoneLeaves is guessedPhone for a json or jsonb column's leaf
+	// keys (T-0394): the keys LeafKeys calls CatNone whose string leaves
+	// clear validatorThreshold under phoneGuessRegions, set in base() and
+	// acted on only with corroboration, by guessedPhoneLeafColumns.
+	guessedPhoneLeaves []string
 	// spare is what the samples of a signal-less character column say it is
 	// -- one identifier shape throughout, or an enumeration -- set in base()
 	// and read only by unknownColumnsBesideCertain, which spares such a column
@@ -880,7 +885,9 @@ func (st *state) base() {
 				// samples (jsonKeyCategories says why not from values). An
 				// hstore is replaced whole by internal/transform and has no
 				// leaves to categorise; a json[] has no leaf walk either.
-				w.d.LeafKeys = jsonKeyCategories(st.pack, st.sampler.Samples(cref))
+				raw := st.sampler.Samples(cref)
+				w.d.LeafKeys = jsonKeyCategories(st.pack, raw, st.region)
+				w.guessedPhoneLeaves = guessedPhoneLeafKeys(raw, w.d.LeafKeys)
 			}
 			st.decide(w, col, ct, values, sig)
 			st.appendContext(w, t, ct, sig.total)
@@ -1927,6 +1934,7 @@ func (st *state) neighbouringColumns() {
 	// own raisableUnknown skips a column this pass has already decided
 	// (Category != CatNone), so the two never fight over one column.
 	st.guessedPhoneColumns()
+	st.guessedPhoneLeafColumns()
 	st.unknownColumnsBesideCertain()
 }
 
@@ -2518,6 +2526,52 @@ func (st *state) guessedPhoneColumns() {
 			render("samples", hit.matched, hit.total, hit.phrase),
 			render("phone_region_guessed"))
 	}
+}
+
+// guessedPhoneLeafColumns is guessedPhoneColumns for a document's leaf keys
+// (T-0394, the 2026-09-25 JSON red team's A26): a key whose string leaves
+// across the samples parse as phone numbers under phoneGuessRegions, at the
+// scalar path's ratio (guessedPhoneLeafKeys), is given CatPhone in the
+// column's LeafKeys when the scalar path's corroboration holds -- a proven
+// personal neighbour in the same table (Decision.TableHasLikelyPersonalColumn,
+// the gate guessedPhoneColumns reads) -- or when the document itself carries
+// a key the name rules call person-identifying (identifiesAPerson), which is
+// the same evidence one level down: a document with a givenName beside a
+// whatsApp is about a person. internal/transform then masks every leaf under
+// the key through the phone masker, and internal/verify's net, reading the
+// same map, leaves those leaves to the residual scan.
+//
+// Before it, a national-format number under a key no name rule names was
+// copied with no --phone-region, while the same values in a scalar column of
+// the same name beside the same neighbours were masked on the guessed-region
+// hit. It changes no column decision and only ever turns a CatNone key --
+// whose leaves were copied -- into one whose leaves are masked. It runs in
+// the same place guessedPhoneColumns does, after the corroboration field is
+// filled, and reads no column that pass changed.
+func (st *state) guessedPhoneLeafColumns() {
+	for _, col := range st.order {
+		w := st.dec[col]
+		if w == nil || len(w.guessedPhoneLeaves) == 0 {
+			continue
+		}
+		if !w.d.TableHasLikelyPersonalColumn && !hasPersonalKey(w.d.LeafKeys) {
+			continue
+		}
+		for _, k := range w.guessedPhoneLeaves {
+			w.d.LeafKeys[k] = pipeline.CatPhone
+		}
+	}
+}
+
+// hasPersonalKey reports whether a document's leaf map names any key with a
+// person-identifying category.
+func hasPersonalKey(keys map[string]pipeline.Category) bool {
+	for _, cat := range keys {
+		if identifiesAPerson(cat) {
+			return true
+		}
+	}
+	return false
 }
 
 // phoneGuessRaisable is guessedPhoneColumns' own gate, kept apart from

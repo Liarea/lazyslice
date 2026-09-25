@@ -340,6 +340,73 @@ func TestANationalNumberIsMaskedUnderTheRunsPhoneRegion(t *testing.T) {
 	}
 }
 
+// T-0394 (the 2026-09-25 JSON red team, round 1, A11 and A26). A11: a
+// national-format phone number used as an object key was masked only in
+// international form, so under --phone-region GB the net read the surviving
+// key and refused the run at exit 9; keyCategory now reads the run's region,
+// and with none the key survives as SECURITY.md item 8 states. A26: a key
+// internal/classify gave CatPhone from its sampled leaves (the value half of
+// the map) masks every leaf under it through the phone masker, whatever the
+// region. The maps are the ones internal/classify builds for each region: a
+// key transform masks is never in one.
+func TestANationalPhoneKeyIsMaskedUnderTheRunsPhoneRegion(t *testing.T) {
+	const national, international, whatsApp = "07911 120001", "+44 7911 130001", "020 7946 6001"
+	for _, c := range []struct {
+		region       string
+		keys         map[string]pipeline.Category
+		wantNational bool
+	}{
+		{"", map[string]pipeline.Category{national: pipeline.CatNone, "whatsApp": pipeline.CatPhone}, true},
+		{"GB", map[string]pipeline.Category{"whatsApp": pipeline.CatPhone}, false},
+	} {
+		k := key(t, 0x76)
+		cls := classification()
+		cls.PhoneRegion = c.region
+		d := cls.Decisions[col("people", "contact")]
+		d.LeafKeys = c.keys
+		cls.Decisions[col("people", "contact")] = d
+
+		b := peopleBatch()
+		b.Rows = b.Rows[:1]
+		b.Rows[0][4] = map[string]any{national: "Wren Calloway", international: "Ysolde Brackenridge", "whatsApp": whatsApp}
+		out, err := New(fixture()).Transform(b, cls, &k, NewResidual(100))
+		if err != nil {
+			t.Fatalf("region %q: Transform: %v", c.region, err)
+		}
+		doc := out.Rows[0][4].(map[string]any)
+		if len(doc) != 3 {
+			t.Fatalf("region %q: the document has %d keys, want 3: %v", c.region, len(doc), doc)
+		}
+		if _, ok := doc[international]; ok {
+			t.Errorf("region %q: the international key survived", c.region)
+		}
+		leaf, kept := doc[national]
+		if kept != c.wantNational {
+			t.Errorf("region %q: national key kept = %v, want %v", c.region, kept, c.wantNational)
+		}
+		if !kept {
+			for name, v := range doc {
+				if name == "whatsApp" {
+					continue
+				}
+				if !textsig.ValidPhone(name) {
+					t.Errorf("region %q: masked key %q is not the phone masker's international output", c.region, name)
+				}
+				if v == "Wren Calloway" || v == "Ysolde Brackenridge" {
+					t.Errorf("region %q: the leaf under masked key %q was copied: its key is unknown to the map", c.region, name)
+				}
+			}
+		} else if leaf != "Wren Calloway" {
+			// With no region the key is a name the map calls none and its
+			// leaf has no signal: copied, the residual item 8 names.
+			t.Errorf("region %q: the leaf under the kept national key = %v, want it copied", c.region, leaf)
+		}
+		if got, _ := doc["whatsApp"].(string); got == whatsApp || !textsig.ValidPhone(got) {
+			t.Errorf("region %q: whatsApp = %q, want the phone masker's output for a key the map calls phone", c.region, got)
+		}
+	}
+}
+
 // T-0393 (the 2026-09-25 JSON red team, round 1, A11 to A13): a jsonb column
 // whose own name matched a personal rule that does not accept jsonb is decided
 // plain semi_structured by its type, and before this fix that decision handed
