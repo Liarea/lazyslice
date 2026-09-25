@@ -148,8 +148,9 @@ type netMode struct {
 	// leafRules is a masked document column's per-leaf map
 	// (pipeline.Decision.LeafMap, T-0272), nil for every other column and
 	// for a masked document whose decision carries none or whose own
-	// category is not plain semi_structured, with the classification's phone
-	// region beside it. netStrings reads it
+	// category is not plain semi_structured, with the category the column's
+	// own name gave every leaf (Decision.LeafNameCategory, T-0393) and the
+	// classification's phone region beside it. netStrings reads it
 	// to leave a leaf a category's own masker replaced to the residual scan
 	// (jsonleaf.go's replacedByCategoryMasker), for the reason docMasked
 	// leaves a masked key: the masker's output is, by construction, still a
@@ -226,7 +227,7 @@ func (s *state) netMode(col ref.ColumnRef, c pipeline.Column) (netMode, bool) {
 		// stronger reason to read its leaves and not a reason to skip it.
 		mode := netMode{leaves: true, text: true, docMasked: has && d.Masked, family: family}
 		if mode.docMasked {
-			mode.leafRules = leafPolicy{keys: d.LeafMap(), region: s.cls.PhoneRegion}
+			mode.leafRules = policyOf(d, s.cls.PhoneRegion)
 		}
 		return mode, true
 	case has && d.Masked:

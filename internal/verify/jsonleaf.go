@@ -58,10 +58,28 @@ import (
 const leafCategory = pipeline.CatFreeText
 
 // leafPolicy is internal/transform's: the decision's per-leaf map through
-// pipeline.Decision.LeafMap, and the classification's phone region.
+// pipeline.Decision.LeafMap, the category the column's own name gave every
+// leaf when its type decided the column (pipeline.Decision.LeafNameCategory,
+// T-0393), and the classification's phone region.
 type leafPolicy struct {
 	keys   map[string]pipeline.Category
+	name   pipeline.Category
 	region string
+}
+
+// policyOf is internal/transform's: the leaf policy a masked document
+// column's decision gives.
+func policyOf(d pipeline.Decision, region string) leafPolicy {
+	return leafPolicy{keys: d.LeafMap(), name: d.LeafNameCategory(), region: region}
+}
+
+// categorised reports whether any leaf under p can have been replaced through
+// a category's own masker rather than free_text: a per-leaf map, or a column
+// name whose category keeps its own masker for a leaf (T-0393's jsonb
+// `emails`, `by_phone`, `home_address`, `passwords`, `national_id`). With
+// neither, every masked leaf is free_text filler, which the net reads.
+func (p leafPolicy) categorised() bool {
+	return p.keys != nil || leafMaskerEmits(p.name)
 }
 
 // leafVerdict is what leafRule decides for one leaf.
@@ -74,10 +92,15 @@ type leafVerdict struct {
 // the key chain (root first). The spellings differ only for a key transform's
 // keyCategory masked, and internal/classify never enters such a key in the
 // map, under either spelling, so the verdict is the same for every leaf the
-// target could hold unchanged.
+// target could hold unchanged. With no map, every leaf is masked under the
+// column's own name's category through leafMasker when p.name holds one
+// (T-0393), and as free_text otherwise; neither reads the key chain.
 func leafRule(p leafPolicy, chain []string, text string, valued bool) leafVerdict {
 	keys := p.keys
 	if keys == nil {
+		if p.name != "" {
+			return leafVerdict{cat: leafMasker(p.name)}
+		}
 		return leafVerdict{cat: leafCategory}
 	}
 	for i := len(chain) - 1; i >= 0; i-- {
@@ -147,11 +170,11 @@ func leafMasker(cat pipeline.Category) pipeline.Category {
 
 // replacedByCategoryMasker reports whether the second net should leave one
 // string leaf of a masked document to the residual scan: the decision carries
-// a per-leaf map, and the rule says a category's own masker, not free_text,
-// replaced the leaf. With no map every leaf was free_text filler, which the net
-// has always read, and still does.
+// a per-leaf map or a column-name category (T-0393), and the rule says a
+// category's own masker, not free_text, replaced the leaf. With neither, every
+// leaf was free_text filler, which the net has always read, and still does.
 func replacedByCategoryMasker(p leafPolicy, l leaf) bool {
-	if p.keys == nil || !l.str {
+	if !p.categorised() || !l.str {
 		return false
 	}
 	v := leafRule(p, l.keys, l.text, true)
@@ -167,7 +190,8 @@ func leafMaskerEmits(cat pipeline.Category) bool {
 
 // generatedFromMaskedLeaves reports a generated column over masked columns of
 // its own table only (generatedFromMasked, ADR-015) at least one of which is a
-// masked document carrying per-leaf categories. Such a column is computed by
+// masked document carrying per-leaf categories, or whose own name gave every
+// leaf a category with its own masker (T-0393). Such a column is computed by
 // the target from leaves transform either replaced through a category masker,
 // whose output is still a value of that category, or copied because no
 // validator recognised them; so a hit from one of the leaf maskers'
@@ -182,7 +206,7 @@ func (s *state) generatedFromMaskedLeaves(t ref.TableRef, expr string) bool {
 	}
 	for _, id := range exprIdentifiers(expr) {
 		d, ok := s.decision(ref.ColumnRef{Table: t, Column: id})
-		if ok && d.Masked && d.LeafMap() != nil {
+		if ok && d.Masked && policyOf(d, s.cls.PhoneRegion).categorised() {
 			return true
 		}
 	}

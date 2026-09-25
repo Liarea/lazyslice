@@ -45,7 +45,9 @@ sees that case and must not paper over it with a retry.
   decision is not plain `semi_structured` masks every leaf — masked under a category an enclosing key names,
   masked under a validator's category when its value validates, **copied** when
   every enclosing key was sampled with no category and nothing validates, and
-  masked as `free_text` otherwise (an unseen key, no key, or no map at all). A
+  masked as `free_text` otherwise (an unseen key, no key, or no map at all);
+  with no map, a column whose own name matched a personal rule its type
+  refused masks every leaf under that name's category instead (T-0393). A
   masked string leaf gets `leafMasker`'s category masker or `free_text`; masked
   numbers/booleans are re-derived from `h`; `null` stays `null`; structure and
   key names survive; an audit/log/history/event table's `jsonb` collapses to
@@ -204,6 +206,20 @@ sees that case and must not paper over it with a retry.
     (`ByYmlRaise`: a yml pattern or column entry, a `mask:` block,
     `--mask`), has every leaf masked as `free_text`
     (`TestAColumnsOwnDecisionMasksEveryLeafWhateverItsMapSays`).
+  - **A document whose own name is personal masks every leaf under that
+    name** (T-0393, the 2026-09-25 JSON red team's A11 to A13). Every name
+    rule but `special_category`'s refuses `jsonb`, so a `jsonb` `full_name`,
+    `passwords` or `notes` was decided `semi_structured` by its type, looked
+    like a document nothing names, and copied every signal-free leaf.
+    `internal/classify` now carries the refused name's category
+    (`pipeline.Decision.NameHit`); `LeafMap` is nil for it and
+    `LeafNameCategory` names it, and `policyOf` puts it on the policy as
+    `name`, which `leafRule`'s nil-map arm masks every leaf under through
+    `leafMasker` — the email masker for `emails`, `free_text` for
+    `full_name` — without reading the value. A raised document keeps
+    `free_text` (`LeafNameCategory` is empty for `ByYmlRaise`).
+    `TestADocumentWhoseOwnNameIsPersonalHasEveryLeafMasked` pins the eight
+    names, a raised control and an unnamed one.
   - **The phone question reads the run's region** (finding 2).
     `leafValueCategory` asks `textsig.ValidPhoneRegion` under
     `pipeline.Classification.PhoneRegion`, which `internal/classify` fills

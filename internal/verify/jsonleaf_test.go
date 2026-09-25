@@ -290,3 +290,156 @@ func TestAGeneratedColumnOverAMaskedDocumentsLeafIsTheMaskersOutput(t *testing.T
 		})
 	}
 }
+
+// T-0393: the second net agrees with transform about a document column whose
+// own name matched a personal rule its type did not accept (a jsonb `emails`,
+// `full_name`, `passwords`). transform masks every leaf of such a column
+// under the name's category through leafMasker, whatever the per-leaf map
+// says, so the rule here does too: a leaf is never called copied, and a leaf
+// the name's own masker replaced (an email, a phone, an address, a national
+// id, a credential) is the masker's output and left to the residual scan,
+// while a leaf of a name whose leafMasker is free_text (person_name,
+// person_date, free_text) is filler and still read.
+var nameHitColumns = []struct {
+	column string
+	cat    pipeline.Category
+	// fake is what transform's leaf masker for cat writes, or, where that
+	// masker is free_text, an address standing in for one that failed open.
+	fake string
+	// wantFail is the net's verdict on a target holding fake.
+	wantFail string
+}{
+	{"full_name", pipeline.CatPersonName, "wren.calloway@example.test", "email"},
+	{"home_address", pipeline.CatAddress, "221 Baker Street", ""},
+	{"passwords", pipeline.CatCredential, "Qx7vR2mK9pL4tZ8wN3bH6cJ1yF5dS0aE", ""},
+	{"date_of_birth", pipeline.CatPersonDate, "wren.calloway@example.test", "email"},
+	{"national_id", pipeline.CatNationalID, "123-45-6789", ""},
+	{"emails", pipeline.CatEmail, "glen.manning@example.com", ""},
+	{"notes", pipeline.CatFreeText, "wren.calloway@example.test", "email"},
+	{"by_phone", pipeline.CatPhone, "+44 20 7946 0958", ""},
+}
+
+func TestADocumentWhoseOwnNameIsPersonalHasNoCopiedLeaf(t *testing.T) {
+	keys := map[string]pipeline.Category{"given": pipeline.CatNone, "family": pipeline.CatNone, "d": pipeline.CatNone}
+	for _, c := range nameHitColumns {
+		t.Run(c.column, func(t *testing.T) {
+			d := pipeline.Decision{Category: pipeline.CatSemiStruct, Masked: true, NameHit: c.cat, LeafKeys: keys}
+			p := policyOf(d, "")
+			for _, l := range []struct{ key, text string }{{"given", "Wren"}, {"family", "Calloway"}, {"d", "1987-03-14"}} {
+				v := leafRule(p, []string{l.key}, l.text, true)
+				if v.copy || v.cat != leafMasker(c.cat) {
+					t.Errorf("leafRule(%s) = %+v, want masked under %s as transform masks it", l.key, v, leafMasker(c.cat))
+				}
+			}
+		})
+	}
+}
+
+func TestTheSecondNetReadsANameHitDocumentAsTransformMaskedIt(t *testing.T) {
+	for _, c := range nameHitColumns {
+		for _, keys := range []map[string]pipeline.Category{nil, {"owner": pipeline.CatNone}} {
+			name := c.column + "/with a map"
+			if keys == nil {
+				name = c.column + "/with no map"
+			}
+			t.Run(name, func(t *testing.T) {
+				table := customers()
+				col := ref.ColumnRef{Table: table, Column: c.column}
+				dec := pipeline.Decision{Col: col, Category: pipeline.CatSemiStruct, Masked: true, NameHit: c.cat, LeafKeys: keys}
+				s := &state{
+					schema: &pipeline.Schema{},
+					target: oneColumn{vals: []any{`{"owner":"` + c.fake + `"}`}},
+					steps:  []pipeline.Step{{Table: table, Mode: pipeline.ChildOK}},
+					tables: map[ref.TableRef]*pipeline.Table{
+						table: {Ref: table, Columns: []pipeline.Column{{Name: col.Column, TypeName: "jsonb"}}},
+					},
+					cls: &pipeline.Classification{Decisions: map[ref.ColumnRef]pipeline.Decision{col: dec}},
+				}
+				if err := s.secondNet(context.Background()); err != nil {
+					t.Fatalf("secondNet: %v", err)
+				}
+				if c.wantFail == "" {
+					if len(s.failures) != 0 {
+						t.Fatalf("the net failed %s as %q on the %s masker's own output", col, s.failures[0].Reason, c.cat)
+					}
+					return
+				}
+				if len(s.failures) != 1 || s.failures[0].Reason != c.wantFail {
+					t.Fatalf("the net recorded %d failures, want one naming %s: a %s leaf is filler, so an address there is a leak",
+						len(s.failures), c.wantFail, c.cat)
+				}
+			})
+		}
+	}
+
+	// A raised document keeps free_text for every leaf, so the net reads it
+	// whatever the column is called.
+	t.Run("a raised emails column is still read", func(t *testing.T) {
+		table := customers()
+		col := ref.ColumnRef{Table: table, Column: "emails"}
+		dec := pipeline.Decision{Col: col, Category: pipeline.CatSemiStruct, Masked: true, Source: pipeline.ByYmlRaise, NameHit: pipeline.CatEmail}
+		s := &state{
+			schema: &pipeline.Schema{},
+			target: oneColumn{vals: []any{`{"owner":"glen.manning@example.com"}`}},
+			steps:  []pipeline.Step{{Table: table, Mode: pipeline.ChildOK}},
+			tables: map[ref.TableRef]*pipeline.Table{
+				table: {Ref: table, Columns: []pipeline.Column{{Name: col.Column, TypeName: "jsonb"}}},
+			},
+			cls: &pipeline.Classification{Decisions: map[ref.ColumnRef]pipeline.Decision{col: dec}},
+		}
+		if err := s.secondNet(context.Background()); err != nil {
+			t.Fatalf("secondNet: %v", err)
+		}
+		if len(s.failures) != 1 || s.failures[0].Reason != "email" {
+			t.Fatalf("the net recorded %d failures, want one naming email", len(s.failures))
+		}
+	})
+}
+
+// A generated column over a name-hit document's leaf holds that name's
+// masker's output, as one over a per-leaf map's leaf does (ADR-015's rail,
+// generatedFromMaskedLeaves).
+func TestAGeneratedColumnOverANameHitDocumentsLeafIsTheMaskersOutput(t *testing.T) {
+	const expr = `lower((emails ->> 'owner'::text))`
+	for _, tc := range []struct {
+		name     string
+		hit      pipeline.Category
+		wantFail string
+	}{
+		{"under an emails column the email masker's output passes", pipeline.CatEmail, ""},
+		{"under a notes column the leaf was filler and an address is refused", pipeline.CatFreeText, "email"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			table := customers()
+			c := func(n string) ref.ColumnRef { return ref.ColumnRef{Table: table, Column: n} }
+			s := &state{
+				schema: &pipeline.Schema{},
+				target: oneColumn{vals: []any{"glen.manning@example.com", "isaac.murillo@example.net"}},
+				steps:  []pipeline.Step{{Table: table, Mode: pipeline.ChildOK}},
+				tables: map[ref.TableRef]*pipeline.Table{table: {Ref: table, Columns: []pipeline.Column{
+					{Name: "emails", TypeName: "jsonb"},
+					{Name: "owner_email", TypeName: "text", Generated: expr},
+				}}},
+				cls: &pipeline.Classification{Decisions: map[ref.ColumnRef]pipeline.Decision{
+					c("emails"):      {Col: c("emails"), Category: pipeline.CatSemiStruct, Masked: true, NameHit: tc.hit},
+					c("owner_email"): {Col: c("owner_email"), Category: pipeline.CatNone},
+				}},
+			}
+			if err := s.secondNet(context.Background()); err != nil {
+				t.Fatalf("secondNet: %v", err)
+			}
+			var got []string
+			for _, f := range s.failures {
+				if f.Column == "owner_email" {
+					got = append(got, f.Reason)
+				}
+			}
+			if tc.wantFail == "" && len(got) != 0 {
+				t.Errorf("owner_email failures %v, want none: the column holds the email masker's output", got)
+			}
+			if tc.wantFail != "" && (len(got) != 1 || got[0] != tc.wantFail) {
+				t.Errorf("owner_email failures %v, want one %s", got, tc.wantFail)
+			}
+		})
+	}
+}

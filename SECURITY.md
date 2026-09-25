@@ -147,9 +147,12 @@ issue.
    keeps configuration documents working; the cost is a personal value no
    rule and no validator knows, inside a document, which is copied too. A key
    the samples never showed, or a document with no key, is still masked, and
-   so is every leaf of a column whose own name marks it personal (a `jsonb`
-   `medical_history`) or that was raised with `--mask
-   TABLE.COL=semi_structured` or the yml.
+   so is every leaf of a column whose own name any name rule marks personal,
+   whatever its keys say: a `jsonb` `medical_history` as filler, and a `jsonb`
+   `full_name`, `home_address`, `passwords`, `date_of_birth`, `national_id`,
+   `emails`, `notes` or `by_phone` under that name's own category, through
+   the masker a leaf of that category gets (T-0393). Every leaf of a column
+   raised with `--mask TABLE.COL=semi_structured` or the yml is masked too.
 9. `NULL` and the empty string, which survive and reveal that much, and the
    approximate length of a value masked as free text: its filler is fitted to
    the input's length, so an application's short values (`admin`, `linux`)
