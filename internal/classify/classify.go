@@ -297,6 +297,10 @@ func (classifier) Classify(schema *pipeline.Schema, s pipeline.Sampler, prior *p
 		st.foreignKeys()
 	}
 	st.finalise()
+	// T-0404: every document column's copied keys are recorded for the yml,
+	// and a key the committed yml does not list is masked and reported as
+	// drift (leafdrift.go).
+	st.leafKeys(prior, cls)
 	cls.Decisions = make(map[ref.ColumnRef]pipeline.Decision, len(st.dec))
 	for col, w := range st.dec {
 		cls.Decisions[col] = w.d

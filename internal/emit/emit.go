@@ -26,6 +26,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -206,6 +207,11 @@ func (e emitter) columnConfig(col ref.ColumnRef, d pipeline.Decision) pipeline.C
 		Unique:     d.UniqueIndex,
 		TypeFP:     d.TypeFP,
 		Role:       d.Role,
+		// `leaf_keys:` (T-0404), already spelled and sorted by classify: the
+		// keys a run from this file may copy, never a key this run masked
+		// as drift from an entry that already had a list; nil on every
+		// column without a per-leaf map.
+		LeafKeys: slices.Clone(d.RecordedLeafKeys),
 	}
 	if d.Masked {
 		cc.Masker = d.Masker

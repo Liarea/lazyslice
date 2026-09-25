@@ -417,7 +417,8 @@ type Decision struct {
     Domain      int64  // admissible output domain, min(column domain, generator Domain()); 0 when unknown
     SmallDomain bool   // Domain < 2 × distinct sampled values: masking is a recoverable substitution (§5)
     Refused     string // non-empty when a unique column's domain is too small (exit 12)
-    LeafKeys    map[string]Category // json/jsonb only: every object key the samples showed → its name-rule category, CatNone when none (T-0272, §4); in memory only, never emitted; read only through LeafMap()
+    LeafKeys    map[string]Category // json/jsonb only: every object key the samples showed → its name-rule category, CatNone when none (T-0272, §4); in memory only, read only through LeafMap()
+    RecordedLeafKeys []string       // what the yml's leaf_keys: records (T-0404, §10), sorted: the keys a run from the file may copy — a fresh column's CatNone keys, an entry's own list carried forward as it stands, or, for an entry with no leaf_keys: at all, every CatNone key once; never a drifted key added to an existing list. Each is the key itself when identifier-shaped (ASCII letter or _, then letters, _ and -, digits only as a trailing run of one or two, not 8+ letters all hex, at most 32 bytes) and its column holds at most 64 keys, and "sha256:" + sha256(key)[:16] otherwise; nil when LeafMap is nil
     NameHit     Category // the name rules' category for the column's own name when its type is not one that category accepts, so the type decided the column (T-0393, §4); in memory only, never emitted
     LogShaped   bool     // the rule pack's log_shaped rule matched this column's table, set on every column of it regardless of family (T-0398, §4); in memory only, never emitted
 }
@@ -428,9 +429,15 @@ func (d Decision) LeafMap() map[string]Category
 // LeafNameCategory is NameHit when Category is semi_structured and Source is ByClassifier, empty otherwise: the category every leaf of the document is masked under, through the leaf masker (§4's T-0393 amendment).
 func (d Decision) LeafNameCategory() Category
 
+type LeafDrift struct {
+    Col ColumnRef
+    Key string // a key the samples showed that the committed yml's leaf_keys: does not list, spelled as RecordedLeafKeys spells it
+}
+
 type Classification struct {
     Decisions   map[ColumnRef]Decision
     Drift       []ColumnRef // columns the committed yml had never seen
+    LeafDrift   []LeafDrift // document keys a column the yml does carry would copy that its leaf_keys: does not list; taken out of LeafKeys, so masked (T-0404)
     Expired     []ColumnRef // opt-outs ignored because TypeFP changed
     Fingerprint string      // sha256 over (rule-pack version, and per column: category, masker)[:16], recomputed by core after the plan because the plan's unique-index pick may overwrite Masker; §5 "Determinism scope"
     PhoneRegion string      // the libphonenumber region classify ran under (Config.PhoneRegion); transform reads it for a JSON leaf's phone question (T-0272)
@@ -697,6 +704,7 @@ type ColumnConfig struct {
     MappingFile string   // ADR-006 escape hatch; gitignored
     Unmask      *Unmask
     Mask        *Mask    // --mask's record (T-0319); tightens only, so no reason and no expiry
+    LeafKeys    []string // leaf_keys: Decision.RecordedLeafKeys; nil on a column with no per-leaf map (T-0404)
 }
 
 type Unmask struct {
@@ -931,7 +939,7 @@ enc(f1, ..., fn) = u32be(len(f1)) ‖ f1 ‖ ... ‖ u32be(len(fn)) ‖ fn   // 
 - **Preserve what the application checks:** `varchar(n)` length, `CHECK` shapes we can parse, enum membership (a masked enum is a valid label), libphonenumber validity except under `phone_unique`.
 - **NULL stays NULL, `''` stays `''`.** Credentials become a fixed unusable value (`$lazyslice$invalid`); a credential column under a unique index escalates to `credential_unique`, `lazyslice-invalid-` followed by thirteen base32 symbols of `h`, domain 2⁶⁵, length-fitted to the column (T-HARD-A, 2026-09-08). Free text and JSON are replaced whole (§4).
 - **Masker signature:** `func(h [32]byte, in mask.Value, c mask.Constraints) (mask.Value, error)` plus `Domain(c mask.Constraints) int64`, registered by name at build time.
-- **Determinism scope:** same value → same fake within a run and across runs with the same `K`, the same category for the column, and the same lazyslice version (embedded lists and the rule pack are part of the mapping, because `K_cat` is derived from the category). `lazyslice.yml` and `lazyslice_meta` carry `sha256(K)[:8]` and `Classification.Fingerprint`; a marked target whose latest `classification_fingerprint` or `tool_version` differs from the run's prints `classification changed — masked values will differ` or `lazyslice version changed — masked values may differ`, in the same place and the same shape as the `secret changed` line (§11.2). A column moving category through drift, the neighbouring-column rule or an `extra_patterns` raise is therefore announced, never silent. **Amended 2026-09-25 (T-0272 review round):** which leaves of a `json`/`jsonb` document are copied and which masked (§4's T-0272 amendment) is *not* in the fingerprint. It follows the keys the samples showed (`Decision.LeafKeys`) and the phone region, so new data or a different sample page can move a leaf between copied and masked with no `classification changed` line; the fingerprint still moves when the column's own category or masker does. Folding a sampled key set into it would print the line on every run whose sample differed, which is noise rather than a warning. The map itself is deterministic for one sample set: every key is gathered, sorted, and only then cut at the 4,096-key limit, so no map iteration order reaches it. The fingerprint that reaches `lazyslice.yml` is computed after the plan, so it covers the classification plus the plan's generator picks and is therefore sensitive to plan inputs: a different root, `--take`, `--depth` or `--skip-table` changes the planned row count, which changes what `d_required` escalates, so `classification changed` can print for rows that are not in the target at all. That is the conservative direction (T-0101, 2026-09-08).
+- **Determinism scope:** same value → same fake within a run and across runs with the same `K`, the same category for the column, and the same lazyslice version (embedded lists and the rule pack are part of the mapping, because `K_cat` is derived from the category). `lazyslice.yml` and `lazyslice_meta` carry `sha256(K)[:8]` and `Classification.Fingerprint`; a marked target whose latest `classification_fingerprint` or `tool_version` differs from the run's prints `classification changed — masked values will differ` or `lazyslice version changed — masked values may differ`, in the same place and the same shape as the `secret changed` line (§11.2). A column moving category through drift, the neighbouring-column rule or an `extra_patterns` raise is therefore announced, never silent. **Amended 2026-09-25 (T-0272 review round):** which leaves of a `json`/`jsonb` document are copied and which masked (§4's T-0272 amendment) is *not* in the fingerprint. It follows the keys the samples showed (`Decision.LeafKeys`) and the phone region, so new data or a different sample page can move a leaf between copied and masked with no `classification changed` line; the fingerprint still moves when the column's own category or masker does. Folding a sampled key set into it would print the line on every run whose sample differed, which is noise rather than a warning. **Amended 2026-09-25 (T-0404, the JSON red team's round 1, entry 28):** what the fingerprint does not cover, a committed `lazyslice.yml` now does. Each per-leaf document column's entry lists its copied keys under `leaf_keys:` (§10), and a re-run from that file masks every key its samples show that the entry does not list — exactly as a key the samples never showed is masked — and reports it as drift (`classify.column.drift`, naming the column and the key), which `--strict-schema` refuses at exit 10 (§8). A key the entry lists keeps this run's decision, which can only be copy or tighter, and a run does not add a drifted key to the list: that takes an edit to the file. So new data can still move a leaf from copied to masked with no `classification changed` line, but it can no longer move one from masked to copied behind a committed file. The map itself is deterministic for one sample set: every key is gathered, sorted, and only then cut at the 4,096-key limit, so no map iteration order reaches it. The fingerprint that reaches `lazyslice.yml` is computed after the plan, so it covers the classification plus the plan's generator picks and is therefore sensitive to plan inputs: a different root, `--take`, `--depth` or `--skip-table` changes the planned row count, which changes what `d_required` escalates, so `classification changed` can print for rows that are not in the target at all. That is the conservative direction (T-0101, 2026-09-08).
 
 **§5 amendment (2026-09-14, T-0132): the masker is chosen per equality group, not per column.**
 
@@ -1047,7 +1055,7 @@ type Sink interface{ Send(Event) }
 | `--mask TABLE.COL[=CATEGORY]` | none; `free_text` when `=CATEGORY` is omitted | classify | The counterpart of `--unmask`: masks the column as CATEGORY, folded into the classifier's prior as a raise to `certain` (ADR-004's tighten-only rule); recorded under the column's `mask:` block with `by: flag`; repeatable; naming a category that is not one of §4's, the same column as `--unmask`, or a column that still comes out unmasked (a key or generated column, or a type the category does not accept) is exit 2 (T-0319) |
 | `--allow-type-literal TYPE=REASON` | none | plan | Per-type opt-out for an enum label or a domain definition otherwise refused at exit 13 (§11.1's fourth arm); recorded under `types:` with the reason and `by: flag`, on the same shape and the same tighten-only rule (ADR-004) `--unmask` has for a column; repeatable; the bare form without `=REASON` is exit 2 |
 | `--residual-probe-cap N` | 1000 | verify | Source confirmation probes per run; hits beyond it are unconfirmable and exit 9 (§6) |
-| `--strict-schema` | off | classify | Exit 10 on any column the committed yml has never seen |
+| `--strict-schema` | off | classify | Exit 10 on any column the committed yml has never seen, and (T-0404) on any document key a column's `leaf_keys:` does not list |
 | `--phone-region REGION` | none | classify | ISO 3166-1 alpha-2 region libphonenumber recognises (e.g. `GB`; anything else is exit 2) a national-format phone column is read under, on top of the international-only reading every run already has; recorded under `classify.phone_region` and named in the reasons output as the region assumed; a short built-in list is also always tried and only masks a column with corroboration — the name already matching the phone pattern, or a proven personal neighbour in the same table (§4) |
 | `--secret-file PATH` | `./lazyslice.secret` | transform | Masking key file; `LAZYSLICE_SECRET` overrides both |
 | `--require-key` | off | transform | Exit 5 instead of using an ephemeral key |
@@ -1315,6 +1323,16 @@ columns:
     category: none
     confidence: low
     reason: "value shape: 2-letter codes; no name signal"
+  public.customer.preferences:
+    category: semi_structured
+    confidence: possible
+    reason: "type jsonb is a semi_structured type"
+    masker: semi_structured
+    type: 9a0e44c1
+    leaf_keys:                     # keys whose values are copied (T-0404); a key the samples show that is not here is masked and is drift until added here by hand
+    - layout
+    - sha256:5d41402abc4b2a76      # a key that is not identifier-shaped, fingerprinted
+    - theme
 
 types:                                # --allow-type-literal, recorded; the same shape unmask has for a column
   public.assignee:
@@ -1337,6 +1355,8 @@ plan:
     function: 9
     trigger: 15
 ```
+
+**Amendment 2026-09-25 (T-0404, the JSON red team's round 1, entry 28).** A `json`/`jsonb` column whose decision carries a per-leaf map (§4's T-0272 amendment; `Decision.LeafMap` non-nil) records `leaf_keys:`: the sorted keys whose leaves a run from the file may copy (`Decision.RecordedLeafKeys`, spelled by `internal/classify`) — the key when identifier-shaped and the column holds at most 64 keys, `sha256:` and the first 16 hex characters of its SHA-256 otherwise, because a key that is not a name may be a value and this file holds none. Such a column with no copied key writes `leaf_keys: []`; every other column writes no `leaf_keys:` at all. Read back, the list is the set a re-run's copied keys are checked against (§5 "Determinism scope"): a key the samples show that the list does not hold is masked and is drift, and the file that run writes carries the list forward unchanged, so the key stays masked, run after run, until someone adds it to the list by hand. A file written before T-0404, whose entries have no `leaf_keys:` at all, is the one exception: its first re-run masks and reports every copied key once and writes them into the list. A lazyslice from before T-0404 refuses a file carrying `leaf_keys:` as an unknown key (the reader is strict); the format change is named in the release notes of the 0.x minor that ships it.
 
 **Amendment 2026-09-14 (T-0135, docs/reviews/2026-09-09 finding 6).** `dsn.Ref` carries `Params`, an allowlisted map of the non-secret transport keys the connection string was given: `sslmode`, `sslrootcert`, `sslcert`, `sslkey`, `connect_timeout`, `application_name`, `options`. Emit writes it as `params:` under `source:` and `target:`, discovery's rung 0 rebuilds the endpoint from it, so a first run with `sslmode=verify-full` reruns at `verify-full` and not at pgx's default `prefer`. A key outside the allowlist is dropped with a warning naming it; `password` and the whole DSN are never in the map. A recorded endpoint that no longer parses (a typoed `sslmode`, a non-numeric `connect_timeout`) refuses at exit 2 naming the field and the parameter rather than falling through to discovery; an unreadable certificate path is stripped with a warning and retried. Settings that reached the first run only through libpq environment variables or a `PGSERVICE` entry are not yet captured (T-0168).
 

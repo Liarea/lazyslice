@@ -373,7 +373,20 @@ Commit that file and the next run — including CI's — needs no flag and asks
 no question. A column the file has never seen is classified fresh, exactly as
 any column is: masked when the classifier lands at `possible` confidence or
 above, copied when it lands at `low` or `none`, and printed under `drift:`
-either way (ADR-004). `--strict-schema` turns any drift into exit 10 instead.
+either way (ADR-004). The same holds inside a `json` or `jsonb` column: the
+file lists, under the column's `leaf_keys:`, the document keys whose values
+the run copied, and a key the sampled documents show that the file does not
+list has every value under it masked and is printed under `drift:` with the
+column and the key — never a value. A run never adds that key to the list
+itself: it stays masked, and printed, until you add the key as the drift
+line spells it to the column's `leaf_keys:`.
+A key that is not shaped like a field name (a name with a space in it, a
+UUID, anything with a dot, or digits anywhere but a short suffix) is written as a
+`sha256:` fingerprint rather than as itself, and so is every key of a
+column whose documents show more than 64 different keys.
+`--strict-schema` turns any drift, a column or a key, into exit 10 instead.
+A file written by an earlier version lists no keys, so the first run from
+it masks and reports every copied key once and writes them into the list.
 An opt-out itself only ever narrows what gets copied, never widens it by
 omission — it takes a recorded `unmask` with a reason, never silence.
 
@@ -493,7 +506,8 @@ refused · `5` no usable source credential or masking key · `6` the source
 role can write and `--require-read-only-role` was set · `7` extract or load
 failed · `8` a foreign key does not hold · `9` a masked column still holds a
 source value, or a value that could not be confirmed either way · `10` a
-column the committed config has never seen, under `--strict-schema` · `11` a
+column, or a document key, the committed config has never seen, under
+`--strict-schema` · `11` a
 row or memory budget was exceeded · `12` the plan was refused — a column
 cannot be masked in place, or an identifier is missing · `13` the target's
 schema cannot be recreated safely — an unrewritable literal, or an object

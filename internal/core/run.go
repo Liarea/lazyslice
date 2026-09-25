@@ -1641,6 +1641,13 @@ func (r *run) classifyStage() error {
 	for _, col := range cls.Drift {
 		drift[col] = true
 	}
+	// T-0404: a column with a document key the committed yml does not list
+	// is not settled either -- its reason line prints, beside the drift line
+	// naming the key -- but it is not "changed" unless its own decision is.
+	leafDrift := make(map[ref.ColumnRef]bool, len(cls.LeafDrift))
+	for _, ld := range cls.LeafDrift {
+		leafDrift[ld.Col] = true
+	}
 	var changed int
 	for _, col := range columns {
 		d := cls.Decisions[col]
@@ -1650,12 +1657,14 @@ func (r *run) classifyStage() error {
 		}
 		settled := false
 		if r.prior != nil && !drift[col] {
+			changedHere := true
 			if cc, ok := r.prior.Columns[col]; ok {
-				settled = !decisionChanged(d, cc)
+				changedHere = decisionChanged(d, cc)
 			}
-		}
-		if r.prior != nil && !settled && !drift[col] {
-			changed++
+			if changedHere {
+				changed++
+			}
+			settled = !changedHere && !leafDrift[col]
 		}
 		r.sink.Send(event.Event{
 			At: time.Now(), Stage: event.Classify, Kind: event.Decision, Code: code,
@@ -1692,6 +1701,24 @@ func (r *run) classifyStage() error {
 				},
 			})
 		}
+		// T-0404: a document key this run's samples show that the
+		// committed yml's leaf_keys: does not list. internal/classify took
+		// it out of the column's leaf map, so every leaf beneath it is
+		// masked; the line names the column and the key (its yml spelling,
+		// a fingerprint for a key that is not identifier-shaped), never a
+		// leaf value.
+		for _, ld := range cls.LeafDrift {
+			r.sink.Send(event.Event{
+				At: time.Now(), Stage: event.Classify, Kind: event.Warn, Code: classify.CodeColumnDrift,
+				Table: ld.Col.Table, Column: ld.Col.Column,
+				Args: event.Args{
+					event.ArgTable:   ld.Col.Table.String(),
+					event.ArgColumn:  leafDriftColumn(ld),
+					event.ArgPath:    r.req.ConfigPath,
+					event.ArgVerdict: leafDriftVerdict,
+				},
+			})
+		}
 	}
 	for _, col := range cls.Expired {
 		r.sink.Send(event.Event{
@@ -1706,7 +1733,7 @@ func (r *run) classifyStage() error {
 		r.send(event.Classify, event.Info, CodeClassifyReused, event.Args{
 			event.ArgCount:        strconv.Itoa(len(columns) - len(cls.Drift)),
 			event.ArgPath:         r.req.ConfigPath,
-			event.ArgDriftCount:   strconv.Itoa(len(cls.Drift)),
+			event.ArgDriftCount:   strconv.Itoa(len(cls.Drift) + len(cls.LeafDrift)),
 			event.ArgChangedCount: strconv.Itoa(changed),
 		})
 	}
@@ -1720,18 +1747,38 @@ func (r *run) classifyStage() error {
 	// seen" (ARCHITECTURE.md §8) — a claim about a file on disk, and, for the
 	// same T-0325 reason as the warning loop above, cls.Drift means that only
 	// when r.prior is non-nil.
-	if r.prior != nil && r.req.StrictSchema && len(cls.Drift) > 0 {
+	// T-0404: a document key the file does not list is drift too, and
+	// counted one per key, the way classify.reused's drift_count counts it.
+	if n := len(cls.Drift) + len(cls.LeafDrift); r.prior != nil && r.req.StrictSchema && n > 0 {
 		return &Stop{
 			Code: classify.CodeRefusedStrictSchema, Exit: exitDrift,
 			Args: event.Args{
-				event.ArgCount: strconv.Itoa(len(cls.Drift)),
+				event.ArgCount: strconv.Itoa(n),
 				event.ArgPath:  r.req.ConfigPath,
 				event.ArgFlag:  "--strict-schema",
 			},
-			Message: fmt.Sprintf("%d column(s) are not in %s", len(cls.Drift), r.req.ConfigPath),
+			Message: fmt.Sprintf("%d column(s) or document key(s) are not in %s", n, r.req.ConfigPath),
 		}
 	}
 	return nil
+}
+
+// leafDriftVerdict is classify.column.drift's {verdict} for a document key
+// (T-0404): what this run did with its leaves, and what copies them. A run
+// does not add a key to a column's leaf_keys: on its own (T-0404 review
+// round, finding 1), so the line names the one step that does; the one
+// exception, a column whose entry has no leaf_keys: at all, lists it in the
+// file it writes, which the same sentence still describes.
+const leafDriftVerdict = "masked, not copied until the key is listed under the column's leaf_keys:"
+
+// leafDriftColumn is classify.column.drift's {column} for a document key:
+// the column and the key in PostgreSQL's own -> spelling, with the key
+// quoted as a SQL literal. The key is spelled as internal/classify spells
+// it for the yml (pipeline.Decision.RecordedLeafKeys), so a key
+// that is not identifier-shaped is named by its fingerprint, as the yml
+// names it, and a value used as a key never reaches the line.
+func leafDriftColumn(ld pipeline.LeafDrift) string {
+	return ld.Col.Column + "->'" + strings.ReplaceAll(ld.Key, "'", "''") + "'"
 }
 
 // classifySummary sends CodeClassifySummary, T-0321's one line folding every

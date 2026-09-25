@@ -903,3 +903,18 @@ settled still stops at exit 4 naming `--create-target`, use the real ladder
 against an `httptest` Docker endpoint on a loopback `tcp://` address that
 answers a ping and lists no containers. CONCEPT.md's "at most one blocking
 question" sentence is outside this package's paths and owed (T-0384).
+
+## T-0404 (2026-09-25): a document key the yml does not list is drift
+
+`Classification.LeafDrift` is reported beside `Drift`, under the same
+`r.prior != nil` gate: one `classify.column.drift` per key, with
+`Event.Column` the document column and `{column}` spelled `col->'key'`
+(`leafDriftColumn`, the key as `internal/classify` spelled it for the yml,
+so a value-shaped key is its fingerprint), and a fixed `{verdict}`
+(`leafDriftVerdict`: masked until the key is listed under `leaf_keys:`,
+because since the T-0404 review round a run no longer lists a drifted key
+itself unless the entry had no `leaf_keys:` at all). `classify.reused`'s `drift_count` and
+`--strict-schema`'s count are columns plus keys; a column with a drifted key
+is not `Settled` (its reason line prints) but is counted `changed` only when
+its own decision moved. The catalogue's wording still says "columns"
+(internal/event is outside T-0404's paths): **T-0420**.

@@ -202,3 +202,18 @@ now (`logShaped`, set in each package's `policyOf`) instead of re-deriving it,
 the same route `LeafMap`/`LeafNameCategory` already take onto each package's
 own `leafPolicy`. It is in memory only, like `NameHit`: `internal/emit` does
 not write it, and every run re-derives it from the rule pack.
+
+**`Decision.RecordedLeafKeys`, `LeafDrift`, `Classification.LeafDrift` and
+`ColumnConfig.LeafKeys` (T-0404, 2026-09-25).** ARCHITECTURE.md §2 prints all
+four. A committed yml now lists a per-leaf document column's copied keys
+under `leaf_keys:`, and a re-run masks and reports a key its samples show
+that the list does not hold (the JSON red team's round 1, entry 28). They
+are plain fields: the spelling of a key (itself when identifier-shaped, a
+`sha256:` fingerprint otherwise) is `internal/classify`'s alone
+(`leafdrift.go`'s `leafKeySpelling`), and `internal/emit` writes the strings
+classify put on the decision. An exported spelling function here was the
+first draft and was taken back out: it would have been a second
+implementation beside `ddlliteral.go`, which this file forbids, and emit
+never needs to spell a key, only to copy one. `LeafKeys`'s own comment
+changed with it: the map is still in memory only, and only
+`RecordedLeafKeys`' spellings leave the process.

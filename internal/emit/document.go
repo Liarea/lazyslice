@@ -4,6 +4,7 @@ package emit
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -147,6 +148,14 @@ type columnDoc struct {
 	// and every other category's own, unset field -- the same way Masker is
 	// omitted for a column this run did not mask.
 	Role string `yaml:"role,omitempty"`
+	// LeafKeys is `leaf_keys:` (T-0404): on a json or jsonb column whose
+	// decision carries a per-leaf map, the keys whose leaves a run from this
+	// file copies, sorted, each a key with an identifier's shape or a
+	// `sha256:` fingerprint of any other (Decision.RecordedLeafKeys). A
+	// pointer so that such a column with no copied key still writes
+	// `leaf_keys: []`, and every other column writes nothing, the way
+	// masker: is present exactly when it means something.
+	LeafKeys *[]string `yaml:"leaf_keys,omitempty"`
 }
 
 type unmaskDoc struct {
@@ -235,9 +244,10 @@ func toDocument(c *pipeline.Config) document {
 			TypeFP:     cc.TypeFP,
 			// mapping_file is never written (ADR-012): pipeline.ColumnConfig
 			// carries no field for it.
-			Unmask: unmaskOf(cc.Unmask),
-			Mask:   maskOf(cc.Mask),
-			Role:   string(cc.Role),
+			Unmask:   unmaskOf(cc.Unmask),
+			Mask:     maskOf(cc.Mask),
+			Role:     string(cc.Role),
+			LeafKeys: leafKeysOf(cc.LeafKeys),
 		}
 	}
 	d.Types = map[string]typeAllowDoc{}
@@ -375,6 +385,9 @@ func (d document) config() (*pipeline.Config, error) {
 			Unique:     cd.Unique,
 			TypeFP:     cd.TypeFP,
 			Role:       mask.Role(cd.Role),
+		}
+		if cd.LeafKeys != nil {
+			cc.LeafKeys = append([]string{}, *cd.LeafKeys...)
 		}
 		if cd.Unmask != nil {
 			cc.Unmask = &pipeline.Unmask{
@@ -641,6 +654,20 @@ func unmaskOf(u *pipeline.Unmask) *unmaskDoc {
 		return nil
 	}
 	return &unmaskDoc{Reason: u.Reason, By: u.By, TypeFP: u.TypeFP}
+}
+
+// leafKeysOf is `leaf_keys:` for one column: nil, and so no key at all, when
+// the column has no per-leaf map, and the sorted, de-duplicated list
+// otherwise, `[]` included. A hand-edited file's order and repeats do not
+// survive a round trip, so the diff a reviewer reads is the set.
+func leafKeysOf(keys []string) *[]string {
+	if keys == nil {
+		return nil
+	}
+	out := append([]string{}, keys...)
+	sort.Strings(out)
+	out = slices.Compact(out)
+	return &out
 }
 
 func maskOf(m *pipeline.Mask) *maskDoc {
