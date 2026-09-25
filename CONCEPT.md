@@ -12,7 +12,7 @@ A bug only reproduces with real data shapes. A new teammate needs a working loca
 
 ## Principles
 
-**Zero config.** First run asks at most one blocking question and then works; headless runs ask none. Configuration is emitted after a run as a record of what happened, never demanded before it. A committed `lazyslice.yml` never excuses an unseen column: it is masked or the run stops. We refuse to ship any feature whose first-run path is "write a YAML file".
+**Zero config.** First run asks only what it cannot decide, each question with a default shown (where to load when no local database is found, which table is the root when the schema does not say), and then works; headless runs ask none (ADR-017). Configuration is emitted after a run as a record of what happened, never demanded before it. A committed `lazyslice.yml` never excuses an unseen column: it is masked or the run stops. We refuse to ship any feature whose first-run path is "write a YAML file".
 
 **Safe by default.** Anything that might be personal data is masked unless the user opts a column out, and the tool explains why it masked each one. Free text and JSON columns are masked whole. When the classifier is unsure it masks more, never less. The source is opened read-only and the role's privileges are checked and printed; the target must be empty or one we wrote before. The output is pseudonymised, not anonymised, and we say so. We refuse to ship a flag, mode, or default that copies an unclassified column as-is.
 
