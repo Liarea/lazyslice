@@ -1,0 +1,423 @@
+{
+ "read": [
+  {
+   "set": "readme",
+   "read": "I read README.md end to end (all 525 lines). I checked it against these sources, which I also read:\n- docs/adr/017 in full, docs/adr/016 in full, and docs/adr/008 sections 5 to 7.\n- docs/adr/015: Status and Context.\n- docs/FLAGS.md and docs/ERRORS.md in full. `make docs-check` passes, so the generated flag table matches.\n- THREAT_MODEL.md: T1 in full, including every amendment through T-0272 (T-0311, T-0313, T-0315, T-0316, T-0317 and T-0354), T12, T13, \"Positions this document takes\", and the T2 marker-bound bullet.\n- ARCHITECTURE.md: the drift/fingerprint amendment in section 5 and the exit-code line.\n- Code: internal/core/root.go (rootQuestion, askRoot), internal/discover/ask.go, internal/ref/ref.go, internal/plan/root.go (RankRoots), internal/core/run.go (gateRefusal, classifySummary, planSummary), internal/pg/target.go (gate rule 1), internal/core/mask.go (checkMasks), internal/verify/secondnet.go (secondNetCode), internal/verify/codes.go, and the catalogue.yml rows for second_net and exit 7.\n- Also: mask/words_corpus.go (the 2020 Census lists), .goreleaser.yaml (archives, SBOM, cosign), Makefile (check, integration, egress), go.mod (mask v0.5.0), and docs/QUICKSTART_TRANSCRIPT.md in full.\n- History: `git log v0.3.0..HEAD` (50 commits) and `git diff v0.3.0 -- README.md docs/FLAGS.md`.\n\nI re-ran the README quickstart against two scratch postgres:16 containers, using a binary built from HEAD 1e061d3, then removed the containers. That covered the green run (exit 0), the reload, the same-database refusal (exit 2), `--unmask`/`--mask` with the yml they emit, and a bare `--unmask` (exit 2).\n\nProposed Status section for v0.4.0 (heading and paragraph), drawn from `git log v0.3.0..HEAD`:\n\n\"## Status: v0.4.0, pre-release, PostgreSQL only\n\nThe pipeline runs end to end against PostgreSQL 14 to 18: it discovers a source and a target, refuses a target that is not empty or not its own, subsets from a root table across foreign keys, masks personal data deterministically, loads, and verifies the copy (foreign keys, row counts, a residual scan of the target against the source). Hardening is done: the defects an independent review found on 2026-09-09 and six rounds of an adversarial red team have landed in the open ([docs/reviews/](docs/reviews/)), and what remains is tracked as [issues](https://github.com/Liarea/lazyslice/issues). `v0.4.0` is the release shaped by the first three dogfood sessions, one against a production Rails schema and one with the maintainer at a terminal. A first run at a terminal now asks both the target question and the root question when both are open (ADR-017). A committed target that is lazyslice's own container is found by name, or offered again, on the next run and the next machine (ADR-016). `--mask` masks a column the classifier copied. `json` and `jsonb` documents are masked leaf by leaf. Free text is masked to about its own length. The classifier no longer masks enumerations, identifier shapes, digests, file names, version strings, licence keys or bare `name` columns it has no evidence are personal; each of those narrowings is listed below. `v0.4.0` is a pre-release, like `v0.1.0` (the first version a stranger may install), `v0.2.0` and `v0.3.0` before it: the `lazyslice.yml` schema, the flags and the exit codes may still change between `0.x` minors, with every such change named in the release notes; a `0.x.y` patch never changes them.\"\n\nOut of scope but found: docs/QUICKSTART_TRANSCRIPT.md, \"recorded 2026-09-17\", has the same two missing summary lines and the same `root table? [customers]` prompt, so it is stale in the same ways."
+  },
+  {
+   "set": "security",
+   "read": "End to end: SECURITY.md (all 177 lines) and README.md's status section (lines 1-40) and \"What a snapshot will not hide\" (lines 403-467). THREAT_MODEL.md: every T1 amendment in full (lines 25-106, including T-0239, T-0253, T-0311, T-0354, T-0313, T-0315, T-0316, T-0317 and T-0272), T2's lease and reload-window amendments (lines 108-157, especially 120-152), and T12 with its ADR-015 amendment (lines 329-345). I read T3 to T11 and T13 only by their headings and grepped them for the mechanisms SECURITY names. ARCHITECTURE.md: \u00a74 (lines 865-901, including the T-0221, T-0317, T-0316, T-0315, T-0313, T-0311 and T-0272 amendments), \u00a76 items 1-6 (lines 966-973) and \u00a711.2 (lines 1399-1437). docs/adr/015 was grepped for the 1/500-bit claim. Code checked against specific claims: internal/transform/json.go lines 1-330 (leafRule, leafValueCategory, keyCategory); internal/verify/jsonleaf.go; internal/verify/secondnet.go applies/netStrings (lines 794-834); internal/verify/validators.go (dict, veto lists); internal/pipeline/classify.go Decision.LeafMap; internal/classify/validators.go (minSecretSamples, entropyExemptNames, identifierNameWords, networkIDVetoWords, phoneGuessVetoWords); internal/classify/classify.go (typeSignals fallback lines 1380-1510, LeafKeys at 872-884, applyPrior/raiseFromConfig at 2819-2950); internal/classify/rules.yml (the categories' accepts lists, bare_name); internal/textsig/secretshape.go (fixedHexDigest) and card.go; internal/core/mask.go (buildPrior, raisedForMask, checkMasks); cmd/lazyslice/main.go (--mask, --allow-remote-target); internal/pg/target.go markerBound/catalogFingerprint; internal/load/fingerprint.go. From git: `git tag` and `git log v0.3.0..HEAD` for the version finding, plus ROADMAP.md line 9. internal/event/catalogue.yml: SECURITY.md names no refusal code or exit code, so nothing in it needed checking there. The --mask syntax, its category list and its refusals (T-0319, T-0364), the T-0317 veto words, the T-0313 bare-name rule, the T-0315 sample floor and exempt names, the ADR-015 real-names sentence, and items 1, 4, 6, 7 and 9-13 all match the tree."
+  },
+  {
+   "set": "launch",
+   "read": "Read all six drafts end to end: docs/launch/SHOW_HN.md, R_POSTGRESQL.md, R_DEVOPS.md, R_WEBDEV.md, LISTINGS.md and BLOG_POSTMORTEMS.md. Checked them against: README.md in full (status, install, the run, flags, Why, How it decides, the safety model, \"What a snapshot will not hide\", exit codes); docs/adr/017 in full; docs/adr/015 in full; ARCHITECTURE.md \u00a73 (planner pseudocode, 3.1 to 3.8), \u00a74 \"Free text and JSON\" including the T-0272 amendment, \u00a75 key sourcing, \u00a76 items 3 and 5; THREAT_MODEL.md T1's T-0272 amendment and the T12/\u00a76 rows; CONCEPT.md in full; ROADMAP.md on the second engine; docs/ERRORS.md verify.* and plan.* rows; internal/core/CLAUDE.md \"The plan print is partial\"; .goreleaser.yaml and Makefile for CGO_ENABLED=0; `git tag` (v0.3.0 is the latest tag and README still says v0.3.0; the task says to treat v0.4.0 as the posting version); `gh repo view` for the live description, licence and language. None of the drafts quotes the install commands, the GIF, docs/QUICKSTART_TRANSCRIPT.md, a PostgreSQL version range or a README anchor link. The one README section they name in prose, \"What a snapshot will not hide\", exists at README.md:398. External claims (Snaplet, Neosync, HN threads, star counts, list line numbers) were not re-fetched, because the task limits the check to the current tree. Outside this document set I also noticed two things. CONCEPT.md:17 and :53 still say \"Free text and JSON columns are masked whole\" / \"Text and JSON ... are masked whole\", which has been stale since T-0272. And README.md:153-155's transcript shows masked `full_name` values as street addresses (\"9164 Juniper Street\"), which contradicts README.md:171-173's statement that masked names are Census names. I filed neither and changed no files."
+  }
+ ],
+ "findings": [
+  {
+   "set": "readme",
+   "severity": "high",
+   "file": "README.md",
+   "line": 8,
+   "claim": "## Status: v0.3.0, pre-release, PostgreSQL only",
+   "truth": "v0.4.0 is about to be cut. `git tag` shows v0.3.0 as the latest tool tag, and `git log v0.3.0..HEAD` has 50 commits, among them ADR-016, ADR-017, --mask, per-leaf JSON (T-0272) and mask/v0.5.0 (go.mod line 9).",
+   "fix": "## Status: v0.4.0, pre-release, PostgreSQL only"
+  },
+  {
+   "set": "readme",
+   "severity": "high",
+   "file": "README.md",
+   "line": 18,
+   "claim": "`v0.3.0` is a pre-release, like `v0.1.0` (the first version a stranger may install) and `v0.2.0` before it: the `lazyslice.yml` schema, the flags and the exit codes may still change between `0.x` minors, with every such change named in the release notes; a `0.x.y` patch never changes them.",
+   "truth": "The version is about to be v0.4.0. The paragraph also says nothing about what v0.4.0 carries (git log v0.3.0..HEAD: ADR-017's two questions, ADR-016's container target, --mask, per-leaf JSON, free_text fitted to input length, the dogfood classifier narrowings).",
+   "fix": "Replace the paragraph's closing sentence (lines 18-22) with the v0.4.0 text given in 'read': it names what v0.4.0 carries, then ends with \"`v0.4.0` is a pre-release, like `v0.1.0` (the first version a stranger may install), `v0.2.0` and `v0.3.0` before it: the `lazyslice.yml` schema, the flags and the exit codes may still change between `0.x` minors, with every such change named in the release notes; a `0.x.y` patch never changes them.\""
+  },
+  {
+   "set": "readme",
+   "severity": "high",
+   "file": "README.md",
+   "line": 51,
+   "claim": "go install github.com/Liarea/lazyslice/cmd/lazyslice@v0.3.0",
+   "truth": "The version being cut is v0.4.0. Pinning @v0.3.0 installs a binary without --mask, ADR-016 or ADR-017, and the rest of the page describes those.",
+   "fix": "go install github.com/Liarea/lazyslice/cmd/lazyslice@v0.4.0"
+  },
+  {
+   "set": "readme",
+   "severity": "high",
+   "file": "README.md",
+   "line": 267,
+   "claim": "lazyslice's own cells describe `v0.3.0` exactly as installed above.",
+   "truth": "The install block will name v0.4.0. The 'Config required' cell on line 272 already describes ADR-017's two-question behaviour, which v0.3.0 does not have (the README diff against v0.3.0 shows the old one-question cell).",
+   "fix": "lazyslice's own cells describe `v0.4.0` exactly as installed above."
+  },
+  {
+   "set": "readme",
+   "severity": "medium",
+   "file": "README.md",
+   "line": 106,
+   "claim": "The run excerpt (lines 99-122), introduced as 'Nothing below is typed; it is what actually happened, trimmed of the columns that print but add nothing', goes straight from the reason lines to `root public.customers ...` and from the last plan step to the estimate line.",
+   "truth": "Since T-0321 (da64ebb) every fresh run prints `classify.summary` after the reasons and `plan.summary` after the plan steps (internal/core/run.go:1767 and :1875). Re-running this exact command at HEAD printed `  17 column(s): 4 masked, 6 copied, 7 never-masked keys` before the root line and `  4 table(s) reached, 0 unreachable, 517 rows` before the estimate line. The stated trims do not cover these lines, and docs/QUICKSTART_TRANSCRIPT.md lacks them too.",
+   "fix": "Insert `  17 column(s): 4 masked, 6 copied, 7 never-masked keys` between line 106 (`public.customers.phone: name matches phone`) and line 107 (`root public.customers ...`). Insert `  4 table(s) reached, 0 unreachable, 517 rows` between line 111 (`public.order_items: 298 rows ...`) and line 112 (`517 rows, 8 KiB of keys ...`). Make the same two insertions in docs/QUICKSTART_TRANSCRIPT.md."
+  },
+  {
+   "set": "readme",
+   "severity": "medium",
+   "file": "README.md",
+   "line": 315,
+   "claim": "A name hit alone is enough to mask; a value hit alone is enough to mask.",
+   "truth": "THREAT_MODEL.md T1 line 32: 'a name hit alone is `possible`, except the bare word `name`, which needs corroboration'. Per the T-0313 amendment (line 88), a bare `name`, `display_name` or `<thing>_name` reaches `possible` only with a word for people in the table or column name, with fewer than three samples, or with a fifth of the samples in the name dictionary. README's own residual 3 (lines 430-437) says such a column is copied.",
+   "fix": "A name hit alone is enough to mask, except a bare `name`, `display_name` or `<thing>_name`, which also needs a word for people in its table or column name, or a fifth of its samples in the name dictionary (residual 3 below); a value hit alone is enough to mask."
+  },
+  {
+   "set": "readme",
+   "severity": "medium",
+   "file": "README.md",
+   "line": 361,
+   "claim": "the bare `--mask TABLE.COL` when neither applies,",
+   "truth": "Since T-0369 (02c918f) the type-conflict hint is `verify.refused.second_net_type_conflict`: 'mask it with --mask {table}.{column}=special_category instead, which internal/classify/rules.yml accepts on every type' (docs/ERRORS.md; internal/event/catalogue.yml:728). internal/verify/codes.go:66-85 records that the bare form was withdrawn: it records free_text, and free_text cannot take bytea, uuid, inet, cidr or macaddr.",
+   "fix": "`--mask TABLE.COL=special_category`, the one category every type accepts, when neither applies,"
+  },
+  {
+   "set": "readme",
+   "severity": "medium",
+   "file": "README.md",
+   "line": 372,
+   "claim": "Commit that file and the next run \u2014 including CI's \u2014 needs no flag and asks no question.",
+   "truth": "Under ADR-016 (docs/adr/016, Decision 3), a committed `target:` record of lazyslice's own container (`from: container`, `service: lazyslice-target-*`) names the container. When the container is absent, a terminal gets Q1 and a headless run such as CI stops at exit 4 with `target.refused.container_missing`, naming --create-target and --target (docs/ERRORS.md). When it is stopped, Q1\u2032 is asked.",
+   "fix": "Commit that file and the next run \u2014 including CI's \u2014 needs no flag and asks no question, as long as it can reach the target the file records. When that target is a container lazyslice started (`lazyslice-target-*`), a machine that does not have it asks to start one at a terminal and, headless, stops at exit 4 (`target.refused.container_missing`) naming `--create-target` and `--target` (ADR-016)."
+  },
+  {
+   "set": "readme",
+   "severity": "medium",
+   "file": "README.md",
+   "line": 454,
+   "claim": "Anything else, in a column with no name signal and no personal neighbour in its table, is copied \u2014 and so is such a column beside a personal neighbour when its samples read as an enumeration or an identifier shape (a username repeated across a handful of staff rows, a hostname a device's owner chose), which the neighbour rule spares.",
+   "truth": "The T-0354 residual is missing (THREAT_MODEL.md line 86, 'The residual, stated'): a hex token of exactly a digest's length (8 to 12 characters, 32/40/64 in one case, or 128 at an entropy LooksSecret does not read as a secret) under a neutral name beside a certain neighbour is spared as a hex digest and copied. README's T-0315 sentence covers only the 32/40/64 entropy case, not the 8-12 or 128 spare, and nothing in residual 4 names T-0354.",
+   "fix": "After '\u2026which the neighbour rule spares.' add: 'So is a hex token of exactly a digest's length \u2014 8 to 12 characters, 32, 40 or 64 in one case, or 128 at an entropy the credential check does not read as a secret \u2014 under a neutral column name beside a certain neighbour, which that rule spares as a hex digest.'"
+  },
+  {
+   "set": "readme",
+   "severity": "medium",
+   "file": "README.md",
+   "line": 489,
+   "claim": "`2` usage \u2014 a flag names something that cannot work (this is also the code a same-database target is refused with: that check runs at the flag surface, before discovery, not as one of the `4`s below)",
+   "truth": "The same-database refusal is rule 1 (identity) of the target gate in internal/pg/target.go:321-327. It compares system_identifier and current_database() over live connections, after discovery. internal/core/run.go:1194-1198 (gateRefusal) maps that one gate reason to exit 2. It is not a flag-surface check, and ERRORS.md files it under the discover stage.",
+   "fix": "`2` usage \u2014 a flag names something that cannot work (this is also the code a same-database target is refused with: it is the target gate's first rule, identity, which runs before any row is read and is the one gate refusal that exits `2` rather than `4`)"
+  },
+  {
+   "set": "readme",
+   "severity": "medium",
+   "file": "README.md",
+   "line": 400,
+   "claim": "An exit `0` means the checks above passed, not that the snapshot is anonymous. lazyslice pseudonymises; it does not anonymise. The full list of stated false negatives, with the reasoning behind each, is in [SECURITY.md](SECURITY.md) and, in more detail, [THREAT_MODEL.md](THREAT_MODEL.md).",
+   "truth": "THREAT_MODEL.md says the README carries two statements it does not. T12 (line 337): 'Stated limit, in the README: the filter tests canonical equality, so a value that was truncated, reformatted or embedded in a longer string is not detected.' Positions (line 366): 'the README tells users to regenerate snapshots after an erasure request and that rotating `K` makes old snapshots uncorrelatable with new ones.' A grep of README for canonical, erasure and rotat finds nothing (SECURITY.md item 6 has the first).",
+   "fix": "After that sentence add: 'Two limits sit beside that list: the residual scan tests canonical equality, so a source value that was truncated, reformatted or embedded in a longer string is not detected; and a snapshot is personal data, so regenerate every snapshot after an erasure request \u2014 rotating the masking key makes old snapshots uncorrelatable with new ones.'"
+  },
+  {
+   "set": "readme",
+   "severity": "low",
+   "file": "README.md",
+   "line": 135,
+   "claim": "prints `root table? [customers]` and waits for Enter, a table name, or `?` for the ranked candidates",
+   "truth": "internal/core/root.go:185 builds the prompt as \"root table? [\" + def.Table.String() + \"]\", and internal/ref/ref.go:27 makes TableRef.String() Schema+\".\"+Name. The prompt on this schema is `root table? [public.customers]`, matching the decision line `root public.customers` on line 107.",
+   "fix": "prints `root table? [public.customers]` and waits for Enter, a table name, or `?` for the ranked candidates"
+  },
+  {
+   "set": "readme",
+   "severity": "low",
+   "file": "README.md",
+   "line": 240,
+   "claim": "A first run at a terminal asks only what it could not settle on its own \u2014 which table to start from, and, when it found no database to load into, whether to start one \u2014 and then works; a headless run asks none.",
+   "truth": "ADR-017 Decision 1 asks open items in ladder order: the target question (Q1, or Q1\u2032 for a stopped container) comes first, then Q2 the root. Q1\u2032 ('target <name> is stopped \u2014 start it? [Y/n]', ADR-008 \u00a76) is also a target question. The sentence lists the root first and leaves out the stopped-container case.",
+   "fix": "A first run at a terminal asks only what it could not settle on its own \u2014 when it found no database to load into, or only a stopped one, whether to start it, and then which table to start from \u2014 and then works; a headless run asks none."
+  },
+  {
+   "set": "readme",
+   "severity": "low",
+   "file": "README.md",
+   "line": 272,
+   "claim": "a run with no flags at a terminal asks at most two questions (whether to start a target container when none is found, then which table to start from)",
+   "truth": "ADR-017 Consequences: 'The largest number of blocking questions a first run can ask is two: Q1 or Q1\u2032, then Q2.' Q1\u2032 fires when the only target-shaped candidate is a stopped container (ADR-008 \u00a76).",
+   "fix": "a run with no flags at a terminal asks at most two questions (whether to start a target container when none is found, or the stopped one it found, then which table to start from)"
+  },
+  {
+   "set": "readme",
+   "severity": "low",
+   "file": "README.md",
+   "line": 301,
+   "claim": "A column already at low confidence is raised to suspect the moment another column in the same table is at likely or above",
+   "truth": "'suspect' is not a confidence level. ADR-004 line 32 gives the scale as `none | low | possible | likely | certain`, and THREAT_MODEL.md T1 line 32 says 'the neighbouring-column rule raises `low` to `possible` in any table with a `likely` column'.",
+   "fix": "A column already at `low` confidence is raised to `possible`, and so masked, the moment another column in the same table is at `likely` or above"
+  },
+  {
+   "set": "readme",
+   "severity": "low",
+   "file": "README.md",
+   "line": 338,
+   "claim": "The yml block (lines 338-348), presented as what 'The run records ... in the `lazyslice.yml` it emits': `reason: \"name matches description; neighbouring-column rule did not apply (no PII in film)\"`, with `type:` only inside `unmask:`.",
+   "truth": "No code emits 'neighbouring-column rule did not apply' (a grep of internal/ finds nothing). The rule-pack match reads as the category (e.g. `name matches free_text`). An --unmask run appends '; opt-out recorded by --unmask', and the column carries its own `type:` line as well as `unmask.type`. The re-run at HEAD produced: `reason: name matches free_text; \u2026; opt-out recorded by --unmask`, then `type: c0b229a2`, then `unmask:` with reason/by/type.",
+   "fix": "Replace the example's `reason:` line with `    reason: \"name matches free_text; opt-out recorded by --unmask\"`, and add `    type: 3e51a0c2` directly above `    unmask:` (the fingerprint the column's own record carries, the same one as `unmask.type`)."
+  },
+  {
+   "set": "readme",
+   "severity": "low",
+   "file": "README.md",
+   "line": 375,
+   "claim": "copied when it lands at `low` or `none`, and printed under `drift:` either way (ADR-004).",
+   "truth": "No `drift:` section is printed or written. Each drift column prints its own `classify.column.drift` line, '{table}.{column} is not in {path}: classified fresh and {verdict}' (docs/ERRORS.md; internal/event/catalogue.yml:168), and a re-run's summary counts it in `classify.reused` ('{drift_count} drift').",
+   "fix": "copied when it lands at `low` or `none`, and printed either way as a drift line naming the file (`\u2026 is not in ./lazyslice.yml: classified fresh and masked`) (ADR-004)."
+  },
+  {
+   "set": "readme",
+   "severity": "low",
+   "file": "README.md",
+   "line": 251,
+   "claim": "the target has to be empty or a database lazyslice wrote before.",
+   "truth": "Gate rule 4 (ADR-008 \u00a75, ADR-005) passes only a marker bound to this source and catalog. Per ADR-016 \u00a76, a target holding lazyslice's copy of another source falls through to rule 5 and is refused as not_empty ('a copy of another source'). Line 384 says the same thing ('a database lazyslice itself wrote before').",
+   "fix": "the target has to be empty or a database lazyslice loaded before from this same source. (Line 384 likewise: 'The target must be empty or a database lazyslice itself loaded before from this same source, held under a lease\u2026')"
+  },
+  {
+   "set": "readme",
+   "severity": "low",
+   "file": "README.md",
+   "line": 493,
+   "claim": "`5` no usable source credential or masking key",
+   "truth": "Exit 5 also covers the target. Q4, the password prompt, is exit 5 for any explicitly given endpoint, --target included (ADR-008 \u00a76), and `secret.password_command.failed` is 'no password for {host}' at exit 5 for either side (docs/ERRORS.md). ARCHITECTURE.md's exit line reads '5 credential or key'.",
+   "fix": "`5` no usable credential for a named source or target, or no usable masking key"
+  },
+  {
+   "set": "readme",
+   "severity": "low",
+   "file": "README.md",
+   "line": 494,
+   "claim": "`7` extract or load failed \u00b7 \u2026 \u00b7 `9` a masked column still holds a source value, or a value that could not be confirmed either way",
+   "truth": "docs/ERRORS.md gives exit 7 to `transform.refused.masker` (transform) and to `verify.refused.row_count` and `verify.refused.sequence` (verify), as well as extract and load. It gives exit 9 to `verify.refused.second_net*` (an unmasked column whose values validate as a category) and `verify.refused.catalog_literal`, not only to residual hits.",
+   "fix": "`7` extract, transform or load failed, or the target's row counts or sequences do not match the plan \u00b7 \u2026 \u00b7 `9` a masked column still holds a source value, or one that could not be confirmed either way, or an unmasked column or the target's schema holds values that validate as personal data"
+  },
+  {
+   "set": "security",
+   "severity": "medium",
+   "file": "SECURITY.md",
+   "line": 9,
+   "claim": "`v0.1.0` was the first version a stranger may install; `v0.3.0` is the current release and the one a report is triaged against, and its `lazyslice.yml` schema, flags and exit codes may still change between `0.x` minors.",
+   "truth": "The known-limitations list describes main, not v0.3.0. `git log v0.3.0..HEAD` shows these landing after the tag: T-0313 (637305e, bare `name`, item 3), T-0315 (3431912), T-0316 (a6988d6) and T-0317 (44412d1), all in item 2, T-0272 (1e061d3, JSON leaves copied, item 8) and T-0328 (757c579/d197074, free-text length, item 9). Under v0.3.0 a bare `name` column, every JSON leaf and every entropy-flagged file name are still masked, and free-text length is uncorrelated with the input. ROADMAP.md line 9 says v0.4.0 is the release these land in. README.md lines 8 and 18 also say v0.3.0, so the two files agree with each other but not with the tree they describe.",
+   "fix": "Until the tag: \"`v0.1.0` was the first version a stranger may install and `v0.3.0` is the current release. The limitations below describe `main`, which ships as `v0.4.0`: items 2, 3, 8 and 9 each copy or reveal something `v0.3.0` still masks. A report is triaged against the latest release or `main`, and the `lazyslice.yml` schema, flags and exit codes may still change between `0.x` minors.\" At the v0.4.0 tag, change `v0.3.0` to `v0.4.0` in the original sentence, and change README.md lines 8 and 18 in the same commit."
+  },
+  {
+   "set": "security",
+   "severity": "medium",
+   "file": "SECURITY.md",
+   "line": 149,
+   "claim": "A key the samples never showed, or a document with no key, is still masked, and so is every leaf of a column whose own name marks it personal (a `jsonb` `medical_history`) or that was raised with `--mask TABLE.COL=semi_structured` or the yml.",
+   "truth": "Only a special-category name masks every leaf, because `special_category` is the only personal category whose `accepts` list admits json/jsonb (`[\"*\"]`; every other category in internal/classify/rules.yml lines 52-97 is text or numeric only). A jsonb column named for any other category, such as `home_address`, `contact_email` or `customer_name`, is a type conflict. internal/classify/classify.go lines 1386-1417 then fall back to the type signal: `semi_structured` at `possible`, Source ByClassifier. Decision.LeafMap (internal/pipeline/classify.go lines 216-221) returns the per-leaf map for exactly that decision, so the column is read leaf by leaf and a leaf under a sampled, unnamed key is copied. THREAT_MODEL.md line 97 says only \"special categories still mask on name alone\".",
+   "fix": "A key the samples never showed, or a document with no key, is still masked. So is every leaf of a column whose own name is a special-category name (a `jsonb` `medical_history` or `diagnosis`), and every leaf of a column raised with `--mask TABLE.COL=semi_structured` or the yml. A document column named for any other category, such as a `jsonb` `home_address`, is still read leaf by leaf."
+  },
+  {
+   "set": "security",
+   "severity": "medium",
+   "file": "SECURITY.md",
+   "line": 89,
+   "claim": "A value outside that list, in a column no name rule matches and whose table holds no other column already decided personal, is copied.",
+   "truth": "Item 2 leaves out the T-0311/T-0354 residual that README.md item 4 (lines 464-467) carries. The sweep beside a `certain` personal neighbour spares, and copies, a character column whose samples read as an enumeration (at most 20 distinct values in 10 or more samples, each seen at least twice) or as one identifier shape: a uuid, a version, a hostname, a path, or a hex digest at 8-12 characters or exactly 32, 40, 64 or 128. THREAT_MODEL.md line 84 states the T-0311 residual (repeated staff logins, a hostname built from its owner's login). Line 86 states the T-0354 residual: a hex token of exactly a digest's length is spared and copied.",
+   "fix": "After that sentence, add: \"So is such a column beside a personal neighbour the classifier is certain of, when its samples read as an enumeration or as one identifier shape: a username repeated across a handful of staff rows, a hostname a device's owner chose, or a hex token of exactly a digest's length (8 to 12 characters, or 32, 40, 64 or 128), which the neighbouring-column rule spares.\""
+  },
+  {
+   "set": "security",
+   "severity": "low",
+   "file": "SECURITY.md",
+   "line": 131,
+   "claim": "A *reload* of a target lazyslice has already marked as its own does not repeat that check: a table an application creates in the target strictly after one run finishes and strictly before the next run's first drop is left alone, untouched and unmentioned, rather than refused.",
+   "truth": "THREAT_MODEL.md T2 line 145: on a bound marker the only window is gate to first drop. The gate's catalog fingerprint \"catches a table introduced before the gate ran\". internal/pg/target.go markerBound (lines 503-525) recomputes the target's schema fingerprint through load.GateFingerprint over the whole introspected catalog. A table created between runs therefore unbinds the marker, and the gate's emptiness rule refuses the reload at exit 4 when that table holds rows.",
+   "fix": "A *reload* of a target lazyslice has already marked as its own does not repeat that check. A table created before the next run's gate changes the target's catalog fingerprint, so the marker no longer binds and the emptiness rule applies, but a table an application creates strictly after the next run's gate and strictly before its first drop is left alone, untouched and unmentioned, rather than refused."
+  },
+  {
+   "set": "security",
+   "severity": "low",
+   "file": "SECURITY.md",
+   "line": 81,
+   "claim": "A card number is only recognised inside a known issuer's range and, under an id/number/version/reference column name, at that issuer's own length; one from a range the table lacks, or of an unlisted length under such a name, is copied.",
+   "truth": "This holds for a scalar column only. The JSON leaf reader still accepts a bare Luhn pass (internal/transform/json.go line 208 and internal/verify/jsonleaf.go line 114: `ValidCard || CardShape || ValidLuhn || ValidIBAN`). So do JSON key masking (json.go line 268, `keyCategory`) and the DDL-literal passes (THREAT_MODEL.md line 92). In those places an out-of-range card is masked or refused, not copied. The identifier-name rule is also a suffix rule over id, number, num, no, nr, version, ref and reference (internal/classify/validators.go lines 139-158).",
+   "fix": "In a column, a card number is only recognised inside a known issuer's range and, under a column name ending in id, number, num, no, nr, version, ref or reference, at that issuer's own length. One from a range the table lacks, or of an unlisted length under such a name, is copied."
+  },
+  {
+   "set": "security",
+   "severity": "low",
+   "file": "SECURITY.md",
+   "line": 93,
+   "claim": "The entropy check itself now passes four more shapes through, in a column no credential name rule matches: a secret that is a hex run of exactly 32, 40 or 64 characters, a secret column of one to four non-NULL rows, \u2026",
+   "truth": "internal/textsig/secretshape.go lines 140-175 (fixedHexDigest/bareDigestHex) spare a hex run of 32, 40 or 64 characters only when it is all one case; a mixed-case run is still read as a secret. The same function also spares the same digests under an `md5`/`sha1`/`sha256` prefix and as 16, 20 or 32 colon-separated byte pairs. ARCHITECTURE.md \u00a74's T-0315 amendment states all three forms.",
+   "fix": "The entropy check itself now passes four more shapes through, in a column no credential name rule matches: a secret that is a hex run of exactly 32, 40 or 64 characters in one case (bare, under an `md5`/`sha1`/`sha256` prefix, or as 16, 20 or 32 colon-separated byte pairs), a secret column of one to four non-NULL rows, \u2026"
+  },
+  {
+   "set": "security",
+   "severity": "low",
+   "file": "SECURITY.md",
+   "line": 143,
+   "claim": "A leaf *value* is copied when nothing marks it personal: every key above it appeared in the sampled documents, no name rule names any of them, and no value validator recognises the value (T-0272).",
+   "truth": "This is literally true, but item 2 (line 80) lists \"a name\" and \"ordinary prose\" among the validators, and neither one reads a leaf. The leaf value list in internal/transform/json.go lines 200-225 (restated in internal/verify/jsonleaf.go) has no person_name or free_text entry. internal/verify/secondnet.go lines 794-797 keep the dictionary validators off a document's leaves (`v.dict && mode.leaves`). THREAT_MODEL.md line 99 gives the example: \"a name under a key like `attendee` \u2026 is copied\".",
+   "fix": "A leaf *value* is copied when nothing marks it personal: every key above it appeared in the sampled documents, no name rule names any of them, and no value validator recognises the value (T-0272). The name dictionary and the prose check do not read a leaf, so a person's name under a key like `attendee` is copied too."
+  },
+  {
+   "set": "security",
+   "severity": "low",
+   "file": "SECURITY.md",
+   "line": 66,
+   "claim": "These are documented in [THREAT_MODEL.md](THREAT_MODEL.md), and the first five are on the README's front page.",
+   "truth": "The five are the same set but in a different order. README.md lines 407-467 order them: 1 identifiers, 2 bare national id, 3 script, 4 unknown shape, 5 reload window. SECURITY.md has 2 unknown shape and 4 national id. THREAT_MODEL.md lines 90, 92 and 94 (T-0315, T-0316, T-0317) and commit 7d527c1 (T-0381) all say \"the fourth of the accepted residuals README.md and SECURITY.md list\" for the unknown-shape residual. In SECURITY.md that is item 2; item 4 is the national-identifier one.",
+   "fix": "Swap items 2 and 4, so that item 2 is \"A bare national identifier with nothing to corroborate it\" and item 4 is \"A shape none of the validators recognise, in a column no name rule names\", and keep the sentence as written. Item 2's current text says \"the next two are the two specific instances of it\" and must then read \"items 2 and 3 above are the two specific instances of it\"."
+  },
+  {
+   "set": "launch",
+   "severity": "high",
+   "file": "docs/launch/R_WEBDEV.md",
+   "line": 25,
+   "claim": "Zero config: it asks at most one question on first run and writes a `lazyslice.yml` afterwards as a record, not something you write by hand up front.",
+   "truth": "ADR-017 (docs/adr/017-a-first-run-at-a-terminal-asks-every-open-question.md, Decision 1 and Consequences) replaced the one-question rule. A first run at a terminal asks every open item: Q1/Q1\u2032 (start a target container) and then Q2 (root table), so it can ask up to two questions. A headless run asks none. README.md:240-242 and :272 say the same ('asks at most two questions').",
+   "fix": "Zero config: at a terminal a first run asks only what it can't settle itself (which table to start from, and, if it finds no database to load into, whether to start one), and then it writes a `lazyslice.yml` afterwards as a record, not something you write by hand up front."
+  },
+  {
+   "set": "launch",
+   "severity": "high",
+   "file": "docs/launch/R_POSTGRESQL.md",
+   "line": 25,
+   "claim": "Free text and JSON columns are masked whole rather than scanned for maybe-PII, because a classifier that is only sometimes right is worse than one that is boringly conservative.",
+   "truth": "Since T-0272, json/jsonb documents are masked leaf by leaf, not whole. A leaf is masked when an enclosing key names a category or a value validator recognises it. A leaf is copied when every enclosing key was seen with no category and no validator recognises the value (ARCHITECTURE.md:876 'Amended 2026-09-25 (T-0272 ...)'; THREAT_MODEL.md:97; README.md:464-472). Free text is still replaced whole (ARCHITECTURE.md:876).",
+   "fix": "Free text is masked whole rather than scanned for maybe-PII, because a classifier that is only sometimes right is worse than one that is boringly conservative; JSON documents are masked leaf by leaf, each leaf a key rule or a value validator recognises replaced, and a leaf neither recognises copied so a config document still works."
+  },
+  {
+   "set": "launch",
+   "severity": "high",
+   "file": "docs/launch/LISTINGS.md",
+   "line": 147,
+   "claim": "lazyslice (https://github.com/Liarea/lazyslice) ships today, refuses to load an unclassified column instead of passing it through, and has no cloud component to be acquired or archived.",
+   "truth": "Every column is classified. A column with no name signal, no recognised value shape and no personal neighbour is copied, not refused (README.md:315-318, residual 4 at README.md:440-472). The refusal that exists is the second net: an unmasked column whose values still validate as personal data is exit 9, verify.refused.second_net (docs/ERRORS.md:64; ARCHITECTURE.md \u00a76 item 4). A column the classifier is unsure about (possible and above) is masked (README.md:394-396).",
+   "fix": "lazyslice (https://github.com/Liarea/lazyslice) ships today, masks a column it is unsure about instead of passing it through, refuses a run whose copied columns still read as personal data, and has no cloud component to be acquired or archived."
+  },
+  {
+   "set": "launch",
+   "severity": "high",
+   "file": "docs/launch/BLOG_POSTMORTEMS.md",
+   "line": 78,
+   "claim": "lazyslice has no `unsafe` mode: an unclassified column stops the run.",
+   "truth": "No column is left unclassified. A column with no signal is copied (README.md:315-318; residual 4, README.md:440-458), and a column the committed yml has never seen is classified fresh, not stopped (README.md:372-376). The run stops (exit 10) only under `--strict-schema`. What stops a run is the second net: a copied column whose values validate as personal data, exit 9 (docs/ERRORS.md:64).",
+   "fix": "lazyslice has no `unsafe` mode: a column it is unsure about is masked, and a run whose copied columns still read as personal data stops at exit 9 instead of finishing."
+  },
+  {
+   "set": "launch",
+   "severity": "medium",
+   "file": "docs/launch/SHOW_HN.md",
+   "line": 27,
+   "claim": "v0.1.0 is PostgreSQL only and pseudonymises, not anonymises",
+   "truth": "The draft is to be posted after v0.4.0 (the task's governing version; README.md:8 still reads v0.3.0, the latest tag). It is still PostgreSQL only, now 14 to 18 (README.md:10, :273; ROADMAP.md:56 puts a second engine in phase 7).",
+   "fix": "v0.4.0 is PostgreSQL only and pseudonymises, not anonymises"
+  },
+  {
+   "set": "launch",
+   "severity": "medium",
+   "file": "docs/launch/R_POSTGRESQL.md",
+   "line": 38,
+   "claim": "Honestly, up front: **v0.1.0 is PostgreSQL only**, and it **pseudonymises, not anonymises**",
+   "truth": "The posting version is v0.4.0. It is still PostgreSQL 14 to 18 only (README.md:10, :273).",
+   "fix": "Honestly, up front: **v0.4.0 is PostgreSQL only**, and it **pseudonymises, not anonymises**"
+  },
+  {
+   "set": "launch",
+   "severity": "medium",
+   "file": "docs/launch/R_DEVOPS.md",
+   "line": 32,
+   "claim": "Straight up: **v0.1.0 is PostgreSQL only**, and it **pseudonymises, not anonymises**",
+   "truth": "The posting version is v0.4.0. It is still PostgreSQL 14 to 18 only (README.md:10, :273).",
+   "fix": "Straight up: **v0.4.0 is PostgreSQL only**, and it **pseudonymises, not anonymises**"
+  },
+  {
+   "set": "launch",
+   "severity": "medium",
+   "file": "docs/launch/R_WEBDEV.md",
+   "line": 29,
+   "claim": "To be upfront about it: **v0.1.0 only supports PostgreSQL** (a second engine is a later phase)",
+   "truth": "The posting version is v0.4.0. It is still PostgreSQL 14 to 18 only (README.md:10), and a second engine is phase 7 (ROADMAP.md:56).",
+   "fix": "To be upfront about it: **v0.4.0 only supports PostgreSQL** (a second engine is a later phase)"
+  },
+  {
+   "set": "launch",
+   "severity": "medium",
+   "file": "docs/launch/R_POSTGRESQL.md",
+   "line": 22,
+   "claim": "Anything that looks like personal data is masked with a keyed hash before it lands in the target, so a `customer_id` still joins to the same masked `orders` rows it did in production, across tables and across repeated runs.",
+   "truth": "`customer_id` is a surrogate/foreign key and is copied verbatim, not masked. That is why the join holds (ARCHITECTURE.md:877 'surrogate keys ... preserved verbatim'; README.md:142-145, residual 1 at :409-412). Masked values are realistic fakes derived under a local key, not hashes. Names are real, common names from the 2020 U.S. Census lists (ADR-015 Consequences; README.md:171-173), and emails land in example.com/net/org (ARCHITECTURE.md:918). Determinism under the key is what keeps a masked value consistent across tables and runs (README.md:274, :386-389).",
+   "fix": "Anything that looks like personal data is masked deterministically under a local key before it lands in the target, so the same email masks to the same fake address in every table and on every run, while surrogate keys like `customer_id` are copied as-is, so they still join to the same `orders` rows they did in production."
+  },
+  {
+   "set": "launch",
+   "severity": "medium",
+   "file": "docs/launch/R_POSTGRESQL.md",
+   "line": 30,
+   "claim": "A non-zero exit means one of those checks failed \u2014 it does not mean \"probably fine.\"",
+   "truth": "Many non-zero exits are not verify failures: 2 usage, 3 no source, 4 target refused, 5 key/credential, 11 budget, 12 plan refused, and so on (README.md:488-502). The verify checks map to 7 (row count or sequence: docs/ERRORS.md:69-70), 8 (foreign key: docs/ERRORS.md:61) and 9 (residual or second net: docs/ERRORS.md:62-68). The true direction is that any failed check is a non-zero exit (CONCEPT.md 'What it does' item 5).",
+   "fix": "Any failed check is a non-zero exit (7 for a row count or sequence, 8 for a foreign key, 9 for a residual), and exit 0 means every check passed, not \"probably fine.\""
+  },
+  {
+   "set": "launch",
+   "severity": "low",
+   "file": "docs/launch/R_POSTGRESQL.md",
+   "line": 29,
+   "claim": "and a second short read against the source confirms no masked column still holds a source value.",
+   "truth": "The residual scan streams the target's masked columns against a filter built during transform. It opens a short source transaction only to confirm a hit, and since ADR-015 it does not probe at all for an explained person_name hit (ARCHITECTURE.md:970, \u00a76 item 3). A second net also checks every column left unmasked (ARCHITECTURE.md \u00a76 item 4; README.md:121 'the second net scanned 11 column(s)').",
+   "fix": "and a residual scan of the target against the source confirms no masked column still holds a source value, with a second net over every column it left unmasked."
+  },
+  {
+   "set": "launch",
+   "severity": "low",
+   "file": "docs/launch/R_DEVOPS.md",
+   "line": 20,
+   "claim": "masks anything that looks like personal data with a deterministic keyed hash, loads the result, and verifies it",
+   "truth": "The masked output is a realistic fake chosen by a keyed hash, not a hash value. Names are real, common names from the 2020 U.S. Census lists (ADR-015 Consequences; README.md:171-173). Emails go to example.com/net/org and phones to the 555-01XX range (ARCHITECTURE.md:918).",
+   "fix": "masks anything that looks like personal data deterministically under a local key, with realistic fakes rather than hashes, loads the result, and verifies it"
+  },
+  {
+   "set": "launch",
+   "severity": "low",
+   "file": "docs/launch/R_WEBDEV.md",
+   "line": 23,
+   "claim": "masks anything that looks like personal data with a deterministic hash, and loads the result into an empty local or CI database.",
+   "truth": "The output is a realistic fake picked deterministically under a local key, such as real Census names and example.net emails (ADR-015; README.md:153-155, :171-173; ARCHITECTURE.md:918). It is not a hash string.",
+   "fix": "masks anything that looks like personal data deterministically, with realistic fakes (real, common names; addresses at example.net), and loads the result into an empty local or CI database."
+  },
+  {
+   "set": "launch",
+   "severity": "low",
+   "file": "docs/launch/BLOG_POSTMORTEMS.md",
+   "line": 51,
+   "claim": "lazyslice's answer to that is to treat the graph as undirected from the start, not to bolt it on later.",
+   "truth": "The planner walks both directions from the start, but not undirected. It pulls parents to completeness at any depth and children only from CHILD_OK rows, capped and depth-limited. A table reached only as a parent never has its own children pulled (ARCHITECTURE.md \u00a73 pseudocode, 'parents: mandatory, uncapped' and 'children: only from CHILD_OK rows, capped'; ARCHITECTURE.md:857).",
+   "fix": "lazyslice's answer to that is to walk foreign keys in both directions from the start (parents to completeness, children capped), not to bolt it on later."
+  },
+  {
+   "set": "launch",
+   "severity": "low",
+   "file": "docs/launch/BLOG_POSTMORTEMS.md",
+   "line": 86,
+   "claim": "lazyslice's plan step decides this itself and prints what it decided in one line.",
+   "truth": "The plan decides cycles itself with no knob. Cycles close through set semantics and 'Both cycles are selected with no special case' (ARCHITECTURE.md:857). But this build does not print SCCs on the transcript: it emits one line per step plus the estimate, and the SCCs are only in the emitted yml under `sccs:` (internal/core/CLAUDE.md 'The plan print is partial'; internal/emit/document.go:180).",
+   "fix": "lazyslice's plan step decides this itself, prints one line per table saying what it took and why, and records every cycle it found in the `lazyslice.yml` it emits."
+  },
+  {
+   "set": "launch",
+   "severity": "low",
+   "file": "docs/launch/LISTINGS.md",
+   "line": 11,
+   "claim": "Repo description: \"Subsets a production PostgreSQL database by a root table across foreign keys, masks personal data with a deterministic keyed hash, and loads a small local copy \u2014 one command, no config.\"",
+   "truth": "The live GitHub description (`gh repo view Liarea/lazyslice --json description`, run 2026-09-25) is \"Snapshot a production Postgres database into a safe local copy: subset by a root table, follow foreign keys, mask personal data, load.\" Licence Apache-2.0 and language Go match.",
+   "fix": "Repo description: \"Snapshot a production Postgres database into a safe local copy: subset by a root table, follow foreign keys, mask personal data, load.\""
+  },
+  {
+   "set": "launch",
+   "severity": "low",
+   "file": "docs/launch/SHOW_HN.md",
+   "line": 5,
+   "claim": "## Title (67 characters, under the 80-character limit)",
+   "truth": "The title on SHOW_HN.md:7, 'Show HN: lazyslice \u2013 subset, mask and load a local Postgres snapshot', is 68 characters (Python len() of the UTF-8 line).",
+   "fix": "## Title (68 characters, under the 80-character limit)"
+  }
+ ]
+}
