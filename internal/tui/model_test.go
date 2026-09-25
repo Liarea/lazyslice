@@ -363,17 +363,17 @@ func TestCapCellIsTheCapInForce(t *testing.T) {
 	}
 }
 
-// TestAcceptAndCancelAreTheTwoWaysOut. Cancel is not rebindable (ADR-002) and
-// both of its keys leave, whatever the screen is showing.
-func TestAcceptAndCancelAreTheTwoWaysOut(t *testing.T) {
+// TestCancelAndQuitLeaveWithoutConfirming. Cancel is not rebindable (ADR-002)
+// and both of its keys leave, whatever the screen is showing; so does "q". Only
+// ctrl+c is the terminal's own interrupt (T-0345).
+func TestCancelAndQuitLeaveWithoutConfirming(t *testing.T) {
 	for _, tc := range []struct {
-		key      string
-		accepted bool
+		key         string
+		interrupted bool
 	}{
-		{"enter", true},
 		{"q", false},
 		{"esc", false},
-		{"ctrl+c", false},
+		{"ctrl+c", true},
 	} {
 		m := fixtureModel(t)
 		next, cmd := m.Update(keyMsg(tc.key))
@@ -384,9 +384,178 @@ func TestAcceptAndCancelAreTheTwoWaysOut(t *testing.T) {
 		if cmd == nil {
 			t.Errorf("%s did not leave", tc.key)
 		}
-		if got.accepted != tc.accepted {
-			t.Errorf("%s: accepted = %v, want %v", tc.key, got.accepted, tc.accepted)
+		if got.accepted {
+			t.Errorf("%s: accepted = true, want false", tc.key)
 		}
+		if got.interrupted != tc.interrupted {
+			t.Errorf("%s: interrupted = %v, want %v", tc.key, got.interrupted, tc.interrupted)
+		}
+	}
+}
+
+// TestAcceptOnAWritingModeConfirmsBeforeRunning. ModeRun and ModeVerify would
+// drop and rewrite the target, so the first Accept must only open the
+// confirmation (T-0345): a stranger pressing enter to open a row must not be
+// able to start that run. The second Accept is what actually leaves.
+func TestAcceptOnAWritingModeConfirmsBeforeRunning(t *testing.T) {
+	m := fixtureModel(t) // core.NewRequest()'s zero Mode is ModeRun.
+
+	next, cmd := m.Update(keyMsg("enter"))
+	got, ok := next.(model)
+	if !ok {
+		t.Fatalf("Update returned a %T", next)
+	}
+	if cmd != nil {
+		t.Error("the first enter left the TUI instead of opening the confirmation")
+	}
+	if got.accepted {
+		t.Error("the first enter accepted the run")
+	}
+	if !got.confirming {
+		t.Fatal("the first enter did not open the confirmation")
+	}
+
+	next, cmd = got.Update(keyMsg("enter"))
+	got, ok = next.(model)
+	if !ok {
+		t.Fatalf("Update returned a %T", next)
+	}
+	if cmd == nil {
+		t.Error("the second enter did not leave")
+	}
+	if !got.accepted {
+		t.Error("the second enter did not accept the run")
+	}
+	if got.interrupted {
+		t.Error("confirming the run reported an interrupt")
+	}
+}
+
+// TestConfirmationNamesTheTargetTablesAndRows is the confirmation's whole
+// point (T-0345): "run: drop and rewrite <target>, N tables, M rows", read
+// once and acted on, not a screen the operator has to already understand the
+// plan table to interpret.
+func TestConfirmationNamesTheTargetTablesAndRows(t *testing.T) {
+	m := fixtureModel(t).setTarget("nobody@127.0.0.1:5432/target")
+	m = press(t, m, "enter")
+	if !m.confirming {
+		t.Fatal("enter did not open the confirmation")
+	}
+	got := m.confirmText()
+	for _, want := range []string{"drop and rewrite nobody@127.0.0.1:5432/target", "3 tables", "4598 rows"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("confirmText() = %q, want it to contain %q", got, want)
+		}
+	}
+}
+
+// TestAnyOtherKeyBacksOutOfTheConfirmation: only Accept runs it; esc, "q" and
+// everything else return to the screen with nothing changed and nothing left.
+func TestAnyOtherKeyBacksOutOfTheConfirmation(t *testing.T) {
+	for _, key := range []string{"esc", "q"} {
+		m := press(t, fixtureModel(t), "enter")
+		if !m.confirming {
+			t.Fatalf("%s: enter did not open the confirmation", key)
+		}
+		next, cmd := m.Update(keyMsg(key))
+		got, ok := next.(model)
+		if !ok {
+			t.Fatalf("%s: Update returned a %T", key, next)
+		}
+		if cmd != nil {
+			t.Errorf("%s left the TUI instead of backing out of the confirmation", key)
+		}
+		if got.confirming {
+			t.Errorf("%s did not close the confirmation", key)
+		}
+		if got.accepted {
+			t.Errorf("%s accepted the run", key)
+		}
+	}
+}
+
+// TestCtrlCLeavesEvenFromInsideTheConfirmation: the interrupt reaches every
+// screen this package has, the confirmation included (T-0345).
+func TestCtrlCLeavesEvenFromInsideTheConfirmation(t *testing.T) {
+	m := press(t, fixtureModel(t), "enter")
+	if !m.confirming {
+		t.Fatal("enter did not open the confirmation")
+	}
+	next, cmd := m.Update(keyMsg("ctrl+c"))
+	got, ok := next.(model)
+	if !ok {
+		t.Fatalf("Update returned a %T", next)
+	}
+	if cmd == nil {
+		t.Error("ctrl+c did not leave")
+	}
+	if !got.interrupted {
+		t.Error("ctrl+c from the confirmation did not report an interrupt")
+	}
+	if got.accepted {
+		t.Error("ctrl+c accepted the run")
+	}
+}
+
+// TestAcceptOnAModeThatWritesNoTargetSkipsTheConfirmation: classify and plan
+// never open a target, so there is nothing for a second Accept to confirm.
+func TestAcceptOnAModeThatWritesNoTargetSkipsTheConfirmation(t *testing.T) {
+	req := core.NewRequest()
+	req.Mode = core.ModePlan
+	m := newModel(req).seed(fixture())
+
+	next, cmd := m.Update(keyMsg("enter"))
+	got, ok := next.(model)
+	if !ok {
+		t.Fatalf("Update returned a %T", next)
+	}
+	if cmd == nil {
+		t.Error("enter on a plan-only mode did not leave")
+	}
+	if !got.accepted {
+		t.Error("enter on a plan-only mode did not accept the run")
+	}
+	if got.confirming {
+		t.Error("enter on a plan-only mode opened a confirmation")
+	}
+}
+
+// TestEscClosesHelpInsteadOfQuitting is T-0345's first finding: Cancel was
+// matched before Help in pressed(), so esc while the overlay was open quit the
+// whole program. ctrl+c is left to still leave, because it is the terminal's
+// interrupt and not a way to dismiss a screen.
+func TestEscClosesHelpInsteadOfQuitting(t *testing.T) {
+	m := press(t, fixtureModel(t), "?")
+	if !m.showHelp {
+		t.Fatal("? did not open the help")
+	}
+
+	next, cmd := m.Update(keyMsg("esc"))
+	got, ok := next.(model)
+	if !ok {
+		t.Fatalf("Update returned a %T", next)
+	}
+	if cmd != nil {
+		t.Error("esc quit the program instead of closing the help overlay")
+	}
+	if got.showHelp {
+		t.Error("esc did not close the help overlay")
+	}
+	if got.accepted {
+		t.Error("closing help accepted the run")
+	}
+
+	m = press(t, fixtureModel(t), "?")
+	next, cmd = m.Update(keyMsg("ctrl+c"))
+	got, ok = next.(model)
+	if !ok {
+		t.Fatalf("Update returned a %T", next)
+	}
+	if cmd == nil {
+		t.Error("ctrl+c did not leave while help was open")
+	}
+	if !got.interrupted {
+		t.Error("ctrl+c while help was open did not report an interrupt")
 	}
 }
 
@@ -414,6 +583,60 @@ func TestEscDiscardsAnAnswerRatherThanLeaving(t *testing.T) {
 	}
 	if got.accepted {
 		t.Error("discarding an answer accepted the run")
+	}
+}
+
+// TestCtrlCInterruptsThePromptToo: promptKey matched Cancel before ctrl+c
+// could be told apart from esc, so ctrl+c with the prompt open only discarded
+// the answer instead of leaving the program (T-0345 review). ctrl+c must
+// leave whatever screen or overlay is in front, the prompt included.
+func TestCtrlCInterruptsThePromptToo(t *testing.T) {
+	m := fixtureModel(t)
+	m = press(t, m, "u")
+	if !m.prompt.active {
+		t.Fatal("u did not open the prompt")
+	}
+
+	next, cmd := m.Update(keyMsg("ctrl+c"))
+	got, ok := next.(model)
+	if !ok {
+		t.Fatalf("Update returned a %T", next)
+	}
+	if cmd == nil {
+		t.Error("ctrl+c did not leave while the prompt was open")
+	}
+	if !got.interrupted {
+		t.Error("ctrl+c while the prompt was open did not report an interrupt")
+	}
+	if got.accepted {
+		t.Error("ctrl+c accepted the run")
+	}
+}
+
+// TestPlanOnlyRunModeWritesNoTarget: `lazyslice --plan --tui` builds a
+// request with Mode == ModeRun and PlanOnly == true. core stops before the
+// target is touched on PlanOnly alone (main.go's previewIsTheRun, core.run's
+// `Mode == ModePlan || PlanOnly`), so writesTarget must say so too: the first
+// enter must accept immediately, not open a confirmation that names a write
+// that was never going to happen (T-0345 review).
+func TestPlanOnlyRunModeWritesNoTarget(t *testing.T) {
+	req := core.NewRequest() // zero Mode is ModeRun.
+	req.PlanOnly = true
+	m := newModel(req).seed(fixture())
+
+	next, cmd := m.Update(keyMsg("enter"))
+	got, ok := next.(model)
+	if !ok {
+		t.Fatalf("Update returned a %T", next)
+	}
+	if cmd == nil {
+		t.Error("enter on a PlanOnly run did not leave")
+	}
+	if !got.accepted {
+		t.Error("enter on a PlanOnly run did not accept")
+	}
+	if got.confirming {
+		t.Error("enter on a PlanOnly run opened a confirmation naming a write that will not happen")
 	}
 }
 

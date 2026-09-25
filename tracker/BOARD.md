@@ -8,8 +8,8 @@
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 0 | 0 | 108 | 0 | 0 |
-| E6 Launch | 6 | 13 | 0 | 33 | 0 | 0 |
-| E9 Later | later | 125 | 0 | 40 | 8 | 0 |
+| E6 Launch | 6 | 12 | 0 | 34 | 0 | 0 |
+| E9 Later | later | 126 | 0 | 40 | 8 | 0 |
 
 ## Open and in progress
 
@@ -143,7 +143,6 @@
 - T-0365 [open] E9 · Share normaliseName's word-boundary fold through internal/textsig instead of hand-mirroring it in internal/verify ()
 - T-0366 [open] E9 · plan: T-0318 review follow-ups: fail-fast comments, empty Refusals guard, package CLAUDE.md, fixture comment (sonnet)
 - T-0367 [open] E9 · cli/verify: T-0319 review follow-ups: --mask duplicate check compares defaulted categories; Verify() asserted to return every second-net failure (sonnet)
-- T-0369 [open] E6 · verify: the second_net hint names a --mask category the column's type accepts, or semi_structured for a json column (sonnet)
 - T-0370 [open] E9 · The gate reports why a lazyslice marker is unbound, so the not-empty refusal names the one cause ()
 - T-0371 [open] E9 · core: T-0325 follow-ups: pin the strict-schema gate on a committed file; classify's CodeColumnDrift comment; drift computed against the committed file (sonnet)
 - T-0372 [open] E9 · core: T-0320 follow-ups: the password-source hint says where the password came from; the verify summary names the checks it counts (sonnet)
@@ -151,6 +150,7 @@
 - T-0374 [open] E9 · core: T-0321 follow-ups: reused count excludes expired opt-outs; never-masked bucket keyed on a Decision flag; plan.summary separates skipped and unreadable from unreachable (sonnet)
 - T-0375 [open] E9 · cli: T-0326 follow-ups: the TestExitCodes stray-argument row reaches noArgs; the subcommand never-quote case is pinned; stale positional-DSN comments (sonnet)
 - T-0376 [open] E9 · tracker.py: a mutating command lists the project once, the board reuses it, and archived cards leave the project (sonnet)
+- T-0377 [open] E9 · discover/core: T-0327 follow-ups: the stopped branch is tested and a paused container is named; two tests pin the documented fallback; doubled unreadable-parameter warning; not_empty line with no database (sonnet)
 
 ## Recently closed
 
@@ -177,5 +177,5 @@
 - T-0361 [done] E6 · The second net's secret exemption agrees with the classifier: the '_type' normalisation and the JSON leaves → done
 - T-0364 [done] E6 · classify: apply a yml mask or raise before FK propagation, so a masked natural key masks its children → done
 - T-0368 [done] E9 · Reconcile ARCHITECTURE.md and docgen fixtures with T-0326's removal of the positional DSN → done
+- T-0369 [done] E6 · verify: the second_net hint names a --mask category the column's type accepts, or semi_structured for a json column → done
 - T-0064 [done] E5 · Dogfood: two sessions against a real project of the maintainer's choosing, logged in docs/DOGFOOD_LOG.md → done
-- T-0283 [done] E6 · Decide whether v0.2.0 ships a docs site (mkdocs-material on GitHub Pages) or the in-repo docs stay the docs → done

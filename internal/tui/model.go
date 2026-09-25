@@ -64,6 +64,28 @@ type model struct {
 	width, height int
 
 	accepted bool
+	// interrupted is set when Cancel fired on its ctrl+c key rather than its
+	// esc key, or Quit was reached from inside the confirmation the same way
+	// (T-0345). It is not "accepted was false" spelled twice: esc and "q" are
+	// an operator's decision to leave, and the caller reports that as an
+	// ordinary exit; ctrl+c is the terminal's own interrupt, and the caller
+	// reports that as exit 130, same as a SIGINT during the run itself.
+	interrupted bool
+
+	// confirming is the one screen this package's rule about a screen never
+	// asking twice makes an exception for: Accept on a mode that writes to the
+	// target (ModeRun, ModeVerify) opens this instead of leaving, and a second
+	// Accept is what actually leaves with accepted set. Every other key backs
+	// out to the screen with nothing changed. See ARCHITECTURE.md section 1 and
+	// T-0345: a stranger pressing enter to open a row on the plan screen must
+	// not be able to start the run that drops and rewrites the target.
+	confirming bool
+	// target is the endpoint the confirmation and the closing line name. It is
+	// core.Reviewed.Target as the preview pass resolved it (dsn.Ref.String()),
+	// not Request.Target: the operator may have named no --target at all and
+	// let discovery choose one, and the confirmation has to say what is
+	// actually about to be dropped and rewritten, not what was typed.
+	target string
 }
 
 // prompt is the one-line answer a value-taking action asks for: the reason an
@@ -120,6 +142,12 @@ func (m model) seed(events []event.Event) model {
 // header can say the screen is not the whole classification.
 func (m model) setDropped(n int) model {
 	m.dropped = n
+	return m
+}
+
+// setTarget records the endpoint the confirmation and the closing line name.
+func (m model) setTarget(target string) model {
+	m.target = target
 	return m
 }
 
@@ -204,13 +232,27 @@ func (m model) pressed(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	m.status = ""
 
+	if m.confirming {
+		return m.confirmingKey(msg)
+	}
+
+	// esc closes the help overlay it opened rather than leaving the whole
+	// program. Cancel's esc key is matched below for every other state, but
+	// Help is the one screen esc must back out of instead of through — T-0345:
+	// Cancel was matched first, so esc while help was open quit lazyslice
+	// entirely. ctrl+c, Cancel's other key, is left to fall through to the
+	// switch below and still leaves, because it is the terminal's own
+	// interrupt and not a way to dismiss a screen.
+	if m.showHelp && isEscape(msg) {
+		m.showHelp = false
+		return m, nil
+	}
+
 	switch {
 	case key.Matches(msg, m.keys.Cancel.Bind), key.Matches(msg, m.keys.Quit.Bind):
-		m.accepted = false
-		return m, tea.Quit
+		return m.leave(isCtrlC(msg))
 	case key.Matches(msg, m.keys.Accept.Bind):
-		m.accepted = true
-		return m, tea.Quit
+		return m.startAccept()
 	case key.Matches(msg, m.keys.Help.Bind):
 		m.showHelp = !m.showHelp
 		return m, nil
@@ -232,6 +274,75 @@ func (m model) pressed(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.reasons, cmd = m.reasons.Update(msg)
 	}
 	return m, cmd
+}
+
+// isEscape reports whether msg is the esc key alone — Cancel's key that
+// dismisses a screen — and not ctrl+c, which is also bound to Cancel but means
+// something different (T-0345).
+func isEscape(msg tea.KeyPressMsg) bool {
+	return msg.Code == tea.KeyEsc && msg.Mod == 0
+}
+
+// isCtrlC reports whether msg is ctrl+c specifically, which key.Matches alone
+// cannot tell apart from esc: both are bound to Cancel, and only this one is
+// the terminal's own interrupt (T-0345).
+func isCtrlC(msg tea.KeyPressMsg) bool {
+	return msg.Mod == tea.ModCtrl && msg.Code == 'c'
+}
+
+// leave is what Cancel and Quit both do: leave without running. interrupted
+// records which key reached it — ctrl+c is the terminal's interrupt and the
+// caller reports it as exit 130 (ADR-005, same as a SIGINT during the run
+// itself); esc and "q" are a decision, and exit 0 (T-0345).
+func (m model) leave(interrupted bool) (tea.Model, tea.Cmd) {
+	m.accepted = false
+	m.interrupted = interrupted
+	return m, tea.Quit
+}
+
+// startAccept is Accept on the screen itself. For the two modes that would
+// drop and rewrite the target (ModeRun, ModeVerify) it opens the confirmation
+// rather than leaving on the same keystroke a stranger presses out of habit to
+// open a row (T-0345); every other mode's Accept touches no target, so there
+// is nothing for a second keypress to confirm.
+func (m model) startAccept() (tea.Model, tea.Cmd) {
+	if !m.writesTarget() {
+		m.accepted = true
+		return m, tea.Quit
+	}
+	m.confirming = true
+	return m, nil
+}
+
+// writesTarget reports whether this run's Accept would drop and rewrite a
+// target, which is the one case Accept must confirm (T-0345). It names the two
+// modes directly rather than calling core.Request's own predicate because that
+// one is unexported and this package reaches no unexported symbol of core's.
+//
+// PlanOnly stops core before the target is touched even in ModeRun or
+// ModeVerify (main.go's previewIsTheRun, core.run's `Mode == ModePlan ||
+// PlanOnly`), so `--plan --tui` must not ask for a confirmation that names a
+// write which was never going to happen.
+func (m model) writesTarget() bool {
+	return (m.req.Mode == core.ModeRun || m.req.Mode == core.ModeVerify) && !m.req.PlanOnly
+}
+
+// confirmingKey routes a key while the confirmation is open. Only Accept
+// confirms; ctrl+c still leaves the whole program as an interrupt; everything
+// else, Cancel included, backs out to the screen with nothing changed.
+func (m model) confirmingKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case isCtrlC(msg):
+		return m.leave(true)
+	case key.Matches(msg, m.keys.Accept.Bind):
+		m.confirming = false
+		m.accepted = true
+		return m, tea.Quit
+	default:
+		m.confirming = false
+		m.status = "not run"
+		return m, nil
+	}
 }
 
 // action finds the action binding for this key on this screen.
@@ -387,6 +498,8 @@ func inForce(v int) string { return " (now " + strconv.Itoa(v) + ", enter alone 
 // everything else that is not "confirm" is typed.
 func (m model) promptKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch {
+	case isCtrlC(msg):
+		return m.leave(true)
 	case key.Matches(msg, m.keys.Cancel.Bind):
 		m.prompt = prompt{}
 		m.status = "discarded"
@@ -680,9 +793,12 @@ func (m model) render() string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render(m.header()))
 	b.WriteString("\n\n")
-	if m.showHelp {
+	switch {
+	case m.confirming:
+		b.WriteString(m.confirmView())
+	case m.showHelp:
 		b.WriteString(m.helpView())
-	} else {
+	default:
 		b.WriteString(m.body())
 	}
 	b.WriteString("\n")
@@ -740,6 +856,50 @@ func (m model) statusLine() string {
 	}
 }
 
+// confirmView is what Accept shows instead of leaving, on a mode that would
+// drop and rewrite the target (T-0345): what running now would do, and the
+// flags this screen has set, exactly what the transcript would otherwise carry
+// on the way out.
+func (m model) confirmView() string {
+	var b strings.Builder
+	b.WriteString(m.confirmText())
+	b.WriteString("\n\n")
+	b.WriteString(faintStyle.Render("enter runs it · any other key backs out"))
+	return b.String()
+}
+
+// confirmText is the one line the confirmation and the transcript in
+// runTUI's caller both need: what running would do, phrased the way an
+// operator can read once and act on (T-0345).
+func (m model) confirmText() string {
+	tables, rows := m.planTotals()
+	target := m.target
+	if target == "" {
+		target = "the target"
+	}
+	line := "run: drop and rewrite " + target + ", " +
+		strconv.Itoa(tables) + " tables, " + strconv.Itoa(rows) + " rows"
+	if flags := m.flags(); len(flags) > 0 {
+		line += "; the flags these screens set: " + strings.Join(flags, " ")
+	} else {
+		line += "; no flags changed from the command line"
+	}
+	return line
+}
+
+// planTotals reads the plan screen's own numbers rather than recomputing them:
+// how many tables this run recreates and how many rows across all of them, the
+// same totals the plan table already printed one row at a time.
+func (m model) planTotals() (tables, rows int) {
+	tables = len(m.steps)
+	for _, s := range m.steps {
+		if n, err := strconv.Atoi(strings.ReplaceAll(s.Rows, ",", "")); err == nil {
+			rows += n
+		}
+	}
+	return tables, rows
+}
+
 // footerPart is one binding as the footer prints it: what to press, what it
 // does, and whether it can be pressed on the selected row.
 type footerPart struct {
@@ -752,10 +912,16 @@ type footerPart struct {
 // stays in the list and is struck through when it is rendered, rather than
 // vanishing (ADR-002): a key that disappears reads as a key that never existed.
 func (m model) footerParts() []footerPart {
-	if m.prompt.active {
+	switch {
+	case m.prompt.active:
 		return []footerPart{
 			{Key: m.keys.Accept.Key(), Desc: "confirm", Available: true},
 			{Key: m.keys.Cancel.Key(), Desc: "discard", Available: true},
+		}
+	case m.confirming:
+		return []footerPart{
+			{Key: m.keys.Accept.Key(), Desc: "run it", Available: true},
+			{Key: m.keys.Cancel.Key(), Desc: "back to the screen", Available: true},
 		}
 	}
 	var out []footerPart

@@ -39,7 +39,9 @@ func runWithKeys(t *testing.T, keys string) (Result, error) {
 }
 
 // TestRunLeavesWithoutRunning: "q" is a decision and not a failure. The caller
-// prints nothing further and exits 0, and the screen is still in scrollback.
+// prints nothing further and exits 0. The screen itself is not echoed — it was
+// not run — and scrollback instead gets the one line saying nothing was
+// written (T-0345).
 func TestRunLeavesWithoutRunning(t *testing.T) {
 	res, err := runWithKeys(t, "q")
 	if err != nil {
@@ -48,18 +50,77 @@ func TestRunLeavesWithoutRunning(t *testing.T) {
 	if res.Run {
 		t.Error("q left with the run accepted")
 	}
-	for _, want := range []string{"public.customer.email", "name rule: email"} {
-		if !strings.Contains(res.Transcript, want) {
-			t.Errorf("the transcript does not carry %q:\n%s", want, res.Transcript)
+	if res.Interrupted {
+		t.Error("q reported an interrupt")
+	}
+	if !strings.Contains(res.Transcript, "stopped before writing anything") {
+		t.Errorf("the transcript does not say nothing was written:\n%s", res.Transcript)
+	}
+	for _, unwanted := range []string{"public.customer.email", "name rule: email"} {
+		if strings.Contains(res.Transcript, unwanted) {
+			t.Errorf("a leave still echoed the screen (%q):\n%s", unwanted, res.Transcript)
 		}
 	}
 }
 
+// TestCtrlCLeavesAsAnInterrupt: ctrl+c is the terminal's own interrupt, not a
+// decision, and Result.Interrupted is how the caller tells the two apart
+// (T-0345).
+func TestCtrlCLeavesAsAnInterrupt(t *testing.T) {
+	res, err := runWithKeys(t, "\x03")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Run {
+		t.Error("ctrl+c left with the run accepted")
+	}
+	if !res.Interrupted {
+		t.Error("ctrl+c did not report an interrupt")
+	}
+}
+
+// TestPlanOnlyLeaveNamesNoTarget: `--plan --tui` builds a request with
+// PlanOnly set even though Mode is still ModeRun's zero value. core stops
+// before the target is touched on PlanOnly alone, so a leave from that
+// request must print the plain "nothing was written" line, not closingLine's
+// "nothing changed in <target>" — that clause claims a write which this
+// request was never going to make (T-0345 review).
+func TestPlanOnlyLeaveNamesNoTarget(t *testing.T) {
+	req := core.NewRequest()
+	req.PlanOnly = true
+
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	in := bytes.NewBufferString("q")
+	var out bytes.Buffer
+	res, err := Run(ctx, Input{
+		Request: req,
+		Events:  fixture(),
+		In:      in,
+		Out:     &out,
+		Target:  "nobody@127.0.0.1:5432/target",
+	})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Run {
+		t.Error("q left with the run accepted")
+	}
+	if !strings.Contains(res.Transcript, "stopped before writing anything") {
+		t.Errorf("the transcript does not say nothing was written:\n%s", res.Transcript)
+	}
+	if strings.Contains(res.Transcript, "nothing changed in") {
+		t.Errorf("a PlanOnly leave named a target as if it would have been rewritten:\n%s", res.Transcript)
+	}
+}
+
 // TestRunBuildsTheRequestItLeavesWith walks the reasons screen the way an
-// operator does — opt a column out, give the reason, leave and run — through a
-// real program, and reads the core.Request back.
+// operator does — opt a column out, give the reason, confirm, leave and run —
+// through a real program, and reads the core.Request back. The third enter is
+// T-0345: the first two build the opt-out, and ModeRun's Accept confirms
+// before it leaves.
 func TestRunBuildsTheRequestItLeavesWith(t *testing.T) {
-	res, err := runWithKeys(t, "usupport ticket\r\r")
+	res, err := runWithKeys(t, "usupport ticket\r\r\r")
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
