@@ -52,8 +52,14 @@ import (
 )
 
 const (
-	// namePrefix is ARCHITECTURE.md section 9's container name: the compose
-	// project name is what makes one developer's two checkouts two containers.
+	// namePrefix is ARCHITECTURE.md section 9's container name. The compose
+	// project name is what makes one developer's two checkouts two
+	// containers, but it is not what Name appends after this prefix: a
+	// project already starting with "lazyslice-"/"lazyslice_" has that
+	// segment stripped first (T-0333), so two directories whose project
+	// names differ only by that prefix — "shop" and "lazyslice-shop" — share
+	// one container name; Name's own doc comment and the ARCHITECTURE.md §9
+	// amendment it cites are what actually settle a checkout apart.
 	namePrefix = "lazyslice-target-"
 	// volumeSuffix names the volume that holds the cluster. ARCHITECTURE.md
 	// section 9 says a *named* volume, so the data survives a docker stop and a
@@ -161,7 +167,25 @@ const (
 // "lazyslice-target-lazyslice-<something>" (T-0333). Only the container name
 // built here is affected; the project name itself — what's read from or
 // written to lazyslice.yml — is untouched.
+//
+// Name is not injective: "shop" and "lazyslice-shop" both produce
+// "lazyslice-target-shop" (ARCHITECTURE.md §9's T-0333 amendment). That
+// collision is not resolved here — --create-target's own-container check
+// (internal/discover's nameTakenBySomeoneElse) and Q1's reuseOwn are what
+// refuse a container that answers to the name but belongs to another
+// directory's project.
 func Name(project string) string { return namePrefix + stripLazyslicePrefix(project) }
+
+// LegacyName is the container name Name would have produced before T-0333
+// started stripping a leading "lazyslice-"/"lazyslice_" segment. A
+// lazyslice.yml committed before that change recorded this name as its
+// target_label — for a project named lazyslice-foo, "lazyslice-target-
+// lazyslice-foo" rather than today's "lazyslice-target-foo" — and the
+// container ARCHITECTURE.md §9 promises "survives the run" still carries it,
+// with its remembered password still filed under it too (T-0385). It is
+// exported for internal/discover's rung0Target, which must recognise both
+// names when matching a recorded target_label.
+func LegacyName(project string) string { return namePrefix + project }
 
 // stripLazyslicePrefix removes one leading "lazyslice-" or "lazyslice_" from
 // project, if present.

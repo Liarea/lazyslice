@@ -1,4 +1,4 @@
-# Board · generated 2026-09-24 by tools/tracker.py (source: GitHub project 3 plus tracker/tasks/) — do not hand-edit
+# Board · generated 2026-09-25 by tools/tracker.py (source: GitHub project 3 plus tracker/tasks/) — do not hand-edit
 
 | Epic | Phase | Open | In progress | Done | Cancelled | Blocked |
 |---|---|---|---|---|---|---|
@@ -8,8 +8,8 @@
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 0 | 0 | 108 | 0 | 0 |
-| E6 Launch | 6 | 10 | 0 | 36 | 0 | 0 |
-| E9 Later | later | 133 | 0 | 40 | 8 | 0 |
+| E6 Launch | 6 | 7 | 0 | 41 | 0 | 0 |
+| E9 Later | later | 135 | 0 | 40 | 8 | 0 |
 
 ## Open and in progress
 
@@ -123,8 +123,6 @@
 - T-0342 [open] E9 · testdata/regressions 039, 040 and 041 claim an explained count the harness never asserts (sonnet)
 - T-0343 [open] E6 · A first run asks both the target question and the root question when both are open (ADR-016 narrows ADR-008's one-question rule) (opus)
 - T-0344 [open] E6 · Decide whether the two --tui screens stay (with a filter, a full-reason view and a footer that shows the exit keys) or ADR-002's reversal is taken (human)
-- T-0345 [open] E6 · The screens' exit keys: esc inside help quits the program, enter runs unconfirmed, ctrl+c exits 0 (sonnet)
-- T-0346 [open] E6 · A lookup step is shown with 0 rows while the estimate counts its rows (sonnet)
 - T-0347 [open] E9 · extract's lookupLimit silently truncates a framework metadata table over 1,000 rows ()
 - T-0349 [open] E9 · internal/pipeline/framework.go's per-tool bookkeeping column lists need a cited source per tool (sonnet)
 - T-0350 [open] E9 · The torture harness's not-masked failure message always blames a guessed-region phone hit ()
@@ -133,9 +131,6 @@
 - T-0353 [open] E9 · Match run-together person-name spellings (nickname, legalname) in the person_name rule ()
 - T-0355 [open] E9 · Same-column-name rule after T-0312: the swept mark through propagateKeys, a docs misstatement, and the source-ordering test (sonnet)
 - T-0356 [open] E9 · Bare-name rule after T-0313: fixture independence, the Recall-bias bullet, and the category of birth_name and cardholder_name (sonnet)
-- T-0357 [open] E6 · README and SECURITY residual lists name the secrets T-0315 no longer reads by entropy ()
-- T-0358 [open] E6 · README and SECURITY: say the card signal wants an issuer prefix, and what a card outside the table costs ()
-- T-0359 [open] E6 · THREAT_MODEL.md T1 owes the T-0317 amendment (network_id/version veto, phone-guess key/code/license/serial/token veto) ()
 - T-0362 [open] E9 · Card shape after T-0316: JSON-leaf docs, UATP's one-digit prefix, and card_no in the name pattern (sonnet)
 - T-0363 [open] E9 · A bare 12-, 16- or 40-character hex column is masked as a MAC address ()
 - T-0365 [open] E9 · Share normaliseName's word-boundary fold through internal/textsig instead of hand-mirroring it in internal/verify ()
@@ -152,13 +147,22 @@
 - T-0378 [open] E9 · classify: a propagated child with a second, unmasked FK parent; the byte-identical claim; an end-to-end fixture for --mask on a natural key (opus)
 - T-0379 [open] E9 · pipeline: give Step its own row-count field instead of packing a Lookup's count into Why (sonnet)
 - T-0380 [open] E9 · verify: T-0369 follow-ups: bytea reaches the type-conflict route; categoryAcceptedFamilies is tested against rules.yml; the new codes' messages are rendered in a test (sonnet)
-- T-0381 [open] E9 · Amend README.md and SECURITY.md residual 4 for T-0317's network_id/phone name-veto widening ()
+- T-0381 [open] E6 · Amend README.md and SECURITY.md residual 4 for T-0317's network_id/phone name-veto widening ()
 - T-0382 [open] E9 · discover: T-0334 follow-ups: one 'ours' predicate; found.own exempts only postgres; the own container's rank against the name pattern; the second-run test proves run 2 loaded (sonnet)
 - T-0383 [open] E9 · free_text gets the ADR-015 vocabulary gate and redraw ()
 - T-0384 [open] E9 · CONCEPT.md's zero-config sentence still says a first run asks at most one blocking question ()
+- T-0385 [open] E6 · discover: a yml committed before T-0333 still finds its lazyslice-target-lazyslice-* container; ARCHITECTURE section 9 records the name rule; the Q1 and create path is tested end to end (sonnet)
+- T-0386 [open] E9 · tui/cli: T-0345 follow-ups: the closing line is asserted with a target; an interrupted leave is pinned to exit 130 at the command; esc and ctrl+c compare like every other key (sonnet)
+- T-0387 [open] E9 · core/plan: T-0346 follow-ups: ParseLookupRows only on a lookup step; a core test over stepRows and stepWhy; the assemble comment and the Step.Why contract (sonnet)
+- T-0388 [open] E9 · docs: T-0357 and T-0358 follow-ups: README and SECURITY residual wording (sentence placement, the one-case hex qualifier and the sweep effect, the eight identifier suffixes, the bare check-digit callers, rewrap) (sonnet)
 
 ## Recently closed
 
+- T-0345 [done] E6 · The screens' exit keys: esc inside help quits the program, enter runs unconfirmed, ctrl+c exits 0 → done
+- T-0346 [done] E6 · A lookup step is shown with 0 rows while the estimate counts its rows → done
+- T-0357 [done] E6 · README and SECURITY residual lists name the secrets T-0315 no longer reads by entropy → done
+- T-0358 [done] E6 · README and SECURITY: say the card signal wants an issuer prefix, and what a card outside the table costs → done
+- T-0359 [done] E6 · THREAT_MODEL.md T1 owes the T-0317 amendment (network_id/version veto, phone-guess key/code/license/serial/token veto) → done
 - T-0143 [done] E9 · Decide the arbitrary-JSON policy: structure-preserving masking versus whole-document replacement → done
 - T-0311 [done] E6 · The neighbouring-column sweep spares enum-like, identifier-shaped and unique-indexed columns → done
 - T-0312 [done] E6 · The same-column-name rule does not propagate a decision that was itself only a neighbour sweep → done
@@ -179,8 +183,3 @@
 - T-0334 [done] E6 · Discovery does not choose the empty target container lazyslice itself created, and offers to start a duplicate on the next port → done
 - T-0337 [cancelled] E9 · Move internal/verify's tests off mask.RoleWords, then delete RoleWords in the next mask minor → cancelled
 - T-0348 [done] E9 · verify's second net has no exemption for a framework metadata column that validates strongly → done
-- T-0354 [done] E6 · The hex-digest spare of the certain-neighbour sweep lets short hex tokens through unmasked → done
-- T-0360 [done] E9 · internal/verify's network_id entry has no version/build/release veto to match T-0317's classifier-side one → done
-- T-0361 [done] E6 · The second net's secret exemption agrees with the classifier: the '_type' normalisation and the JSON leaves → done
-- T-0364 [done] E6 · classify: apply a yml mask or raise before FK propagation, so a masked natural key masks its children → done
-- T-0368 [done] E9 · Reconcile ARCHITECTURE.md and docgen fixtures with T-0326's removal of the positional DSN → done

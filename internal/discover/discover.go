@@ -951,8 +951,19 @@ func refDSNValidated(w io.Writer, r dsn.Ref) (string, error) {
 // The container name is computed from the working directory, never taken from
 // the file: the label is committed text, and provision.Password refuses a name
 // that is not a single path element, so a lazyslice.yml naming another file
-// cannot make this read it. The label only has to *agree* with the name we
-// would have used, which is what identifies the endpoint as ours.
+// cannot make this read it. The label only has to *agree* with one of the two
+// names we would have used, which is what identifies the endpoint as ours.
+//
+// Two names, not one (T-0385): provision.Name strips a leading
+// "lazyslice-"/"lazyslice_" segment from the project before T-0333, and a
+// lazyslice.yml committed before that change recorded provision.LegacyName's
+// unstripped form instead. A project named lazyslice-foo therefore has two
+// TargetLabels that both name this run's own container — today's
+// "lazyslice-target-foo" and the legacy "lazyslice-target-lazyslice-foo" —
+// and the maintainer's own lazyslice-dogfood* directories are exactly this
+// shape. Whichever one the file recorded is also the name the password was
+// filed under, so the same match decides which name provision.Password reads
+// back.
 //
 // Since ADR-016 this is the fallback for a record of lazyslice's own container,
 // not the first answer: the container's own environment is (recorded.go), and
@@ -965,8 +976,16 @@ func rung0Target(o Options) (string, error) {
 	if s == "" {
 		return "", nil
 	}
-	name := provision.Name(projectName(o.Workdir))
-	if o.Config.TargetLabel != name || !o.Config.TargetRef.Loopback() {
+	project := projectName(o.Workdir)
+	name := provision.Name(project)
+	if o.Config.TargetLabel != name {
+		if legacy := provision.LegacyName(project); legacy != name && o.Config.TargetLabel == legacy {
+			name = legacy
+		} else {
+			return s, nil
+		}
+	}
+	if !o.Config.TargetRef.Loopback() {
 		return s, nil
 	}
 	secret, remembered := provision.Password(name)
