@@ -347,11 +347,14 @@ func addLeaf(res pipeline.Residual, col ref.ColumnRef, path, text string) error 
 	return nil
 }
 
-// decodeDocument parses a document into the shape the walker takes. A value pgx
-// already decoded (a json or jsonb column comes back as map[string]any,
-// []any or a scalar) is walked as it stands; a string — which is what a domain
-// over jsonb, an hstore or an unregistered type arrives as — is parsed here,
-// with json.Number so that an integer leaf is not silently a float64.
+// decodeDocument parses a document into the shape the walker takes. A value
+// this package was handed directly rather than read from the source (a test
+// fixture, chiefly) is walked as it stands; a string — which is what a real
+// read of a plain json or jsonb column now arrives as too (internal/pg's
+// jsonTextRows, T-0402), the same text a domain over jsonb, an hstore or an
+// unregistered type has always arrived as, since pgx has no codec for any of
+// those either — is parsed here, with json.Number so that an integer leaf is
+// not silently a float64.
 func decodeDocument(v any) (doc any, fromText bool, ok bool) {
 	s, isText := v.(string)
 	if !isText {
@@ -572,8 +575,12 @@ func (t transformer) walk(
 		}
 		return t.maskLeafNumber(col, path, n.String(), func(s string) any { return json.Number(s) }, k, res)
 	case float64:
-		// A jsonb column pgx already decoded arrives with float64 leaves, so an
-		// integral leaf has to be spotted by its value and not by its Go kind.
+		// A value this package was handed directly rather than read from the
+		// source arrives with float64 leaves this way (T-0402: a real read's
+		// json or jsonb cell is the source's own text now, decoded above with
+		// UseNumber, so this arm is a value-arrived-by-hand fallback and not
+		// the common case any more), so an integral leaf has to be spotted by
+		// its value and not by its Go kind.
 		in := strconv.FormatFloat(n, 'g', -1, 64)
 		// The rule reads the plain decimal spelling: 'g' writes a ten-digit
 		// phone number stored as a number as 4.155552671e+09, which no

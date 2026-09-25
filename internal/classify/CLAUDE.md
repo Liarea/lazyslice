@@ -668,6 +668,42 @@ was chosen and is recorded here rather than only in a comment.
   to the rule's fixed literal. Neither is "malformed" in the syntax-error sense
   the sentence above is about; both are rejected by name before
   `regexp.Compile` ever sees them.
+- **`decodeSampleDocument` decodes a `[]byte` or `string` sample with
+  `encoding/json`'s `Decoder` and `UseNumber`, not plain `Unmarshal`**
+  (`validators.go`, T-0402, the 2026-09-25 JSON red team's A11,
+  `docs/reviews/2026-09-25-redteam-json/round1.json` entry 14). A json or
+  jsonb column now reaches this package as the source's own raw text
+  (`internal/pg`'s `jsonTextRows`), the same text a domain over jsonb has
+  always arrived as, so this is the one place both are decoded — read by
+  `jsonKeyCategories` (the per-leaf key map, T-0272) and by
+  `guessedPhoneLeafKeys` (the value half, T-0394). Plain `Unmarshal` decodes a
+  number into a `float64`, which rounds an integer past 2^53; nothing this
+  function's own two callers read a number leaf's value for, so the recall
+  hole T-0402 fixes was never here directly — it was `internal/transform`'s
+  own copy of this function, handed the same already-decoded, already-rounded
+  value pgx used to produce. This one is fixed anyway, for the same reason
+  `internal/transform`'s and `internal/verify`'s copies are: a number leaf
+  keeps every digit wherever this package decodes one, not only where a bug
+  report happened to find the loss.
+  - **`jsonSignal` (`classify.go`) has the matching gap and is not fixed
+    here.** It asks `scalars()`/`asText()` to render each sample into a
+    string before `jsonLeaves` (a second, undeduplicated copy of this
+    decoding, `validators.go`) ever runs, and `asText` renders neither a
+    `map[string]any` nor a `[]any` — so a real object- or array-shaped
+    document, sampled through the ordinary path, contributes nothing to the
+    column's *value* signal at all; only a document whose sample happens to
+    already be a string (a domain over jsonb, or a test fixture written that
+    way) reaches `jsonLeaves`. Measured directly against a real
+    `postgres:16`: `bestSignal`'s json branch never sees an object document's
+    leaves. It costs nothing here that T-0402 needs — every jsonb column
+    still gets its baseline type-signal `possible` confidence regardless of
+    what `jsonSignal` finds, so the column is still walked leaf by leaf, and
+    the per-leaf recall T-0402 fixes is `internal/transform`'s
+    `leafValueCategory`, not this — but it is a real, separate recall gap
+    (`jsonSignal` can never raise a real object document's confidence from
+    `possible` to `likely` on its own values, only on its keys through
+    `jsonKeyCategories`), reported rather than folded into this task, which
+    named only `decodeSampleDocument`. Filed as **T-0415**.
 
 ## A composite is refused, not copied and not masked (T-0094, T-HARD-B)
 

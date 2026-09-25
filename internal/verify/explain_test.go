@@ -252,6 +252,12 @@ func (r *resultRows) Scan(dest ...any) error {
 				return errors.New("resultRows: not a bool")
 			}
 			*p = b
+		case *[]byte:
+			// T-0402: a json or jsonb column is scanned into *[]byte for its
+			// raw text; see scanFakeBytes in verify_test.go.
+			if err := scanFakeBytes(row[i], p); err != nil {
+				return fmt.Errorf("resultRows: %w", err)
+			}
 		default:
 			return fmt.Errorf("resultRows: destination %T", d)
 		}

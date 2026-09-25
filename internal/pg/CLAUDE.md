@@ -596,6 +596,56 @@ for the privilege.
   only masked columns. T-0094 owns the plan-time decision (refuse the column, or
   mask a composite field-wise) and the THREAT_MODEL.md T1 entry that must record
   it; both files were outside this package's paths.
+- **The source reader hands back a json or jsonb column's raw text, not
+  whatever pgx decoded it into** (`source.go`'s `jsonTextRows`, T-0402, the
+  2026-09-25 JSON red team's A11). `reader.Query` returns `pgx.Rows` directly
+  to `internal/extract` and `internal/introspect`, both of which scan every
+  column generically into a `*any`; pgx's own `JSONCodec` answers that with
+  `encoding/json`'s plain `Unmarshal`, which decodes an integer past 2^53 into
+  a rounded `float64` — measured directly, a 19-digit Luhn-valid card number
+  in a json number leaf came back with its last three digits rounded away,
+  before `internal/classify`'s or `internal/transform`'s own validators ever
+  ran on it. `jsonTextRows` wraps every `Rows` this package's source reader
+  returns and, for a `*any` destination on a column whose `FieldDescription`
+  names OID 114 or 3802, scans into a `*[]byte` instead and hands the caller
+  the exact source text as a `string` (`nil` stays `nil`, keeping the
+  distinction a `*any` destination would have made) — the same text a domain
+  over jsonb has always arrived as, because pgx has no codec for an
+  unregistered OID either. `internal/transform`'s and `internal/classify`'s
+  and `internal/verify`'s own copies of `decodeDocument` already decode a
+  string with `encoding/json`'s `Decoder` and `UseNumber`, exactly to keep
+  every digit; this is what makes a plain json or jsonb column take that path
+  too, not only a domain's. No `AfterConnect` hook is involved — the source
+  pool may not carry one (T-0076, above) — this reads `FieldDescriptions()`
+  and `RawValues()` off the `Rows` the pool already returned. Only a `*any`
+  destination for a json or jsonb column is touched; a caller that scans such
+  a column into something else keeps pgx's own answer, and every other
+  column's `Scan` is unaffected. `internal/verify`'s own target reads
+  (`internal/verify/target.go`'s `scanColumn`/`scanRows`) needed the identical
+  fix over a different pool — the second, unregistered target pool
+  `internal/core` opens for verify, which this package cannot reach from here
+  — so that package carries its own copy of the same idea, scanning a json or
+  jsonb column (by `shapeOf`, through a domain) into a `*[]byte` directly
+  rather than wrapping `Rows`. `json_integration_test.go`'s
+  `TestSourceReaderHandsBackJSONAsRawText` proves this against a real server:
+  a 19-digit number that a plain `Unmarshal` would round comes back as the
+  source's own text, and a `NULL` document stays `nil` rather than becoming
+  `""`.
+  - **Still open: `json[]` (OID 199) and `jsonb[]` (OID 3807) are not among
+    the OIDs `jsonTextRows` reads raw, so a number leaf past 2^53 inside such
+    an array is still whatever `float64` pgx's own `ArrayCodec` decoded it
+    to, by the same mechanism this note describes for a scalar column before
+    this fix — an array of json or jsonb is left to arrive exactly as it did
+    before T-0402, a `[]any` of natively-decoded elements. Widening
+    `jsonTextRows` to those two OIDs is not enough on its own: the wire text
+    it would then hand back is a Postgres array literal, not JSON, so
+    `internal/transform` would need to split it (its own `array.go` already
+    has the grammar) and decode each element with `UseNumber` before
+    leaf categorisation runs, and `internal/verify`'s own copy
+    (`rawJSONColumn`, above) would need the identical carrier once the
+    source side is fixed. **T-0416** (E9) carries the fix; filed rather than
+    built in the fix round that added this paragraph, because it is a second
+    carrier and not a targeted edit to this one.
 
 **Test.** `go test ./internal/pg/...`; the gate, tracer, identity,
 read-only-transaction, type-registration and pooler behaviour need

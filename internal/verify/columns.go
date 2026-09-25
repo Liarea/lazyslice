@@ -318,9 +318,11 @@ func leaves(v any) []leaf {
 }
 
 // decodeDocument parses a document into the shape the walker takes, exactly as
-// internal/transform does: a value pgx already decoded is walked as it stands,
-// a string is parsed with json.Number so an integer leaf is not silently a
-// float64.
+// internal/transform's own copy does: a value this stage was handed directly
+// rather than read from the target is walked as it stands, a string — which is
+// what scanColumn and scanRows now hand this function for every json or jsonb
+// column, through rawJSONColumn (target.go, T-0402) — is parsed with
+// json.Number so an integer leaf is not silently a float64.
 func decodeDocument(v any) (any, bool) {
 	s, isText := v.(string)
 	if !isText {

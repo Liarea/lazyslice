@@ -4,7 +4,9 @@ package verify
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"sort"
 	"strconv"
@@ -502,11 +504,45 @@ func (r *fakeRows) Scan(dest ...any) error {
 	if len(dest) != 1 {
 		return errors.New("fakeRows: one column")
 	}
-	p, ok := dest[0].(*any)
-	if !ok {
-		return errors.New("fakeRows: want *any")
+	v := r.vals[r.i-1]
+	switch p := dest[0].(type) {
+	case *any:
+		*p = v
+		return nil
+	case *[]byte:
+		// T-0402: scanCell reads a json or jsonb column's raw text through a
+		// *[]byte destination, exactly as internal/pg's source reader now
+		// hands it back; every fixture that reaches this fake for such a
+		// column already stores its target value as the source text a real
+		// scan would return.
+		return scanFakeBytes(v, p)
 	}
-	*p = r.vals[r.i-1]
+	return errors.New("fakeRows: want *any")
+}
+
+// scanFakeBytes is the fakes' shared answer to a *[]byte destination
+// (T-0402): nil stays nil, a string or []byte is its bytes as they stand, and
+// a fixture that stored a document as a Go value directly (map[string]any,
+// []any, a bare number or bool -- the convenience most of this package's
+// table-driven fixtures use) is marshalled, standing in for the source text a
+// real scan of that value would have returned.
+func scanFakeBytes(v any, p *[]byte) error {
+	switch t := v.(type) {
+	case nil:
+		*p = nil
+		return nil
+	case string:
+		*p = []byte(t)
+		return nil
+	case []byte:
+		*p = t
+		return nil
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return fmt.Errorf("scanFakeBytes: %T is not a json or jsonb fixture value: %w", v, err)
+	}
+	*p = b
 	return nil
 }
 func (r *fakeRows) Err() error { return nil }
@@ -1176,5 +1212,239 @@ func TestSecondNetReadsDocumentKeysAsWellAsValues(t *testing.T) {
 				t.Errorf("the refusal exits %d, want %d", got, exitResidual)
 			}
 		})
+	}
+}
+
+// T-0402 (the 2026-09-25 JSON red team's A11, docs/reviews/2026-09-25-
+// redteam-json/round1.json entry 14): leaves (columns.go) keeps a number
+// leaf's exact digits now that scanColumn and scanRows (target.go) hand
+// decodeDocument the source's own text for a json or jsonb column, through
+// rawJSONColumn, instead of whatever Go value the target pool's own *any
+// scan would have decoded — a float64, which rounds an integer past 2^53.
+//
+// This is a decode-correctness guard, not a detection one: neither the second
+// net (secondnet.go's netStrings, its `if !l.str` skip) nor the residual scan
+// (residual.go's documentHits, the identical skip, and its own comment —
+// "a *number* leaf ... is deliberately not tested") ever reads a number
+// leaf's *value* at all, by a design predating this task, so nothing here
+// makes either net catch a card number it did not catch before. What T-0402
+// actually closes is internal/transform's own leafValueCategory, which reads
+// the identical text this function now reads exactly rather than rounded —
+// see internal/transform/leaf_test.go's own regression. This test is the
+// verify-side half the tracker task names anyway: leaves' own contract, that
+// a number leaf's text is the source's exact spelling.
+func TestLeavesKeepsANumberLeafsExactDigitsPastFloat64Precision(t *testing.T) {
+	const pan16 = "4111111111111111"    // Luhn-valid, 16 digits: exact in a float64
+	const pan19 = "4000123456789012343" // Luhn-valid, 19 digits: a float64 rounds this
+
+	doc := `{"p0":` + pan16 + `,"p1":` + pan19 + `}`
+	got := map[string]string{}
+	for _, l := range leaves(doc) {
+		got[l.path] = l.text
+	}
+	for path, want := range map[string]string{"$.p0": pan16, "$.p1": pan19} {
+		if got[path] != want {
+			t.Errorf("leaves(%q)[%q] = %q, want %q: a float64 would have rounded it", doc, path, got[path], want)
+		}
+	}
+}
+
+// TestRawJSONColumnAnswersFalseForAnArray pins rawJSONColumn (target.go)
+// directly, over every shape the fix round after T-0402's first pass found it
+// answering wrong for: a review found the function reading only the family
+// shapeOf returns and ignoring the array flag beside it, so a json[] or
+// jsonb[] column took the same raw-text path a scalar column does. That path
+// scans into a *[]byte and hands decodeDocument the exact wire text — correct
+// for a scalar json or jsonb column, whose wire text is the document itself,
+// but wrong for an array, whose wire text is a Postgres array literal
+// (`{"{...}"}`) that decodeDocument's JSON decoder cannot parse at all,
+// silently losing every leaf of the array to the residual scan rather than
+// merely leaving a number leaf float64-rounded. hstore is document(family)
+// too and carries no JSON codec either way, so it stays false regardless of
+// the array flag, unchanged from before this task.
+func TestRawJSONColumnAnswersFalseForAnArray(t *testing.T) {
+	table := customers()
+	cases := []struct {
+		name string
+		typ  string
+		want bool
+	}{
+		{"jsonb scalar", "jsonb", true},
+		{"json scalar", "json", true},
+		{"jsonb array", "jsonb[]", false},
+		{"json array", "json[]", false},
+		{"hstore scalar", "hstore", false},
+		{"hstore array", "hstore[]", false},
+		{"text scalar", "text", false},
+		{"text array", "text[]", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s := &state{tables: map[ref.TableRef]*pipeline.Table{
+				table: {Ref: table, Columns: []pipeline.Column{{Name: "col", TypeName: c.typ}}},
+			}}
+			if got := s.rawJSONColumn(table, "col"); got != c.want {
+				t.Errorf("rawJSONColumn(%q) = %v, want %v", c.typ, got, c.want)
+			}
+		})
+	}
+}
+
+// wireJSONRow simulates one row of a json or jsonb target column exactly as a
+// real target pool hands it back through whichever destination type scanCell
+// chooses (target.go's rawJSONColumn): wireText is what a *[]byte destination
+// receives — the column's own bytes on the wire, byte for byte, whether that
+// is jsonTextRows's raw source text for a scalar json or jsonb column, or
+// (for an array, which no such wrapper covers) the Postgres array literal a
+// *[]byte destination would otherwise be left holding; decoded is what pgx's
+// own codec hands a *any destination instead — plain encoding/json.Unmarshal
+// of a scalar document's text (T-0402's own bug: an integer past 2^53
+// already rounded to a float64), or pgx's ArrayCodec's element-wise decode of
+// an array's, which is a []any of natively-decoded elements and never wire
+// text. Each test below sets only the field the shape under test is supposed
+// to reach; production code choosing the other destination type gets the
+// zero value of that field — an empty []byte, or a nil any — so a wrong
+// choice fails loudly (a parse error, or an empty leaf set) rather than
+// quietly returning a stand-in value that happens to look right.
+type wireJSONRow struct {
+	wireText string
+	decoded  any
+	scanned  bool
+}
+
+func (r *wireJSONRow) Next() bool {
+	if r.scanned {
+		return false
+	}
+	r.scanned = true
+	return true
+}
+
+func (r *wireJSONRow) Scan(dest ...any) error {
+	if len(dest) != 1 {
+		return errors.New("wireJSONRow: one column")
+	}
+	switch p := dest[0].(type) {
+	case *any:
+		*p = r.decoded
+		return nil
+	case *[]byte:
+		if r.wireText == "" {
+			*p = nil
+			return nil
+		}
+		*p = []byte(r.wireText)
+		return nil
+	}
+	return errors.New("wireJSONRow: want *any or *[]byte")
+}
+func (r *wireJSONRow) Err() error { return nil }
+func (r *wireJSONRow) Close()     {}
+
+// oneWireJSONColumn is a target that answers scanColumn's one query with a
+// single wireJSONRow, whichever destination type scanCell asks it to fill.
+type oneWireJSONColumn struct{ row wireJSONRow }
+
+func (c oneWireJSONColumn) Query(context.Context, string, ...any) (pipeline.Rows, error) {
+	row := c.row
+	return &row, nil
+}
+
+// TestScanColumnReadsAScalarJSONBColumnAsRawText drives scanColumn itself
+// through rawJSONColumn (target.go, T-0402), and not leaves alone the way
+// TestLeavesKeepsANumberLeafsExactDigitsPastFloat64Precision above does — a
+// review round on this task found that test, and internal/transform's own
+// TestANumberLeafPastFloat64PrecisionIsStillMasked, both pass a string
+// straight into the function under test, which exercises decodeDocument's
+// pre-existing text branch and pins nothing about which destination type
+// scanColumn actually chose. Here wireJSONRow's decoded field holds exactly
+// what pgx's own codec would have handed a *any destination for this wire
+// text — a plain encoding/json.Unmarshal, carrying the same rounding T-0402
+// fixed — so a rawJSONColumn that wrongly answered false for a scalar jsonb
+// column would make scanColumn take that path instead, and this test would
+// see the rounded spelling.
+func TestScanColumnReadsAScalarJSONBColumnAsRawText(t *testing.T) {
+	const pan19 = "4000123456789012343" // Luhn-valid, 19 digits: a float64 rounds this
+	wire := `{"p1":` + pan19 + `}`
+
+	var decoded any
+	if err := json.Unmarshal([]byte(wire), &decoded); err != nil {
+		t.Fatalf("json.Unmarshal(%q): %v", wire, err)
+	}
+
+	table := customers()
+	s := &state{
+		target: oneWireJSONColumn{row: wireJSONRow{wireText: wire, decoded: decoded}},
+		tables: map[ref.TableRef]*pipeline.Table{
+			table: {Ref: table, Columns: []pipeline.Column{{Name: "profile", TypeName: "jsonb"}}},
+		},
+	}
+
+	var got any
+	if err := s.scanColumn(context.Background(), table, "profile", func(v any) error {
+		got = v
+		return nil
+	}); err != nil {
+		t.Fatalf("scanColumn: %v", err)
+	}
+
+	var found bool
+	for _, l := range leaves(got) {
+		if l.path != "$.p1" {
+			continue
+		}
+		found = true
+		if l.text != pan19 {
+			t.Errorf("leaves(scanColumn's value)[%q] = %q, want %q: rawJSONColumn let the *any path "+
+				"round it", l.path, l.text, pan19)
+		}
+	}
+	if !found {
+		t.Fatalf("leaves(scanColumn's value) has no $.p1 leaf at all: %v", leaves(got))
+	}
+}
+
+// TestScanColumnDoesNotTakeTheRawTextPathForAJSONBArrayColumn is the fix
+// round after T-0402's first pass, a reviewer's finding: rawJSONColumn
+// (target.go) must answer false for a json[] or jsonb[] column, because the
+// wire text a *[]byte destination would receive for an array is a Postgres
+// array literal and decodeDocument cannot parse that as JSON — every leaf of
+// the array would be silently invisible to the residual scan, not merely
+// float64-rounded. wireText here is set to exactly that shape (matching the
+// reviewer's own reproduction) and decoded to what pgx's ArrayCodec actually
+// hands a *any destination instead — a []any of natively-decoded elements —
+// so a rawJSONColumn that wrongly answered true for an array column would
+// make scanColumn take the wire-text path and this test would find no leaf
+// at all.
+func TestScanColumnDoesNotTakeTheRawTextPathForAJSONBArrayColumn(t *testing.T) {
+	wire := `{"{\"email\": \"a@b.test\"}"}`
+	decoded := []any{map[string]any{"email": "a@b.test"}}
+
+	table := customers()
+	s := &state{
+		target: oneWireJSONColumn{row: wireJSONRow{wireText: wire, decoded: decoded}},
+		tables: map[ref.TableRef]*pipeline.Table{
+			table: {Ref: table, Columns: []pipeline.Column{{Name: "profiles", TypeName: "jsonb[]"}}},
+		},
+	}
+
+	var got any
+	if err := s.scanColumn(context.Background(), table, "profiles", func(v any) error {
+		got = v
+		return nil
+	}); err != nil {
+		t.Fatalf("scanColumn: %v", err)
+	}
+
+	var found bool
+	for _, l := range leaves(got) {
+		if l.path == "$[0].email" && l.str && l.text == "a@b.test" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("leaves(scanColumn's value) = %v, want a hit at $[0].email: rawJSONColumn let the "+
+			"raw-text path run on an array column, and decodeDocument cannot parse a Postgres array "+
+			"literal", leaves(got))
 	}
 }

@@ -33,9 +33,10 @@ func (s *state) scanColumn(ctx context.Context, t ref.TableRef, column string, f
 		return fmt.Errorf("verify: reading %s.%s in the target: %w", t, column, err)
 	}
 	defer rows.Close()
+	raw := s.rawJSONColumn(t, column)
 	for rows.Next() {
-		var v any
-		if err := rows.Scan(&v); err != nil {
+		v, err := scanCell(rows, raw)
+		if err != nil {
 			return fmt.Errorf("verify: reading %s.%s in the target: %w", t, column, err)
 		}
 		if err := fn(v); err != nil {
@@ -58,14 +59,38 @@ func (s *state) scanRows(ctx context.Context, t ref.TableRef, cols []string, fn 
 		return fmt.Errorf("verify: reading %s in the target: %w", t, err)
 	}
 	defer rows.Close()
+	raw := make([]bool, len(cols))
+	for i, c := range cols {
+		raw[i] = s.rawJSONColumn(t, c)
+	}
 	dest := make([]any, len(cols))
 	for rows.Next() {
 		row := make([]any, len(cols))
 		for i := range row {
 			dest[i] = &row[i]
 		}
+		var bufs [][]byte
+		for i, isRaw := range raw {
+			if !isRaw {
+				continue
+			}
+			if bufs == nil {
+				bufs = make([][]byte, len(cols))
+			}
+			dest[i] = &bufs[i]
+		}
 		if err := rows.Scan(dest...); err != nil {
 			return fmt.Errorf("verify: reading %s in the target: %w", t, err)
+		}
+		for i, isRaw := range raw {
+			if !isRaw {
+				continue
+			}
+			if bufs[i] == nil {
+				row[i] = nil
+			} else {
+				row[i] = string(bufs[i])
+			}
 		}
 		if err := fn(row); err != nil {
 			return err
@@ -75,6 +100,70 @@ func (s *state) scanRows(ctx context.Context, t ref.TableRef, cols []string, fn 
 		return fmt.Errorf("verify: reading %s in the target: %w", t, err)
 	}
 	return nil
+}
+
+// rawJSONColumn reports whether t.column is a scalar json or jsonb column (its
+// base type, through a domain), whose value scanColumn and scanRows must read
+// as raw text rather than let the driver decode it: pgx's own JSON codec
+// unmarshals a *any destination with encoding/json's plain Unmarshal, which
+// turns an integer past 2^53 into a rounded float64 before any validator here
+// ever sees it (T-0402, the 2026-09-25 JSON red team's A11) — a 19-digit
+// Luhn-valid card number stored as a json number leaf came back rounded and
+// the leaf read clean. decodeDocument already decodes a string with
+// encoding/json's Decoder and UseNumber to keep every digit, exactly as
+// internal/transform's own copy does; this is what makes every column this
+// stage reads take that path, not only a domain over jsonb (which pgx cannot
+// resolve a codec for and so was already read as text). hstore is also
+// document(family) but is not JSON text and has no such codec, so it is left
+// alone.
+//
+// It answers false for a json[] or jsonb[] column (shapeOf's array flag): the
+// wire text for an array is a Postgres array literal — `{"{\"a\":1}"}` — and
+// scanning that into *[]byte hands decodeDocument a string that is not JSON
+// at all, so it fails to parse and every leaf of the array is silently lost
+// to the residual scan rather than merely left float64-rounded (fix round
+// after T-0402's first pass, a reviewer's finding). pgx's own array codec is
+// left to decode such a column as it always has — into []any of the same
+// natively-decoded elements a plain jsonb column used to arrive as before
+// this task — which keeps every leaf visible to documentHits even though a
+// number leaf inside it can still lose digits past 2^53 (that gap is the
+// array carrier internal/pg/CLAUDE.md's own T-0402 note names as still open,
+// tracked separately).
+func (s *state) rawJSONColumn(t ref.TableRef, column string) bool {
+	tbl := s.tables[t]
+	if tbl == nil {
+		return false
+	}
+	col, ok := columnOf(tbl, column)
+	if !ok {
+		return false
+	}
+	family, array := s.shapeOf(col)
+	if array {
+		return false
+	}
+	return family == famJSON || family == famJSONB
+}
+
+// scanCell reads one column's value from the current row. raw asks for a json
+// or jsonb column's exact source text (rawJSONColumn): scanning it into *[]byte
+// keeps a NULL a nil slice, the same distinction *any would have made, and
+// keeps the bytes pgx's own JSON codec would otherwise have decoded and
+// rounded.
+func scanCell(rows pipeline.Rows, raw bool) (any, error) {
+	if !raw {
+		var v any
+		err := rows.Scan(&v)
+		return v, err
+	}
+	var b []byte
+	if err := rows.Scan(&b); err != nil {
+		return nil, err
+	}
+	if b == nil {
+		return nil, nil
+	}
+	return string(b), nil
 }
 
 // one runs a statement that returns one row and scans it into dest.

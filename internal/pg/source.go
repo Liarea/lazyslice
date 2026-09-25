@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Liarea/lazyslice/internal/dsn"
@@ -1082,7 +1083,7 @@ func (r *reader) Query(ctx context.Context, sql string, args ...any) (pipeline.R
 		rows.Close()
 		return nil, fmt.Errorf("pg: the source refused a statement: %w", ErrRefused)
 	}
-	return rows, nil
+	return jsonTextRows{Rows: rows}, nil
 }
 
 func (r *reader) Close(ctx context.Context) error {
@@ -1135,5 +1136,76 @@ func discard(ctx context.Context, conn *pgxpool.Conn) {
 }
 
 // pgx.Rows already has exactly the four methods pipeline.Rows names, so the
-// read side needs no adapter. This assertion is what says so.
+// read side needs no adapter for anything but json and jsonb (below). This
+// assertion is what says so.
 var _ pipeline.Rows = (pgx.Rows)(nil)
+
+// jsonTextRows wraps every Rows this reader returns so that a json or jsonb
+// column scanned into a *any comes back as its raw source text instead of
+// whatever Go value pgx's own JSON codec decoded it into (T-0402, the
+// 2026-09-25 JSON red team's A11). In pgx.QueryExecModeExec every value
+// arrives in text format, and the codec's DecodeValue for a *any destination
+// runs it through encoding/json's plain Unmarshal, which turns an integer
+// past 2^53 into a rounded float64 before internal/classify's or
+// internal/transform's own validators ever see it — measured directly: a
+// 19-digit Luhn-valid card number stored as a json number leaf came back
+// 4.0001234567890125e+18. internal/transform's decodeDocument,
+// internal/classify's decodeSampleDocument and internal/verify's own copy of
+// decodeDocument already decode a string with encoding/json's Decoder and
+// UseNumber, exactly to keep every digit — that is what a domain over jsonb,
+// which pgx cannot resolve a codec for and so already hands back as text,
+// has always taken. This makes a plain json or jsonb column arrive the same
+// way, so every reader through this package's source pool — extract's rows
+// and introspect's samples alike — takes the one code path that keeps every
+// digit, rather than trusting whichever Go kind pgx's own codec produced.
+//
+// Only a *any destination for a json or jsonb column is touched. A caller
+// that scans such a column into something else — a *string, for instance —
+// keeps pgx's own answer, and every other column's Scan is untouched.
+type jsonTextRows struct {
+	pgx.Rows
+}
+
+func (r jsonTextRows) Scan(dest ...any) error {
+	fds := r.FieldDescriptions()
+	var (
+		raw  [][]byte
+		orig []*any
+	)
+	for i := range dest {
+		if i >= len(fds) {
+			continue
+		}
+		oid := fds[i].DataTypeOID
+		if oid != pgtype.JSONOID && oid != pgtype.JSONBOID {
+			continue
+		}
+		p, ok := dest[i].(*any)
+		if !ok {
+			continue
+		}
+		if orig == nil {
+			raw = make([][]byte, len(dest))
+			orig = make([]*any, len(dest))
+		}
+		orig[i] = p
+		dest[i] = &raw[i]
+	}
+	if orig == nil {
+		return r.Rows.Scan(dest...)
+	}
+	if err := r.Rows.Scan(dest...); err != nil {
+		return err
+	}
+	for i, p := range orig {
+		if p == nil {
+			continue
+		}
+		if raw[i] == nil {
+			*p = nil
+		} else {
+			*p = string(raw[i])
+		}
+	}
+	return nil
+}

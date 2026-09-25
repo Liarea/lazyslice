@@ -735,6 +735,73 @@ was chosen and is recorded here rather than only in a comment.
   table-agnostic `SELECT EXISTS` would admit an equality test of any value
   against any relation, which is the widening `internal/extract` names in its
   own lookup shape.
+- **`scanColumn` and `scanRows` read a json or jsonb column as raw text, not
+  whatever the target pool's own `*any` scan would decode it into**
+  (`target.go`'s `rawJSONColumn`/`scanCell`, T-0402, the 2026-09-25 JSON red
+  team's A11, `docs/reviews/2026-09-25-redteam-json/round1.json` entry 14).
+  This stage's target reads go through the second, unregistered target pool
+  `internal/core` opens for verify (`internal/pg/CLAUDE.md`'s own T-0092
+  section), not through `internal/pg`'s source reader — a different pool, so
+  the identical fix there (`jsonTextRows`) does not reach it, and this package
+  carries its own copy of the same idea instead of a third stage package
+  importing across the boundary `internal/CLAUDE.md` forbids. `rawJSONColumn`
+  answers from `s.tables`/`s.shapeOf` — the same schema-driven family lookup
+  `document(family)` already reads — so a domain over jsonb is read as text
+  the same way a plain column now is, though it always was anyway (pgx has no
+  codec for an unregistered OID). `scanCell` and `scanRows`'s per-column `raw`
+  flags scan into a `*[]byte` instead of a `*any` for exactly those columns,
+  which is what lets `decodeDocument` (`columns.go`) take its `UseNumber`
+  branch: before this, the second net's and the residual scan's own reads of a
+  plain jsonb column got whatever Go value pgx's own `JSONCodec` had already
+  decoded — `float64` for a number, rounded past 2^53. **This is a
+  decode-correctness fix, not a detection one, and is recorded as such rather
+  than overclaimed**: `netStrings` (`secondnet.go`) and `documentHits`
+  (`residual.go`) both skip every non-string leaf outright (`if !l.str`), by a
+  design that predates this task and is documented at `documentHits`'s own
+  comment ("a *number* leaf ... is deliberately not tested" — a value redrawn
+  over transform's own small domain carries no residual signal, and the net
+  never reads a leaf's value at all unless it is a string) — so neither net's
+  own coverage of a card number leaf changed by one row. What T-0402 actually
+  closes is `internal/transform`'s own `leafValueCategory`, which decides
+  whether a leaf is masked at all and now reads the identical exact text this
+  function reads; this package's own fix is here because the tracker task
+  names it, for the same reason `leaves`' contract should not depend on which
+  pool happened to read the document — a number leaf's `.text` is the
+  source's exact spelling, whatever uses it next.
+  `TestLeavesKeepsANumberLeafsExactDigitsPastFloat64Precision`
+  (`verify_test.go`) pins that contract directly, over `leaves` rather than
+  over either net, because neither net has an assertion this fix could move.
+  `*[]byte` and not `*string` because it is the one destination type pgx's
+  `JSONCodec` treats a `NULL` value correctly for (`scanPlanJSONToByteSlice`
+  sets a `nil` slice; the `*string` plan would write `""`), which is what
+  keeps `v == nil` — the check every caller of `scanColumn` already makes —
+  true for a `NULL` document exactly as a `*any` scan would have left it.
+  - **`rawJSONColumn` answers false for a `json[]` or `jsonb[]` column, not
+    only for the scalar shape** (a fix round on this task, a reviewer's
+    finding). The first version read only the family `shapeOf` returns and
+    ignored the array flag beside it, so an array column took the raw-text
+    path too — but the wire text for an array is a Postgres array literal
+    (`{"{\"a\":1}"}`), which `decodeDocument` cannot parse as JSON at all, so
+    every leaf of the array was silently invisible to `documentHits` and the
+    second net rather than merely `float64`-rounded: strictly worse than the
+    bug T-0402 fixed. `rawJSONColumn` now returns `array` from `shapeOf`
+    alongside the family and answers false whenever it is true, leaving such
+    a column to `*any` and pgx's own `ArrayCodec` — the same carrier it
+    always had, a `[]any` of natively-decoded elements, which keeps every
+    leaf visible even though a number leaf inside one can still lose digits
+    past 2^53 (that half is `internal/pg/CLAUDE.md`'s and this package's
+    T-0402 note both still name as open, tracked as **T-0416**, E9).
+    `TestRawJSONColumnAnswersFalseForAnArray` pins the boolean directly for
+    every shape (scalar, array, hstore, a plain family);
+    `TestScanColumnReadsAScalarJSONBColumnAsRawText` and
+    `TestScanColumnDoesNotTakeTheRawTextPathForAJSONBArrayColumn`
+    (`verify_test.go`) drive `scanColumn` itself through a fake that hands
+    back a different value for a `*any`
+    destination than for a `*[]byte` one — simulating what pgx's own codec
+    and `jsonTextRows` each actually produce — so a wrong choice of
+    destination type fails loudly (a rounded number, or an unparseable
+    array literal) rather than passing on a fake that cannot tell the two
+    paths apart.
 
 **Test.** `go test ./internal/verify/...` for what is provable without a
 database: every statement this package sends to the source matches a shape it
