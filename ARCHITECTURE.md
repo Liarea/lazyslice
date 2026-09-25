@@ -505,7 +505,10 @@ type Step struct {
     Cap      int    // per parent key per edge, 0 when unused
     Depth    int
     Why      string // rendered from a template set like Decision.Reason: "child of orders via order_items.order_id",
-                    // "parent of ...", "lookup", "unreachable", "unreadable", "skipped"; never free-form
+                    // "parent of ...", "copied whole", "unreachable", "unreadable", "skipped"; never free-form.
+                    // A Lookup step's Why also carries its own row count, packed on as " (N rows)"
+                    // (internal/plan's lookupWhyWithRows/ParseLookupRows) — Step has no row-count field of
+                    // its own for a step whose Keys is nil (T-0346, tracked as T-0379)
 }
 
 // AssumedRowsPerSec is the extract throughput the hold estimate assumes. It

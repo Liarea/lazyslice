@@ -923,6 +923,67 @@ func TestPlanPagilaFromCustomer(t *testing.T) {
 	}
 }
 
+// TestPlanPagilaLookupCountryCarriesItsRowCount is T-0346: the Orchestrator's
+// evaluation of --tui against Pagila found public.country — a parent reached
+// only as a lookup (no outgoing edge, an incoming one from city, few rows, no
+// masked column) — printed "0 rows, lookup; lookup" on its plan line and its
+// plan screen row, while the estimate's total already added country's 109 rows
+// in. The 0 came from stepRows (internal/core/names.go) looking at nothing but
+// Step.Keys, which is nil for a Lookup step by design (ARCHITECTURE.md §2 — it
+// is copied whole, not walked); this pins that a Lookup step's Why instead
+// carries its row count (internal/plan's lookupWhyWithRows/ParseLookupRows)
+// and says "copied whole" rather than the bare "lookup" T-0346 found.
+func TestPlanPagilaLookupCountryCarriesItsRowCount(t *testing.T) {
+	ctx := context.Background()
+	r, schema, url := fixtureURL(ctx, t, testutil.LoadPagila)
+
+	conn, err := pgx.Connect(ctx, url)
+	if err != nil {
+		t.Fatalf("connecting to count public.country directly: %v", err)
+	}
+	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
+	var want int64
+	if scanErr := conn.QueryRow(ctx, "SELECT count(*) FROM public.country").Scan(&want); scanErr != nil {
+		t.Fatalf("counting public.country: %v", scanErr)
+	}
+
+	customer := tref("public", "customer")
+	p, err := New().Plan(ctx, r, schema, pagilaClassification(), pipeline.PlanRequest{
+		Root: &customer,
+		Take: 50,
+	})
+	if err != nil {
+		t.Fatalf("Plan: %v", err)
+	}
+	steps := stepsByTable(p)
+	country, ok := steps[tref("public", "country")]
+	if !ok {
+		t.Fatal("public.country has no step")
+	}
+	if country.Mode != pipeline.Lookup {
+		t.Fatalf("public.country mode = %d, want Lookup (T-0346's shape: no outgoing edge, reached only "+
+			"as a parent of city, few rows, no masked column)", country.Mode)
+	}
+	if country.Keys != nil {
+		t.Fatalf("public.country has Keys, want nil: a Lookup step is copied whole, not walked (ARCHITECTURE.md §2)")
+	}
+
+	plain, gotRows, ok := ParseLookupRows(country.Why)
+	if !ok {
+		t.Fatalf("public.country Why = %q carries no row count ParseLookupRows can read back off it, "+
+			"which is what stepRows (internal/core/names.go) needs since Keys is nil (T-0346)", country.Why)
+	}
+	if gotRows != want {
+		t.Errorf("public.country Why carries %d rows, want the table's actual %d (T-0346: the plan's own "+
+			"estimate already adds this table's rows in, and the step must say the same number)", gotRows, want)
+	}
+	if plain != "copied whole" {
+		t.Errorf("public.country Why (with its row count stripped) = %q, want \"copied whole\": T-0346 found "+
+			"the bare \"lookup\", which does not say a lookup actually copied its rows rather than finding none",
+			plain)
+	}
+}
+
 // keyLen is a nil-safe key count for a failure message.
 func keyLen(s pipeline.Step) int {
 	if s.Keys == nil {
@@ -1309,6 +1370,21 @@ func TestPlanFrameworkMetadataTableOverTheLookupCeilingSaysSo(t *testing.T) {
 	}
 	if !strings.Contains(s.Why, "1000") {
 		t.Errorf("public.schema_migrations Why = %q, want it to name the row ceiling actually applied", s.Why)
+	}
+
+	// T-0346 review round, finding 1: the count packed into Why (and so the
+	// plan line's own row count) must agree with what the sentence just
+	// above claims reaches the target — lookupRowCeiling (1,000) — and not
+	// leak findLookups' internal probe cap (countProbeLimit, 1,001), which
+	// contradicts "only the first 1000 ... are copied" and matches neither
+	// the source's 1,002 rows nor what the sentence says is copied.
+	_, n, ok := ParseLookupRows(s.Why)
+	if !ok {
+		t.Fatalf("ParseLookupRows(%q): ok = false, want a Lookup step's Why to carry a row count", s.Why)
+	}
+	if n != lookupRowCeiling {
+		t.Errorf("public.schema_migrations row count = %d, want %d (the ceiling the Why sentence says was "+
+			"applied, not countProbeLimit's 1,001 probe cap)", n, lookupRowCeiling)
 	}
 }
 

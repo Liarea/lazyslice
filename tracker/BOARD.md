@@ -9,7 +9,7 @@
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 0 | 0 | 108 | 0 | 0 |
 | E6 Launch | 6 | 12 | 0 | 34 | 0 | 0 |
-| E9 Later | later | 126 | 0 | 40 | 8 | 0 |
+| E9 Later | later | 129 | 0 | 40 | 8 | 0 |
 
 ## Open and in progress
 
@@ -151,6 +151,9 @@
 - T-0375 [open] E9 · cli: T-0326 follow-ups: the TestExitCodes stray-argument row reaches noArgs; the subcommand never-quote case is pinned; stale positional-DSN comments (sonnet)
 - T-0376 [open] E9 · tracker.py: a mutating command lists the project once, the board reuses it, and archived cards leave the project (sonnet)
 - T-0377 [open] E9 · discover/core: T-0327 follow-ups: the stopped branch is tested and a paused container is named; two tests pin the documented fallback; doubled unreadable-parameter warning; not_empty line with no database (sonnet)
+- T-0378 [open] E9 · classify: a propagated child with a second, unmasked FK parent; the byte-identical claim; an end-to-end fixture for --mask on a natural key (opus)
+- T-0379 [open] E9 · pipeline: give Step its own row-count field instead of packing a Lookup's count into Why (sonnet)
+- T-0380 [open] E9 · verify: T-0369 follow-ups: bytea reaches the type-conflict route; categoryAcceptedFamilies is tested against rules.yml; the new codes' messages are rendered in a test (sonnet)
 
 ## Recently closed
 

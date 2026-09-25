@@ -159,8 +159,11 @@ func TestThePlanWordingTheScreenParsesIsStillTheOneThePlanWrites(t *testing.T) {
 		// internal/plan writes the Why the screen reads.
 		"../plan/plan.go": {`p.why[root] = "root"`, `"root: %d chosen, %d pulled in by references"`, `p.noteWhy(fk.Child, "child of "`},
 		// internal/core packs the mode and the Why into one argument, and names
-		// the mode the screen compares against.
-		"../core/run.go":   {`modeName(s.Mode) + "; " + s.Why`},
+		// the mode the screen compares against. Why goes through stepWhy
+		// first (T-0346), which strips the row count internal/plan packs
+		// into a Lookup step's own Why (plan.ParseLookupRows) back off
+		// before the screen ever sees it.
+		"../core/run.go":   {`modeName(s.Mode) + "; " + stepWhy(s)`},
 		"../core/names.go": {`return "child_ok"`},
 	} {
 		src, err := os.ReadFile(path)

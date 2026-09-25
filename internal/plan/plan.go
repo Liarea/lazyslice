@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -752,16 +753,16 @@ func (p *run) findLookups(ctx context.Context, root ref.TableRef) error {
 		}
 		p.lookups[t.Ref] = true
 		p.lookupRows[t.Ref] = n
-		p.why[t.Ref] = "lookup"
+		p.why[t.Ref] = "copied whole"
 	}
 	return nil
 }
 
 // frameworkMetadataWhy is the plan.step line a framework metadata table gets
-// (T-0314), read by assemble instead of the bare "lookup" every other Lookup
-// step carries — §3 says the plan must say why each row is present, and
-// "lookup" alone does not say why a table with no incoming edge at all was
-// not left SchemaOnly the way §3's ordinary rule would have left it. n is
+// (T-0314), read by assemble instead of the bare "copied whole" every other
+// Lookup step carries — §3 says the plan must say why each row is present,
+// and "copied whole" alone does not say why a table with no incoming edge at
+// all was not left SchemaOnly the way §3's ordinary rule would have left it. n is
 // findLookups' own boundedCount answer for this table, capped at
 // countProbeLimit (1,001) the same way every other lookup's probe is.
 //
@@ -802,6 +803,67 @@ func frameworkMetadataWhy(t pipeline.Table, n int64) string {
 		why += "; environment rewritten to development"
 	}
 	return why
+}
+
+// planRows is the row count a Lookup step's plan line reports, which is not
+// always p.lookupRows[t] itself (T-0346 review round, finding 1). An ordinary
+// lookup's count can never exceed lookupRowCeiling — findLookups skips it
+// otherwise — but a framework metadata table bypasses that gate, and its
+// boundedCount answer above the ceiling is countProbeLimit's probe cap
+// (1,001), not the table's real size; frameworkMetadataWhy's own sentence
+// right beside it already says "only the first 1000 ... are copied", so
+// printing 1,001 would contradict the sentence next to it and match neither
+// the source count nor what the sentence says reaches the target. Capping
+// the reported count at lookupRowCeiling keeps the number in agreement with
+// that sentence; the exact count internal/extract's Lookup read actually
+// yields for such a table is T-0347's call, not this function's.
+func (p *run) planRows(t ref.TableRef) int64 {
+	n := p.lookupRows[t]
+	if n > lookupRowCeiling {
+		return lookupRowCeiling
+	}
+	return n
+}
+
+// lookupWhyWithRows appends a Lookup step's row count to its own Why (T-0346:
+// the Orchestrator's Pagila evaluation found a lookup table's plan.step line
+// reading "0 rows, lookup; lookup" while the estimate two lines below already
+// added that table's rows in). A Lookup step's Keys is nil by design (§2 — it
+// is copied whole, not walked), so stepRows (internal/core/names.go) had
+// nowhere to read a row count from; giving Step a row-count field of its own
+// is internal/pipeline's call, outside this package's paths, filed as T-0379
+// (this file's own CLAUDE.md records it). Until then the count travels packed
+// into Why, the same carrier §3.7's root line already uses for "200 chosen, 4
+// pulled in by references" — ParseLookupRows below is its one inverse, and the
+// suffix it appends is stripped back off before the sentence reaches an
+// operator (internal/core's stepWhy), so this is the only place the row count
+// on a lookup's line and the one folded into its prose can ever disagree.
+func lookupWhyWithRows(why string, n int64) string {
+	return fmt.Sprintf("%s (%d rows)", why, n)
+}
+
+// ParseLookupRows is lookupWhyWithRows' inverse: it splits a Lookup step's Why
+// back into the plain sentence and the row count appended to it, and ok is
+// false for any Why this package did not append one to — every mode but
+// Lookup. internal/core's stepRows and stepWhy are its only two callers
+// (T-0346): stepRows needs the number for the plan.step line's own {count}
+// slot, and stepWhy needs the plain sentence so that number is not printed
+// twice.
+func ParseLookupRows(why string) (plain string, rows int64, ok bool) {
+	const suffix = " rows)"
+	if !strings.HasSuffix(why, suffix) {
+		return why, 0, false
+	}
+	i := strings.LastIndex(why, " (")
+	if i < 0 {
+		return why, 0, false
+	}
+	digits := why[i+2 : len(why)-len(suffix)]
+	n, err := strconv.ParseInt(digits, 10, 64)
+	if err != nil {
+		return why, 0, false
+	}
+	return why[:i], n, true
 }
 
 // hasMaskedColumn says whether any column of the table reaches the mask
@@ -1174,13 +1236,40 @@ func (p *run) assemble(root ref.TableRef, rootReason string) *pipeline.Plan {
 	for _, t := range p.tables {
 		switch {
 		case p.lookups[t.Ref]:
-			// p.why is "lookup" for an ordinary lookup (findLookups sets both
-			// together) and frameworkMetadataWhy's fuller sentence for a
+			// p.why is "copied whole" for an ordinary lookup (findLookups sets
+			// both together) and frameworkMetadataWhy's fuller sentence for a
 			// framework metadata table (T-0314); either way this reads what
 			// findLookups actually recorded rather than repeating the literal.
-			steps[t.Ref] = pipeline.Step{Table: t.Ref, Mode: pipeline.Lookup, Why: p.why[t.Ref]}
-			rows += p.lookupRows[t.Ref]
-			estBytes += p.lookupRows[t.Ref] * rowWidth(t)
+			//
+			// lookupWhyWithRows appends the row count findLookups already
+			// fetched (T-0346): a Lookup step's Keys is nil by design (§2 —
+			// it is copied whole, not walked), so stepRows
+			// (internal/core/names.go) had nowhere to read a row count from
+			// and printed 0 for a step the estimate two lines below already
+			// counts in full. Step has no row-count field of its own to give
+			// it one instead (that is internal/pipeline's call, filed as
+			// T-0379 — see this file's CLAUDE.md), so the count travels
+			// packed into Why, the same carrier §3.7's root line already
+			// uses for "200 chosen, 4 pulled in by references"; stepRows
+			// reads it back off with the matching regexp and strips it
+			// before the sentence reaches an operator, so this is the only
+			// place the two numbers in a lookup's plan line can disagree.
+			//
+			// lookupRows itself is not always the count to print (T-0346
+			// review round, finding 1): for a framework metadata table over
+			// lookupRowCeiling, findLookups' boundedCount answer is capped at
+			// countProbeLimit (1,001), not the table's real row count — and
+			// frameworkMetadataWhy's own sentence right next to it already
+			// says "only the first 1000 ... are copied". Printing 1,001
+			// there would contradict that sentence and match neither the
+			// source count nor (per the sentence) what reaches the target.
+			// planRows is the count that agrees with the Why sentence: the
+			// ceiling itself once the probe has hit it, the exact count
+			// otherwise.
+			n := p.planRows(t.Ref)
+			steps[t.Ref] = pipeline.Step{Table: t.Ref, Mode: pipeline.Lookup, Why: lookupWhyWithRows(p.why[t.Ref], n)}
+			rows += n
+			estBytes += n * rowWidth(t)
 		case p.selected[t.Ref] != nil:
 			ks := p.selected[t.Ref]
 			steps[t.Ref] = pipeline.Step{
