@@ -8,7 +8,7 @@
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 0 | 0 | 108 | 0 | 0 |
-| E6 Launch | 6 | 14 | 0 | 32 | 0 | 0 |
+| E6 Launch | 6 | 13 | 0 | 33 | 0 | 0 |
 | E9 Later | later | 125 | 0 | 40 | 8 | 0 |
 
 ## Open and in progress
@@ -140,7 +140,6 @@
 - T-0359 [open] E6 · THREAT_MODEL.md T1 owes the T-0317 amendment (network_id/version veto, phone-guess key/code/license/serial/token veto) ()
 - T-0362 [open] E9 · Card shape after T-0316: JSON-leaf docs, UATP's one-digit prefix, and card_no in the name pattern (sonnet)
 - T-0363 [open] E9 · A bare 12-, 16- or 40-character hex column is masked as a MAC address ()
-- T-0364 [open] E6 · classify: apply a yml mask or raise before FK propagation, so a masked natural key masks its children ()
 - T-0365 [open] E9 · Share normaliseName's word-boundary fold through internal/textsig instead of hand-mirroring it in internal/verify ()
 - T-0366 [open] E9 · plan: T-0318 review follow-ups: fail-fast comments, empty Refusals guard, package CLAUDE.md, fixture comment (sonnet)
 - T-0367 [open] E9 · cli/verify: T-0319 review follow-ups: --mask duplicate check compares defaulted categories; Verify() asserted to return every second-net failure (sonnet)
@@ -176,7 +175,7 @@
 - T-0354 [done] E6 · The hex-digest spare of the certain-neighbour sweep lets short hex tokens through unmasked → done
 - T-0360 [done] E9 · internal/verify's network_id entry has no version/build/release veto to match T-0317's classifier-side one → done
 - T-0361 [done] E6 · The second net's secret exemption agrees with the classifier: the '_type' normalisation and the JSON leaves → done
+- T-0364 [done] E6 · classify: apply a yml mask or raise before FK propagation, so a masked natural key masks its children → done
 - T-0368 [done] E9 · Reconcile ARCHITECTURE.md and docgen fixtures with T-0326's removal of the positional DSN → done
 - T-0064 [done] E5 · Dogfood: two sessions against a real project of the maintainer's choosing, logged in docs/DOGFOOD_LOG.md → done
 - T-0283 [done] E6 · Decide whether v0.2.0 ships a docs site (mkdocs-material on GitHub Pages) or the in-repo docs stay the docs → done
-- T-0303 [done] E6 · tools/names regenerates the masker's name lists from the 2020 Census top-1000 files (public domain), checked in CI → done
