@@ -181,19 +181,20 @@ type netMode struct {
 	// is the masker's own vocabulary — `full_name GENERATED ALWAYS AS
 	// (first_name || ' ' || last_name)` over masked names is a given name and
 	// a surname by construction — and the dictionary rule is skipped for it.
-	// Every validator that carries a parse still runs over it, with the one
-	// exception derivedFromMaskedLeaves names.
+	// Every validator that carries a parse still runs over it, and over a
+	// document's leaves one value at a time (leafDocs).
 	derivedFromMasked bool
-	// derivedFromMaskedLeaves is derivedFromMasked for a generated column
-	// whose masked inputs include a document column carrying per-leaf
-	// categories (T-0272, jsonleaf.go's generatedFromMaskedLeaves). Supabase's
-	// auth.identities.email is `lower((identity_data ->> 'email'))`: the leaf
-	// it reads is now replaced by the email masker, so the column holds the
-	// masker's own addresses and the email validator would refuse every
-	// Supabase run. netColumn skips, for such a column, exactly the
-	// validators whose category a leaf's own category masker emits
-	// (leafMaskerEmits) and runs every other one.
-	derivedFromMaskedLeaves bool
+	// leafDocs is, for a generated column derivedFromMasked holds for, the
+	// masked document columns its expression reads that carry per-leaf
+	// categories (T-0272, jsonleaf.go's generatedFromMaskedLeaves), and nil
+	// for every other column. Supabase's auth.identities.email is
+	// `lower((identity_data ->> 'email'))`: the leaf it reads is replaced by
+	// the email masker, so the column holds the masker's own addresses and
+	// the email validator would refuse every Supabase run. netColumn reads
+	// these documents in the same row and skips a hit only when the value is
+	// one of that row's category-masked leaves (T-0397); every other hit
+	// counts, so a value assembled from copied leaves is still refused.
+	leafDocs []leafDocument
 	// family is the column's own type family (columns.go's fam* constants),
 	// carried alongside the flags above so netColumn can choose the right
 	// verify.refused.second_net* code and hint without asking shapeOf a
@@ -235,9 +236,9 @@ func (s *state) netMode(col ref.ColumnRef, c pipeline.Column) (netMode, bool) {
 	case netText(family):
 		return netMode{
 			array: array, text: true, maybeDocument: character(family),
-			derivedFromMasked:       s.generatedFromMasked(col.Table, c.Generated),
-			derivedFromMaskedLeaves: s.generatedFromMaskedLeaves(col.Table, c.Generated),
-			family:                  family,
+			derivedFromMasked: s.generatedFromMasked(col.Table, c.Generated),
+			leafDocs:          s.generatedFromMaskedLeaves(col.Table, c.Generated),
+			family:            family,
 		}, true
 	case family == famBytea:
 		return netMode{array: array, text: true, bytea: true, maybeDocument: true, family: family}, true
@@ -498,11 +499,23 @@ func (s *state) netColumn(ctx context.Context, col ref.ColumnRef, mode netMode) 
 		}
 	}
 
-	err := s.scanColumn(ctx, col.Table, col.Column, func(v any) error {
+	row := func(v any, maskedLeaves map[string]bool) {
 		direct, fromLeaves := s.netStrings(v, mode)
 		for _, text := range direct {
 			own.nonNull++
-			s.count(text, false, mode, own.hits, distinct)
+			if maskedLeaves[generatedFold(text)] {
+				// T-0397: this generated value is one of its own row's
+				// category-masked leaves -- `lower(leaf)` over the email
+				// masker's output -- so a hit from a validator whose category
+				// a leaf masker emits is that masker's output, and the
+				// residual scan over the document is what proves the source
+				// leaf did not survive. Every other validator still counts
+				// it, and so does every validator over a value that is not
+				// such a leaf (netMode.leafDocs).
+				s.countOutsideLeafMaskers(text, mode, own.hits, distinct)
+			} else {
+				s.count(text, false, mode, own.hits, distinct)
+			}
 			files.observe(text)
 			// seq reads every direct value regardless of family, not only a
 			// digits-family column's (T-0240): the character-family twin of
@@ -522,8 +535,24 @@ func (s *state) netColumn(ctx context.Context, col ref.ColumnRef, mode netMode) 
 			leaf.nonNull++
 			s.count(text, true, mode, leaf.hits, nil)
 		}
-		return nil
-	})
+	}
+	var err error
+	if len(mode.leafDocs) > 0 {
+		cols := make([]string, 0, 1+len(mode.leafDocs))
+		cols = append(cols, col.Column)
+		for _, d := range mode.leafDocs {
+			cols = append(cols, d.column)
+		}
+		err = s.scanRows(ctx, col.Table, cols, func(vals []any) error {
+			row(vals[0], sameRowMaskedLeaves(mode.leafDocs, vals[1:]))
+			return nil
+		})
+	} else {
+		err = s.scanColumn(ctx, col.Table, col.Column, func(v any) error {
+			row(v, nil)
+			return nil
+		})
+	}
 	if err != nil {
 		return err
 	}
@@ -542,13 +571,6 @@ func (s *state) netColumn(ctx context.Context, col ref.ColumnRef, mode netMode) 
 			// ADR-015: a generated column over masked columns only holds the
 			// masker's own words, and a dictionary shape there is not evidence
 			// about the source (netMode.derivedFromMasked).
-			continue
-		}
-		if mode.derivedFromMaskedLeaves && leafMaskerEmits(val.category) {
-			// T-0272: the same argument for a document's leaves — a value of
-			// this shape is a leaf category masker's output, and the residual
-			// scan over the document itself is what proves no source leaf
-			// survived (netMode.derivedFromMaskedLeaves).
 			continue
 		}
 		if val.sequenceExempt && dense && (neverMasked || !corroboratedForSeq) {
@@ -1010,6 +1032,21 @@ func (s *state) count(text string, fromLeaf bool, mode netMode, hits []int64, di
 		}
 		if d := distinct[i]; d != nil && len(d) < minValues {
 			d[sha256.Sum256([]byte(text))] = struct{}{}
+		}
+	}
+}
+
+// countOutsideLeafMaskers is count for a generated value that equals one of
+// its own row's category-masked leaves (netMode.leafDocs, T-0397): every
+// validator is asked, and a hit is recorded unless its category is one a
+// leaf's category masker emits (leafMaskerEmits), because that hit is the
+// masker's output. A special-category term there is still recorded.
+func (s *state) countOutsideLeafMaskers(text string, mode netMode, hits []int64, distinct []map[[sha256.Size]byte]struct{}) {
+	mine := make([]int64, len(validators))
+	s.count(text, false, mode, mine, distinct)
+	for i, n := range mine {
+		if n > 0 && !leafMaskerEmits(validators[i].category) {
+			hits[i] += n
 		}
 	}
 }

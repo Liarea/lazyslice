@@ -1904,23 +1904,39 @@ of each leaf's enclosing keys, which `leaves()` now carries (`leaf.keys`).
   packages' copy, in one commit, because transform's copy is what decides what
   gets masked. `TestLeafValueCategoryIsPinned` carries one table in both.
 - **A generated column over a masked document's leaves** (`netMode.
-  derivedFromMaskedLeaves`, `generatedFromMaskedLeaves`, `leafMaskerEmits`).
-  `make torture` found it on the first run: Supabase's `auth.identities.email`
-  is `lower((identity_data ->> 'email'))`, the leaf it reads is now replaced
-  by the email masker, and the net refused every Supabase run at exit 9 as
-  `email` on the masker's own addresses. ADR-015's rail
-  (`derivedFromMasked`, above) skipped only the dictionary rule; for a
-  generated column over masked columns only, one of them a masked document
-  with a per-leaf map, the net now also skips the validators whose category a
-  leaf's own category masker emits, and runs every other one (a
-  special-category term there is still refused).
-  `TestAGeneratedColumnOverAMaskedDocumentsLeafIsTheMaskersOutput` pins both
-  directions and the no-map control. What it does not see: an expression that
-  assembles a personal value from copied leaves none of which is personal on
-  its own — §6 item 6's quasi-identifier false negative. The same shape over a
-  *scalar* masked column (`lower(email)` over a masked `email`) is not covered
-  by this and still refuses, as it did before T-0272; it is reported rather
-  than widened here.
+  leafDocs`, `generatedFromMaskedLeaves`, `sameRowMaskedLeaves`,
+  `countOutsideLeafMaskers`). `make torture` found it on the first run:
+  Supabase's `auth.identities.email` is `lower((identity_data ->> 'email'))`,
+  the leaf it reads is now replaced by the email masker, and the net refused
+  every Supabase run at exit 9 as `email` on the masker's own addresses.
+  ADR-015's rail (`derivedFromMasked`, above) skipped only the dictionary
+  rule. For a generated column over masked columns only, one of them a
+  masked document with a per-leaf map (or a T-0393 name category), the net
+  now scans the column together with those documents (`scanRows`, one
+  target statement, the value first) and **skips a hit only when the value
+  equals, after `lower` and `btrim` (`generatedFold`), a string leaf of the
+  same row the rule says a category masker replaced**, and then only the
+  validators whose category a leaf masker emits (`leafMaskerEmits`); a
+  special-category term there is still counted. Every other value is
+  counted like any unmasked column's. That is T-0397 (the 2026-09-25 JSON
+  red team, round 1, entry 24): the first version skipped those validators
+  for the whole column, whichever leaf the expression read, so `u || '@' ||
+  h`, `'+' || cc || nsn` and `bin || tail` over copied leaves crossed at exit
+  0 beside the Supabase column. `internal/classify` now masks such leaves in
+  the first place when the generated column's samples validate (its own
+  T-0397 note), and this net is what still refuses the shape when the
+  samples did not. `TestAGeneratedColumnOverAMaskedDocumentsLeafIsTheMaskersOutput`
+  pins both directions, another row's masked leaf and the no-map control;
+  `TestAGeneratedColumnAssembledFromCopiedLeavesIsRefused` is the red team's
+  table; both run through `explain_test.go`'s multi-column fake target,
+  because `oneColumn` answers one column only. What it still does not see:
+  an assembled value no validator recognises — §6 item 6's
+  quasi-identifier false negative. The same shape over a *scalar* masked
+  column (`lower(email)` over a masked `email`) is not covered by this and
+  still refuses, as it did before T-0272; it is reported rather than
+  widened here. A generated column of a document family (`jsonb GENERATED
+  AS (doc -> 'profile')`) takes the document arm of `netMode`, not this one,
+  and reads every leaf as it always did.
 - **The phone question under `--phone-region`** (the T-0272 review round,
   finding 2). The net's phone entry also reads `Options.PhoneRegion`
   (T-0221), and the first version of the value half did not, so a

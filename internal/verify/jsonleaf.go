@@ -3,6 +3,8 @@
 package verify
 
 import (
+	"strings"
+
 	"github.com/Liarea/lazyslice/internal/pipeline"
 	"github.com/Liarea/lazyslice/internal/ref"
 	"github.com/Liarea/lazyslice/internal/textsig"
@@ -188,27 +190,77 @@ func leafMaskerEmits(cat pipeline.Category) bool {
 	return cat != leafCategory && leafMasker(cat) == cat
 }
 
-// generatedFromMaskedLeaves reports a generated column over masked columns of
-// its own table only (generatedFromMasked, ADR-015) at least one of which is a
-// masked document carrying per-leaf categories, or whose own name gave every
-// leaf a category with its own masker (T-0393). Such a column is computed by
-// the target from leaves transform either replaced through a category masker,
-// whose output is still a value of that category, or copied because no
-// validator recognised them; so a hit from one of the leaf maskers'
-// categories there is the masker's own output, and the net skips exactly
-// those validators for it (netColumn). What that does not see, stated: an
-// expression that assembles a personal value out of copied leaves none of
-// which is personal alone — the quasi-identifier false negative
-// ARCHITECTURE.md section 6 item 6 already lists.
-func (s *state) generatedFromMaskedLeaves(t ref.TableRef, expr string) bool {
+// leafDocument is one masked document column a generated column's
+// expression reads, with the leaf policy its decision gives (policyOf).
+type leafDocument struct {
+	column string
+	policy leafPolicy
+}
+
+// generatedFromMaskedLeaves returns, for a generated column over masked
+// columns of its own table only (generatedFromMasked, ADR-015), the masked
+// document columns among them that carry per-leaf categories, or whose own
+// name gave every leaf a category with its own masker (T-0393); nil for every
+// other column. Such a column is computed by the target from leaves transform
+// either replaced through a category masker, whose output is still a value of
+// that category, or copied because no validator recognised them.
+//
+// **What the net may skip there is one value, not one category** (T-0397,
+// the 2026-09-25 JSON red team's round 1, entry 24). The first version of
+// this rail skipped every validator whose category a leaf masker emits for
+// the whole column, whichever leaf the expression read, so a column that
+// assembled an email from two copied leaves (`u || '@' || h`), a phone number
+// from two more and a card number from two more crossed at exit 0 beside the
+// Supabase column the rail was written for. netColumn now reads these
+// documents in the same row as the generated value (sameRowMaskedLeaves) and
+// skips a hit only when the value equals, after lower and btrim, a string
+// leaf of that row the rule says a category masker replaced: `lower(leaf)`
+// over the email masker's output is that output. Every other hit counts, so
+// a value built out of copied leaves is refused like any unmasked column's.
+func (s *state) generatedFromMaskedLeaves(t ref.TableRef, expr string) []leafDocument {
 	if !s.generatedFromMasked(t, expr) {
-		return false
+		return nil
 	}
+	var out []leafDocument
+	seen := map[string]bool{}
 	for _, id := range exprIdentifiers(expr) {
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
 		d, ok := s.decision(ref.ColumnRef{Table: t, Column: id})
-		if ok && d.Masked && policyOf(d, s.cls.PhoneRegion).categorised() {
-			return true
+		if !ok || !d.Masked {
+			continue
+		}
+		if p := policyOf(d, s.cls.PhoneRegion); p.categorised() {
+			out = append(out, leafDocument{column: id, policy: p})
 		}
 	}
-	return false
+	return out
+}
+
+// sameRowMaskedLeaves is the set of one target row's string leaves, across
+// the documents docs names (vals in the same order), that the rule says a
+// category's own masker replaced, each folded by generatedFold. It is what
+// netColumn compares a generated column's value with.
+func sameRowMaskedLeaves(docs []leafDocument, vals []any) map[string]bool {
+	out := map[string]bool{}
+	for i, d := range docs {
+		if i >= len(vals) || vals[i] == nil {
+			continue
+		}
+		for _, l := range leaves(vals[i]) {
+			if l.text != "" && replacedByCategoryMasker(d.policy, l) {
+				out[generatedFold(l.text)] = true
+			}
+		}
+	}
+	return out
+}
+
+// generatedFold is lower(btrim(s)): the two things an expression over a leaf
+// most often does to it (Supabase's `lower(identity_data ->> 'email')`), in
+// the server's spelling -- btrim with no second argument trims spaces only.
+func generatedFold(s string) string {
+	return strings.ToLower(strings.Trim(s, " "))
 }
