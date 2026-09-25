@@ -291,7 +291,9 @@ its reason lines. A column's **name** is checked against a multilingual rule pac
 (`email`, `phone`, `full_name`, and so on — `customers.email: name matches
 email`). Its **sampled values** — about two hundred rows, never the whole
 table — are run through validators built for the same categories: an email
-parser, libphonenumber, a Luhn check for card numbers, a name dictionary
+parser, libphonenumber, a Luhn check for card numbers that also wants a
+known issuer prefix (and, under an id/number/version/reference column name,
+the issuer's own length), a name dictionary
 (`200/200 samples parse as addresses`). And its **neighbours** matter, in two
 ways. A column already at low confidence is raised to suspect the moment
 another column in the same table is at likely or above, because a
@@ -438,7 +440,10 @@ residuals are accepted rather than hidden:
    names.** The validators parse or recognise about a dozen shapes —
    email, phone, national ID, IBAN, card number, IP or MAC address, a
    credential's entropy, a name, an address, ordinary prose, a
-   special-category term. Anything else, in a column with no name signal and
+   special-category term. A card number is only recognised inside a known
+   issuer's range and, under an id/number/version/reference column name,
+   at that issuer's own length, so one outside the table or of an unlisted
+   length under such a name is copied too. Anything else, in a column with no name signal and
    no personal neighbour in its table, is copied — and so is such a column
    beside a personal neighbour when its samples read as an enumeration or an
    identifier shape (a username repeated across a handful of staff rows, a
