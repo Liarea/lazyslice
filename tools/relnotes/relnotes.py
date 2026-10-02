@@ -78,9 +78,22 @@ def main(argv):
         bs = bullets(body)
         # tools/relnotes/overrides.json maps a commit's short or full sha to the bullets its body should have had;
         # a pushed commit on a protected branch cannot be rewritten (T-0213's body was one letter, 2026-09-16).
+        # An entry is a list of bullets, or an object with "title", "bullets", both, or "skip": a task's headline
+        # is the task's title, and a task filed as a defect ("ctrl+c exits 0") would otherwise print the defect in
+        # bold above bullets that say it is fixed; "skip": true leaves out a commit that records process (a review's
+        # findings file, a session log) and changed nothing a user sees (v0.4.0, 2026-10-02).
+        skip = False
         for key, repl in OVERRIDES.items():
-            if sha.startswith(key):
+            if not sha.startswith(key):
+                continue
+            if isinstance(repl, dict):
+                skip = bool(repl.get("skip", False))
+                title = repl.get("title", title)
+                bs = list(repl.get("bullets", bs))
+            else:
                 bs = list(repl)
+        if skip:
+            continue
 
         if not bs:
             subjects_only.append((title, sha[:7]))

@@ -137,9 +137,12 @@ jobs:
       # (ROADMAP.md "Versioning and releases"), so it is not a previous
       # version: without --exclude, v0.1.0's notes would have covered the four
       # commits since v0.0.3 instead of everything since the first commit.
+      # A mask/vX.Y.Z tag is the mask module's own version, not a lazyslice
+      # release: without its --exclude, v0.3.0's notes began at mask/v0.4.0 and
+      # covered one of the nineteen commits since v0.2.0.
       - name: release notes from the commits since the previous tag
         run: |
-          prev=$(git describe --tags --abbrev=0 --exclude 'v0.0.*' "${GITHUB_REF_NAME}^" 2>/dev/null || git rev-list --max-parents=0 HEAD)
+          prev=$(git describe --tags --abbrev=0 --exclude 'v0.0.*' --exclude 'mask/*' "${GITHUB_REF_NAME}^" 2>/dev/null || git rev-list --max-parents=0 HEAD)
           python3 tools/relnotes/relnotes.py "$prev" "${GITHUB_REF_NAME}" > /tmp/relnotes.md
           echo "release notes: from $prev to ${GITHUB_REF_NAME}, $(wc -l < /tmp/relnotes.md) lines"
       - uses: goreleaser/goreleaser-action@v6

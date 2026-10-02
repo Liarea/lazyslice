@@ -5,21 +5,39 @@
 Point it at a production Postgres database and get a small, referentially
 complete, pseudonymised copy in a local database — one command, no config.
 
-## Status: v0.3.0, pre-release, PostgreSQL only
+## Status: v0.4.0, pre-release, PostgreSQL only
 
 The pipeline runs end to end against PostgreSQL 14 to 18: it discovers a
 source and a target, refuses a target that is not empty or not its own,
 subsets from a root table across foreign keys, masks personal data
 deterministically, loads, and verifies the copy (foreign keys, row counts, a
 residual scan of the target against the source). Hardening is done: the
-defects an independent review found on 2026-09-09 and six rounds of an
-adversarial red team have landed in the open ([docs/reviews/](docs/reviews/)),
-and what remains is tracked as
-[issues](https://github.com/Liarea/lazyslice/issues). `v0.3.0` is a
-pre-release, like `v0.1.0` (the first version a stranger may install) and
-`v0.2.0` before it: the `lazyslice.yml` schema, the flags and the exit codes may
-still change between `0.x` minors, with every such change named in the
-release notes; a `0.x.y` patch never changes them.
+defects an independent review found on 2026-09-09 and eight rounds of an
+adversarial red team, six general and two aimed at JSON documents, have
+landed in the open ([docs/reviews/](docs/reviews/)), and what remains is
+tracked as [issues](https://github.com/Liarea/lazyslice/issues).
+
+`v0.4.0` is the release shaped by the first three dogfood sessions
+([docs/DOGFOOD_LOG.md](docs/DOGFOOD_LOG.md)), all against dumps of one
+production Rails application, the third with the maintainer at a terminal. A first run at a terminal
+now asks both the target question and the root question when both are open
+(ADR-017). A committed target that is lazyslice's own container is found by
+name, or offered again, on the next run and the next machine (ADR-016).
+`--mask` masks a column the classifier copied. `json` and `jsonb` documents
+are masked leaf by leaf, and a red-team round aimed at documents
+([docs/reviews/2026-09-25-redteam-json/](docs/reviews/2026-09-25-redteam-json/))
+found eleven leaks outside the named residuals: ten are closed, and the
+eleventh, a national-format phone number used as a document key with no
+`--phone-region`, is named in [SECURITY.md](SECURITY.md) item 8. Free text is
+masked to about its own length. The classifier no longer masks enumerations,
+identifier shapes, digests, file names, version strings or bare `name`
+columns it has no evidence are personal, and no longer reads a licence key's
+digits as a phone number; each of those narrowings is listed below.
+
+`v0.4.0` is a pre-release, like `v0.1.0` (the first version a stranger may
+install), `v0.2.0` and `v0.3.0` before it: the `lazyslice.yml` schema, the
+flags and the exit codes may still change between `0.x` minors, with every
+such change named in the release notes; a `0.x.y` patch never changes them.
 
 Whatever the version, point it only at data you are already allowed to hold
 on the machine that runs it. What a snapshot does not hide is listed below
@@ -48,7 +66,7 @@ Or with `go install`, once Go's own module cache and `$GOPATH/bin` are on
 your `PATH`:
 
 ```sh
-go install github.com/Liarea/lazyslice/cmd/lazyslice@v0.3.0
+go install github.com/Liarea/lazyslice/cmd/lazyslice@v0.4.0
 lazyslice --version
 ```
 
@@ -273,7 +291,7 @@ in the TUI.
 
 Every cell about another tool is that tool's own documentation, fetched
 2026-09-22; a cell nothing found could confirm says "not stated" instead of
-guessing. lazyslice's own cells describe `v0.3.0` exactly as installed above.
+guessing. lazyslice's own cells describe `v0.4.0` exactly as installed above.
 
 | | lazyslice | Greenmask | PostgreSQL Anonymizer | Tonic Structural |
 |---|---|---|---|---|
@@ -369,7 +387,7 @@ under the column's `mask:` block with `by: flag`, and it is the answer to a
 `verify.refused.second_net` refusal, whose line names a `--mask` flag that
 works — the category the check found when that column's type accepts it,
 `semi_structured` for a json/jsonb/hstore column whatever category matched
-one of its values (no other category accepts the json family),
+one of its values (every leaf of the document is then masked),
 `--mask TABLE.COL=special_category`, the one category every type accepts,
 when neither applies, and `--skip-table` alone for a
 column the check found already masked, since `--mask` cannot change a
@@ -395,8 +413,8 @@ and masked`) (ADR-004). The same holds inside a `json` or `jsonb` column: the
 file lists, under the column's `leaf_keys:`, the document keys whose values
 the run copied, and a key the sampled documents show that the file does not
 list has every value under it masked and is printed under `drift:` with the
-column and the key — never a value. A run never adds that key to the list
-itself: it stays masked, and printed, until you add the key as the drift
+column and the key — never a value. A run never adds that key to an existing
+list itself: it stays masked, and printed, until you add the key as the drift
 line spells it to the column's `leaf_keys:`.
 A key that is not shaped like a field name (a name with a space in it, a
 UUID, anything with a dot, or digits anywhere but a short suffix) is written as a

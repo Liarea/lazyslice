@@ -57,7 +57,7 @@ body:
     attributes:
       label: lazyslice version
       description: Output of `lazyslice --version`.
-      placeholder: "v0.1.0"
+      placeholder: "v0.4.0"
     validations:
       required: true
   - type: input

@@ -27,7 +27,9 @@ rows they did in production. Free text is masked whole rather than scanned
 for maybe-PII, because a classifier that is only sometimes right is worse
 than one that is boringly conservative; JSON documents are masked leaf by
 leaf, each leaf a key rule or a value validator recognises replaced, and a
-leaf neither recognises copied so a config document still works. On load it
+leaf neither recognises copied so a config document still works (every leaf
+of a column whose own name marks it personal, and every value under a key the
+samples never showed, is masked). On load it
 verifies its own work: foreign keys resolve, sequences are reset past the max
 value it loaded, and a residual scan of the target against the source
 confirms no masked column still holds a source value, with a second net over
@@ -40,7 +42,7 @@ Snaplet (2024) and Neosync, whose repository was archived in 2025 — so I'm
 not pretending this is an unclaimed idea, just one I think is worth having
 as a small, boring, dependency-free binary rather than a company.
 
-Honestly, up front: **v0.1.0 is PostgreSQL only**, and it **pseudonymises,
+Honestly, up front: **v0.4.0 is PostgreSQL only**, and it **pseudonymises,
 not anonymises** — row identifiers, foreign keys, and a short, named list
 of other residuals are copied through and documented rather than hidden
 (README's "What a snapshot will not hide", and THREAT_MODEL.md in full).

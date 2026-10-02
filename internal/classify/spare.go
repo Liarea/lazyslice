@@ -160,7 +160,7 @@ const (
 
 // identifierShapes is every identifier shape a column can be spared on.
 // named is set on the two shapes made of words, which are the two a person's
-// name can hide inside ("gareths-laptop.local", "/home/gareth").
+// name can hide inside ("graces-laptop.local", "/home/grace").
 var identifierShapes = []struct {
 	phrase string
 	ok     func(string) bool

@@ -154,7 +154,7 @@ func HexDigest(s string) bool {
 // HostnameShape reports whether s is a DNS hostname: RFC 1123 labels joined by
 // dots, a final label of letters only, and either three labels or more or a
 // final label from hostSuffixes. It says nothing about whether any label is a
-// person's name ("gareths-laptop.local"); that guard is the caller's, because
+// person's name ("graces-laptop.local"); that guard is the caller's, because
 // this package's dictionary signal is the caller's to score.
 func HostnameShape(s string) bool {
 	s = strings.TrimSuffix(strings.TrimSpace(s), ".")
@@ -232,7 +232,7 @@ func hasFileExt(seg string) bool {
 // "/" with three segments or more, or an IANA "Area/Location" zone name. A
 // bare "/home/jsmith" or "admin/users" has none of them and is not a path
 // here (the T-0311 review). Like HostnameShape it does not ask whether a
-// segment names a person ("/home/gareth/src"); the caller does.
+// segment names a person ("/home/grace/src"); the caller does.
 func PathShape(s string) bool {
 	s = strings.TrimSpace(s)
 	if s == "" || len(s) > 1024 || !strings.Contains(s, "/") || strings.Contains(s, "://") {

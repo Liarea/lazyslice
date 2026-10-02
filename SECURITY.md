@@ -6,12 +6,12 @@ personal data unmasked is not a cosmetic defect: it is the failure the tool was
 built to prevent.
 
 **lazyslice is pre-release.** The pipeline runs end to end against PostgreSQL;
-`v0.1.0` was the first version a stranger may install; `v0.3.0` is the
+`v0.1.0` was the first version a stranger may install; `v0.4.0` is the
 current release and the one a report is triaged against, and its `lazyslice.yml` schema, flags and exit
 codes may still change between `0.x` minors. The findings of
 the independent review of 2026-09-09
 ([docs/reviews/2026-09-09/REVIEW.md](docs/reviews/2026-09-09/REVIEW.md)) and
-of six red-team rounds have landed; what is still open is an
+of eight red-team rounds have landed; what is still open is an
 [issue](https://github.com/Liarea/lazyslice/issues). Report anything you find
 anyway — a hole in the design is cheaper to fix than a hole in the code.
 
@@ -159,7 +159,11 @@ issue.
    not read a leaf, so a person's name under a key like `attendee` is copied
    too. That keeps configuration documents working; the cost is a personal
    value no rule and no validator knows, inside a document, which is copied
-   too. A key whose sampled values are
+   too. A number of more than fifteen digits stored as a JSON number inside
+   a `json[]` or `jsonb[]` array column is read rounded, so a card number
+   that long may not be recognised there and is then copied with its last
+   digits rounded (T-0416); the same number in a `json` or `jsonb` column, or
+   stored as a string, is read with every digit (T-0402). A key whose sampled values are
    national-format phone numbers counts as a phone key, and every value under
    it is masked, when the table holds another personal column or the
    document holds a personal key: the same evidence a plain column of such
