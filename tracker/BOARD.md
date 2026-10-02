@@ -9,7 +9,7 @@
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 0 | 0 | 108 | 0 | 0 |
 | E6 Launch | 6 | 2 | 0 | 54 | 0 | 0 |
-| E9 Later | later | 157 | 0 | 41 | 10 | 0 |
+| E9 Later | later | 159 | 0 | 41 | 10 | 0 |
 
 ## Open and in progress
 
@@ -172,6 +172,8 @@
 - T-0421 [open] E9 · textsig: T-0403 follow-ups: non-ASCII decimal digits and other stops fold or are named as uncovered; Candidates computed once per value (sonnet)
 - T-0422 [open] E9 · Fold a document column's many leaf-drift lines into one, naming --mask as the remedy ()
 - T-0423 [open] E9 · core/classify: T-0404 follow-ups: key drift has its own wording; the key fingerprint is keyed; the --strict-schema upgrade path is documented; a drifted key is tested through transform (sonnet)
+- T-0425 [open] E9 · A fix round returns the commit's whole changelog, so release notes never carry a bullet the fix reversed (sonnet)
+- T-0426 [open] E9 · Messages and comments that lag v0.4.0: the second_net_document hint, the mask refusal comment, the 1,000-row plan line (sonnet)
 
 ## Recently closed
 
