@@ -28,7 +28,7 @@ config: at a terminal a first run asks only what it can't settle itself
 whether to start one), and then it writes a `lazyslice.yml` afterwards as a
 record, not something you write by hand up front.
 
-To be upfront about it: **v0.1.0 only supports PostgreSQL** (a second
+To be upfront about it: **v0.4.0 only supports PostgreSQL** (a second
 engine is a later phase), and it **pseudonymises, not anonymises** — a few
 specific things aren't hidden, row identifiers being the main one, and
 they're listed plainly in the README rather than glossed over. It's also

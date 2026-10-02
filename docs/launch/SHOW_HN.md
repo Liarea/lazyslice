@@ -24,7 +24,7 @@ archived 30 Aug 2025 after Grow Therapy acquired the team
 lazyslice does the same job: subset a production Postgres database by a
 root table, follow foreign keys, mask personal data deterministically so
 joins survive, load a small local copy. One static binary, no account, no
-cloud, nothing it calls home to. v0.1.0 is PostgreSQL only and
+cloud, nothing it calls home to. v0.4.0 is PostgreSQL only and
 pseudonymises, not anonymises — the row identifiers it can't hide and the
 rest of the residual list are documented, not glossed over.
 

@@ -1,4 +1,4 @@
-# Board · generated 2026-09-25 by tools/tracker.py (source: GitHub project 3 plus tracker/tasks/) — do not hand-edit
+# Board · generated 2026-10-02 by tools/tracker.py (source: GitHub project 3 plus tracker/tasks/) — do not hand-edit
 
 | Epic | Phase | Open | In progress | Done | Cancelled | Blocked |
 |---|---|---|---|---|---|---|
@@ -8,8 +8,8 @@
 | E3 Foundations | 3 | 0 | 0 | 10 | 0 | 0 |
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 0 | 0 | 108 | 0 | 0 |
-| E6 Launch | 6 | 3 | 0 | 53 | 0 | 0 |
-| E9 Later | later | 158 | 0 | 41 | 9 | 0 |
+| E6 Launch | 6 | 2 | 0 | 54 | 0 | 0 |
+| E9 Later | later | 157 | 0 | 41 | 10 | 0 |
 
 ## Open and in progress
 
@@ -157,7 +157,6 @@
 - T-0401 [open] E9 · A national-format phone number used as a JSON key survives with no --phone-region ()
 - T-0405 [open] E9 · A generated column's path-operator reads raise the document keys they read, as its arrow reads do ()
 - T-0406 [open] E9 · A second-net refusal on a generated column names a remedy that works on a generated column ()
-- T-0407 [open] E6 · The v0.4.0 truth pass over README, SECURITY, CONCEPT, the quickstart transcript and the launch drafts (sonnet)
 - T-0408 [open] E9 · classify/transform: T-0272 follow-ups: jsonSignal reads decoded documents; the EAV document shape is named (sonnet)
 - T-0409 [open] E9 · verify/docs: T-0393 follow-ups: an hstore column's name hit does not narrow the second net; SECURITY item 8 names which categories mask as filler; fixture 046 pins every leaf (sonnet)
 - T-0410 [open] E9 · classify/transform: T-0394 follow-ups: fixture 048 sees the leaf under the national key; the value half applies the T-0317 name veto; guessedPhoneRatio's cost; the key-collision wording (sonnet)
@@ -173,10 +172,11 @@
 - T-0421 [open] E9 · textsig: T-0403 follow-ups: non-ASCII decimal digits and other stops fold or are named as uncovered; Candidates computed once per value (sonnet)
 - T-0422 [open] E9 · Fold a document column's many leaf-drift lines into one, naming --mask as the remedy ()
 - T-0423 [open] E9 · core/classify: T-0404 follow-ups: key drift has its own wording; the key fingerprint is keyed; the --strict-schema upgrade path is documented; a drifted key is tested through transform (sonnet)
-- T-0424 [open] E9 · A masked person_name column can be masked under the address masker despite its reason line naming person_name ()
 
 ## Recently closed
 
+- T-0407 [done] E6 · The v0.4.0 truth pass over README, SECURITY, CONCEPT, the quickstart transcript and the launch drafts → done
+- T-0424 [cancelled] E9 · A masked person_name column can be masked under the address masker despite its reason line naming person_name → cancelled
 - T-0272 [done] E6 · Per-leaf categories for JSON documents on the Decision, so an email leaf is replaced by a fake email rather than filler → done
 - T-0343 [done] E6 · A first run asks both the target question and the root question when both are open (ADR-016 narrows ADR-008's one-question rule) → done
 - T-0345 [done] E6 · The screens' exit keys: esc inside help quits the program, enter runs unconfirmed, ctrl+c exits 0 → done
@@ -200,5 +200,3 @@
 - T-0311 [done] E6 · The neighbouring-column sweep spares enum-like, identifier-shaped and unique-indexed columns → done
 - T-0312 [done] E6 · The same-column-name rule does not propagate a decision that was itself only a neighbour sweep → done
 - T-0313 [done] E6 · A bare 'name' column and a '*_file_name' column are not a person's name without corroboration → done
-- T-0314 [done] E6 · Framework metadata tables are copied whole and never masked (schema_migrations, ar_internal_metadata and their kin) → done
-- T-0315 [done] E6 · The entropy validator does not read filenames, hex digests, namespaced class names or a handful of samples as secrets → done

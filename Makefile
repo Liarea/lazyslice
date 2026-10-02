@@ -30,7 +30,7 @@ GOVULNCHECK   := $(shell command -v $(TOOLDIR)/govulncheck 2>/dev/null || comman
 # that walks the tree walks both.
 MODULES := . ./mask
 
-VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+VERSION := $(shell git describe --tags --always --dirty --exclude 'mask/*' 2>/dev/null || echo dev)
 COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 DATE    := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -s -w \
@@ -835,7 +835,10 @@ help:
 ## inclusive), grouped by the headline's stage prefix. Every task commit carries
 ## bullets written for this (docs/OPERATING_MODEL.md "Commit discipline"), so the
 ## release workflow hands goreleaser this file instead of a list of subjects.
-FROM ?= $(shell git describe --tags --abbrev=0 HEAD^ 2>/dev/null || git rev-list --max-parents=0 HEAD)
+## FROM defaults to the previous lazyslice release, as the release workflow computes
+## it: a mask/vX.Y.Z tag (the mask module's version) and a v0.0.x pipeline proof are
+## not previous versions.
+FROM ?= $(shell git describe --tags --abbrev=0 --exclude 'v0.0.*' --exclude 'mask/*' HEAD^ 2>/dev/null || git rev-list --max-parents=0 HEAD)
 TO ?= HEAD
 relnotes:
 	@python3 tools/relnotes/relnotes.py $(FROM) $(TO)

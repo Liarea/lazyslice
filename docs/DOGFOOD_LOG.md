@@ -1,6 +1,6 @@
 # Dogfood log
 
-Two sessions against a real project of the maintainer's choosing (T-0064, a gate-4 item carried to phase 6). The rule for this file: it records what the tool did and what was confusing, never the data. The database is a production system under the maintainer's access controls; every value stayed inside two local containers, the tool itself prints no values, and the schema is described here by shape, not by name. Column names below are the generic ones a reader will recognise from any Rails application (`role`, `type`, `uuid`, `filename`); the application's own names are not in this repository.
+Three sessions against a real project of the maintainer's choosing (T-0064, a gate-4 item carried to phase 6). The rule for this file: it records what the tool did and what was confusing, never the data. The database is a production system under the maintainer's access controls; every value stayed inside local containers on the maintainer's machine, the tool itself prints no values, and the schema is described here by shape, not by name. Column names below are the generic ones a reader will recognise from any Rails application (`role`, `type`, `uuid`, `filename`); the application's own names are not in this repository.
 
 ## Session 1, 2026-09-23: first run against a production dump
 
