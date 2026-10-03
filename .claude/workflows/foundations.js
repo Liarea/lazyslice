@@ -7,7 +7,7 @@ export const meta = {
     { title: 'Review', detail: 'can the invariants be faked, are all traps present, does CI run integration' },
   ],
 }
-const REPO = '<repo>'
+const REPO = '.' // the checkout the workflow is launched from; a workflow runs with the repository as its working directory (T-0267)
 const IMPL = `${REPO}/.claude/workflows/implement.js`
 // args: { step: 'scaffold' | 'fixtures' | 'docs' | 'invariants' | 'review' }  one step per usage window
 // fixtures: T-FIXTURES and T-ADR008 in parallel. invariants: T-INVARIANTS (needs fixtures), T-CLAUDEMD, T-ROADMAP in parallel.

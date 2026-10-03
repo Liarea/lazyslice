@@ -10,7 +10,7 @@ export const meta = {
   ],
 }
 
-const REPO = '<repo>'
+const REPO = '.' // the checkout the workflow is launched from; a workflow runs with the repository as its working directory (T-0267)
 
 const PRE = `You are on the lazyslice team. Repo: ${REPO}. Read ${REPO}/CONCEPT.md and ${REPO}/CLAUDE.md first.
 Rules: write ONLY the file(s) your task names, using absolute paths under ${REPO}. Do not edit any other file. Do not run git commit. Reddit cannot be fetched from this environment; use Hacker News (hn.algolia.com search works), GitHub issues and discussions, blogs, official docs, Stack Overflow, and dev.to instead. Every factual claim gets a markdown link to its source. If you cannot find a source, say "unverified" rather than inventing one. Recognizing a tool's name is not the same as knowing its current state: search for each tool as named and verify its status as of September 2026. Batch independent web fetches in one response. Do not stop until the file is written and complete; nobody is watching and nobody can answer questions. Your final message is not for a human: return only the structured output.`

@@ -6,7 +6,7 @@ export const meta = {
     { title: 'v0.2.0', detail: 'what a stranger hits in the first ten minutes: go install, and a first-name column masked with a full name. The orchestrator cuts mask/v0.1.0 with make tag before this step runs.' },
   ],
 }
-const REPO = '<repo>'
+const REPO = '.' // the checkout the workflow is launched from; a workflow runs with the repository as its working directory (T-0267)
 const IMPL = `${REPO}/.claude/workflows/implement.js`
 // args: { step: 'material' | 'v020' | 'polish' | 'names' | 'dogfood', from?: index, to?: index (exclusive; names and dogfood steps) }  from skips merged tasks; a task's brief starts with `python3 tools/tracker.py show T-NNNN` (T-0196: open tasks are GitHub issues, not files)
 const step = (args && args.step) || 'material'

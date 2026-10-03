@@ -3,7 +3,7 @@ export const meta = {
   description: 'Phase 4: the gate-4 packages from ARCHITECTURE.md section 14, in dependency order, each through implement.js with reviews; stops at the first blocked task',
   phases: [{ title: 'Slice', detail: 'pg, introspect, classify, plan, mask, extract+transform, load, verify, core+emit+render, discover' }],
 }
-const REPO = '<repo>'
+const REPO = '.' // the checkout the workflow is launched from; a workflow runs with the repository as its working directory (T-0267)
 const IMPL = `${REPO}/.claude/workflows/implement.js`
 // args: { from: index } to start at a later stage; resume by run id replays finished stages from cache
 const start = (args && args.from) || 0

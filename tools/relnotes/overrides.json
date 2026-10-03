@@ -409,5 +409,8 @@
    "Case, ligature and ß spellings of one value (STRASSE and straße, file and its ligature spelling) mask to the same output, as they did in v0.3.0, even when the raw values differ in length: the output is fitted to the length of the value's canonical form",
    "The filler a free-text value is fitted from leaves out trace, default, session, level, stage, system, token, value, input and output, words a log_level or settings column is likely to hold itself; a masked value equal to a real value of the same column is what the residual scan stops on at exit 9"
   ]
+ },
+ "9f793a4": {
+  "title": "Commits carry release-note bodies; the tracker and commit skills; make relnotes"
  }
 }

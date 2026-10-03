@@ -10,7 +10,7 @@ export const meta = {
     { title: 'Gate', detail: 'what section 14 and the accepted ADRs promise for v1 and the 2026-09-17 audit found missing; no replay' },
   ],
 }
-const REPO = '<repo>'
+const REPO = '.' // the checkout the workflow is launched from; a workflow runs with the repository as its working directory (T-0267)
 const IMPL = `${REPO}/.claude/workflows/implement.js`
 // args: { step: 'features' | 'backlog' | 'harden' | 'redteam', from?: index }  one step per usage window; from skips merged tasks in features or backlog
 const step = (args && args.step) || 'features'
