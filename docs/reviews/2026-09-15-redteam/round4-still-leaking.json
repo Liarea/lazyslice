@@ -1,7 +1,7 @@
 {
  "round": 4,
  "date": "2026-09-17",
- "tree": "c9536ed",
+ "tree": "0201b53",
  "still_leaking": [
   {
    "attack": "NEW VARIANT of finding 16, against the T-0223 fix itself: a custom masker that returns an error which quotes the value AND wraps one of the mask module's own sentinels — `fmt.Errorf(\"cannot fit %q: %w\", in.Text, mask.ErrNoRoom)`. maskCell's new wrapper is gated on isModuleError(err), which is an errors.Is/As test the masker controls, so declaring the module's sentinel buys the masker a pass straight through the redaction.",

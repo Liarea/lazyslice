@@ -39,4 +39,4 @@ T-0118 landed the transform half: internal/transform/array.go parses a Postgres 
 
 ## Post-mortem
 
-went well: doc-only fix round, 819ef4e; regression 009 flipped to ok and its leak assertion now runs | went badly: reviewers found the moved-failure constraint sentence had been dropped; the grammar gap between classify and transform is closed by argument (array_out never emits the divergent forms) rather than a plan-time parse check | change next time: when a brief says 'record the constraint', the reviewer should check the recorded sentence exists
+went well: doc-only fix round, b041d1b; regression 009 flipped to ok and its leak assertion now runs | went badly: reviewers found the moved-failure constraint sentence had been dropped; the grammar gap between classify and transform is closed by argument (array_out never emits the divergent forms) rather than a plan-time parse check | change next time: when a brief says 'record the constraint', the reviewer should check the recorded sentence exists

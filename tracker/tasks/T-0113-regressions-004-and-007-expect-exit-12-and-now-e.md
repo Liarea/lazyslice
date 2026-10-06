@@ -8,14 +8,14 @@ owner: ""
 created: 2026-09-08
 started: ""
 closed: 2026-09-09
-outcome: "done: in T-HARD-C (4f9a186)"
+outcome: "done: in T-HARD-C (30d2b63)"
 ---
 
 # T-0113 · Regressions 004 and 007 expect exit 12 and now exit 0: credential_unique made their headers stale
 
 ## Goal
 
-make torture fails two of its eight regressions, and has since T-HARD-A (ecc42ae) — measured at that commit with T-0112's catalogue changes stashed, so it is not T-0112's doing.
+make torture fails two of its eight regressions, and has since T-HARD-A (b89f0f0) — measured at that commit with T-0112's catalogue changes stashed, so it is not T-0112's doing.
 
 testdata/regressions/004-composite-unique-index-all-masked.sql and 007-partial-unique-index-masked-column.sql both carry '-- expect: exit 12 plan.refused.unique_domain'. Both reduce a *credential* column under a unique index (004: public.reg4_grant.access_token, 'name matches credential; 200/200 samples look like secrets', under a composite unique index whose every key column is masked; 007: public.reg7_account.confirmation_token under a partial unique index). Both were written when CatCredential's only generator was the fixed literal, whose Domain() is 1, so the plan could not satisfy d_required and refused at exit 12. mask/gen_credential.go's credential_unique now escalates them and both runs exit 0 with the column masked, which is the fix working. TestTortureRegressions compares the exit code to the header and fails.
 
@@ -38,7 +38,7 @@ Found by T-0112 while re-measuring the flag counts; recorded in internal/invaria
 
 - 2026-09-09 moved to E5 phase 5
 
-- 2026-09-09 closed: done: in T-HARD-C (4f9a186)
+- 2026-09-09 closed: done: in T-HARD-C (30d2b63)
 
 ## Post-mortem
 

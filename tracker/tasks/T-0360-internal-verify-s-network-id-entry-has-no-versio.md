@@ -28,4 +28,4 @@ internal/verify/validators.go's network_id entry (ValidIP || ValidMAC, text: tru
 
 ## Post-mortem
 
-went well: landed by hand with T-0317 in 44412d1: the second net's network_id validator no longer fires on a column whose name carries version, build or release, pinned by internal/verify/network_id_veto_test.go | went badly: filed by the T-0317 developer into E9 because it lay outside its paths, so the fix that made the classify change safe waited on a hand landing | change next time: the same change as T-0317: put the verify twin in the classify task's paths
+went well: landed by hand with T-0317 in 4679f75: the second net's network_id validator no longer fires on a column whose name carries version, build or release, pinned by internal/verify/network_id_veto_test.go | went badly: filed by the T-0317 developer into E9 because it lay outside its paths, so the fix that made the classify change safe waited on a hand landing | change next time: the same change as T-0317: put the verify twin in the classify task's paths

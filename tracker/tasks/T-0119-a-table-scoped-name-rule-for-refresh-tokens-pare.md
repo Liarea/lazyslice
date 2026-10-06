@@ -35,4 +35,4 @@ T-0104's tenth miss has no fix in T-HARD-B and needs a rule-pack feature rather 
 
 ## Post-mortem
 
-went well: rules.yml gains a table-scoped pattern; refresh_tokens.parent is masked; two tests kill the reviewer's mutation of the table gate; docs/TORTURE.md provenance stated (802395a, one fix round) | went badly: make torture not re-run by the task; a pre-existing torture failure on regression 013 surfaced as T-0172 | change next time: any classify change re-runs make torture before returning
+went well: rules.yml gains a table-scoped pattern; refresh_tokens.parent is masked; two tests kill the reviewer's mutation of the table gate; docs/TORTURE.md provenance stated (0c5431c, one fix round) | went badly: make torture not re-run by the task; a pre-existing torture failure on regression 013 surfaced as T-0172 | change next time: any classify change re-runs make torture before returning

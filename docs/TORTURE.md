@@ -403,7 +403,7 @@ defects this exercise found *and* got fixed:
   ADR-011 carries the reversal condition: the agreeing-group statistic that
   would make (a) exact.
 * **T-0097 — §11.1's not-recreatable refusal was raised inside `load.Load`.**
-  T-HARD-A (`ecc42ae`) moved `ddl.Recreatable` to the top of `internal/core`'s
+  T-HARD-A (`b89f0f0`) moved `ddl.Recreatable` to the top of `internal/core`'s
   `planStage`, before the plan request and before the first key query, which is
   where §11.1 says it is raised. Mastodon and gitlab now pay one introspect
   rather than a whole extract before being told the target cannot be built, and
@@ -1123,7 +1123,7 @@ predicted, 50 TP, 31 FP, precision 0.617, against the 74/50/24/0.676 this file
 last wrote down: the schema itself is unchanged (still 271 columns), so all
 seven are rule-pack widening, not a new column. `git log` over
 `internal/classify/{classify.go,rules.yml}` since this table's own T-0119
-measurement names the mechanism: commit `a712cbc` ("Red team round 1 fixes",
+measurement names the mechanism: commit `4f4a839` ("Red team round 1 fixes",
 T-REDFIX, 2026-09-15) widened `credential`, `online_id` and `person_name`'s
 name patterns by roughly sixty spellings across several categories, and seven
 of `custom_oauth_providers`' and its neighbours' OAuth-plumbing columns —
@@ -1133,7 +1133,7 @@ of `custom_oauth_providers`' and its neighbours' OAuth-plumbing columns —
 match that did not exist when this table was last written. T-0187 (national_id
 on the row path) is not the cause: no column in this schema decides
 `national_id`, checked directly against the emitted `columns:` block. This
-file was not re-measured after `a712cbc` landed, so the drift sat unrecorded
+file was not re-measured after `4f4a839` landed, so the drift sat unrecorded
 until T-0188's own before/after pass surfaced it; the table above is the
 corrected "before" for what follows, not a new regression.
 

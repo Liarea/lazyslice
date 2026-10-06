@@ -287,7 +287,7 @@ bench:
 ##
 ## The regression gate `bench` cannot be: an absolute floor compared against
 ## a number recorded on some other run, on some other day, on a shared
-## runner. ae51123 recorded one such number from the CI job's own runner and
+## runner. d1ffe02 recorded one such number from the CI job's own runner and
 ## made the job blocking; the very next run, with identical code, measured
 ## 6,741,072 rows/sec against that run's 10,865,118 (CI runs 34928141791 and
 ## 34927703066) — a 38% swing on the same commit, comfortably past

@@ -33,4 +33,4 @@ The 2026-09-15 red team registered a passthrough masker against the public mask 
 
 ## Post-mortem
 
-went well: implemented inside T-0191 (f5ec705), the mask.Apply post-condition | went badly: sat as a separate open task while its code landed elsewhere | change next time: fold a red-team follow-up into the fix task that owns the path when one is queued
+went well: implemented inside T-0191 (db33590), the mask.Apply post-condition | went badly: sat as a separate open task while its code landed elsewhere | change next time: fold a red-team follow-up into the fix task that owns the path when one is queued

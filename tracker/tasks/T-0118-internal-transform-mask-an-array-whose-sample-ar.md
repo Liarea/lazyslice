@@ -31,7 +31,7 @@ T-HARD-B landed the classify half of T-0103: an array of an extension type (cite
 
 - 2026-09-09 blocked: Code complete and green; unreachable from the CLI because internal/plan's writeback still refuses an array that arrives as a text literal (exit 12). Sequence: T-0129 (verify refuses or flags a masked array column whose target value does not decode to a slice) first or together with T-0127 (plan drops arrayArrivesAsLiteral); then regression 009's header flips to ok and its leak assertion runs. Paused 2026-09-09.
 
-- 2026-09-14 2026-09-14 unblocked: T-0129 (f40de6a) and T-0127 (819ef4e) landed; make torture exits 0 with 009-citext-array-of-addresses-masked-as-one-string.sql at expect ok and its leak assertion passing (61.3 s, ten schemas, catalogue, nine regressions)
+- 2026-09-14 2026-09-14 unblocked: T-0129 (ecb129e) and T-0127 (b041d1b) landed; make torture exits 0 with 009-citext-array-of-addresses-masked-as-one-string.sql at expect ok and its leak assertion passing (61.3 s, ten schemas, catalogue, nine regressions)
 
 - 2026-09-14 closed: done
 

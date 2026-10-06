@@ -8,7 +8,7 @@ owner: ""
 created: 2026-09-08
 started: ""
 closed: 2026-09-09
-outcome: "done: in T-HARD-C (4f9a186)"
+outcome: "done: in T-HARD-C (30d2b63)"
 ---
 
 # T-0115 · docs/TORTURE.md: re-measure supabase-auth recall after T-0104's name rules
@@ -27,7 +27,7 @@ T-HARD-B widened internal/classify/rules.yml's credential and online_id patterns
 
 - 2026-09-09 moved to E5 phase 5
 
-- 2026-09-09 closed: done: in T-HARD-C (4f9a186)
+- 2026-09-09 closed: done: in T-HARD-C (30d2b63)
 
 ## Post-mortem
 

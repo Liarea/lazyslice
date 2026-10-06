@@ -30,4 +30,4 @@ T-0317 (THREAT_MODEL.md) widens the fourth accepted residual: a minority of IP/M
 
 ## Post-mortem
 
-went well: landed as 7d527c1 with no review finding above low: README and SECURITY residual 4 name T-0317's two widenings the way T-0316's card widening was carried, and THREAT_MODEL's amendment now says plainly that no corpus-wide measurement was taken | went badly: the developer chose the plain statement over running the ten-schema comparison, which is the honest answer for a docs task; two lows (the certain-neighbour qualifier, a rewrap) logged on T-0388 with the other residual-wording follow-ups | change next time: nothing
+went well: landed as 306f25e with no review finding above low: README and SECURITY residual 4 name T-0317's two widenings the way T-0316's card widening was carried, and THREAT_MODEL's amendment now says plainly that no corpus-wide measurement was taken | went badly: the developer chose the plain statement over running the ten-schema comparison, which is the honest answer for a docs task; two lows (the certain-neighbour qualifier, a rewrap) logged on T-0388 with the other residual-wording follow-ups | change next time: nothing

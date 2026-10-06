@@ -8,7 +8,7 @@ owner: ""
 created: 2026-09-08
 started: ""
 closed: 2026-09-09
-outcome: "done: in T-HARD-B (78530ef)"
+outcome: "done: in T-HARD-B (e364afb)"
 ---
 
 # T-0120 · internal/classify: a masked FK child whose parent is copied orphans the row
@@ -25,7 +25,7 @@ T-HARD-B review. propagateKeys runs parent to child only, so a key-family child 
 
 - 2026-09-08 created
 
-- 2026-09-09 closed: done: in T-HARD-B (78530ef)
+- 2026-09-09 closed: done: in T-HARD-B (e364afb)
 
 ## Post-mortem
 

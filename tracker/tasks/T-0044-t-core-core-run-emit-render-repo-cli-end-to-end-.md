@@ -8,7 +8,7 @@ owner: opus
 created: 2026-09-05
 started: 2026-09-06
 closed: 2026-09-07
-outcome: "done: core merged at 9bd9e24, blockers closed by T-0058"
+outcome: "done: core merged at 8e5c336, blockers closed by T-0058"
 ---
 
 # T-0044 · T-CORE: core run, emit, render, repo, CLI end to end; integration job blocking again
@@ -33,7 +33,7 @@ outcome: "done: core merged at 9bd9e24, blockers closed by T-0058"
 
 - 2026-09-07 the maintainer 2026-09-06: continue; pause after phase 5 is fully complete.
 
-- 2026-09-07 closed: done: core merged at 9bd9e24, blockers closed by T-0058
+- 2026-09-07 closed: done: core merged at 8e5c336, blockers closed by T-0058
 
 ## Post-mortem
 

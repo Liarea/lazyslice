@@ -31,4 +31,4 @@ internal/invariants/torture_test.go runs the tool at line 56 and takes beforeRow
 
 ## Post-mortem
 
-went well: baselines taken before the run, negative control on rows, I4 now held for refusing runs too (4487315, one fix round) | went badly: the Makefile's TORTURE_TESTS list did not include the negative control (T-0171, orchestrator fixes); comment overstated what the reorder buys and the catalog half has no negative control (low) | change next time: a negative control per comparison, not per test
+went well: baselines taken before the run, negative control on rows, I4 now held for refusing runs too (4dcc802, one fix round) | went badly: the Makefile's TORTURE_TESTS list did not include the negative control (T-0171, orchestrator fixes); comment overstated what the reorder buys and the catalog half has no negative control (low) | change next time: a negative control per comparison, not per test

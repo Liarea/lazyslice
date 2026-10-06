@@ -33,4 +33,4 @@ The 2026-09-15 red team's thrower masker panicked with the offending value in it
 
 ## Post-mortem
 
-went well: implemented inside T-0191 (f5ec705), masker error messages never carry the value | went badly: as T-0180 | change next time: as T-0180
+went well: implemented inside T-0191 (db33590), masker error messages never carry the value | went badly: as T-0180 | change next time: as T-0180

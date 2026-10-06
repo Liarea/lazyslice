@@ -8,7 +8,7 @@ owner: opus
 created: 2026-09-08
 started: ""
 closed: 2026-09-08
-outcome: "done: 2d57b00; session GUC removed, SystemID in a read-only transaction, pgbouncer neighbour test proves a second client can CREATE TABLE after lazyslice exits, T9 reworded"
+outcome: "done: 332d7a4; session GUC removed, SystemID in a read-only transaction, pgbouncer neighbour test proves a second client can CREATE TABLE after lazyslice exits, T9 reworded"
 ---
 
 # T-0076 · T-0076: source read-only setting per transaction, never a session GUC that leaks through a transaction-pooling PgBouncer; T9 reworded
@@ -25,7 +25,7 @@ outcome: "done: 2d57b00; session GUC removed, SystemID in a read-only transactio
 
 - 2026-09-08 created
 
-- 2026-09-08 closed: done: 2d57b00; session GUC removed, SystemID in a read-only transaction, pgbouncer neighbour test proves a second client can CREATE TABLE after lazyslice exits, T9 reworded
+- 2026-09-08 closed: done: 332d7a4; session GUC removed, SystemID in a read-only transaction, pgbouncer neighbour test proves a second client can CREATE TABLE after lazyslice exits, T9 reworded
 
 ## Post-mortem
 

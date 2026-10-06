@@ -29,4 +29,4 @@ T-0315 narrowed the entropy signal (THREAT_MODEL.md T1's T-0315 amendment): a se
 
 ## Post-mortem
 
-went well: landed as 80f16a9 after one review round (one medium, two low): README and SECURITY's residual lists name the four secret shapes T-0315 no longer reads by entropy, matching THREAT_MODEL's amendment | went badly: the first cut said three where the amendment names four; two lows filed as a follow-up (sentence placement in SECURITY residual 2; the one-case hex qualifier and the sweep effect) | change next time: a docs task that mirrors a THREAT_MODEL amendment quotes the amendment's list in the brief
+went well: landed as 7a2a32d after one review round (one medium, two low): README and SECURITY's residual lists name the four secret shapes T-0315 no longer reads by entropy, matching THREAT_MODEL's amendment | went badly: the first cut said three where the amendment names four; two lows filed as a follow-up (sentence placement in SECURITY residual 2; the one-case hex qualifier and the sweep effect) | change next time: a docs task that mirrors a THREAT_MODEL amendment quotes the amendment's list in the brief

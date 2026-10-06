@@ -8,7 +8,7 @@ owner: ""
 created: 2026-09-08
 started: ""
 closed: 2026-09-09
-outcome: "done: in T-HARD-B (78530ef)"
+outcome: "done: in T-HARD-B (e364afb)"
 ---
 
 # T-0104 · The credential and online_id name rules miss the spellings an auth schema actually uses
@@ -27,7 +27,7 @@ docs/TORTURE.md's hand-labelled truth set over supabase-auth (271 columns, 50 la
 
 - 2026-09-08 moved to E5 phase 5
 
-- 2026-09-09 closed: done: in T-HARD-B (78530ef)
+- 2026-09-09 closed: done: in T-HARD-B (e364afb)
 
 ## Post-mortem
 

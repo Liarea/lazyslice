@@ -31,4 +31,4 @@ outcome: done
 
 ## Post-mortem
 
-went well: torture job on pushes to main; release refuses a tag whose commit has no green push-to-main ci run, filtered server-side and re-checked (6cae95e, one fix round) | went badly: nothing | change next time: nothing
+went well: torture job on pushes to main; release refuses a tag whose commit has no green push-to-main ci run, filtered server-side and re-checked (facc8a2, one fix round) | went badly: nothing | change next time: nothing

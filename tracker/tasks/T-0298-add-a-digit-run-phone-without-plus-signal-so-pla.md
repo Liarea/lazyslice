@@ -24,8 +24,8 @@ T-0297's ValidMAC narrowing (internal/textsig/textsig.go) means a column with no
 ## Log
 
 - 2026-09-22 2026-09-22 created
-- 2026-09-22 cancelled: Moot: 5711c6b reverted the ValidMAC narrowing (87aea49) that created the gap; a digit-run column with no name is caught as network_id exactly as before.
+- 2026-09-22 cancelled: Moot: ebed6cd reverted the ValidMAC narrowing (3b876a3) that created the gap; a digit-run column with no name is caught as network_id exactly as before.
 
 ## Post-mortem
 
-Cancelled. Reason: Moot: 5711c6b reverted the ValidMAC narrowing (87aea49) that created the gap; a digit-run column with no name is caught as network_id exactly as before.
+Cancelled. Reason: Moot: ebed6cd reverted the ValidMAC narrowing (3b876a3) that created the gap; a digit-run column with no name is caught as network_id exactly as before.

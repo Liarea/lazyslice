@@ -8,7 +8,7 @@ owner: opus
 created: 2026-09-08
 started: ""
 closed: 2026-09-08
-outcome: "done: ecc42ae; credential_unique (domain 2^65), fingerprint recomputed after the plan, exit 13 raised at plan"
+outcome: "done: b89f0f0; credential_unique (domain 2^65), fingerprint recomputed after the plan, exit 13 raised at plan"
 ---
 
 # T-0108 · T-HARD-A: unique credential masker, fingerprint after plan, exit 13 at plan (T-0098, T-0101, T-0097)
@@ -25,7 +25,7 @@ outcome: "done: ecc42ae; credential_unique (domain 2^65), fingerprint recomputed
 
 - 2026-09-08 created
 
-- 2026-09-08 closed: done: ecc42ae; credential_unique (domain 2^65), fingerprint recomputed after the plan, exit 13 raised at plan
+- 2026-09-08 closed: done: b89f0f0; credential_unique (domain 2^65), fingerprint recomputed after the plan, exit 13 raised at plan
 
 ## Post-mortem
 

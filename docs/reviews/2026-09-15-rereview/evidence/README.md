@@ -1,17 +1,17 @@
 # Re-review evidence
 
-All probes were run against binary code from commit `c8ec5e2124d9f5fea2387a6028d152b80c2d8db3`, using disposable `postgres:18` containers. Values and credentials are synthetic.
+All probes were run against binary code from commit `6e19e6c9756215fd9d3f41e7fb65575abd5ba93e`, using disposable `postgres:18` containers. Values and credentials are synthetic.
 
 Build a pinned binary and run the probes from the repository root:
 
 ```sh
-git worktree add /tmp/lazyslice-review-c8ec5e2 c8ec5e2124d9f5fea2387a6028d152b80c2d8db3
-go build -o /tmp/lazyslice-review-c8ec5e2-bin ./cmd/lazyslice
-LAZYSLICE_REVIEW_BIN=/tmp/lazyslice-review-c8ec5e2-bin \
+git worktree add /tmp/lazyslice-review-6e19e6c 6e19e6c9756215fd9d3f41e7fb65575abd5ba93e
+go build -o /tmp/lazyslice-review-6e19e6c-bin ./cmd/lazyslice
+LAZYSLICE_REVIEW_BIN=/tmp/lazyslice-review-6e19e6c-bin \
   python3 docs/reviews/2026-09-15-rereview/evidence/extended_probes.py
-LAZYSLICE_REVIEW_BIN=/tmp/lazyslice-review-c8ec5e2-bin \
+LAZYSLICE_REVIEW_BIN=/tmp/lazyslice-review-6e19e6c-bin \
   python3 docs/reviews/2026-09-15-rereview/evidence/target_rls_race.py
-LAZYSLICE_REVIEW_BIN=/tmp/lazyslice-review-c8ec5e2-bin \
+LAZYSLICE_REVIEW_BIN=/tmp/lazyslice-review-6e19e6c-bin \
   docs/reviews/2026-09-15-rereview/evidence/password_command_probe.sh
 ```
 

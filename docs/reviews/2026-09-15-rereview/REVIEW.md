@@ -1,6 +1,6 @@
 # Adversarial re-review — 2026-09-15
 
-**Reviewed commit:** `c8ec5e2124d9f5fea2387a6028d152b80c2d8db3`
+**Reviewed commit:** `6e19e6c9756215fd9d3f41e7fb65575abd5ba93e`
 
 **Verdict:** the eleven findings from the 2026-09-09 review have either been fixed, explicitly refused, or kept open as a documented product decision. The exact destructive-race, sink-canary, text-FK, verify-lifecycle, DDL-default, sparse-hit, and torture probes now hold. That is substantial progress.
 
@@ -167,7 +167,7 @@ Rewrite the principle around a bounded, testable guarantee: which values are alw
 
 ### The project is accumulating control surface faster than user evidence
 
-Between the previous reviewed commit `936ceec` and this commit, the repository added roughly 50 commits, 286 changed files, and 57,857 inserted lines in about two days. The reviewed tree has about 86,000 lines of Go including about 41,000 test lines, 30,000 lines of Markdown, 27 Go packages, and more than 220 tracker files. Much of that work directly hardened real defects. It also raises the cost of changing the product boundary before the required dogfood has happened.
+Between the previous reviewed commit `12c955a` and this commit, the repository added roughly 50 commits, 286 changed files, and 57,857 inserted lines in about two days. The reviewed tree has about 86,000 lines of Go including about 41,000 test lines, 30,000 lines of Markdown, 27 Go packages, and more than 220 tracker files. Much of that work directly hardened real defects. It also raises the cost of changing the product boundary before the required dogfood has happened.
 
 Freeze feature expansion. Spend the next cycle on the destructive boundary, PostgreSQL semantic laws, one real application, and a same-schema comparison with the leading alternative. Delete controls that do not protect a named risk or a measured user outcome.
 

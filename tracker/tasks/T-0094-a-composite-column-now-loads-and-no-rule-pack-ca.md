@@ -8,7 +8,7 @@ owner: ""
 created: 2026-09-08
 started: ""
 closed: 2026-09-09
-outcome: "done: in T-HARD-B (78530ef)"
+outcome: "done: in T-HARD-B (e364afb)"
 ---
 
 # T-0094 · A composite column now loads, and no rule pack category accepts its type family: decide refuse or mask field-wise (THREAT_MODEL.md T1)
@@ -27,7 +27,7 @@ Before T-0083 a source table with a composite column failed CopyFrom at 42804, s
 
 - 2026-09-08 moved to E5 phase 5
 
-- 2026-09-09 closed: done: in T-HARD-B (78530ef)
+- 2026-09-09 closed: done: in T-HARD-B (e364afb)
 
 ## Post-mortem
 

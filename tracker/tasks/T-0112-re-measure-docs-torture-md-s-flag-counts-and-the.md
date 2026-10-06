@@ -8,7 +8,7 @@ owner: ""
 created: 2026-09-08
 started: ""
 closed: 2026-09-09
-outcome: "done: 3b03050; eighteen credential opt-outs stripped, counts re-measured, make torture green after T-HARD-C"
+outcome: "done: 83b45be; eighteen credential opt-outs stripped, counts re-measured, make torture green after T-HARD-C"
 ---
 
 # T-0112 · Re-measure docs/TORTURE.md's flag counts and the catalogue's flags-by-kind after the credential_unique masker
@@ -36,11 +36,11 @@ Paths this needs: internal/invariants/, docs/TORTURE.md, ROADMAP.md.
 
 - 2026-09-08 created
 
-- 2026-09-08 Correction to this task's Goal, from the T-HARD-A review round (do not work the numbers above as written). The T-0098-tagged flag count is EIGHTEEN, not twenty. Measured in the tree at 512d712: grep -c '"--unmask"' internal/invariants/torture_catalogue_test.go is 37, and the subset whose reason names (T-0098) is 18. Per-schema, those eighteen are supabase-auth 6 (lines 145-150), calcom 1 (202), mastodon 2 (217-218), gitlab 8 (237, 239, 242-247), discourse 1 (285) - plausible, metabase and odoo carry no T-0098 flags at all, so the Goal's 'plausible/metabase/odoo the rest' is wrong as well as unnecessary. Scope also gains internal/invariants/CLAUDE.md:296-298, which repeats the same 'twenty of the thirty-seven' sentence and is not a _test.go file. Worth knowing while re-measuring: make test reports internal/invariants as '[no test files]' because the suite is behind a build tag, so no routine check will ever catch this drift - the numbers in docs/TORTURE.md, ROADMAP.md:54, internal/invariants/CLAUDE.md and torture_test.go's flags-by-kind map agree with each other and are all pre-fix, so nothing fails today. mask/CLAUDE.md:297-301 and testdata/torture/CLAUDE.md:45-50 already carry the corrected eighteen and the corrected per-schema split.
+- 2026-09-08 Correction to this task's Goal, from the T-HARD-A review round (do not work the numbers above as written). The T-0098-tagged flag count is EIGHTEEN, not twenty. Measured in the tree at f9514b8: grep -c '"--unmask"' internal/invariants/torture_catalogue_test.go is 37, and the subset whose reason names (T-0098) is 18. Per-schema, those eighteen are supabase-auth 6 (lines 145-150), calcom 1 (202), mastodon 2 (217-218), gitlab 8 (237, 239, 242-247), discourse 1 (285) - plausible, metabase and odoo carry no T-0098 flags at all, so the Goal's 'plausible/metabase/odoo the rest' is wrong as well as unnecessary. Scope also gains internal/invariants/CLAUDE.md:296-298, which repeats the same 'twenty of the thirty-seven' sentence and is not a _test.go file. Worth knowing while re-measuring: make test reports internal/invariants as '[no test files]' because the suite is behind a build tag, so no routine check will ever catch this drift - the numbers in docs/TORTURE.md, ROADMAP.md:54, internal/invariants/CLAUDE.md and torture_test.go's flags-by-kind map agree with each other and are all pre-fix, so nothing fails today. mask/CLAUDE.md:297-301 and testdata/torture/CLAUDE.md:45-50 already carry the corrected eighteen and the corrected per-schema split.
 
 - 2026-09-08 moved to E5 phase 5
 
-- 2026-09-09 closed: done: 3b03050; eighteen credential opt-outs stripped, counts re-measured, make torture green after T-HARD-C
+- 2026-09-09 closed: done: 83b45be; eighteen credential opt-outs stripped, counts re-measured, make torture green after T-HARD-C
 
 ## Post-mortem
 

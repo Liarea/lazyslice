@@ -28,4 +28,4 @@ T-0403 made internal/textsig import golang.org/x/text/unicode/norm for its NFKC 
 
 ## Post-mortem
 
-went well: done with T-0403's landing 4ccfba6: ARCHITECTURE section 13's x/text row names internal/textsig's NFKC folding beside the mask module, and the import-graph and layout lines say textsig imports ref, pipeline and unicode/norm | went badly: nothing | change next time: nothing
+went well: done with T-0403's landing 1851eb6: ARCHITECTURE section 13's x/text row names internal/textsig's NFKC folding beside the mask module, and the import-graph and layout lines say textsig imports ref, pipeline and unicode/norm | went badly: nothing | change next time: nothing

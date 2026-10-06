@@ -1,44 +1,44 @@
 {
- "ee2c64f": [
+ "51350e7": [
   "--password-command now runs: when no earlier password source resolves for an endpoint (a password in the DSN, PGPASSWORD, ~/.pgpass), the command runs through the shell with a 30 second limit and its output, with one trailing newline trimmed, is the password",
   "The command's output never reaches an event, a log line, a refusal message, lazyslice.yml or the trace; its own stderr passes through to the operator untouched",
   "A command that exits non-zero, times out or prints nothing refuses the run with a message naming the exit status and nothing else",
   "The command also runs for an endpoint the discovery ladder resolved, not only for one named on the command line"
  ],
- "87aea49": [
-  "Reverted before release by the entry above (5711c6b); nothing in this commit shipped, and no check was narrowed."
+ "3b876a3": [
+  "Reverted before release by the entry above (ebed6cd); nothing in this commit shipped, and no check was narrowed."
  ],
- "930c9b1": [
+ "f437695": [
   "Research doc: the Hacker News comment is dated precisely, seven weeks after the Snaplet shutdown (31 August 2024 to 17 October 2024), not a year.",
   "Research doc: the npm figures are for the dated week 23-29 August 2026 (@snaplet/copycat 121,478, @snaplet/snapshot 9,808, more than twelve times), linked to npm's dated range endpoints so the links keep backing the numbers."
  ],
- "e7de57b": [
+ "f9dedea": [
   "No user-visible change: part of re-landing the entry above in two steps so a release and go install build against the published mask module."
  ],
- "0011c26": [
+ "7854fde": [
   "No user-visible change: the mask module's test data is checked out byte for byte on every platform."
  ],
- "eb4657b": [
+ "6952f9f": [
   "No user-visible change beyond the entry above, which this commit re-lands on the published mask/v0.3.0; the tool now requires mask v0.3.0."
  ],
- "4a7f1a5": {
+ "4f8ea50": {
   "title": "JSON-document red-team round 2 replays the eleven round-1 attempts that crossed outside the named residuals: ten hold, one is a named residual, zero undocumented",
   "bullets": [
    "docs/reviews/2026-09-25-redteam-json/round2.json records each replay with its commands and target check. Round 1 ran on the development tree where per-leaf masking first landed; round 2 ran against per-leaf masking as v0.4.0 ships it",
    "The one that still crosses is a national-format phone number used as a document key with no --phone-region, which SECURITY.md item 8 names; with --phone-region naming the number's region, that key is masked"
   ]
  },
- "cad1812": {
+ "1b4b732": {
   "title": "JSON-document red-team round 1 records 37 attempts against per-leaf masking as it first landed; the eleven that crossed outside the named residuals are replayed in round 2, which ends with zero undocumented",
   "bullets": [
    "docs/reviews/2026-09-25-redteam-json/round1.json records every attempt with its reproduction. The round ran on the development tree where per-leaf masking first landed, which no release shipped: 27 attempts crossed there, 16 of them residuals that SECURITY.md item 8 and THREAT_MODEL.md T1 name",
    "The other eleven were replayed as round 2 against the code v0.4.0 ships: ten hold and one is a named residual"
   ]
  },
- "b6eea65": {
+ "a1cec08": {
   "skip": true
  },
- "395cc6e": {
+ "f7b5f56": {
   "title": "README, SECURITY, CONCEPT, the quickstart transcript and the launch drafts describe what v0.4.0 does",
   "bullets": [
    "README, SECURITY.md and CONCEPT.md now describe v0.4.0's actual behaviour: JSON columns mask leaf by leaf (free text still masks whole; CONCEPT.md no longer says both are masked whole), the neighbouring-column rule promotes low to possible confidence, a bare name/display_name/<x>_name column needs corroboration before a name hit alone masks it, and a hex token exactly a digest's length is spared and copied beside a certain personal neighbour.",
@@ -50,7 +50,7 @@
    "README's quickstart section and docs/QUICKSTART_TRANSCRIPT.md now explain the full_name column's address-shaped output: the column name says person_name, but its sample values (which carry a trailing digit in this schema) read as addresses, and when the name and the values disagree about the category the values decide. README's Census-names sentence now says it applies to a column masked under person_name, not to this full_name example."
   ]
  },
- "7d527c1": {
+ "306f25e": {
   "title": "README and SECURITY residual 4 name the two shapes a version-named or key-named column now copies",
   "bullets": [
    "README.md's list of accepted residuals now names two more unmasked shapes under residual 4: IP/MAC addresses appearing as a minority of a version/build/release column's values, and a guessed-region phone number under a key/code/license/serial/token column name when the table's best personal neighbour is only likely rather than certain.",
@@ -58,14 +58,14 @@
    "THREAT_MODEL.md's T-0317 amendment states that no corpus-wide before/after classify --json comparison over the ten torture schemas was run for this change, so the two truth-set numbers it quotes are not a corpus-wide measurement."
   ]
  },
- "65c81fb": {
+ "b1060f8": {
   "title": "THREAT_MODEL.md T1 carries the amendment for the version-column network veto and the key/code/license/serial/token phone-guess veto",
   "bullets": [
    "THREAT_MODEL.md's T1 threat now documents the T-0317 classifier change: a column whose name carries version, build or release as a word is no longer offered the network-address (IP/MAC) signal as a minority-value hit, and a column whose name carries key, code, license, serial or token as a word is no longer offered the guessed-region phone corroboration.",
    "The amendment names the personal data that change leaves unmasked (a minority of real IP/MAC addresses in a version/build/release-named column, and real non-configured-region phone numbers in a key/code/license/serial/token-named column beside only a 'likely' personal neighbour) as a widening of the fourth accepted residual README.md and SECURITY.md list."
   ]
  },
- "9abc269": {
+ "3348bde": {
   "title": "README and SECURITY say the card signal wants an issuer prefix, and what a card outside the issuer table costs",
   "bullets": [
    "README.md's 'How it decides' now states the Luhn card check also requires a known issuer prefix, and under an id/number/version/reference column name, that issuer's own length.",
@@ -73,16 +73,16 @@
    "SECURITY.md's known-limitations item 4 states the same bound: a card from a range the table lacks, or of an unlisted length under an identifier-shaped column name, is copied."
   ]
  },
- "80f16a9": {
+ "7a2a32d": {
   "title": "README and SECURITY residual lists name the shapes the entropy check no longer reads as secrets",
   "bullets": [
    "README.md's and SECURITY.md's residual lists now spell out the four shapes the entropy check passes through, copied unmasked, when no credential-name rule matches the column's name: a secret that is an exact 32/40/64-character hex run, a secret held in a column of one to four non-NULL rows, a secret in a column literally named type, klass or component_name, and a file named after a person in a column where fewer than a fifth of the file names carry a word the dictionary holds."
   ]
  },
- "06362bd": {
+ "c62af09": {
   "skip": true
  },
- "5a77f1b": {
+ "d66ab4c": {
   "title": "A committed yml pins which document keys are copied, and a key the samples newly show counts as drift",
   "bullets": [
    "lazyslice.yml now lists, under a json or jsonb column's new leaf_keys: entry, the document keys whose values the run copied, so the committed file shows which keys cross in clear (a yml format change for this 0.x minor; older lazyslice versions refuse a file carrying the key)",
@@ -94,14 +94,14 @@
    "A lazyslice.yml written before this release lists no leaf keys: the first run over it masks every value under the document keys it would otherwise copy, reports each key once as drift and writes the list into the file, and later runs copy them; with --strict-schema that drift is exit 10, so a pipeline that runs with the flag must run once without it to write the list before the strict run passes again"
   ]
  },
- "6a0e687": {
+ "4a78cb3": {
   "title": "A lazyslice.yml written by v0.3.0 still finds its lazyslice-target-lazyslice-* container after the container name rule changed",
   "bullets": [
    "A lazyslice.yml whose target was recorded as lazyslice-target-lazyslice-<something>, the name v0.3.0 gave the container of a directory called lazyslice-<something>, is still recognised as this directory's own container, and the password remembered for it is still read, so a second run from that directory connects without a password being given",
    "ARCHITECTURE.md section 9 records that the container name lazyslice-target-<project> is not a one-to-one function of the project name (shop and lazyslice-shop share one), and which checks stop one directory from taking another's container: --create-target's own-container check and the start-a-container question's reuse check"
   ]
  },
- "792ea21": {
+ "6896570": {
   "title": "The screens' exit keys: esc closes help, enter asks before a run that writes, ctrl+c exits 130",
   "bullets": [
    "--tui: pressing esc while the help overlay (\"?\") is open now closes the overlay and returns to the screen, instead of quitting the whole program.",
@@ -113,14 +113,14 @@
    "--tui: pressing ctrl+c while answering an unmask reason or a take/depth/cap prompt now exits as an interrupt (exit 130), the same as ctrl+c on every other screen, instead of only discarding the typed answer."
   ]
  },
- "80a93ce": {
+ "23d619e": {
   "title": "--create-target's container name no longer doubles the prefix for a directory named lazyslice-*",
   "bullets": [
    "Running lazyslice --create-target from a directory already named lazyslice-<something> (or with a compose project name starting lazyslice- or lazyslice_) now creates/looks for lazyslice-target-<something>, not the doubled lazyslice-target-lazyslice-<something>.",
    "--create-target now refuses at exit 4 with target.refused.name_taken (\"a container named ... already exists and lazyslice did not create it for this directory\", naming --target) when the container it would create or reuse belongs to a different project or directory, instead of silently adopting, starting, and loading into whatever container already held that name."
   ]
  },
- "800e31b": {
+ "8fbae37": {
   "title": "Discovery chooses the empty target container lazyslice itself created, and no longer offers to start a duplicate on the next port",
   "bullets": [
    "A second run from the directory whose first run created lazyslice-target-<project> now loads into that container without asking, including headless with no --yes; it no longer asks 'no local postgres found... start one?' for the same name on the next port or stops at exit 4 target.refused.none",
@@ -130,7 +130,7 @@
    "Discovery no longer takes over the lazyslice-target container that a second checkout or worktree with the same folder name created: when no target is named, a run only reuses, without asking, a container whose recorded working directory is the current one; a target recorded in a committed lazyslice.yml is still found by its container name from any directory"
   ]
  },
- "b092f3a": {
+ "c27caf6": {
   "title": "A committed yml whose target is a container lazyslice created reconnects or re-provisions, and says which",
   "bullets": [
    "A committed lazyslice.yml whose target is a container lazyslice created now works from any directory: the run finds the container by name and connects with the password from the container's own environment, instead of failing with a raw 'password authentication failed (SQLSTATE 28P01)'.",
@@ -141,7 +141,7 @@
    "The not-empty target refusal now reads 'the target <db> is not empty (<tables>): <reason>' with every placeholder filled; when the target holds lazyslice's copy of a different source it says so, and it names --target as the way through. docs/ERRORS.md lists the two new codes and the changed row."
   ]
  },
- "4ba7027": {
+ "a70e717": {
   "title": "A stray positional argument is a usage error at exit 2; the root command takes its source only from --source",
   "bullets": [
    "The root command no longer accepts a positional argument at all, so the source is passed with --source and `lazyslice postgres://...` exits 2; `lazyslice --source DSN --create-target ' --unmask x'` (one unsplit shell variable) now exits 2 naming the stray argument instead of exiting 4 with a confusing 'no local postgres found' / 'server version' message.",
@@ -150,7 +150,7 @@
    "ARCHITECTURE.md shows `lazyslice --source DSN` in place of `lazyslice [DSN]`; the subcommands still take a positional DSN."
   ]
  },
- "37fe2c8": {
+ "849dd90": {
   "title": "--unmask on a first run reports no drift against a file that does not exist; the drift message names the real decision",
   "bullets": [
    "A run using only the --unmask flags with no committed lazyslice.yml in the directory no longer prints a classify.column.drift warning for every column the flags did not name; drift is now only ever reported against a committed file that actually exists, matching a run with no --unmask flag at all.",
@@ -158,7 +158,7 @@
    "The classify.column.drift warning now states what actually happened to the column instead of a fixed phrase: copied, or masked as its category, rather than always printing masked at or above possible even for a column that was in fact copied unmasked, such as a boolean column below the mask threshold."
   ]
  },
- "da64ebb": {
+ "cb223fa": {
   "title": "The reasons dump and the plan end with a summary, and a re-run from a committed yml is quiet",
   "bullets": [
    "A fresh run's per-column masking reasons now end with one summary line: \"N column(s): A masked, B copied, C never-masked keys\" (classify.summary), instead of scrolling off with no count.",
@@ -168,7 +168,7 @@
    "Only the plain-text transcript is folded: on a re-run from a committed lazyslice.yml the --tui reasons screen and the --json event stream still receive every column's classify.masked.column/classify.copied.column event."
   ]
  },
- "4689821": {
+ "1f4a02e": {
   "title": "A green run prints one verify summary line and how to reach the target",
   "bullets": [
    "A successful run now ends with a `verify:` line summarizing every check it ran: foreign keys validated, table row counts matched (with total rows), the residual scan's outcome, and how many columns the second net scanned.",
@@ -179,7 +179,7 @@
    "docs/ERRORS.md lists the four new event codes."
   ]
  },
- "9f6b1a1": {
+ "7326e8a": {
   "title": "--mask masks a copied column; every second-net failure reported at once",
   "bullets": [
    "When the post-load check finds several copied columns that still look like personal data, the run now names every one of them, each on its own verify.refused.second_net line (or one of that code's document and type-conflict variants), before exiting 9, instead of one column per run",
@@ -191,7 +191,7 @@
    "With --tui, adding an --unmask on the review screens no longer makes the second run drop --phone-region when it checks the classification the operator reviewed, and --mask is carried the same way"
   ]
  },
- "ea3d105": {
+ "7eacaf8": {
   "title": "A lookup step shows the rows it will copy, not 0 rows",
   "bullets": [
    "A lookup step (a small reference table like country, which other tables reference and which references nothing itself) no longer shows \"0 rows\" on its plan line or on the --tui plan screen; it shows the number of rows that table will copy.",
@@ -199,7 +199,7 @@
    "A framework metadata table (e.g. Rails schema_migrations) over 1,000 rows reports 1,000 rows on its plan line and in the overall estimate, the same figure as the reason beside it, which says only the first 1,000 rows (ordered by identity) are copied."
   ]
  },
- "02c918f": {
+ "8e2177c": {
   "title": "the second_net hint names a --mask category the column's type accepts, or semi_structured for a json column",
   "bullets": [
    "A second-net refusal on an unmasked json, jsonb or hstore column has its own code, verify.refused.second_net_document (exit 9), and hints --mask TABLE.COL=semi_structured, whatever category matched a leaf.",
@@ -209,7 +209,7 @@
    "docs/ERRORS.md has a row for each of the three new error codes."
   ]
  },
- "c40546a": {
+ "1ff4986": {
   "title": "A --mask or lazyslice.yml raise on a key column also masks the columns that reference it",
   "bullets": [
    "--mask on a key column, or a mask: block naming one, also masks every column that references it by foreign key, under the same category, so the join holds in the copy; that includes a uuid or integer foreign-key column, which is otherwise exempt from masking as a key",
@@ -219,14 +219,14 @@
    "README's --mask section says that masking a key also masks the columns that reference it"
   ]
  },
- "48738f7": {
+ "3222140": {
   "title": "The second net exempts the same columns from the entropy check as the classifier: type, klass and component_name, not '_type', and never a document's leaves",
   "bullets": [
    "The second net's exemption from the entropy check covers exactly the column names the classifier's does: `type`, `klass` and `component_name`. A column named `_type` is exempt in neither: the classifier and the second net both put its values to the entropy check.",
    "The second net scans the string leaves of a jsonb, json or hstore column named `type`, `klass` or `component_name` for credential-shaped values; only the column's own scalar value is exempt, matching the classifier's document-leaf path."
   ]
  },
- "e62e4fe": {
+ "6e835ad": {
   "title": "The neighbouring-column rule spares a hex column only at a digest's length, so a column of hex tokens of 13 to 31 characters is still masked",
   "bullets": [
    "A column of hex tokens of 13 to 31 characters (API keys, reset tokens, invite codes, session ids) under a neutral name next to a certain email or IP column is still masked, as in v0.3.0; it is not spared as 'hex digests'",
@@ -234,7 +234,7 @@
    "THREAT_MODEL.md T1 states what this skip leaves: a hex token of exactly a digest's length, under a neutral column name, is copied unmasked"
   ]
  },
- "9b79da0": {
+ "401a1fe": {
   "title": "The plan reports every refusal in one run, and a no-identity hint names the columns",
   "bullets": [
    "A plan refusal (no row identity, a masked column its type can't hold, --skip-table on a needed parent, or a masked column under a unique index too narrow to widen) no longer stops the run at the first cause found: `lazyslice plan` (and any writing run) now reports every independent cause it can find in one pass, each as its own line, still exiting 12.",
@@ -243,7 +243,7 @@
    "A schema with several independent plan-time refusals can now take a fraction of a second longer to refuse, because finding a unique-index collision in the same pass needs the walk to run even after an earlier cause (a table with no identity, an unwritable column) was already found; the process still exits 12 exactly once."
   ]
  },
- "44412d1": {
+ "4679f75": {
   "title": "a version column is not an IP address and a digit-only license key is not a phone number",
   "bullets": [
    "A column whose name carries version, build or release (app_version, app_build_number) is no longer masked as free text because a minority of its dotted-integer values parse as IPv4 addresses; a column whose values genuinely are addresses is still masked as network_id.",
@@ -251,7 +251,7 @@
    "The leak check agrees: verify's second net does not ask the IP or MAC address question of a version, build or release column, so a copied one does not stop the run at exit 9 over the same dotted values."
   ]
  },
- "a6988d6": {
+ "369b39a": {
   "title": "The Luhn check needs a card length and issuer prefix before it masks an id, number or version column",
   "bullets": [
    "A column of customer, subscription, invoice or estimate numbers, or a migration version, is no longer masked as free text because one value passes the card checksum by chance: a card number must now also start with a known card issuer's prefix",
@@ -260,7 +260,7 @@
    "A card number with a known issuer's prefix is still masked, whether written plain, grouped with spaces or dashes, or dotted; under a column name ending in id, number, num, no, nr, version, ref or reference its length must also be one that issuer uses. A card whose prefix is in no issuer range, or whose length its issuer does not use under such a name, is not recognised as a card and is copied when nothing else masks its column (README residual 4, SECURITY.md item 4)"
   ]
  },
- "3431912": {
+ "7749cc9": {
   "title": "The entropy validator does not read filenames, hex digests, namespaced class names or a handful of samples as secrets",
   "bullets": [
    "File names (exported reports, logos, screenshots, media files, software releases, webcam shots) are no longer read as secrets and masked as credentials to the fixed $lazyslice$invalid value. A file name whose part before the extension contains a word from the name dictionary still counts as one; a value with a file extension is judged by this rule alone, so a file name that carries a person's name, such as 'hopper_grace_1906_birth_cert.pdf', is not spared as a dotted class name",
@@ -273,7 +273,7 @@
    "Other secrets stay masked as before: API keys, access tokens, JWTs, bcrypt/argon2/pbkdf2 password hashes and OAuth client secrets. What the entropy check now passes through, in a column no credential name rule matches, is a secret that is a one-case hex run of exactly 32, 40 or 64 characters, a secret column of one to four non-NULL rows, a secret in a column named type, klass or component_name, and a file named after a person in a column where fewer than a fifth of the file names carry a dictionary name (README residual 4, SECURITY.md item 4)"
   ]
  },
- "637305e": {
+ "9eef352": {
   "title": "A bare 'name' column and a '*_file_name' column are not a person's name without corroboration",
   "bullets": [
    "A column called just `name`, `display_name` or `<thing>_name` in a table not named for people (tags, folders, roles, languages, AI models, plans) is now copied when its samples carry no names from the name dictionary, instead of being masked as a person's name and refusing the plan under a unique index",
@@ -286,14 +286,14 @@
    "README.md and SECURITY.md's third accepted residual now says that a bare `name` column of a non-person table, holding names the dictionary does not carry (for example a non-Latin script), is copied, and that a neighbouring column protects it only when that neighbour is decided at `likely` or above"
   ]
  },
- "291f198": {
+ "c9c0f68": {
   "title": "The same-column-name rule does not propagate a decision that was itself only a neighbour sweep",
   "bullets": [
    "A decision the neighbouring-column sweep reached on no name or value signal of its own (only a certain neighbour sitting beside it, e.g. an unrecognised uuid/state/filename/colour column beside an email column) is no longer copied onto a same-named column in an unrelated table via the same-column-name rule; that same-named column is masked only when it has real evidence of its own, or when another column with real evidence shares its name. A column v0.3.0 masked only on that inheritance is therefore copied unless something else raises it, which ARCHITECTURE.md's amendment records as a recall change against THREAT_MODEL.md T1.",
    "A swept column that foreign-key propagation then confirmed with real evidence remains a source for the same-column-name rule, so a same-named column in an unrelated table inherits that category (e.g. email)."
   ]
  },
- "ec339f6": {
+ "d0b41b3": {
   "title": "The neighbouring-column sweep spares enum-like and identifier-shaped columns, and says why a column was not swept",
   "bullets": [
    "A text column sitting beside a certain email, phone or IP column is no longer filled with free-text filler when its sampled values are an enumeration: at least 10 samples, at most 20 distinct values, each seen at least twice. Columns like role, state and log_level are now copied, so a copied Rails database boots.",
@@ -308,7 +308,7 @@
    "README's 'How it decides' section and residual 4 describe the spared shapes and what is never spared (blood groups, marital status, dates and postcode-length numbers). THREAT_MODEL T1 records the recall measurement and what can still be copied."
   ]
  },
- "effdee3": {
+ "d0cf6c5": {
   "title": "A migration tool's bookkeeping tables are copied whatever the walk reaches and their bookkeeping columns are not masked, so a Rails copy knows its migrations ran",
   "bullets": [
    "Framework migration tables (schema_migrations, ar_internal_metadata, flyway_schema_history, django_migrations, alembic_version, knex_migrations, goose_db_version, __EFMigrationsHistory, atlas_schema_revisions, _prisma_migrations, SequelizeMeta, DATABASECHANGELOG and DATABASECHANGELOGLOCK) are copied into the target whatever the plan's walk reaches, whole when the table holds 1,000 rows or fewer; a schema_migrations table with no foreign key pointing at it used to be left empty, and a fresh Rails checkout re-ran every migration. A table with more than 1,000 rows is cut short by the lookup read's row bound, and its plan line says so: \"has more than 1000 rows -- only the first 1000 (ordered by identity) are copied\".",
@@ -318,7 +318,7 @@
    "The plan names a framework table on its own line: \"framework metadata table, copied whole regardless of reachability\", or the first-1000-rows sentence for a larger table, with \"environment rewritten to development\" added for ar_internal_metadata."
   ]
  },
- "4ccfba6": {
+ "1851eb6": {
   "title": "Personal values are recognised when written in fullwidth characters, with dash, underscore or slash separators, behind mailto: or sms:, percent-encoded or base64-encoded",
   "bullets": [
    "An email, phone number, card or national identifier written in fullwidth characters (a fullwidth @, + or digits) is recognised and masked: in a plain text column, where v0.3.0 did not recognise it, and in a JSON value under a key no rule names",
@@ -330,14 +330,14 @@
    "THREAT_MODEL's obfuscation amendment now lists the spellings covered and the ones still not: HTML entities, backslash-x escapes, homoglyphs NFKC does not fold, and a token inside a longer decoded string"
   ]
  },
- "b021eab": {
+ "e4e09cc": {
   "title": "A json or jsonb number is read with every digit, so a card number stored as a json number is recognised and masked",
   "bullets": [
    "A number leaf in a json or jsonb column is read with its exact digits, not through floating point, so a card number longer than about 16 digits stored as a json number (for example a 19-digit payment card number under a document key with no name signal) is recognised and masked",
    "The classifier's samples, the masking pass and verify's scan of the target all read a json or jsonb column from its own text, the precision a domain over jsonb already had. A json[] or jsonb[] array column is not covered: a number leaf past 2^53 inside one is still rounded before any validator reads it, so a card number that long stored there as a number may not be recognised"
   ]
  },
- "9426813": {
+ "44f93ed": {
   "title": "A composite type holding a json, jsonb or hstore field is refused at plan, not classified over its record text",
   "bullets": [
    "A composite column whose declared type holds a json, jsonb or hstore field (or a nested composite that does) is refused at plan with exit 12, whatever its sampled values look like, closing a leak where an email hidden inside a document field's own record-quoted text reached the target under a green run.",
@@ -346,13 +346,13 @@
    "THREAT_MODEL.md's T1 entry on composites now names the document-field case explicitly, and the case that stays open: a nested composite with no document field of its own is still read only by whole-value validators over each field, so a personal value two levels down is caught only by chance."
   ]
  },
- "25ba8c8": {
+ "4e156d1": {
   "title": "A json or jsonb column in a log-shaped table is replaced whole with {}, for CamelCase, *_activity and *_trace table names too",
   "bullets": [
    "A jsonb/json column in a log-shaped table (audit, log, history, event, activity, trace tables, including a CamelCase name like Prisma's default AuditLog and an all-caps or embedded-acronym plural such as EVENTs or user_LOGs) is collapsed to {} rather than walked leaf by leaf, which is what the plan's \"replaced whole\" reasons line says. For a CamelCase table and an *_activity or *_trace table this is new: v0.3.0 printed that reasons line and then walked the document, masking every leaf and keeping its keys."
   ]
  },
- "39587db": {
+ "4872e2e": {
   "title": "A generated column built from json document fields is checked one value at a time, and the keys it reads are masked when its values are personal",
   "bullets": [
    "A generated column that builds an email address, a phone number or a card number out of copied JSON document fields (for example `data->>'u' || '@' || data->>'h'`) does not reach the target in cleartext at exit 0: verify refuses it at exit 9 unless the value is exactly one of its own row's masked document fields.",
@@ -361,7 +361,7 @@
    "The threat model and the architecture's list of stated false negatives describe what crosses: an assembled value that no validator recognises, and keys read through #> or #>> path operators, which are not masked at plan time. Verify still refuses such a value when a validator recognises it."
   ]
  },
- "0a24223": {
+ "85036cb": {
   "title": "The phone region reaches document keys and leaves, and a key whose sampled leaves are phone numbers masks them",
   "bullets": [
    "A run with --phone-region no longer stops at exit 9 over a JSON document whose keys are national-format phone numbers such as 07911 123456; those keys are now masked like international ones, and the value under each is masked too",
@@ -369,7 +369,7 @@
    "SECURITY.md item 8 now says that JSON keys holding national-format phone numbers are masked only under --phone-region, and that a key whose sampled values are phone numbers masks everything under it; THREAT_MODEL.md T1 records this and what stays open: with no --phone-region a national-format number used as a key survives, and one under an unnamed key with no personal column or key beside it is copied"
   ]
  },
- "e49df22": {
+ "5aa03f6": {
   "title": "A document column whose own name is personal has every leaf masked, whatever category the name matched",
   "bullets": [
    "A json or jsonb column whose own name marks it personal (full_name, home_address, passwords, date_of_birth, national_id, emails, notes, by_phone and the like) has every leaf masked; the leaf-by-leaf rule copies no leaf of such a column.",
@@ -379,7 +379,7 @@
    "SECURITY.md's item 8 states which document columns have every leaf masked and under which category."
   ]
  },
- "1e061d3": {
+ "94f2809": {
   "title": "A json document is masked leaf by leaf, each personal leaf by its own category",
   "bullets": [
    "A json or jsonb column is now masked leaf by leaf: a leaf with no personal signal, under keys the sampled documents showed, is copied, so configuration documents (model settings, ad-server settings, deployment rules) keep working instead of becoming filler text. On a re-run from a committed lazyslice.yml, only keys the file lists under the column's leaf_keys: entry are copied",
@@ -392,13 +392,13 @@
    "README residual 4 and SECURITY item 8 now say that a personal value inside a document is copied when no validator recognises it and no name rule matches its keys (a name under 'attendee', an identity-provider id under 'sub'); the old sentence 'every leaf value is masked' is gone"
   ]
  },
- "d197074": {
+ "ee0aa51": {
   "title": "A go install or a release build uses mask/v0.5.0, whose free_text masker fits its output to the input",
   "bullets": [
    "A go install or a release build now masks free text with the v0.5.0 masker: the output is about as long as the input, and exactly as long in a column narrower than nine characters, so a three-value enum-like column and a narrow varchar keep their shape, and the filler fitted to the input leaves out ten state and level words such as trace and default"
   ]
  },
- "757c579": {
+ "90ca468": {
   "title": "The free_text masker fits its output to the input's length",
   "bullets": [
    "Columns masked as free text now get a value about as long as the original, not filler of a random length up to the column's width: a role column holding admin, user and guest masks to three short filler words, so state, enum-like and time-zone columns no longer turn into strings of up to 255 characters",
@@ -410,7 +410,7 @@
    "The filler a free-text value is fitted from leaves out trace, default, session, level, stage, system, token, value, input and output, words a log_level or settings column is likely to hold itself; a masked value equal to a real value of the same column is what the residual scan stops on at exit 9"
   ]
  },
- "9f793a4": {
+ "6ce191f": {
   "title": "Commits carry release-note bodies; the tracker and commit skills; make relnotes"
  }
 }

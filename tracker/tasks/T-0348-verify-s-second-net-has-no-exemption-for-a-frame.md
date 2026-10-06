@@ -28,4 +28,4 @@ internal/verify/secondnet.go's netMode scans every column with Decision.Masked=f
 
 ## Post-mortem
 
-went well: landed with T-0314 in effdee3: netMode skips a framework table's own bookkeeping column when classify marked it NeverMasked and internal/pipeline.IsFrameworkMetadataColumn lists it; the exemption is the allowlist's, so an identity-bearing column of a framework table is still scanned (both directions pinned in verify_test.go; the test fails without the case) | went badly: nothing | change next time: nothing
+went well: landed with T-0314 in d0cf6c5: netMode skips a framework table's own bookkeeping column when classify marked it NeverMasked and internal/pipeline.IsFrameworkMetadataColumn lists it; the exemption is the allowlist's, so an identity-bearing column of a framework table is still scanned (both directions pinned in verify_test.go; the test fails without the case) | went badly: nothing | change next time: nothing

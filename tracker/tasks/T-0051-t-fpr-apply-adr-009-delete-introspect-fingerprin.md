@@ -8,7 +8,7 @@ owner: opus
 created: 2026-09-06
 started: 2026-09-06
 closed: 2026-09-06
-outcome: "done: e85be26; introspect fingerprint deleted, pg gate runs the injected fingerprinter inside its own BEGIN/ROLLBACK, load's test workaround removed, marker binds end to end"
+outcome: "done: c13ce60; introspect fingerprint deleted, pg gate runs the injected fingerprinter inside its own BEGIN/ROLLBACK, load's test workaround removed, marker binds end to end"
 ---
 
 # T-0051 · T-FPR: apply ADR-009, delete introspect fingerprint, core-side Schema.Fingerprint, pg gate runs fingerprinter in its own transaction
@@ -27,7 +27,7 @@ outcome: "done: e85be26; introspect fingerprint deleted, pg gate runs the inject
 
 - 2026-09-06 started
 
-- 2026-09-06 closed: done: e85be26; introspect fingerprint deleted, pg gate runs the injected fingerprinter inside its own BEGIN/ROLLBACK, load's test workaround removed, marker binds end to end
+- 2026-09-06 closed: done: c13ce60; introspect fingerprint deleted, pg gate runs the injected fingerprinter inside its own BEGIN/ROLLBACK, load's test workaround removed, marker binds end to end
 
 ## Post-mortem
 

@@ -8,7 +8,7 @@ owner: ""
 created: 2026-09-08
 started: ""
 closed: 2026-09-08
-outcome: "done: in T-HARD-A (ecc42ae)"
+outcome: "done: in T-HARD-A (b89f0f0)"
 ---
 
 # T-0101 · internal/plan changes Decision.Masker after internal/classify has computed the classification fingerprint
@@ -27,7 +27,7 @@ internal/plan/unique.go implements 5's 'the plan picks, within the column's cate
 
 - 2026-09-08 moved to E5 phase 5
 
-- 2026-09-08 closed: done: in T-HARD-A (ecc42ae)
+- 2026-09-08 closed: done: in T-HARD-A (b89f0f0)
 
 ## Post-mortem
 

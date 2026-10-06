@@ -29,4 +29,4 @@ ARCHITECTURE.md section 14's 2026-09-17 amendment (the gate-5 audit) says 'the n
 
 ## Post-mortem
 
-went well: ARCHITECTURE.md section 14's amendment now says both audit findings landed and where (make egress and the egress CI job; Q2 in internal/core), and README's Building block lists make egress | went badly: nothing; the developer filed it correctly because the file was outside its paths | change next time: nothing (commit 4fce950)
+went well: ARCHITECTURE.md section 14's amendment now says both audit findings landed and where (make egress and the egress CI job; Q2 in internal/core), and README's Building block lists make egress | went badly: nothing; the developer filed it correctly because the file was outside its paths | change next time: nothing (commit 2e3e856)

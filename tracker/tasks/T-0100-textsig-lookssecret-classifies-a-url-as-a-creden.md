@@ -8,7 +8,7 @@ owner: ""
 created: 2026-09-08
 started: ""
 closed: 2026-09-09
-outcome: "done: in T-HARD-B (78530ef)"
+outcome: "done: in T-HARD-B (e364afb)"
 ---
 
 # T-0100 · textsig.LooksSecret classifies a URL as a credential
@@ -27,7 +27,7 @@ LooksSecret matches any 16-to-512-character string with two character classes an
 
 - 2026-09-08 moved to E5 phase 5
 
-- 2026-09-09 closed: done: in T-HARD-B (78530ef)
+- 2026-09-09 closed: done: in T-HARD-B (e364afb)
 
 ## Post-mortem
 

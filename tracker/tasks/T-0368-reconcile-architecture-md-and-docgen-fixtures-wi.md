@@ -28,4 +28,4 @@ T-0326 (noArgs review) removed root's positional DSN acceptance, but ARCHITECTUR
 
 ## Post-mortem
 
-went well: closed by T-0326's landing 4ba7027: ARCHITECTURE section 8's usage line and section 11's remediation show --source, core.go's ModeRun and Source comments say --source, the docgen fixtures follow; the decision was --source only on the root command (the dogfood log's own call), and a subcommand keeps its optional positional DSN but refuses at exit 2 when --source is also given | went badly: filed by a developer as a question for the maintainer when the task's goal had already decided it | change next time: nothing
+went well: closed by T-0326's landing a70e717: ARCHITECTURE section 8's usage line and section 11's remediation show --source, core.go's ModeRun and Source comments say --source, the docgen fixtures follow; the decision was --source only on the root command (the dogfood log's own call), and a subcommand keeps its optional positional DSN but refuses at exit 2 when --source is also given | went badly: filed by a developer as a question for the maintainer when the task's goal had already decided it | change next time: nothing

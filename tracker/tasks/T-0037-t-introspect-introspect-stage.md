@@ -8,7 +8,7 @@ owner: opus
 created: 2026-09-05
 started: 2026-09-06
 closed: 2026-09-06
-outcome: "done: 2dd2102 (stage) after fix2; PG18 contype filter, tolerant sampling, bounded TABLESAMPLE, FK end filters, extension walk narrowed, partition edges re-pointed only when the root can carry them"
+outcome: "done: c47b887 (stage) after fix2; PG18 contype filter, tolerant sampling, bounded TABLESAMPLE, FK end filters, extension walk narrowed, partition edges re-pointed only when the root can carry them"
 ---
 
 # T-0037 · T-INTROSPECT: introspect stage
@@ -27,7 +27,7 @@ outcome: "done: 2dd2102 (stage) after fix2; PG18 contype filter, tolerant sampli
 
 - 2026-09-06 started
 
-- 2026-09-06 closed: done: 2dd2102 (stage) after fix2; PG18 contype filter, tolerant sampling, bounded TABLESAMPLE, FK end filters, extension walk narrowed, partition edges re-pointed only when the root can carry them
+- 2026-09-06 closed: done: c47b887 (stage) after fix2; PG18 contype filter, tolerant sampling, bounded TABLESAMPLE, FK end filters, extension walk narrowed, partition edges re-pointed only when the root can carry them
 
 ## Post-mortem
 

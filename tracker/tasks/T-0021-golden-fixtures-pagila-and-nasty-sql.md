@@ -8,7 +8,7 @@ owner: opus
 created: 2026-09-05
 started: 2026-09-05
 closed: 2026-09-05
-outcome: "done: 31aa82e; Pagila pinned v3.1.0 with checksums, nasty.sql 21 tables, 22 traps documented, 2M-row generator, testutil loaders"
+outcome: "done: 781da1a; Pagila pinned v3.1.0 with checksums, nasty.sql 21 tables, 22 traps documented, 2M-row generator, testutil loaders"
 ---
 
 # T-0021 · Golden fixtures: Pagila and nasty.sql
@@ -27,7 +27,7 @@ outcome: "done: 31aa82e; Pagila pinned v3.1.0 with checksums, nasty.sql 21 table
 
 - 2026-09-05 started
 
-- 2026-09-05 closed: done: 31aa82e; Pagila pinned v3.1.0 with checksums, nasty.sql 21 tables, 22 traps documented, 2M-row generator, testutil loaders
+- 2026-09-05 closed: done: 781da1a; Pagila pinned v3.1.0 with checksums, nasty.sql 21 tables, 22 traps documented, 2M-row generator, testutil loaders
 
 ## Post-mortem
 

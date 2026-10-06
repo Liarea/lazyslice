@@ -29,4 +29,4 @@ Three lows from T-0065's review, all in the recording pipeline. (1) The demo con
 
 ## Post-mortem
 
-went well: 70c496a merged through implement.js on the first pass: make gif creates a read-only role (no write warning in the recording), probes readiness from the host, pace.awk anchors on column names and fails loudly; the orchestrator read the first and last frames back (one-word synthetic names, no warning) | went badly: nothing in the task; the run's next task failed on its output schema, not this one | change next time: nothing
+went well: ba534ec merged through implement.js on the first pass: make gif creates a read-only role (no write warning in the recording), probes readiness from the host, pace.awk anchors on column names and fails loudly; the orchestrator read the first and last frames back (one-word synthetic names, no warning) | went badly: nothing in the task; the run's next task failed on its output schema, not this one | change next time: nothing

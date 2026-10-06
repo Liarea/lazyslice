@@ -8,7 +8,7 @@ owner: sonnet
 created: 2026-09-08
 started: ""
 closed: 2026-09-08
-outcome: "done: 7142c52; stream_docs declared beside stream_rows above the gate, only the fill is gated; introspect table list updated; extract workaround removed"
+outcome: "done: 9618d12; stream_docs declared beside stream_rows above the gate, only the fill is gated; introspect table list updated; extract workaround removed"
 ---
 
 # T-0077 · T-0077: stream_docs lifted above the nasty.sql big gate; introspect table list updated; extract workaround removed
@@ -25,7 +25,7 @@ outcome: "done: 7142c52; stream_docs declared beside stream_rows above the gate,
 
 - 2026-09-08 created
 
-- 2026-09-08 closed: done: 7142c52; stream_docs declared beside stream_rows above the gate, only the fill is gated; introspect table list updated; extract workaround removed
+- 2026-09-08 closed: done: 9618d12; stream_docs declared beside stream_rows above the gate, only the fill is gated; introspect table list updated; extract workaround removed
 
 ## Post-mortem
 

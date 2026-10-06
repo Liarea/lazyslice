@@ -31,4 +31,4 @@ internal/transform/json.go:246 keeps every object key and masks values only, so 
 
 ## Post-mortem
 
-went well: keys that parse as email, phone or credit card are masked deterministically; verify scans keys at their JSON path; regression 013; SECURITY.md narrowed (c991086, one fix round) | went badly: the first landing recorded masked keys under an empty path, a blind spot below a masked key that the reviewer caught; a key collision refuses under a new json_key masker id rather than a code of its own | change next time: record every residual entry at its real path from the start
+went well: keys that parse as email, phone or credit card are masked deterministically; verify scans keys at their JSON path; regression 013; SECURITY.md narrowed (6ba1733, one fix round) | went badly: the first landing recorded masked keys under an empty path, a blind spot below a masked key that the reviewer caught; a key collision refuses under a new json_key masker id rather than a code of its own | change next time: record every residual entry at its real path from the start

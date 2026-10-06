@@ -8,7 +8,7 @@ owner: ""
 created: 2026-09-08
 started: ""
 closed: 2026-09-08
-outcome: "done: /lazyslice anchored in .gitignore (2d57b00)"
+outcome: "done: /lazyslice anchored in .gitignore (332d7a4)"
 ---
 
 # T-0080 · Anchor /lazyslice in .gitignore so a bare go build cannot commit a 32MB binary
@@ -25,7 +25,7 @@ make build sends its -o to bin/, which .gitignore covers, but a bare 'go build .
 
 - 2026-09-08 created
 
-- 2026-09-08 closed: done: /lazyslice anchored in .gitignore (2d57b00)
+- 2026-09-08 closed: done: /lazyslice anchored in .gitignore (332d7a4)
 
 ## Post-mortem
 

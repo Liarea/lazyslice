@@ -8,7 +8,7 @@ owner: opus
 created: 2026-09-05
 started: 2026-09-07
 closed: 2026-09-07
-outcome: "done: 5381042; rungs 0 to 3, six-step Docker endpoint resolution, compose and .env as naming sources, one blocking question, headless asks nothing; unit tests green"
+outcome: "done: 8f49342; rungs 0 to 3, six-step Docker endpoint resolution, compose and .env as naming sources, one blocking question, headless asks nothing; unit tests green"
 ---
 
 # T-0045 · T-DISCOVER: discovery rungs 0-3 and the first-run ladder
@@ -27,7 +27,7 @@ outcome: "done: 5381042; rungs 0 to 3, six-step Docker endpoint resolution, comp
 
 - 2026-09-07 started
 
-- 2026-09-07 closed: done: 5381042; rungs 0 to 3, six-step Docker endpoint resolution, compose and .env as naming sources, one blocking question, headless asks nothing; unit tests green
+- 2026-09-07 closed: done: 8f49342; rungs 0 to 3, six-step Docker endpoint resolution, compose and .env as naming sources, one blocking question, headless asks nothing; unit tests green
 
 ## Post-mortem
 

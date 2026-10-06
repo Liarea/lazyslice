@@ -8,7 +8,7 @@ owner: ""
 created: 2026-09-08
 started: ""
 closed: 2026-09-08
-outcome: "done: in T-HARD-A (ecc42ae)"
+outcome: "done: in T-HARD-A (b89f0f0)"
 ---
 
 # T-0097 · ARCHITECTURE.md 11.1's not-recreatable refusal is still raised inside load.Load, not at plan
@@ -27,7 +27,7 @@ outcome: "done: in T-HARD-A (ecc42ae)"
 
 - 2026-09-08 moved to E5 phase 5
 
-- 2026-09-08 closed: done: in T-HARD-A (ecc42ae)
+- 2026-09-08 closed: done: in T-HARD-A (b89f0f0)
 
 ## Post-mortem
 

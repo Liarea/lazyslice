@@ -29,4 +29,4 @@ T-0316 made the classifier's and the second net's card signal require a known is
 
 ## Post-mortem
 
-went well: landed as 9abc269 with no review finding above low: README's card-signal description and both residual lists say the card signal wants an issuer prefix and what a card outside the table costs | went badly: three lows filed as a follow-up (the eight identifier suffixes, the sentence's scope against the JSON-leaf and DDL-literal callers that still use the bare check digit, a rewrap) | change next time: nothing
+went well: landed as 3348bde with no review finding above low: README's card-signal description and both residual lists say the card signal wants an issuer prefix and what a card outside the table costs | went badly: three lows filed as a follow-up (the eight identifier suffixes, the sentence's scope against the JSON-leaf and DDL-literal callers that still use the bare check digit, a rewrap) | change next time: nothing

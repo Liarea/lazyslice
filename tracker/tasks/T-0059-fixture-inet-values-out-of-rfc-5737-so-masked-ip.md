@@ -8,7 +8,7 @@ owner: sonnet
 created: 2026-09-07
 started: 2026-09-07
 closed: 2026-09-07
-outcome: "done: 65ab0a3; fixture inet values are RFC 1918, flake paragraphs replaced by a pointer to §5, mask range test added"
+outcome: "done: 1cfa0ea; fixture inet values are RFC 1918, flake paragraphs replaced by a pointer to §5, mask range test added"
 ---
 
 # T-0059 · Fixture inet values out of RFC 5737 so masked IPs cannot equal source values; remove the flake paragraphs; mask test pins the output space
@@ -27,7 +27,7 @@ Closes the measured 2.7 percent I2/nasty/values flake (T-0058 post-mortem)
 
 - 2026-09-07 started
 
-- 2026-09-07 closed: done: 65ab0a3; fixture inet values are RFC 1918, flake paragraphs replaced by a pointer to §5, mask range test added
+- 2026-09-07 closed: done: 1cfa0ea; fixture inet values are RFC 1918, flake paragraphs replaced by a pointer to §5, mask range test added
 
 ## Post-mortem
 

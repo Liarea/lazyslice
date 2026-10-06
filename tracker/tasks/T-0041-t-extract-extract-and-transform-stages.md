@@ -8,7 +8,7 @@ owner: opus
 created: 2026-09-05
 started: 2026-09-06
 closed: 2026-09-06
-outcome: "done: 4fd5c28; chunked typed unnest extract with bounded memory (2M rows at 19 MiB growth), transform with JSON leaf masking and per-leaf residual digests, source pool read-only by session SET, extract shapes moved home"
+outcome: "done: 553cefe; chunked typed unnest extract with bounded memory (2M rows at 19 MiB growth), transform with JSON leaf masking and per-leaf residual digests, source pool read-only by session SET, extract shapes moved home"
 ---
 
 # T-0041 · T-EXTRACT: extract and transform stages
@@ -27,7 +27,7 @@ outcome: "done: 4fd5c28; chunked typed unnest extract with bounded memory (2M ro
 
 - 2026-09-06 started
 
-- 2026-09-06 closed: done: 4fd5c28; chunked typed unnest extract with bounded memory (2M rows at 19 MiB growth), transform with JSON leaf masking and per-leaf residual digests, source pool read-only by session SET, extract shapes moved home
+- 2026-09-06 closed: done: 553cefe; chunked typed unnest extract with bounded memory (2M rows at 19 MiB growth), transform with JSON leaf masking and per-leaf residual digests, source pool read-only by session SET, extract shapes moved home
 
 - 2026-09-06 Hand-offs: internal/plan/CLAUDE.md composed-allowlist bullet still names pg.ExtractShapes (deleted); pipeline.KeySet needs a chunk-at-a-time iterator to bound peak memory (§2 change); lookupShapeFor interpolates a quoted table name into a shape template so a table named with a {token} widens or breaks the allowlist (escape or pre-quoted literal segment); maskDocument ignores Decision.Masker; a pgbouncer testcontainer is owed to test the pooler-safe startup list; a big text- or uuid-keyed fixture table is owed for the memory test.
 

@@ -8,7 +8,7 @@ owner: ""
 created: 2026-09-08
 started: ""
 closed: 2026-09-09
-outcome: "done: in T-HARD-B (78530ef)"
+outcome: "done: in T-HARD-B (e364afb)"
 ---
 
 # T-0103 · An array of an extension type is sampled as one opaque string, so the classifier never sees the values inside it
@@ -29,7 +29,7 @@ internal/classify's scalars() flattens an array sample element-wise, which is wh
 
 - 2026-09-08 moved to E5 phase 5
 
-- 2026-09-09 closed: done: in T-HARD-B (78530ef)
+- 2026-09-09 closed: done: in T-HARD-B (e364afb)
 
 ## Post-mortem
 

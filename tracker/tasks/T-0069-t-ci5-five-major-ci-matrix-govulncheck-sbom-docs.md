@@ -8,7 +8,7 @@ owner: sonnet
 created: 2026-09-07
 started: 2026-09-08
 closed: 2026-09-08
-outcome: "done: 91eab92; Postgres 14 to 18 matrix, blocking govulncheck, SBOM and signing in the release, tools/docgen generating FLAGS.md, KEYBINDINGS.md, ERRORS.md with a drift job, unsafe-flag rail"
+outcome: "done: f80a17c; Postgres 14 to 18 matrix, blocking govulncheck, SBOM and signing in the release, tools/docgen generating FLAGS.md, KEYBINDINGS.md, ERRORS.md with a drift job, unsafe-flag rail"
 ---
 
 # T-0069 · T-CI5: five-major CI matrix, govulncheck, SBOM, docs drift, unsafe-flag grep
@@ -27,7 +27,7 @@ outcome: "done: 91eab92; Postgres 14 to 18 matrix, blocking govulncheck, SBOM an
 
 - 2026-09-08 started
 
-- 2026-09-08 closed: done: 91eab92; Postgres 14 to 18 matrix, blocking govulncheck, SBOM and signing in the release, tools/docgen generating FLAGS.md, KEYBINDINGS.md, ERRORS.md with a drift job, unsafe-flag rail
+- 2026-09-08 closed: done: f80a17c; Postgres 14 to 18 matrix, blocking govulncheck, SBOM and signing in the release, tools/docgen generating FLAGS.md, KEYBINDINGS.md, ERRORS.md with a drift job, unsafe-flag rail
 
 ## Post-mortem
 

@@ -8,7 +8,7 @@ owner: opus
 created: 2026-09-05
 started: 2026-09-06
 closed: 2026-09-06
-outcome: "done: 2d1de18; key, HKDF, HMAC, every category generator with Domain(), small-domain reporting, unique-domain refusal, format preservation"
+outcome: "done: 4668167; key, HKDF, HMAC, every category generator with Domain(), small-domain reporting, unique-domain refusal, format preservation"
 ---
 
 # T-0040 · T-MASK: mask module
@@ -27,7 +27,7 @@ outcome: "done: 2d1de18; key, HKDF, HMAC, every category generator with Domain()
 
 - 2026-09-06 started
 
-- 2026-09-06 closed: done: 2d1de18; key, HKDF, HMAC, every category generator with Domain(), small-domain reporting, unique-domain refusal, format preservation
+- 2026-09-06 closed: done: 4668167; key, HKDF, HMAC, every category generator with Domain(), small-domain reporting, unique-domain refusal, format preservation
 
 - 2026-09-06 Low findings for hardening: mask.Pick unique branch passes when Rows<=0 (Required returns 0), refuse bestD<=0 regardless; freeTextExact lacks MaxLen clamp; satAdd overflows at 1<<62+1<<62; checkValues treats NOT IN / NOT (= ANY) lists as allowed values; network_id MAC-shaped value in varchar(15/16) gives Domain 768 but ErrNoRoom at mask time; fixedMasker writes a literal not admissible under a CHECK list; rules.yml accepts integer for phone which now refuses at plan.
 

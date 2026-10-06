@@ -8,7 +8,7 @@ owner: opus
 created: 2026-09-08
 started: ""
 closed: 2026-09-08
-outcome: "done: af911ac; core.Preview, core.Request.Reviewed, core.refused.reviewed_changed; structural test pins the wiring"
+outcome: "done: 7313a1f; core.Preview, core.Request.Reviewed, core.refused.reviewed_changed; structural test pins the wiring"
 ---
 
 # T-0070 · T-PIN: the run that writes the target is pinned to the reviewed snapshot and endpoints (core.Request.Reviewed, core.refused.reviewed_changed)
@@ -25,7 +25,7 @@ outcome: "done: af911ac; core.Preview, core.Request.Reviewed, core.refused.revie
 
 - 2026-09-08 created
 
-- 2026-09-08 closed: done: af911ac; core.Preview, core.Request.Reviewed, core.refused.reviewed_changed; structural test pins the wiring
+- 2026-09-08 closed: done: 7313a1f; core.Preview, core.Request.Reviewed, core.refused.reviewed_changed; structural test pins the wiring
 
 ## Post-mortem
 

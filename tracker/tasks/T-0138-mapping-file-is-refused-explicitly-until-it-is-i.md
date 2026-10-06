@@ -31,4 +31,4 @@ internal/pipeline/config.go:81 reads mapping_file, emit round-trips it (internal
 
 ## Post-mortem
 
-went well: mapping_file is exit 2 at read with a two-step remedy, emit never writes it, ADR-012 proposed, unique refusal names two escapes (99e3fe2, one fix round) | went badly: first landing's remedy named only flags, which cannot clear a refusal driven by file content; ADR cited a stale line number and a merge test that does not exist (low, to fix before the ADR freezes) | change next time: write the exact remedy text first, verify every line reference in an ADR against the checkout
+went well: mapping_file is exit 2 at read with a two-step remedy, emit never writes it, ADR-012 proposed, unique refusal names two escapes (e7720cc, one fix round) | went badly: first landing's remedy named only flags, which cannot clear a refusal driven by file content; ADR cited a stale line number and a merge test that does not exist (low, to fix before the ADR freezes) | change next time: write the exact remedy text first, verify every line reference in an ADR against the checkout

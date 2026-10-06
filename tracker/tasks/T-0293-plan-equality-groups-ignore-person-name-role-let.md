@@ -28,4 +28,4 @@ internal/plan/equality.go:100 (maskedMembers/fitsGroup) builds mask.Constraints 
 
 ## Post-mortem
 
-went well: 8894b3c: maskedMembers carries Decision.Role; a group whose roles disagree is brought to RoleFull on members and decisions (agreeOnRole) instead of refused, since no flag sets a role; TestEqualityGroupBringsDisagreeingRolesToFull fails without the fix | went badly: nothing | change next time: nothing
+went well: 2d8d9bd: maskedMembers carries Decision.Role; a group whose roles disagree is brought to RoleFull on members and decisions (agreeOnRole) instead of refused, since no flag sets a role; TestEqualityGroupBringsDisagreeingRolesToFull fails without the fix | went badly: nothing | change next time: nothing

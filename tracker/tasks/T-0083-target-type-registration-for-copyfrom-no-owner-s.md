@@ -33,4 +33,4 @@ ARCHITECTURE.md 11.1 and ADR-005 say load registers the source's user types on e
 
 ## Post-mortem
 
-went well: load registers the source's enum, domain, composite and user-defined array types on every target connection through Writer.RegisterTypes before the first CopyFrom (commit 1ae4a9e, recorded in ARCHITECTURE.md 11.1 and both package CLAUDE.md files) | went badly: the task landed on 2026-09-09 and was never closed, so the board showed phase-5 work in progress for eight days until the gate-5 audit on 2026-09-17 caught it | change next time: a by-hand landing closes its task in the same sitting as the commit
+went well: load registers the source's enum, domain, composite and user-defined array types on every target connection through Writer.RegisterTypes before the first CopyFrom (commit 172b686, recorded in ARCHITECTURE.md 11.1 and both package CLAUDE.md files) | went badly: the task landed on 2026-09-09 and was never closed, so the board showed phase-5 work in progress for eight days until the gate-5 audit on 2026-09-17 caught it | change next time: a by-hand landing closes its task in the same sitting as the commit

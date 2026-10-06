@@ -8,7 +8,7 @@ owner: sonnet
 created: 2026-09-05
 started: 2026-09-05
 closed: 2026-09-05
-outcome: "done: 94466d0; six-step Docker order, gate order, locality predicate, three exit-4 event codes, ADR index updated"
+outcome: "done: e5f2008; six-step Docker order, gate order, locality predicate, three exit-4 event codes, ADR index updated"
 ---
 
 # T-0027 · Apply ADR-008 consequences to ARCHITECTURE.md, catalogue, ADR index
@@ -27,7 +27,7 @@ outcome: "done: 94466d0; six-step Docker order, gate order, locality predicate, 
 
 - 2026-09-05 started
 
-- 2026-09-05 closed: done: 94466d0; six-step Docker order, gate order, locality predicate, three exit-4 event codes, ADR index updated
+- 2026-09-05 closed: done: e5f2008; six-step Docker order, gate order, locality predicate, three exit-4 event codes, ADR index updated
 
 ## Post-mortem
 

@@ -27,4 +27,4 @@ T-0302 (ADR-015) added AddEmitted(col, path, canonical []byte) and Emitted(col, 
 
 ## Post-mortem
 
-went well: landed with T-0302 in eb4657b (first as b75b33f, re-landed after the split): the recorder double in internal/core/core_test.go gained no-op AddEmitted and Emitted, the only change that made make check green on the live tree | went badly: nothing | change next time: nothing
+went well: landed with T-0302 in 6952f9f (first as 36cdfcb, re-landed after the split): the recorder double in internal/core/core_test.go gained no-op AddEmitted and Emitted, the only change that made make check green on the live tree | went badly: nothing | change next time: nothing

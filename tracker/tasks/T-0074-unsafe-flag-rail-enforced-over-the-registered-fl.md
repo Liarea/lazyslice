@@ -8,7 +8,7 @@ owner: sonnet
 created: 2026-09-08
 started: 2026-09-08
 closed: 2026-09-08
-outcome: "done: 2a35a36; forbidden rule walks every registered flag set recursively, permits exactly unmask, self-test proves it fires; make unsafe-flags runs the test"
+outcome: "done: aea82c6; forbidden rule walks every registered flag set recursively, permits exactly unmask, self-test proves it fires; make unsafe-flags runs the test"
 ---
 
 # T-0074 · Unsafe-flag rail enforced over the registered flag set: main_test's forbidden list permits exactly unmask and rejects every other name containing it; make unsafe-flags runs that test
@@ -27,7 +27,7 @@ outcome: "done: 2a35a36; forbidden rule walks every registered flag set recursiv
 
 - 2026-09-08 started
 
-- 2026-09-08 closed: done: 2a35a36; forbidden rule walks every registered flag set recursively, permits exactly unmask, self-test proves it fires; make unsafe-flags runs the test
+- 2026-09-08 closed: done: aea82c6; forbidden rule walks every registered flag set recursively, permits exactly unmask, self-test proves it fires; make unsafe-flags runs the test
 
 ## Post-mortem
 

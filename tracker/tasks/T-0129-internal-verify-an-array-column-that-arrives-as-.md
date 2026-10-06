@@ -35,4 +35,4 @@ internal/transform (T-0118) masks such a column element-wise and records one res
 
 ## Post-mortem
 
-went well: split-or-refuse decided from T-0127's log before code; every new test proven to fail on the reverted code; f40de6a with zero fix rounds | went badly: third copy of the array-literal grammar (classify liberal, transform strict, verify parse-only) with no shared home; element hits end unconfirmable because the probe binds an element against an array column (T-0146) | change next time: a grammar shared by the three readers is owed before a fourth copy appears
+went well: split-or-refuse decided from T-0127's log before code; every new test proven to fail on the reverted code; ecb129e with zero fix rounds | went badly: third copy of the array-literal grammar (classify liberal, transform strict, verify parse-only) with no shared home; element hits end unconfirmable because the probe binds an element against an array column (T-0146) | change next time: a grammar shared by the three readers is owed before a fourth copy appears

@@ -28,4 +28,4 @@ internal/plan/ddlliteral.go:773 rewrites a masked DEFAULT literal by building it
 
 ## Post-mortem
 
-went well: 8894b3c: the DEFAULT rewrite sets c.Role = d.Role; unique-domain runs before the DDL pass so an agreed role reaches it; TestAMaskedNameDefaultIsMaskedUnderTheColumnsRole fails without the fix; no CHECK-literal path calls mask.Apply | went badly: nothing | change next time: nothing
+went well: 2d8d9bd: the DEFAULT rewrite sets c.Role = d.Role; unique-domain runs before the DDL pass so an agreed role reaches it; TestAMaskedNameDefaultIsMaskedUnderTheColumnsRole fails without the fix; no CHECK-literal path calls mask.Apply | went badly: nothing | change next time: nothing

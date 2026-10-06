@@ -8,7 +8,7 @@ owner: opus
 created: 2026-09-05
 started: 2026-09-06
 closed: 2026-09-06
-outcome: "done: 86c5ee1; FIFO worklist with provenance, caps, budgets, identity ladder with §3.4 pseudo-keys, unreadable tables, SCC order, not-recreatable refusal; unit and integration tests green"
+outcome: "done: ab544a5; FIFO worklist with provenance, caps, budgets, identity ladder with §3.4 pseudo-keys, unreadable tables, SCC order, not-recreatable refusal; unit and integration tests green"
 ---
 
 # T-0039 · T-PLAN: subset planner
@@ -27,7 +27,7 @@ outcome: "done: 86c5ee1; FIFO worklist with provenance, caps, budgets, identity 
 
 - 2026-09-06 started
 
-- 2026-09-06 closed: done: 86c5ee1; FIFO worklist with provenance, caps, budgets, identity ladder with §3.4 pseudo-keys, unreadable tables, SCC order, not-recreatable refusal; unit and integration tests green
+- 2026-09-06 closed: done: ab544a5; FIFO worklist with provenance, caps, budgets, identity ladder with §3.4 pseudo-keys, unreadable tables, SCC order, not-recreatable refusal; unit and integration tests green
 
 ## Post-mortem
 

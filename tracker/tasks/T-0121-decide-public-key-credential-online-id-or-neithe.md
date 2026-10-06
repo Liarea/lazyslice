@@ -8,7 +8,7 @@ owner: ""
 created: 2026-09-08
 started: ""
 closed: 2026-09-09
-outcome: "done: in T-HARD-C (4f9a186)"
+outcome: "done: in T-HARD-C (30d2b63)"
 ---
 
 # T-0121 · Decide public_key: credential, online_id, or neither
@@ -29,7 +29,7 @@ T-0104 named it one of two columns that deserve a decision rather than a pattern
 
 - 2026-09-09 Orchestrator decision 2026-09-09: public_key is category credential (unusable literal; credential_unique under a unique index). A key that identifies a user is personal data; masking it costs nothing a dev database needs. Implemented in T-HARD-C.
 
-- 2026-09-09 closed: done: in T-HARD-C (4f9a186)
+- 2026-09-09 closed: done: in T-HARD-C (30d2b63)
 
 ## Post-mortem
 

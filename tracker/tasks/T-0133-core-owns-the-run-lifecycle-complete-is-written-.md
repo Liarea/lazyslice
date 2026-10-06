@@ -31,4 +31,4 @@ load.Load writes status = complete (internal/load/load.go:184) before core runs 
 
 ## Post-mortem
 
-went well: b626d77 after one fix round; complete is written by core after verify; exit-9 class failures drop every loaded table (best-effort across the list, ACCESS EXCLUSIVE NOWAIT with bounded retries) under a detached bounded context; deterministic direct closeRun test | went badly: one transient integration failure under -count=5 on a 1970MB Docker VM; core and load CLAUDE.md notes not updated; docs/ERRORS.md owed (T-0149) | change next time: same as T-0130, docs/ERRORS.md in paths
+went well: 53ed1ef after one fix round; complete is written by core after verify; exit-9 class failures drop every loaded table (best-effort across the list, ACCESS EXCLUSIVE NOWAIT with bounded retries) under a detached bounded context; deterministic direct closeRun test | went badly: one transient integration failure under -count=5 on a 1970MB Docker VM; core and load CLAUDE.md notes not updated; docs/ERRORS.md owed (T-0149) | change next time: same as T-0130, docs/ERRORS.md in paths

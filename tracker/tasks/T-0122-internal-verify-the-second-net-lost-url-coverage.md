@@ -8,7 +8,7 @@ owner: ""
 created: 2026-09-08
 started: ""
 closed: 2026-09-09
-outcome: "done: in T-HARD-C (4f9a186)"
+outcome: "done: in T-HARD-C (30d2b63)"
 ---
 
 # T-0122 · internal/verify: the second net lost URL coverage when T-0100 narrowed textsig.LooksSecret
@@ -27,7 +27,7 @@ T-HARD-B review, high severity. T-0100 excluded a URL from textsig.LooksSecret a
 
 - 2026-09-09 moved to E5 phase 5
 
-- 2026-09-09 closed: done: in T-HARD-C (4f9a186)
+- 2026-09-09 closed: done: in T-HARD-C (30d2b63)
 
 ## Post-mortem
 

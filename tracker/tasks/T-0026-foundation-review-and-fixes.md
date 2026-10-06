@@ -8,7 +8,7 @@ owner: opus
 created: 2026-09-05
 started: 2026-09-05
 closed: 2026-09-05
-outcome: "done: 1a000f8 review fixes; five spec-level findings resolved by the orchestrator in the follow-up commit"
+outcome: "done: 7bd19c6 review fixes; five spec-level findings resolved by the orchestrator in the follow-up commit"
 ---
 
 # T-0026 · Foundation review and fixes
@@ -27,7 +27,7 @@ outcome: "done: 1a000f8 review fixes; five spec-level findings resolved by the o
 
 - 2026-09-05 started
 
-- 2026-09-05 closed: done: 1a000f8 review fixes; five spec-level findings resolved by the orchestrator in the follow-up commit
+- 2026-09-05 closed: done: 7bd19c6 review fixes; five spec-level findings resolved by the orchestrator in the follow-up commit
 
 ## Post-mortem
 

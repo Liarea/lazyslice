@@ -8,7 +8,7 @@ owner: opus
 created: 2026-09-08
 started: ""
 closed: 2026-09-09
-outcome: "done: 78530ef; composite fail-closed, array-literal splitter, auth-schema rules, URL is online_id, key-child exemption"
+outcome: "done: e364afb; composite fail-closed, array-literal splitter, auth-schema rules, URL is online_id, key-child exemption"
 ---
 
 # T-0109 · T-HARD-B: composite fail-closed, extension-type array splitter, auth-schema rules, URL not credential (T-0094, T-0103, T-0104, T-0100)
@@ -25,7 +25,7 @@ outcome: "done: 78530ef; composite fail-closed, array-literal splitter, auth-sch
 
 - 2026-09-08 created
 
-- 2026-09-09 closed: done: 78530ef; composite fail-closed, array-literal splitter, auth-schema rules, URL is online_id, key-child exemption
+- 2026-09-09 closed: done: e364afb; composite fail-closed, array-literal splitter, auth-schema rules, URL is online_id, key-child exemption
 
 ## Post-mortem
 

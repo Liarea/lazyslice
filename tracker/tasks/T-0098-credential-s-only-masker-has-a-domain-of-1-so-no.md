@@ -8,7 +8,7 @@ owner: ""
 created: 2026-09-08
 started: ""
 closed: 2026-09-08
-outcome: "done: in T-HARD-A (ecc42ae)"
+outcome: "done: in T-HARD-A (b89f0f0)"
 ---
 
 # T-0098 · credential's only masker has a domain of 1, so no unique credential column can be masked at all
@@ -27,7 +27,7 @@ mask/register.go registers one generator for CatCredential: fixedMasker with the
 
 - 2026-09-08 moved to E5 phase 5
 
-- 2026-09-08 closed: done: in T-HARD-A (ecc42ae)
+- 2026-09-08 closed: done: in T-HARD-A (b89f0f0)
 
 ## Post-mortem
 

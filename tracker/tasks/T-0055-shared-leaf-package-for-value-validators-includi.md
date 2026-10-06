@@ -8,7 +8,7 @@ owner: opus
 created: 2026-09-06
 started: ""
 closed: 2026-09-08
-outcome: "done: 654bfd4; internal/textsig leaf holds validators and the name dictionary; person_name and free_text in the second net with a multi-token or hit-rate threshold"
+outcome: "done: 51632a1; internal/textsig leaf holds validators and the name dictionary; person_name and free_text in the second net with a multi-token or hit-rate threshold"
 ---
 
 # T-0055 · Shared leaf package for value validators including the name dictionary; register person_name and free_text in verify's second net with a verify-side false-positive threshold decision
@@ -25,7 +25,7 @@ verify covers 8 of classify's 10 validators; dictionary words like black, brown,
 
 - 2026-09-06 created
 
-- 2026-09-08 closed: done: 654bfd4; internal/textsig leaf holds validators and the name dictionary; person_name and free_text in the second net with a multi-token or hit-rate threshold
+- 2026-09-08 closed: done: 51632a1; internal/textsig leaf holds validators and the name dictionary; person_name and free_text in the second net with a multi-token or hit-rate threshold
 
 ## Post-mortem
 

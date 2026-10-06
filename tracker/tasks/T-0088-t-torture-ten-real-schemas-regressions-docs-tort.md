@@ -8,7 +8,7 @@ owner: opus
 created: 2026-09-08
 started: ""
 closed: 2026-09-08
-outcome: "done: 08e4159; ten real schemas, nine clean, tenth named; docs/TORTURE.md; 45 flags measured (37 unmask, 7 skip-table, 1 key); twelve findings filed"
+outcome: "done: be68df4; ten real schemas, nine clean, tenth named; docs/TORTURE.md; 45 flags measured (37 unmask, 7 skip-table, 1 key); twelve findings filed"
 ---
 
 # T-0088 · T-TORTURE: ten real schemas, regressions, docs/TORTURE.md
@@ -25,7 +25,7 @@ outcome: "done: 08e4159; ten real schemas, nine clean, tenth named; docs/TORTURE
 
 - 2026-09-08 created
 
-- 2026-09-08 closed: done: 08e4159; ten real schemas, nine clean, tenth named; docs/TORTURE.md; 45 flags measured (37 unmask, 7 skip-table, 1 key); twelve findings filed
+- 2026-09-08 closed: done: be68df4; ten real schemas, nine clean, tenth named; docs/TORTURE.md; 45 flags measured (37 unmask, 7 skip-table, 1 key); twelve findings filed
 
 ## Post-mortem
 

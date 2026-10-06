@@ -28,4 +28,4 @@ docs/QUICKSTART_TRANSCRIPT.md shows 'public.orders.placed_at: 200/200 samples lo
 
 ## Post-mortem
 
-went well: ea8f5a7; a timestamp column now reads 'no name or value signal'; the fix round kept every masking decision identical by keeping a bare silencedStrong flag, so the raising passes still stay off such a column; the GIF's first screen confirms it | went badly: the first cut dropped the refused-signal state and widened recall, which the reviewer caught | change next time: a reason-line task's brief should say in its first sentence that no decision may change, and ask for a before/after decision diff over Pagila
+went well: f7e1834; a timestamp column now reads 'no name or value signal'; the fix round kept every masking decision identical by keeping a bare silencedStrong flag, so the raising passes still stay off such a column; the GIF's first screen confirms it | went badly: the first cut dropped the refused-signal state and widened recall, which the reviewer caught | change next time: a reason-line task's brief should say in its first sentence that no decision may change, and ask for a before/after decision diff over Pagila

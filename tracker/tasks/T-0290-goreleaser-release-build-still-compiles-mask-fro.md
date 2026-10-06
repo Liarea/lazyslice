@@ -29,4 +29,4 @@ T-0285 review (Makefile install-proof fix): .goreleaser.yaml's builds[].env has 
 
 ## Post-mortem
 
-went well: e0dc25f: global GOWORK=off in .goreleaser.yaml (covers the go mod hooks as well as builds), make snapshot green; tag.sh check 8 proven both ways (mask/ code unchanged since mask/v0.1.0 passes, an edited mask.go refuses) | went badly: the first cut compared all of mask/ and refused over T-0285's own CLAUDE.md edit, so Markdown is excluded | change next time: a release guard should be tried against today's tree before it is committed, not just against a crafted failure
+went well: 5b020fa: global GOWORK=off in .goreleaser.yaml (covers the go mod hooks as well as builds), make snapshot green; tag.sh check 8 proven both ways (mask/ code unchanged since mask/v0.1.0 passes, an edited mask.go refuses) | went badly: the first cut compared all of mask/ and refused over T-0285's own CLAUDE.md edit, so Markdown is excluded | change next time: a release guard should be tried against today's tree before it is committed, not just against a crafted failure

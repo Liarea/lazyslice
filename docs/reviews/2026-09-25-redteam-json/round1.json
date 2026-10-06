@@ -1,7 +1,7 @@
 {
  "round": 1,
  "date": "2026-09-25",
- "tree": "1e061d3",
+ "tree": "94f2809",
  "kind": "fresh-variant round aimed at json and jsonb documents after T-0272 landed per-leaf masking; three Opus attackers (harmless keys and split values; documents in disguise and odd encodings; cross-stage consistency and the checks that should catch a leak)",
  "attackers": 3,
  "attempts": 37,
