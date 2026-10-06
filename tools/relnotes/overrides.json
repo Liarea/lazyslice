@@ -6,20 +6,20 @@
   "The command also runs for an endpoint the discovery ladder resolved, not only for one named on the command line"
  ],
  "3b876a3": [
-  "Reverted before release by the entry above (ebed6cd); nothing in this commit shipped, and no check was narrowed."
+  "Reverted before release by the entry above (ebed6cd); its narrowing of the shared hardware-address check never shipped."
  ],
  "f437695": [
   "Research doc: the Hacker News comment is dated precisely, seven weeks after the Snaplet shutdown (31 August 2024 to 17 October 2024), not a year.",
   "Research doc: the npm figures are for the dated week 23-29 August 2026 (@snaplet/copycat 121,478, @snaplet/snapshot 9,808, more than twelve times), linked to npm's dated range endpoints so the links keep backing the numbers."
  ],
  "f9dedea": [
-  "No user-visible change: part of re-landing the entry above in two steps so a release and go install build against the published mask module."
+  "No user-visible change: the first of two steps that re-land T-0302's entry under Safety and masking, so a release and go install build against the published mask module."
  ],
  "7854fde": [
   "No user-visible change: the mask module's test data is checked out byte for byte on every platform."
  ],
  "6952f9f": [
-  "No user-visible change beyond the entry above, which this commit re-lands on the published mask/v0.3.0; the tool now requires mask v0.3.0."
+  "No user-visible change: this commit re-lands T-0302's entry under Safety and masking (a masked name that equals another row's real name is explained, not refused) on the published mask module; the mask version this release requires is v0.4.0, as the entry under Build, CI and release says."
  ],
  "4f8ea50": {
   "title": "JSON-document red-team round 2 replays the eleven round-1 attempts that crossed outside the named residuals: ten hold, one is a named residual, zero undocumented",
@@ -263,13 +263,13 @@
  "7749cc9": {
   "title": "The entropy validator does not read filenames, hex digests, namespaced class names or a handful of samples as secrets",
   "bullets": [
-   "File names (exported reports, logos, screenshots, media files, software releases, webcam shots) are no longer read as secrets and masked as credentials to the fixed $lazyslice$invalid value. A file name whose part before the extension contains a word from the name dictionary still counts as one; a value with a file extension is judged by this rule alone, so a file name that carries a person's name, such as 'hopper_grace_1906_birth_cert.pdf', is not spared as a dotted class name",
+   "File names (exported reports, logos, screenshots, media files, software releases, webcam shots) are no longer read as secrets and masked as credentials to the fixed $lazyslice$invalid value. A file name whose part before the extension contains a word from the name dictionary still counts as one; a value with a file extension is judged by this rule alone, so a file name that carries a person's name, such as '<surname>_<givenname>_1906_birth_cert.pdf', is not spared as a dotted class name",
    "MD5, SHA-1 and SHA-256 digests (32, 40 or 64 hex characters in one case, bare, after an md5:, sha1: or sha256: prefix, or written as colon-separated byte pairs) are no longer read as secrets; a hex token of 32 characters or more at any other length, or in mixed case, still is",
    "Rails single-table-inheritance class names are copied unchanged instead of becoming $lazyslice$invalid, which raised on every row the application loaded: this covers columns named type, klass or component_name, class names namespaced with ::, dotted class names in which a segment is camelCase and no word is a dictionary name, and environment-variable names such as AWS_S3_BUCKET_V2 (at most two digits per word and no dictionary name)",
    "A column with fewer than five sampled values is no longer masked as a credential just because its values look random; a column whose name says it is a credential is still masked on the name, and the post-load second net applies the same five-value floor, so it does not refuse such a column at exit 9",
    "A column of file names in which at least a fifth name a person (for example photo-<username>-3.jpg) is still masked whole, with the reason 'N/N samples are file names, a fifth or more carrying a dictionary name'",
    "Columns named key_hash (a hash of an API key) are now masked as credentials by name, because their hex values are no longer read as secrets",
-   "Values that only resemble those shapes stay with the entropy check, as in v0.3.0: a dotted handle such as 'katherine.johnson84', an upper-case value built from a name and a year such as 'DUBLIN_GRACE_HOPPER_1906', and an all-lowercase dotted module path such as 'billing.invoice_mailer.v2', which is still masked as a credential as the stated price of keeping dotted handles masked",
+   "Values that only resemble those shapes stay with the entropy check, as in v0.3.0: a dotted handle such as '<givenname>.<surname>84', an upper-case value built from a name and a year such as 'DUBLIN_<GIVENNAME>_<SURNAME>_1906', and an all-lowercase dotted module path such as 'billing.invoice_mailer.v2', which is still masked as a credential as the stated price of keeping dotted handles masked",
    "Other secrets stay masked as before: API keys, access tokens, JWTs, bcrypt/argon2/pbkdf2 password hashes and OAuth client secrets. What the entropy check now passes through, in a column no credential name rule matches, is a secret that is a one-case hex run of exactly 32, 40 or 64 characters, a secret column of one to four non-NULL rows, a secret in a column named type, klass or component_name, and a file named after a person in a column where fewer than a fifth of the file names carry a dictionary name (README residual 4, SECURITY.md item 4)"
   ]
  },
@@ -282,7 +282,7 @@
    "A column whose own qualifier names a person (legal_name, preferred_name, nick_name, married_name, billing_name, shipping_name, card_holder_name, name_on_card, name_given, name_family and similar) is still masked on its name alone, in any table, even when its values are names the dictionary does not know",
    "Columns ending in `_file_name` (Paperclip's `logo_file_name`, `image_file_name`, `dump_file_name`) are no longer treated as a person's name",
    "`lazyslice classify` reason lines now say why a bare name was masked or copied: which word for people corroborated it, how many samples carried a dictionary name, or that too few samples were available to check",
-   "A device name built on its owner's name in a possessive, such as \"Grace's iPhone\", now counts as carrying that name, so such a column stays masked",
+   "A device name built on its owner's name in a possessive, such as \"<givenname>'s iPhone\", now counts as carrying that name, so such a column stays masked",
    "README.md and SECURITY.md's third accepted residual now says that a bare `name` column of a non-person table, holding names the dictionary does not carry (for example a non-Latin script), is copied, and that a neighbouring column protects it only when that neighbour is decided at `likely` or above"
   ]
  },
@@ -300,9 +300,9 @@
    "A text column whose every sampled value is a UUID, hex digest, semantic version, hostname or path is copied instead of being swept into free-text masking beside a personal column.",
    "Each column spared this way gets a reason line starting 'not swept by the neighbouring-column rule' that says why: enum-like with its counts, the identifier shape it matched, or its unique index. The unique-index skip used to be silent.",
    "A value that carries a dictionary name or a special-category term, or that is a gender or title term (male, female, mrs), is never spared. Neither is a non-ASCII value in an enumeration, an enumeration with fewer than 10 samples or an identifier shape with fewer than 3, so a repeated native-script name or a /home/<name> path is still masked.",
-   "Blood groups, marital status, ISO dates, CamelCase handles such as JohnSmith, and runs of four or more digits, alone or joined by hyphens, dots, slashes or a plus sign (postcodes, ZIP+4 codes, local phone numbers), are not spared as enumerations: beside a certain personal column they are still masked.",
+   "Blood groups, marital status, ISO dates, CamelCase handles built from a given name and a surname, and runs of four or more digits, alone or joined by hyphens, dots, slashes or a plus sign (postcodes, ZIP+4 codes, local phone numbers), are not spared as enumerations: beside a certain personal column they are still masked.",
    "A column of dates of birth written as unpadded dotted dates (5.3.1985) or with a month name (05/Mar/1985), beside a certain personal column, is still masked: it is not spared as versions or paths.",
-   "A bare home directory such as /home/jsmith, or a two-segment route, is not spared as a path. A value counts as a path only if it has a file extension, is an absolute path with three or more segments, or is a time zone name such as Europe/London.",
+   "A bare home directory such as /home/<username>, or a two-segment route, is not spared as a path. A value counts as a path only if it has a file extension, is an absolute path with three or more segments, or is a time zone name such as Europe/London.",
    "A currency-code foreign-key pair beside a personal column, which used to refuse the run at exit 12 (plan.refused.unique_domain), now loads with both ends copied and still matching. A pair whose partner carries its own name signal still refuses at exit 12.",
    "A project with a lazyslice.yml written by an earlier release keeps masking these columns until the file is regenerated with --reconfigure, because a committed yml can only tighten.",
    "README's 'How it decides' section and residual 4 describe the spared shapes and what is never spared (blood groups, marital status, dates and postcode-length numbers). THREAT_MODEL T1 records the recall measurement and what can still be copied."
@@ -324,7 +324,7 @@
    "An email, phone number, card or national identifier written in fullwidth characters (a fullwidth @, + or digits) is recognised and masked: in a plain text column, where v0.3.0 did not recognise it, and in a JSON value under a key no rule names",
    "A card number grouped with en dashes, em dashes, minus signs, underscores or zero-width characters, and a US Social Security number grouped with en dashes, em dashes, minus signs, underscores or slashes, is now recognised and masked instead of being copied into the target",
    "An email address whose domain ends in a trailing dot, or written behind mailto:, and a phone number written behind sms: with a ?body= after it, are now recognised as the address or number inside and masked; a number behind a bare tel: or sms: was already recognised",
-   "Percent-encoded values (ana%40example.org, %2B44...), backslash-u escaped values and base64-encoded addresses and numbers are now decoded once and masked as the email or phone number they hold, not only by chance as credentials",
+   "Percent-encoded values (user%40example.org, %2B44...), backslash-u escaped values and base64-encoded addresses and numbers are now decoded once and masked as the email or phone number they hold, not only by chance as credentials",
    "A base64 value written the way a shell or Postgres writes it, with the input's trailing newline encoded or the output wrapped into 76-character lines, is now read as the address, phone number or card it decodes to",
    "A date written with dashes or slashes (2026-09-24, 24/09/2026) is still copied: the new separator rules skip calendar dates, so no date column is newly masked as a national identifier",
    "THREAT_MODEL's obfuscation amendment now lists the spellings covered and the ones still not: HTML entities, backslash-x escapes, homoglyphs NFKC does not fold, and a token inside a longer decoded string"
@@ -412,5 +412,171 @@
  },
  "6ce191f": {
   "title": "Commits carry release-note bodies; the tracker and commit skills; make relnotes"
- }
+ },
+ "9269a7a": [
+  "A validated foreign key's character columns beside a certain personal column, an email say, are now masked together, instead of both ends being left unmasked whenever one end carried personal data with no other signal to catch it; the walk follows the key upward through every ancestor table, so a chained key three tables deep is masked as a set",
+  "A native-script name held as a foreign-key child of a lookup table beside a real email column no longer crosses into the target verbatim",
+  "A directly related pair is masked even when a distant lookup table shared through another key could not be masked safely; only the pair's own ancestors decide",
+  "When one end of the pair cannot be masked the same way, because it already carries a decision the classifier must not override or is a measured two-letter code lookup, the run refuses at exit 12 before any write, naming both columns with a --unmask escape for each, instead of copying the pair",
+  "Masking both ends of a key whose lookup table sits under a small unique index surfaces as the existing exit-12 unique-domain refusal naming both columns",
+  "Taking the override on one column of a refused pair is not enough: both have to be accepted explicitly, and the message says so",
+  "One real schema in the torture suite, Metabase, needs a second --unmask for a session-id pair whose parent is operator-unmasked while its child is masked; the flag is recorded in the torture suite.",
+  "The regression corpus pins the native-script child, the chained key, the blocked-partner pair and the currency-code lookup, whose expected outcome moved to the refusal"
+ ],
+ "db33590": [
+  "A masker whose output follows the value it was given is now a hard stop rather than a cell the run reports as masked: the mask module refuses it, naming the category and the masker id and never the value.",
+  "The two paths that are meant to return a member are still allowed: a masked enum emits one of its own labels, and a generator with a single output (a collapsed special category, the null and fixed maskers, an emptied tsvector) emits its constant.",
+  "A masker that panics no longer carries the row out with it: the panic is converted into an error naming the category, the masker id and the type of the panic value, inside the mask module itself, so a program that imports only that module gets the same redaction the CLI does.",
+  "A transform refusal no longer prints the masker's own message, which could quote the value it refused; it names the column, the masker and the kind of error, and when the reason is one of the masking module's own — \"no masked value fits varchar(8)\", \"can emit 44700 distinct values\" — it names that reason, so an exit-7 refusal is a diagnosis again.",
+  "THREAT_MODEL.md T4, T7 and T12 record these three controls as landed rather than owed.",
+  "A masked value that happens to equal the value it replaced no longer aborts the run: short-id and birthdate columns, where that coincidence is arithmetic rather than a bug, snapshot normally again instead of stopping at exit 7 with a message about a masker that is not broken.",
+  "A masker whose output really does follow its input is still refused, and now so is one that claims a single output to excuse itself.",
+  "A jsonb column whose documents are structure only -- {\"tags\":[]}, {\"prefs\":{}}, {\"a\":{\"b\":{}}} -- no longer stops a run at exit 7 with a passthrough refusal naming semi_structured; a document with no scalar leaf has nothing to mask, so it is copied as-is and the run continues.",
+  "A JSON null leaf no longer counts as an unmasked value: {\"a\":null} passes for the same reason.",
+  "A masker that really does hand a document back unchanged is still refused at exit 7 as soon as one document in the column carries a leaf, and the refusal still names only the category and the masker."
+ ],
+ "2680d5e": [
+  "A --secret-file whose parent directory is a symbolic link is now refused (exit 5) even on a first run, where the file itself doesn't exist yet to be checked directly — closes the path a symlinked directory component (e.g. a cloud-synced folder) took the masking key out of the repository while the transcript said it had been protected.",
+  "A --secret-file that has been hard-linked to a second path is now refused (exit 5, 'secret.refused.hardlink') the same way a world-readable one already was, since a key reachable under a second name may already have been read outside .gitignore's protection.",
+  "--password-command is now screened before it is written into lazyslice.yml: a command whose argument looks like a literal value rather than a path (an echo/printf/cat-style command carrying the password itself, most plainly) is withheld from the file and a warning ('secret.password_command.withheld') is printed instead, so the committed yml's 'this file never contains a secret' header stays true.",
+  "THREAT_MODEL.md's T5 and T6 sections now document both fixes and their conservative-by-design false-positive tradeoffs."
+ ],
+ "0395d1c": [
+  "The container-startup port-mapping race (T-0052) now gets up to 120 seconds of bounded-backoff retry per container, up from 30, before giving up.",
+  "If that full 120-second wait is exhausted, the test helper terminates the stuck container and starts a fresh one once, then waits up to 30 more seconds before failing, so a genuinely wedged container fails fast with the T-0052 message rather than pushing a single test binary close to make torture's 60-minute timeout.",
+  "The resulting failure message names T-0052 as before, and now also states how long each wait ran and that a restart was attempted, so a torture-suite failure is diagnosable without re-running with -v.",
+  "Restarting a wedged Postgres test container after the container never worked no longer risks re-hitting the same stale-reaper crash it was already recovering from: the restart's own container-recreate step now retries once through the same guard the initial container start uses.",
+  "A container whose port maps immediately (the common case) is never torn down and restarted; a test pins it so an always-restart bug cannot double make torture's container churn and wall time unnoticed."
+ ],
+ "112ba1e": [
+  "Every reference to the maintainer by name in docs, tracker tasks, skills, workflows and the licence now reads \"the maintainer\"; the copyright holder is Liarea.",
+  "Commits from this repository are now authored as Liarea with the GitHub no-reply address."
+ ],
+ "c621086": [
+  "A column the run masks can no longer carry an unexplained literal in its own CHECK, generated expression, index predicate, or default that cannot be rewritten -- the plan and the post-load check now refuse it (exit 13) whatever it parses as, not only when a known personal-data shape matches, unless --unmask already names the column, the literal is empty, sits in a closed value list, or is one of the column's own enum labels.",
+  "A new value check recognises health, religion, sexual-orientation, ethnicity, trade-union and political-opinion terms in a literal, so a special-category sentence with no digit and no name pair -- for example 'HIV positive, CD4 210' or 'Ahmadiyya Muslim' inside a CHECK constraint -- is now caught and the refusal names the category as 'special_category'.",
+  "A SIMILAR TO or NOT SIMILAR TO predicate is now correctly recognised as a pattern rather than a value wherever Postgres writes it back as a call to similar_escape(...), so a Unicode character-class index predicate used for search filtering is no longer mistaken for a personal-data literal and refused.",
+  "The refusal message for an unrewritable literal in a masked column's own constraint now reads 'masked column, unrewritable literal in its own constraint' when nothing more specific matched, and still names the specific category (email, address, special_category, etc.) when a recognised shape did.",
+  "Two new regression fixtures pin the fix: a special-category sentence in a CHECK on a masked column now refuses at plan, and the same sentence in a CHECK on an unmasked column still refuses with the existing --unmask escape.",
+  "THREAT_MODEL.md's account of the special-category DDL-literal rule's history no longer contradicts the amendment describing the current, narrowed scope."
+ ],
+ "4bfbe36": [
+  "A masker can no longer smuggle its input value out of the mask module by wrapping one of the module's own sentinel errors (e.g. ErrNoRoom) around it; the error Apply returns now always carries only the module's own safe, value-free text, with errors.Is/errors.As still able to identify the underlying sentinel or NoRoomError/DomainError kind.",
+  "A masker can no longer smuggle a value out by forging or rewrapping the module's own *NoRoomError with an attacker-chosen TypeTag string; the caller now always sees the real column's TypeTag/MaxLen, taken from its own Constraints rather than from the masker's returned error.",
+  "mask/CLAUDE.md documents the new wrapMaskerError guard and the two attack variants it closes, alongside the existing T-0223 entry.",
+  "A masker's DomainError refusal (raised when a unique column's generator cannot mint enough distinct values) now reports the module's own recomputed domain size, required count, row count and max-rows figures, never numbers a third-party masker supplied itself.",
+  "No flag, exit code or message format changes: this closes a data-exfiltration channel in the masking library's error handling, where a registered masker could smuggle a few bytes of the value it was asked to mask into a unique-column refusal message via its own Domain() method."
+ ],
+ "619f23e": [
+  "A source that is a streaming standby now prints a header line naming it (and, where pg_stat_wal_receiver is readable, its primary's host and port), on every run — not only headless ones.",
+  "A headless run (--yes, or no controlling terminal) whose source is a streaming standby and whose --target was not given now refuses at exit 4 naming --target, instead of silently discovering a target that turns out to be the standby's own primary.",
+  "The eligibility gate no longer reports a confident \"different cluster\" when only the source's postmaster start time disagrees and system_identifier could not be read on either side — a standby read against its own primary as the target now correctly prints the \"same cluster as source\" warning instead of writing with no warning at all.",
+  "The recommended read-only role statement printed in the header (and the matching setup guidance) now includes GRANT EXECUTE ON FUNCTION pg_control_system(), which is what lets the strongest cluster-identity check work for this shape.",
+  "Documentation only: ARCHITECTURE.md section 9, THREAT_MODEL.md's target-is-production entry and ADR-013 now record the read-replica finding, the fix, and that a live primary-and-standby integration test remains an open gap.",
+  "The tradeoff this change carries — a genuinely unrelated target of the same Postgres major reads as \"possibly the same cluster\" under the recommended read-only role rather than being told apart — is stated in ARCHITECTURE.md and THREAT_MODEL.md and pinned by an integration test, instead of being an undocumented side effect a same-version headless run or CI run could hit with no explanation.",
+  "The replica-detection test suite now proves its claims under the same restricted, non-superuser role ARCHITECTURE.md §9 recommends operators create, rather than under the test container's own superuser — closing a gap where the suite could pass for reasons unrelated to what it claimed to test."
+ ],
+ "45a60bf": [
+  "A source role denied EXECUTE on pg_postmaster_start_time() (a hardened cluster that also revokes pg_control_system, closing R2-06's original gap) no longer loses its entire cluster identity: the privilege check is now a separate statement sent before the guarded call, so the maintenance-database oid, data_directory and server version still contribute even when the start time cannot be read.",
+  "When neither side's cluster identity can be compared at all, the gate now reports the target as possibly on the source's own cluster and prints the 'same cluster as source' warning, instead of silently falling back to comparing the two connection endpoints' spelling -- a comparison guaranteed to disagree for one cluster reached over two transports (a published port and a unix socket, a pooler, an SSH tunnel), which previously let a masked slice land on a production cluster with no warning and exit 0.",
+  "Agreement on the maintenance-database oid or the server version alone no longer counts as proof of 'same cluster': both are shared by unrelated clusters built from the same image or PostgreSQL 15+, so agreeing on only those two now reads as unknown (fail-closed) rather than a confident same-cluster warning; disagreement on either still proves the clusters different.",
+  "A mid-read failure on the guarded postmaster-start-time field, inside the source's own snapshot transaction, no longer aborts the rest of the cluster-identity read: the read is wrapped in a savepoint so the remaining fields (oid, data_directory, server version) still come back.",
+  "New integration test coverage: a source role with EXECUTE denied on pg_postmaster_start_time() still lets the gate recognise an empty, differently-named database reached over a second endpoint as the source's own cluster (the round-3 red-team replay's exact shape), and a forced mid-transaction failure on the guarded field is shown to leave the transaction and the rest of the identity intact."
+ ],
+ "3466e2f": [
+  "Every masked first name, last name and full name is now a real, common name from the 2020 U.S. Census lists (958 given names, 1,000 surnames) instead of made-up syllables like 'Bado Bika' or the old list of about 140 names; every masked person name changes in this release, under every key.",
+  "Masked email addresses keep their example.com, example.net and example.org hosts, but the given.surname local part now comes from the same Census lists, so every masked email local part changes in this release; every other kind of masked column is unchanged.",
+  "A masked name that happens to equal another customer's real name in the same column no longer stops the run: on Pagila's first run (--root public.customer -n 200) 51 first_name and 33 last_name values match another customer's real name, no customer keeps their own, and the run exits 0.",
+  "The mask module's exported RoleWords now returns the Census name lists and is due for removal in the next mask minor; importers should stop calling it.",
+  "A generated full_name column built from masked first_name and last_name columns loads at exit 0 now that those names are real ones (new regression 041).",
+  "SECURITY.md item 12, the README's note on how masked names can match and the README's first-run GIF now describe the Census names; the re-recorded GIF reads back one real name per column and emails such as lance.wells@example.com.",
+  "A person-name column too narrow to draw from at least 400 names (for example a varchar(2), varchar(3) or varchar(4) first_name) is refused at plan with exit 12 instead of being masked by swapping between a handful of short names such as Jo and Ty.",
+  "A varchar(5) full-name column is masked to a single given name rather than a short given-and-surname pair, because only 22 such pairs fit that width."
+ ],
+ "49294c4": {
+  "title": "Provisioning passes CI again: the Windows file-mode check and the container readiness deadline on runners are corrected"
+ },
+ "0fe18ad": {
+  "title": "Discover probe reads inside a read-only transaction; a check that no source statement runs outside one; the read-only prose brought current"
+ },
+ "a42a130": [
+  "A previously unreachable rail now catches an unrecognised character column as short as two declared characters (down from sixteen) sitting beside a certain personal column such as email, masking it as free_text instead of copying it verbatim — closing the round-4 red team's native-script varchar(12) leak.",
+  "The two-letter ISO-code exclusion (a column whose sampled values are all two-letter codes) is unchanged and still prevents masking of genuine country/language code columns.",
+  "A masked column whose generator genuinely cannot write into its declared type still refuses the plan at exit 12 naming the column with the --skip-table and --unmask escapes, exactly as before; nothing new was added for the length case because the existing generator always fits a non-unique column of this shape.",
+  "A validated foreign key's short code column (an ISO-style currency or country code, for example) sitting beside an email or other certain personal column is no longer masked on one side of the join while its foreign-key partner stays unmasked on the other, a split that previously died at the load stage's foreign-key VALIDATE step with the target already half loaded; the two ends are decided together, masked as a set or refused at exit 12, as the T-0253 entry says.",
+  "Corrected an inaccurate internal explanation of the short-column masking rule that claimed a nonexistent safety net for two-letter codes seen too few times to be checked by value; the actual, correct behaviour (masking such a column when in doubt) is unchanged -- only the documentation was wrong."
+ ],
+ "b22ebce": [
+  "A run with no --root flag and no root recorded in lazyslice.yml now asks 'root table? [<top-scoring table>]' at the controlling terminal instead of silently guessing: Enter takes the default, a table name (schema-qualified or bare when unambiguous) takes that table, '?' prints the ranked top five candidates with their score components, and an unrecognised name re-asks with the reason instead of failing the run.",
+  "Under --yes, with no controlling terminal, or once discovery has already asked the start/create-target question this run, the root-table question is skipped and the computed default is taken silently, exactly as ADR-008's one-question rule requires.",
+  "Whatever decided the root table -- the --root flag, a committed lazyslice.yml, an answer at the prompt, or the computed default -- is now always printed as a decision line ('root public.customers (named by --root) — --root'), the same way the source and target decisions already print.",
+  "Three new event codes (plan.root.decided, plan.root.candidate, plan.root.unknown) are documented in docs/ERRORS.md.",
+  "README.md's quickstart and docs/QUICKSTART_TRANSCRIPT.md now show the new root-table decision line (verified against a real run) and explain what a run without --root would have asked instead.",
+  "Running `lazyslice --tui` with no `--root` now asks the root-table question at most once: the run itself reuses the answer from the preview pass instead of asking a second time and possibly landing on a different table.",
+  "Typing a table name at the root-table prompt that matches nothing in the source (including a schema-qualified name, such as a typo'd schema) now re-asks the question immediately instead of accepting it and refusing much later once planning starts.",
+  "The table offered as the root-table prompt's default, and any name it accepts, now always matches the table the run actually slices from, even on a schema with partitioned tables, where the two could previously disagree.",
+  "A root-table name containing a dot, typed at the interactive prompt, is no longer corrupted before being used to plan the run.",
+  "Running the internal/core test suite from an interactive terminal no longer hangs waiting for a root-table prompt nobody can answer."
+ ],
+ "6478d8f": [
+  "README now opens with a plain-language paragraph on what lazyslice does and what it refuses to do, instead of jumping straight to a status paragraph.",
+  "README gained an Install section: `brew install Liarea/tap/lazyslice`, with build from source as the alternative.",
+  "README gained a Quickstart with a transcript that was actually run: the source/target decision lines, the per-column masking reasons, a masked value shown next to its source value, the lazyslice_meta.status = complete marker as evidence of a passing verify, a marker-bound reload, and a same-database refusal at exit 2 - the full untrimmed run is now docs/QUICKSTART_TRANSCRIPT.md.",
+  "README gained an 'Exit codes at a glance' one-liner covering every exit code, linked to docs/ERRORS.md for the full table.",
+  "README gained a six-sentence safety-model summary: read-only source, an owned empty target held under a lease, deterministic masking under a key that never leaves the machine, every check running before the marker is written complete (and the target emptied on a leak-class failure), and refuse-rather-than-guess as the default.",
+  "README's 'What a snapshot will not hide' now lists the five residuals actually accepted after five red-team rounds (row identifiers, an uncorroborated bare national identifier, names in uncovered scripts, any unrecognised shape, and the marker-bound reload window) instead of only the row-identifier quote.",
+  "SECURITY.md's known-limitations list gained the same three named residuals (uncorroborated national identifier, uncovered-script names, marker-bound reload window) and corrected the bytea item, which no longer claims bytea is unscanned now that printable text stored as bytea is read like a text column.",
+  "README's honesty section on non-Latin-script names now says plainly that the name-matching rules and dictionary are Latin-script only (about twenty languages), so a column named and valued in Cyrillic, CJK, Arabic, Thai, Devanagari or Amharic is not recognised as a name and is masked only when a certain personal neighbour or a foreign-key pair rule catches it, replacing an inverted claim about covering '~20 scripts'.",
+  "README's exit-code table now lists exit 1 (an internal failure with no assigned code; run with --debug) and clarifies that the same-database refusal exits 2 at the flag surface rather than exit 4.",
+  "README now documents that a Ctrl-C (exit 130) rolls back only the in-flight table's transaction; tables already committed in that run stay loaded, so the target can be left partly loaded rather than untouched."
+ ],
+ "b4dcbbf": [
+  "A release now carries checksums.txt.sigstore.json, one keyless Sigstore bundle holding the signature and its certificate, instead of a .sig and .pem pair. cosign v3 writes the bundle by default and ignored the older flags, which is where v0.0.2 failed after building every archive.",
+  "Verify a download with cosign verify-blob --bundle checksums.txt.sigstore.json, the identity regexp for this repository and GitHub's OIDC issuer, then check the archive's line in checksums.txt; docs/RUNBOOK.md has the full command.",
+  "The orchestrator's own permission to run make tag lives in .claude/settings.json, versioned with the rest of the operating model; it allows that one target and its script and nothing else."
+ ],
+ "e741bf5": [
+  "A tag now gets past the release job's setup: the cosign installer action was pinned to a floating v4 that the action does not publish, so v0.0.1 failed before its first step and published nothing. It is pinned to an exact release.",
+  "docs/RUNBOOK.md records what broke, how every action a release pins is now checked against its real tags, and that a failed proof is followed by the next v0.0.x rather than a moved tag."
+ ],
+ "2dce582": [
+  "README and SECURITY no longer say the 2026-09-09 review's findings are being fixed: they and six red-team rounds have landed, and open work is a GitHub issue rather than a file under tracker/."
+ ],
+ "772abe6": [
+  "The same database server reached two ways, a second published port, a proxy, a pooler name or the unix socket, is now recognised as one server: lazyslice refuses it as the source's own cluster instead of dropping its tables",
+  "The cluster check reads only values that are the same for every session on a server (its start time in a fixed zone, its version, its data directory when readable, its system identifier when the role may read it) and nothing about the connection it arrived on",
+  "A read-only source role and a superuser target still compare: a value one side is not allowed to read is skipped rather than treated as proof of two different servers, so no extra grant is needed",
+  "The source's own database, reached on the source's own cluster, is refused even when the two sessions run in different time zones, and still recognised after the server restarted between the two reads, because the system identifier decides on its own wherever both sides can read it",
+  "When nothing at all can be compared, a target carrying the source's own database name is still refused rather than admitted",
+  "The check is documented honestly: under a SELECT-only source role on PostgreSQL 15 or newer it rests on the postmaster start time and the server version; the maintenance-database oid is the same on every modern cluster",
+  "An integration test reaches one container over a second endpoint through a loopback proxy, and a unit test asserts the identity statement reads nothing from the connection"
+ ],
+ "e6b9078": {
+  "title": "A VHS GIF of the first run on Pagila"
+ },
+ "b950957": [
+  "`go install github.com/Liarea/lazyslice/cmd/lazyslice@v0.2.0` works: the tool requires the mask module by its published version (mask v0.2.0 at this release) instead of a local override that only resolved inside this checkout; v0.1.0's tag predates this and still fails.",
+  "README's Install section gives the working `go install` line for v0.2.0 and says why v0.1.0 fails.",
+  "A new `make install-proof` target and CI job build the tool the way `go install` does, from a fresh module cache with the workspace and mask/ out of the way, and fail if a local override of the mask module comes back.",
+  "CI also builds and tests the whole tree once against the published mask module with the workspace turned off.",
+  "Contributors get a `go.work` at the repo root, so an edit under mask/ is built and tested by the tool immediately; CONTRIBUTING and the runbook describe how a mask change is released (tag mask/vX.Y.Z with `make tag`, bump the require, before the tool's own tag)."
+ ],
+ "88cb577": [
+  "README.md is reorganised as a landing page: the first-run GIF now leads, followed by a one-line description, install, the annotated quickstart run, a 'Why' section matching CONCEPT.md's three principles, a sourced comparison against Greenmask, PostgreSQL Anonymizer and Tonic Structural, a plain-language explanation of how personal-data decisions and --unmask overrides work, then the existing safety model, residual list, and exit-code table.",
+  "The install section says why `go install .../cmd/lazyslice@v0.1.0` does not resolve from a clean module cache (its go.mod pointed the nested mask module at a local replace directive) and offers the Homebrew tap and the signed release archives; the working `go install` line for v0.2.0 is in the go install entry under Build, CI and release.",
+  "The install section corrects the release-archive OS list from 'Linux and Windows' to 'macOS, Linux and Windows' (six archives, amd64/arm64), matching what the release pipeline actually publishes, and keeps the cosign verify-blob command inline.",
+  "README's classifier explanation now correctly states that only a low-confidence column is raised toward masking by a likely-or-above neighbour, and that a signal-less column is swept into masking only beside a neighbour the classifier is certain identifies a person — restoring the honest carve-out that a column with no name signal, no value shape and no personal neighbour is copied, not masked.",
+  "README's config-file walkthrough now states ADR-004's actual drift rule for a column the config has never seen (masked at possible confidence or above, copied at low or none, reported under drift:, with --strict-schema turning drift into exit 10) instead of an aspirational rule ADR-004 superseded.",
+  "README's example lazyslice.yml no longer shows the impossible masker: plus unmask: combination on one column, since a masker only ever appears on a column the run actually masked.",
+  "README's build-from-source instructions again put bin/ on PATH after make build, so the lazyslice command used in the earlier examples resolves for a from-source build on Linux or Windows.",
+  "README again names the enforcing test, cmd/lazyslice's TestForbiddenFlagsDoNotExist, next to the claim that no flag or mode turns masking off."
+ ],
+ "7609fc8": [
+  "New `make names` / `go run ./tools/names` regenerates mask's Census-sourced given-name and surname word lists offline from two checked-in CSVs, with `-given-per-sex`/`-surnames` cut flags.",
+  "New `make names-check` (also run as a step in ci.yml's `docs` job, and added to `make check`) fails the build if the generated mask/words_corpus.go has drifted from a fresh regeneration, instead of drifting silently.",
+  "THIRD_PARTY_NOTICES.md now documents the 2020 Census name-list source: URLs, sha256s, fetch date, the public-domain basis (17 U.S.C. §105), the exact cut (958 given names, 1,000 surnames) and the Bureau's requested citation.",
+  "tools/names/README.md and the new tools/CLAUDE.md record the one-time xlsx-to-csv extraction command and column shapes so a future contributor can re-run or audit the fetch by hand.",
+  "On its own this change alters no masker output: it generates and checks the word lists; the T-0304 entries in this release are where the masker starts drawing from them.",
+  "Documented precisely what tools/names' '-given-per-sex' cut means: 'top-500 male/female given names' is a rank derived within the Census Bureau's single 1,000-name overall list by each sex's own count, not the Bureau's own per-sex top-500, with the actual boundary names and counts shown as a worked example in tools/names/README.md and THIRD_PARTY_NOTICES.md."
+ ]
 }
