@@ -18,7 +18,7 @@ BINDIR  := bin
 TOOLDIR := $(CURDIR)/$(BINDIR)/tools
 
 # Pinned build tools. A bump is a pull request that says why.
-GOLANGCI_LINT_VERSION := v2.13.2
+GOLANGCI_LINT_VERSION := v2.15.0
 GORELEASER_VERSION    := v2.18.0
 GOVULNCHECK_VERSION   := v1.7.0
 

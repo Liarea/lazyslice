@@ -219,7 +219,7 @@ func contextHost(dir, name string) (string, error) {
 	}
 	sum := sha256.Sum256([]byte(name))
 	path := filepath.Join(dir, "contexts", "meta", hex.EncodeToString(sum[:]), "meta.json")
-	b, err := os.ReadFile(filepath.Clean(path))
+	b, err := os.ReadFile(filepath.Clean(path)) //nolint:gosec // G703: built above from the config directory and a sha256 of the name; nothing in it is input
 	if err != nil {
 		return "", fmt.Errorf("dockerctx: reading the context store: %w", err)
 	}

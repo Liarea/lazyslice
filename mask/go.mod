@@ -1,6 +1,6 @@
 module github.com/Liarea/lazyslice/mask
 
-go 1.27.1
+go 1.27.3
 
 require (
 	github.com/nyaruka/phonenumbers v1.8.1

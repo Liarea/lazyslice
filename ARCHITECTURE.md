@@ -1504,7 +1504,7 @@ Every version below was checked against proxy.golang.org (and go.dev/dl for the 
 
 | Module | Version | Reason |
 |---|---|---|
-| Go toolchain | 1.27.1 | Current stable; `crypto/hkdf` and `crypto/hmac` in the standard library, so the masker needs no crypto dependency |
+| Go toolchain | 1.27.3 | Current stable (1.27.1 on 2026-09-05; 1.27.3 since 2026-10-25, the first patch to carry fixes for the nine standard-library vulnerabilities govulncheck reported as reachable from this code); `crypto/hkdf` and `crypto/hmac` in the standard library, so the masker needs no crypto dependency |
 | `github.com/jackc/pgx/v5` | v5.10.0 | Pure-Go Postgres driver; typed `CopyFrom` from a channel, `QueryTracer` for the source allowlist, statement cache for the fixed `unnest` shape |
 | `github.com/moby/moby/client` | v0.6.0 | Docker Engine API client for container discovery; `docker/docker` stopped at v28.5.2+incompatible (2025-11-05) |
 | `github.com/spf13/cobra` | v1.10.2 | Subcommands and the generated flag reference |

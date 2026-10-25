@@ -3167,11 +3167,11 @@ func (r *run) close(ctx context.Context) {
 	// Normally move has already read both and set them back to nil, so this is
 	// two nil checks and nothing else.
 	if r.extractDone != nil {
-		<-r.extractDone
+		<-r.extractDone //nolint:errcheck // a join; move already reported the error
 		r.extractDone = nil
 	}
 	if r.transformDone != nil {
-		<-r.transformDone
+		<-r.transformDone //nolint:errcheck // a join; move already reported the error
 		r.transformDone = nil
 	}
 	r.releaseSnapshot(ctx)

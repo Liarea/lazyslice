@@ -74,5 +74,5 @@ func splice(client net.Conn, backend string) {
 	// Either end closing is how a proxied connection ends, so the error is the
 	// end condition rather than something to report: the test asserts on what
 	// the database answered, and there is no t here to report it to.
-	<-done
+	<-done //nolint:errcheck // the end condition, not an error to report
 }

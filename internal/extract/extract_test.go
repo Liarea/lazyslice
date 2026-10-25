@@ -426,7 +426,7 @@ func TestALookupIsReadWholeAndOrdered(t *testing.T) {
 func TestTheChannelIsClosedOnAnErrorPath(t *testing.T) {
 	out := make(chan pipeline.RowBatch)
 	go func() {
-		for range out { //nolint:revive // draining is the point
+		for range out { // draining is the point
 		}
 	}()
 	err := New(nil).Extract(context.Background(), &fakeReader{}, &pipeline.Plan{}, out)
