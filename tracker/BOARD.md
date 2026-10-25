@@ -1,4 +1,4 @@
-# Board · generated 2026-10-03 by tools/tracker.py (source: GitHub project 3 plus tracker/tasks/) — do not hand-edit
+# Board · generated 2026-10-25 by tools/tracker.py (source: GitHub project 3 plus tracker/tasks/) — do not hand-edit
 
 | Epic | Phase | Open | In progress | Done | Cancelled | Blocked |
 |---|---|---|---|---|---|---|
@@ -9,7 +9,7 @@
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 0 | 0 | 108 | 0 | 0 |
 | E6 Launch | 6 | 2 | 0 | 54 | 0 | 0 |
-| E9 Later | later | 159 | 0 | 41 | 10 | 0 |
+| E9 Later | later | 160 | 0 | 41 | 10 | 0 |
 
 ## Open and in progress
 
@@ -174,6 +174,7 @@
 - T-0423 [open] E9 · core/classify: T-0404 follow-ups: key drift has its own wording; the key fingerprint is keyed; the --strict-schema upgrade path is documented; a drifted key is tested through transform (sonnet)
 - T-0425 [open] E9 · A fix round returns the commit's whole changelog, so release notes never carry a bullet the fix reversed (sonnet)
 - T-0426 [open] E9 · Messages and comments that lag v0.4.0: the second_net_document hint, the mask refusal comment, the 1,000-row plan line (sonnet)
+- T-0427 [open] E9 · ci: golangci-lint-action moves from v8 (Node 20, deprecated) to v9 (sonnet)
 
 ## Recently closed
 
