@@ -19,7 +19,7 @@ Repo URL throughout: `https://github.com/Liarea/lazyslice`.
 ## 1. dhamaniasad/awesome-postgres
 
 - **Repo:** https://github.com/dhamaniasad/awesome-postgres (not archived,
-  ~8.9k stars, confirmed active today)
+  ~12.1k stars as of 2026-10-25, confirmed active today)
 - **Section:** `### Utilities` (README.md, line 240 as fetched today) —
   already carries Greenmask, a comparable Postgres anonymization tool, at
   line 246, confirming the section's fit.
@@ -52,7 +52,7 @@ Repo URL throughout: `https://github.com/Liarea/lazyslice`.
 - **Repo:** https://github.com/avelino/awesome-go (the canonical Go
   awesome-list; not archived, actively maintained, confirmed today)
 - **Section:** `### Database Tools`, under `## Database` (README.md, line
-  874 as fetched today) — the right home because lazyslice is a Go binary,
+  896 as fetched 2026-10-25) — the right home because lazyslice is a Go binary,
   and the section already lists other single-purpose database CLIs (`dg`,
   a relational-data generator; `onedump`, a one-command database backup
   tool).
@@ -64,10 +64,10 @@ Repo URL throughout: `https://github.com/Liarea/lazyslice`.
   - [lazyslice](https://github.com/Liarea/lazyslice) - Subsets a production Postgres database by a root table across foreign keys, masks personal data deterministically, and loads a small local copy.
   ```
 
-## 4. awesomelistsio/awesome-postgresql
+## 4. brandonhimpfen/awesome-postgresql
 
-- **Repo:** https://github.com/awesomelistsio/awesome-postgresql (not
-  archived, confirmed active today)
+- **Repo:** https://github.com/brandonhimpfen/awesome-postgresql (moved from
+  awesomelistsio; not archived, confirmed active today)
 - **Section:** `## Backup and Migration` (README.md, confirmed today) —
   sits next to `pg_dump`, `pgBackRest` and `WAL-G`; lazyslice is not a
   backup tool, but it is the closest existing category to "moves a
@@ -87,7 +87,7 @@ Repo URL throughout: `https://github.com/Liarea/lazyslice`.
   today) — already lists `dbmask` ("Masks sensitive data in SQL test
   databases with deterministic fakes and verifies the masking row by
   row"), the closest existing neighbor in the whole set of ten.
-- **Exact line the PR adds**, appended after `MockJutsu` (matching the
+- **Exact line the PR adds**, appended as the section's last item (matching the
   section's `- [name](url) - description.` style, ending each item with a
   short language/licence note as several neighbors do):
 
@@ -97,8 +97,8 @@ Repo URL throughout: `https://github.com/Liarea/lazyslice`.
 
 ## 6. agarrharr/awesome-cli-apps
 
-- **Repo:** https://github.com/agarrharr/awesome-cli-apps (not archived,
-  20,444 stars, confirmed active today)
+- **Repo:** https://github.com/agarrharr/awesome-cli-apps (archived
+  2026-10-12, read-only: this PR can no longer be opened; 20,570 stars)
 - **Section:** `### Database` (readme.md, line 230 as fetched today) —
   currently interactive database clients (`mycli`, `pgcli`, `pgxcli`); the
   PR description should be explicit that lazyslice is a one-shot pipeline
@@ -127,7 +127,7 @@ Repo URL throughout: `https://github.com/Liarea/lazyslice`.
 ## 8. bramaos/brama (comparison page, not an awesome-list)
 
 - **Repo:** https://github.com/bramaos/brama — a pre-alpha CLI (not yet
-  implemented; issue-tracker-only) that pulls anonymized production
+  implemented, by its own README status line) that pulls anonymized production
   databases to a local environment, and whose own README already runs
   through the field: *"The tools that exist pick one half... Tonic.ai
   anonymizes at enterprise prices. Neon and PlanetScale branch databases
@@ -144,7 +144,7 @@ Repo URL throughout: `https://github.com/Liarea/lazyslice`.
   self-promotion, and the maintainer should expect it might not be merged:
 
   ```
-  lazyslice (https://github.com/Liarea/lazyslice) ships today, masks a column it is unsure about instead of passing it through, refuses a run whose copied columns still read as personal data, and has no cloud component to be acquired or archived.
+  lazyslice (https://github.com/Liarea/lazyslice) ships today, refuses a run whose copied columns still read as personal data, and has no cloud component to be acquired or archived.
   ```
 
 ## 9. jaywcjlove/awesome-mac
@@ -154,12 +154,12 @@ Repo URL throughout: `https://github.com/Liarea/lazyslice`.
   the ten)
 - **Section:** `### Developer Utilities` (README.md, line 406 as fetched
   today) — the list's `### Databases` section (line 591) is GUI database
-  *clients* (DataGrip, DBeaver, Beekeeper Studio) and is the wrong fit for
+  *clients* (DBeaver, Beekeeper Studio) and is the wrong fit for
   a CLI pipeline tool; `Developer Utilities` already mixes CLI tools
-  (`AXe`, `Swifka`) with GUI ones, which is the right neighborhood.
+  (`AXe`) with GUI ones, which is the right neighborhood.
 - **Exact line the PR adds**, matching the section's `* [name](url) -
   description. [icon markup]` style used by other open-source CLI entries
-  in the same section (e.g. `Swifka`):
+  in the same section (e.g. `AXe`):
 
   ```
   * [lazyslice](https://github.com/Liarea/lazyslice) - CLI that subsets a production Postgres database, masks personal data, and loads a small local copy. [![Open-Source Software][OSS Icon]](https://github.com/Liarea/lazyslice) ![Freeware][Freeware Icon]

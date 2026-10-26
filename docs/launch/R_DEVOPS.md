@@ -32,7 +32,7 @@ need one.
 
 Straight up: **v0.4.0 is PostgreSQL only**, and it **pseudonymises, not
 anonymises** — the exact residuals (row identifiers among them) are listed
-in the README and in full in THREAT_MODEL.md, not buried. Flags and exit
+in the README and in full in SECURITY.md, not buried. Flags and exit
 codes can still change between `0.x` minors, with every change named in
 the release notes.
 

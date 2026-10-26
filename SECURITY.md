@@ -63,7 +63,8 @@ than described it.
 
 ### What is a known limitation, not a vulnerability
 
-These are documented in [THREAT_MODEL.md](THREAT_MODEL.md), and the first five
+These are documented in [THREAT_MODEL.md](THREAT_MODEL.md) (the thirteenth in
+ARCHITECTURE.md section 6, item 6), and the first five
 are on the README's front page. They are the honest edges of the design, and
 reporting one tells us nothing new —
 though an argument that one of them should be fixed is very welcome as a public
@@ -87,7 +88,8 @@ issue.
 3. **A name — or any other value — in a script the built-in dictionaries do
    not carry**, in a column also named in that script. The name, address,
    phone and email name-patterns and the name dictionary are Latin-script
-   only, covering the given/surname stock of roughly twenty languages; a
+   only (six stray Arabic-script dictionary entries aside), covering the
+   given/surname stock of roughly twenty languages; a
    column named — and holding values — in a non-Latin script (Cyrillic, CJK,
    Arabic, Thai, Devanagari, Amharic, and more) defeats both the name-pattern
    match on the column and the value match on its contents at once.
@@ -121,8 +123,9 @@ issue.
    personal neighbour the classifier is certain of, when its samples read as
    an enumeration or as one identifier shape: a username repeated across a
    handful of staff rows, a hostname a device's owner chose, or a hex token
-   of exactly a digest's length (8 to 12 characters, or 32, 40, 64 or 128),
-   which the neighbouring-column rule spares. This is the general case; items
+   of exactly a digest's length (8 to 12 characters, or 32, 40 or 64 in one
+   case, or 128 at an entropy the credential check does not read as a
+   secret), which the neighbouring-column rule spares. This is the general case; items
    2 and 3 above are the two specific instances of it that an adversarial
    red team found worth naming on their own. The entropy check itself now
    passes four more shapes through, in a column no credential name rule
@@ -159,9 +162,9 @@ issue.
    not read a leaf, so a person's name under a key like `attendee` is copied
    too. That keeps configuration documents working; the cost is a personal
    value no rule and no validator knows, inside a document, which is copied
-   too. A number of more than fifteen digits stored as a JSON number inside
+   too. A number past 2^53 (about 9 × 10^15) stored as a JSON number inside
    a `json[]` or `jsonb[]` array column is read rounded, so a card number
-   that long may not be recognised there and is then copied with its last
+   above it may not be recognised there and is then copied with its last
    digits rounded (T-0416); the same number in a `json` or `jsonb` column, or
    stored as a string, is read with every digit (T-0402). A key whose sampled values are
    national-format phone numbers counts as a phone key, and every value under
@@ -185,7 +188,8 @@ issue.
    this list existed: its first run masks and reports every key once and
    lists them in the file it writes. The list itself puts the copied key
    names in the committed file; a key that is not shaped like a field name
-   (a UUID, a dotted handle, anything with a digit run) is written as a
+   (a UUID, a dotted handle, anything with digits other than one or two at
+   its end) is written as a
    `sha256:` fingerprint instead, and so is every key of a column whose
    documents show more than 64 keys, but a word-shaped key that is itself
    personal (a username used as a key, in a column of few keys) is written
@@ -195,7 +199,8 @@ issue.
    the input's length, so an application's short values (`admin`, `linux`)
    stay short. Every character of it is still replaced.
 10. Masked columns with a small admissible domain, where the substitution is
-    recoverable by frequency. The tool lists these under `small_domain:`
+    recoverable by frequency. The tool lists those the column's own type makes
+    small under `small_domain:`
     rather than hiding them.
 11. Quasi-identifier combinations, and frequency or prefix leaks in unmasked
     columns.
@@ -205,7 +210,7 @@ issue.
     surnames — so a masked "Mary" is often some other customer's real
     "Mary": the residual scan explains such a match (the list contains the
     value, the masker produced every copy, and, on a table with a primary or
-    unique key, no row kept its own) and reports it as a count. A masked
+    unique key, no row kept its own). A masked
     person name never equals its own source value, which reveals less than
     1/500 of a bit per value in a column wide enough for the whole list.
 13. Values that were already fake in the source.

@@ -62,8 +62,7 @@ brew install Liarea/tap/lazyslice
 lazyslice --version
 ```
 
-Or with `go install`, once Go's own module cache and `$GOPATH/bin` are on
-your `PATH`:
+Or with `go install`, once `$GOPATH/bin` is on your `PATH`:
 
 ```sh
 go install github.com/Liarea/lazyslice/cmd/lazyslice@v0.4.0
@@ -89,8 +88,7 @@ cosign verify-blob --bundle checksums.txt.sigstore.json \
 ```
 
 then check the archive's own line against the verified `checksums.txt`. The
-full steps, and what to do if verification fails, are in
-[docs/RUNBOOK.md](docs/RUNBOOK.md) under "Cutting a release".
+full steps are in [docs/RUNBOOK.md](docs/RUNBOOK.md) under "Cutting a release".
 
 ## The run
 
@@ -147,7 +145,8 @@ $ echo $?
 The two lines marked `--source` and `--target` are lazyslice answering the
 first question anyone pointing it at a database has to ask before anything
 else happens: which database is about to be read, and which one is about to
-be dropped and rewritten. Get either wrong and the run refuses instead of
+be dropped and rewritten. Name the same database as both, or a target that
+is not empty and not lazyslice's own, and the run refuses instead of
 guessing — see the last example below.
 
 `--root customers` above answers the one question a run at a terminal would
@@ -196,7 +195,8 @@ residual scan finds no source value left in a masked column. A column
 masked under `person_name` (not this `full_name`, which the values decided
 as `address` above) can equal some other row's real name, because masked
 names are real, common names drawn from the 2020 U.S. Census lists; the scan
-counts those too and checks that no row kept its own.
+counts those too and, on a table with a primary or unique key, checks that
+no row kept its own.
 
 ```sh
 $ psql postgres://ls:pw@127.0.0.1:55702/shop_dev -c "select status from lazyslice_meta"
@@ -271,7 +271,7 @@ needed a YAML file written before it could run: `lazyslice.yml` is what a run
 prerequisite for the first one. We refuse to ship any feature whose first-run
 path is "write a YAML file."
 
-**Safe by default.** Anything that might be personal data is masked unless a
+**Safe by default.** Anything recognised as personal data is masked unless a
 person opts a specific column out and says why; the source above is opened
 read-only with its role's privileges checked and printed, not assumed, and the
 target has to be empty or a database lazyslice loaded before from this same
@@ -320,8 +320,8 @@ its reason lines. A column's **name** is checked against a multilingual rule pac
 email`). Its **sampled values** — about two hundred rows, never the whole
 table — are run through validators built for the same categories: an email
 parser, libphonenumber, a Luhn check for card numbers that also wants a
-known issuer prefix (and, under an id/number/version/reference column name,
-the issuer's own length), a name dictionary
+known issuer prefix (and, under a column name ending in id, number, num, no,
+nr, version, ref or reference, the issuer's own length), a name dictionary
 (`200/200 samples parse as addresses`). And its **neighbours** matter, in two
 ways. A column already at `low` confidence is raised to `possible`, and so
 masked, the moment another column in the same table is at `likely` or above, because a
@@ -338,12 +338,15 @@ marital status, or reading as a date, a postcode or a phone-number-like run of d
 spared that way. A signal-less column
 that isn't character-typed — an integer, numeric, date or uuid column, the
 shape of a surrogate key like `customers.id` above — is copied verbatim
-regardless of its neighbours; the sweep only ever reaches columns free-text
+regardless of its neighbours, `bytea` apart (emptied beside a column the
+classifier is certain of); the sweep only ever reaches columns free-text
 masking can apply to. A name hit alone is enough to mask, except a bare
 `name`, `display_name` or `<thing>_name`, which also needs a word for people
 in its table or column name, or a fifth of its samples in the name
-dictionary (residual 3 below); a value hit alone is enough to mask. A column with no name signal, no recognised value shape and no
-personal neighbour in its table is not "unsure" — it is copied; that gap is
+dictionary (residual 3 below); a value hit alone is enough to mask, except a
+phone number read under a guessed region, which also needs a `likely`
+personal neighbour in its table. A column with no name signal, no recognised
+value shape and no personal neighbour in its table is not "unsure" — it is copied; that gap is
 residual 4 below. Nothing here calls out to a network or a model; it runs
 entirely against the box being read.
 
@@ -392,8 +395,8 @@ one of its values (every leaf of the document is then masked),
 when neither applies, and `--skip-table` alone for a
 column the check found already masked, since `--mask` cannot change a
 column's category once one is recorded. A column that cannot be masked that
-way (a key, or a type the category does not fit) is exit 2, never quietly
-copied, and so is a `--mask` on a column already masked under another
+way (a surrogate key, or a type the category does not fit) is exit 2, never
+quietly copied, and so is a `--mask` on a column already masked under another
 category. Masking a key
 masks every column that references it by foreign key as well, under the same
 category, so the join still holds; a column with its own `--unmask` is the one
@@ -409,11 +412,11 @@ exit 4 (`target.refused.container_missing`) naming `--create-target` and
 any column is: masked when the classifier lands at `possible` confidence or
 above, copied when it lands at `low` or `none`, and printed either way as a
 drift line naming the file (`… is not in ./lazyslice.yml: classified fresh
-and masked`) (ADR-004). The same holds inside a `json` or `jsonb` column: the
+and masked as free_text`) (ADR-004). The same holds inside a `json` or `jsonb` column: the
 file lists, under the column's `leaf_keys:`, the document keys whose values
 the run copied, and a key the sampled documents show that the file does not
-list has every value under it masked and is printed under `drift:` with the
-column and the key — never a value. A run never adds that key to an existing
+list has every value under it masked and is printed as a drift line naming
+the column and the key — never a value. A run never adds that key to an existing
 list itself: it stays masked, and printed, until you add the key as the drift
 line spells it to the column's `leaf_keys:`.
 A key that is not shaped like a field name (a name with a space in it, a
@@ -423,17 +426,17 @@ column whose documents show more than 64 different keys.
 `--strict-schema` turns any drift, a column or a key, into exit 10 instead.
 A file written by an earlier version lists no keys, so the first run from
 it masks and reports every copied key once and writes them into the list.
-An opt-out itself only ever narrows what gets copied, never widens it by
-omission — it takes a recorded `unmask` with a reason, never silence.
+The file itself only ever narrows what gets copied, never widens it by
+omission — an opt-out takes a recorded `unmask` with a reason, never silence.
 
 ## The safety model
 
 Six sentences cover it. The source is opened read-only and its role's
 privileges are checked and printed, never assumed. The target must be empty
 or a database lazyslice itself wrote before, held under a lease for the
-whole run so nothing else can take it apart at the same time. Masking is
-deterministic under a local key that is never written to git, never printed,
-and never sent anywhere — the same key produces the same masked value for
+whole run so no second lazyslice run can take it apart at the same time.
+Masking is deterministic under a local key that is never written to git,
+never printed, and never sent anywhere — the same key produces the same masked value for
 the same input every time, which is what keeps a join working after masking
 and what a leaked key would let someone confirm a guess against. Every check
 runs before the marker row is written `complete`: foreign keys, row counts,
@@ -475,7 +478,8 @@ residuals are accepted rather than hidden:
 3. **A name, or any other value, in a script the built-in dictionaries do
    not carry**, in a column also named in that script. The name, address,
    phone and email name-patterns and the name dictionary are Latin-script
-   only, covering the given/surname stock of about twenty languages; a
+   only (six stray Arabic-script dictionary entries aside), covering the
+   given/surname stock of about twenty languages; a
    column named — and holding values — in Cyrillic, CJK, Arabic, Thai,
    Devanagari, Amharic, or any other non-Latin script defeats both the
    name-pattern match on the column and the value match on its contents at
@@ -496,8 +500,8 @@ residuals are accepted rather than hidden:
    email, phone, national ID, IBAN, card number, IP or MAC address, a
    credential's entropy, a name, an address, ordinary prose, a
    special-category term. A card number is only recognised inside a known
-   issuer's range and, under an id/number/version/reference column name,
-   at that issuer's own length, so one outside the table or of an unlisted
+   issuer's range and, under a column name ending in id, number, num, no, nr,
+   version, ref or reference, at that issuer's own length, so one outside the table or of an unlisted
    length under such a name is copied too. Under a version, build or
    release column name, IP or MAC addresses among the column's values are
    copied too when they are only a minority — that name no longer offers
@@ -515,8 +519,8 @@ residuals are accepted rather than hidden:
    as a secret — under a neutral column name beside a certain neighbour,
    which that rule spares as a hex digest. The
    entropy check itself now passes four more shapes through, in a column no
-   credential name rule matches: a secret that is a hex run of exactly 32,
-   40 or 64 characters, a secret column of one to four non-NULL rows, a
+   credential name rule matches: a secret that is a one-case hex run of exactly
+   32, 40 or 64 characters, a secret column of one to four non-NULL rows, a
    secret in a column named `type`, `klass` or `component_name`, and a file
    named after a person in a column where fewer than a fifth of the file
    names carry a word the dictionary holds. Inside a `json` or `jsonb`
@@ -533,7 +537,7 @@ residuals are accepted rather than hidden:
    after the plan was approved. A *reload* — the ordinary daily case, since
    any target lazyslice has written once stays marked as its own — does not
    repeat that whole-target check: a table an application creates in the
-   target strictly after one run finishes and strictly before the next run's
+   target strictly after the next run's gate and strictly before that run's
    first drop is left alone and unmentioned.
 
 ## Exit codes at a glance
@@ -548,8 +552,8 @@ The full table, one row per code with its message template, is
 same-database target is refused with: it is the target gate's first rule,
 identity, which runs before any row is read and is the one gate refusal that
 exits `2` rather than `4`) · `3` no source · `4` target
-refused · `5` no usable credential for a named source or target, or no usable
-masking key · `6` the source
+refused · `5` `--password-command` supplied no password for a named source or
+target, or no usable masking key · `6` the source
 role can write and `--require-read-only-role` was set · `7` extract, transform
 or load failed, or the target's row counts or sequences do not match the plan
 · `8` a foreign key does not hold · `9` a masked column still holds a

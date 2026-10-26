@@ -21,15 +21,15 @@ shutdown threads, and the Hacker News comments under both launches, to
 find out what to copy and what to refuse.
 
 **The best thing either of them built wasn't the product.** Snaplet's
-deterministic fake-value library, Copycat, still pulls more than thirteen
+deterministic fake-value library, Copycat, still pulls more than twelve
 times the weekly downloads of the actual snapshot tool it was built to
 serve
-([copycat](https://api.npmjs.org/downloads/point/last-week/@snaplet/copycat),
-[snapshot](https://api.npmjs.org/downloads/point/last-week/@snaplet/snapshot),
-both checked today, 2026-09-22) — on a codebase whose last commit was
+([copycat](https://api.npmjs.org/downloads/range/2026-08-23:2026-08-29/@snaplet/copycat),
+[snapshot](https://api.npmjs.org/downloads/range/2026-08-23:2026-08-29/@snaplet/snapshot),
+the week of 23 to 29 August 2026) — on a codebase whose last commit was
 January 2025
 ([commits](https://github.com/supabase-community/copycat/commits/main)).
-An HN user, seven weeks after the shutdown, named exactly this when asked
+An HN user, seven weeks after the shutdown, named exactly this as
 what he missed: *"good (stable) generators for names, emails"*
 ([HN](https://news.ycombinator.com/item?id=41867092)). The boring,
 dependency-free, deterministic part outlived the company. That's why
@@ -77,15 +77,16 @@ as is without transformation"*
 on the same documented screen where the PII detector's own transcript
 reads `Smart shape prediciton failed`. A failing detector plus a
 pass-through default is production data on a laptop, silently. lazyslice
-has no `unsafe` mode: a column it is unsure about is masked, and a run whose
-copied columns still read as personal data stops at exit 9 instead of
+has no `unsafe` mode: a column it reads as possibly personal is masked, and a
+run whose copied columns still read as personal data stops at exit 9 instead of
 finishing.
 
 **Complexity leaked into the config instead of staying in the code.**
 Snaplet's subset config reached nine top-level keys, with the docs
 instructing users to set one (`maxCyclesLoop`) to zero and *"gradually
 increment it"* by trial and error against their own database
-([subset docs](https://github.com/snaplet/docs-old/blob/main/docs/04-references/data-operations/04-reduce.md)).
+([capture docs](https://snaplet-snapshot.netlify.app/snapshot/core-concepts/capture),
+[subset docs](https://github.com/snaplet/docs-old/blob/main/docs/04-references/data-operations/04-reduce.md)).
 That's the hard problem, handed back as homework. lazyslice's plan step
 decides this itself, prints one line per table saying what it took and why,
 and records every cycle it found in the `lazyslice.yml` it emits.
@@ -103,10 +104,11 @@ lazyslice ships one static binary with no runtime dependency to rot out
 from under it.
 
 None of this is a guarantee lazyslice survives where two well-built,
-well-liked tools didn't — both founders independently landed on the same
-word for why they died: *demand*, not execution
-([evis.dev](https://www.evis.dev/posts/is_the_market_stupid),
-[HN](https://news.ycombinator.com/item?id=46518012)). But it's a free,
+well-liked tools didn't — both founders blamed the market, not execution:
+*"we have not reached the necessary adoption levels"*
+([shutdown post](http://web.archive.org/web/20240716025550/https://www.snaplet.dev/post/snaplet-is-shutting-down))
+and *"there just wasn't enough demand"*
+([evis.dev](https://www.evis.dev/posts/is_the_market_stupid)). But it's a free,
 local, dependency-light CLI, not a company, so the bar it has to clear is
 lower: not "enough demand to fund a team," just "less painful than a raw
 `pg_dump` or nothing." The full research, with every source, is in

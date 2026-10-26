@@ -39,7 +39,7 @@ Both shutdowns were re-checked today, not assumed from research/POSTMORTEMS.md's
 - **Snaplet.** `github.com/snaplet/docs` README still reads "Goodbye, world /
   Snaplet the company has shut down, but our tools are now open source" as of
   today's fetch; the file's last commit is 13 Aug 2024
-  (`gh api repos/snaplet/docs/commits --jq '.[0].commit.author.date'` →
+  (`gh api 'repos/snaplet/docs/commits?path=README.md' --jq '.[0].commit.author.date'` →
   `2024-08-13T08:44:59Z`, run today). `https://registry.npmjs.org/@snaplet/snapshot`,
   fetched today, shows `time.modified` of `2024-08-02T09:24:33.720Z` — no
   release since. `www.snaplet.dev` and `snaplet.dev` return no DNS A record as
