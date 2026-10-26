@@ -9,7 +9,7 @@
 | E4 Vertical slice | 4 | 0 | 0 | 20 | 0 | 0 |
 | E5 Hardening | 5 | 0 | 0 | 108 | 0 | 0 |
 | E6 Launch | 6 | 2 | 0 | 54 | 0 | 0 |
-| E9 Later | later | 160 | 0 | 41 | 10 | 0 |
+| E9 Later | later | 162 | 0 | 41 | 10 | 0 |
 
 ## Open and in progress
 
@@ -175,6 +175,8 @@
 - T-0425 [open] E9 · A fix round returns the commit's whole changelog, so release notes never carry a bullet the fix reversed (sonnet)
 - T-0426 [open] E9 · Messages and comments that lag v0.4.0: the second_net_document hint, the mask refusal comment, the 1,000-row plan line (sonnet)
 - T-0427 [open] E9 · ci: golangci-lint-action moves from v8 (Node 20, deprecated) to v9 (sonnet)
+- T-0428 [open] E9 · textsig: the name dictionary's six Arabic-script rows are romanised or dropped, so it is Latin-script only as SECURITY.md says (sonnet)
+- T-0429 [open] E9 · classify: the rule pack gains the words for name, surname, address, phone and email in the non-Latin scripts the red team listed (sonnet)
 
 ## Recently closed
 
